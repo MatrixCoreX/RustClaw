@@ -8,10 +8,10 @@
 pub(crate) use crate::contract_matrix::{
     action_matches_policy_tokens, action_policy_for_output_contract,
     action_trace_for_output_contract, compact_prompt_line_for_output_contract,
-    final_answer_shape_for_output_contract, final_answer_shape_for_route, fnv1a_hex,
-    required_evidence_for_output_contract, runtime_contract_snapshot_for_output_contract,
-    trace_snapshot_for_output_contract, ActionPolicyDecision, ActionRef, EvidenceExpression,
-    FailureAttribution, FinalAnswerShape, FinalAnswerShapeClass,
+    final_answer_shape_for_output_contract, fnv1a_hex, required_evidence_for_output_contract,
+    runtime_contract_snapshot_for_output_contract, trace_snapshot_for_output_contract,
+    ActionPolicyDecision, ActionRef, EvidenceExpression, FailureAttribution, FinalAnswerShape,
+    FinalAnswerShapeClass,
 };
 
 pub(crate) use crate::task_contract::{
@@ -28,12 +28,10 @@ pub(crate) fn evidence_expression_for_output_contract(
 }
 
 #[allow(dead_code)]
-pub(crate) fn delivery_shape_for_route(route: &crate::RouteResult) -> EvidenceDeliveryShape {
-    crate::task_contract::delivery_shape_for_route(route)
-}
-
-pub(crate) fn operation_for_route(route: &crate::RouteResult) -> EvidenceOperation {
-    crate::task_contract::operation_for_route(route)
+pub(crate) fn delivery_shape_for_output_contract(
+    route: &crate::IntentOutputContract,
+) -> EvidenceDeliveryShape {
+    crate::task_contract::delivery_shape_for_output_contract(route)
 }
 
 pub(crate) fn operation_for_output_contract(
@@ -46,10 +44,6 @@ pub(crate) fn required_evidence_fields_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> Vec<String> {
     crate::task_contract::required_evidence_fields_for_output_contract(output_contract)
-}
-
-pub(crate) fn required_evidence_fields_for_route(route: &crate::RouteResult) -> Vec<String> {
-    crate::task_contract::required_evidence_fields_for_route(route)
 }
 
 pub(crate) fn target_object_for_output_contract(

@@ -13,7 +13,7 @@ pub(super) fn replace_scalar_placeholder_delivery_with_direct_scalar_answer(
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_allows_direct_scalar_observed_answer(route) {
@@ -71,7 +71,7 @@ pub(super) fn replace_scalar_placeholder_delivery_with_direct_scalar_answer(
 }
 
 fn latest_terminal_scalar_respond_for_placeholder(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<String> {
     loop_state
@@ -86,7 +86,7 @@ fn latest_terminal_scalar_respond_for_placeholder(
 }
 
 fn terminal_scalar_placeholder_replacement_matches_route(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     candidate: &str,
 ) -> bool {
     let candidate = candidate.trim();

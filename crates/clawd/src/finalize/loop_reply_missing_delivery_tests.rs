@@ -56,7 +56,7 @@ async fn observed_execution_without_delivery_reply_omits_raw_summary() {
         "model_io.log\nact_plan.log\n",
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -93,11 +93,11 @@ async fn observed_execution_without_delivery_uses_structured_dry_run_projection(
         r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"}],"outputs":[]}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.delivery_required = false;
+    route.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::Free;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -142,7 +142,7 @@ async fn observed_execution_without_delivery_uses_structured_dry_run_projection(
 }
 
 #[tokio::test]
-async fn observed_execution_without_delivery_prefers_finalizer_clarify_question() {
+async fn observed_execution_without_delivery_does_not_reuse_route_fixed_question() {
     let state = test_state();
     let task = claimed_task("task-missing-delivery-clarify");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -152,10 +152,8 @@ async fn observed_execution_without_delivery_prefers_finalizer_clarify_question(
         r#"{"action":"inventory_dir","path":"/tmp","entries":[]}"#,
     ));
     let mut route = free_route_result();
-    route.needs_clarify = true;
-    route.clarify_question = "请提供压缩包路径。".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let summary = crate::task_journal::TaskJournalFinalizerSummary {
@@ -178,7 +176,8 @@ async fn observed_execution_without_delivery_prefers_finalizer_clarify_question(
     .expect("observed execution clarify reply");
 
     assert!(!reply.should_fail_task);
-    assert_eq!(reply.text, "请提供压缩包路径。");
+    assert!(!reply.text.trim().is_empty());
+    assert_ne!(reply.text, "请提供压缩包路径。");
     assert_eq!(
         reply
             .task_journal
@@ -191,11 +190,11 @@ async fn observed_execution_without_delivery_prefers_finalizer_clarify_question(
 #[test]
 fn language_rendered_failed_step_message_counts_as_publishable_completion() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -260,12 +259,12 @@ fn observed_language_delivery_with_complete_contract_evidence_counts_as_publisha
         r#"{"action":"analyze_log","keyword_counts":{},"level_counts":{},"path":"/tmp/app.log","total_lines":42}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/app.log".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/app.log".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let summary = crate::task_journal::TaskJournalFinalizerSummary {
@@ -314,7 +313,7 @@ fn free_none_observed_delivery_does_not_promote_empty_contract_coverage() {
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", "alpha\nbeta\n"));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -359,7 +358,7 @@ async fn observed_execution_without_delivery_skips_summary_for_extract_field_res
         r#"{"action":"extract_field","exists":false,"field_path":"name","format":"json","path":"package.json","resolved_path":"/tmp/package.json","value":null,"value_text":"","value_type":"null"}"#,
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -393,10 +392,10 @@ async fn observed_execution_without_delivery_preserves_structured_config_payload
         r#"{"action":"extract_field","exists":true,"field_path":"scripts","format":"json","path":"package.json","resolved_field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -468,13 +467,13 @@ async fn observed_execution_without_delivery_uses_matrix_grouped_name_answer() {
     let state = test_state();
     let task = claimed_task("task-matrix-grouped-no-delivery");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "workspace".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "workspace".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -522,12 +521,12 @@ async fn observed_execution_without_delivery_uses_matrix_hidden_entries_answer()
     let state = test_state();
     let task = claimed_task("task-matrix-hidden-no-delivery");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -567,12 +566,11 @@ async fn observed_execution_without_delivery_uses_docker_image_observation() {
     let state = test_state();
     let task = claimed_task("task-matrix-docker-images-no-delivery");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DockerImages;
-    route.resolved_intent = "capability_ref=docker.list_images".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::DockerImages;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -610,11 +608,11 @@ async fn observed_execution_without_delivery_uses_docker_image_observation() {
 fn exact_file_names_contract_prefers_observed_list_over_synthesized_sentence() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "document".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.locator_hint = "document".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -652,12 +650,11 @@ fn exact_file_names_contract_prefers_observed_list_over_synthesized_sentence() {
 fn exact_directory_names_contract_replaces_file_list_synthesis_with_parent_dirs() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
-    route.resolved_intent = "Find directories containing .sh files".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -692,23 +689,10 @@ fn exact_directory_names_contract_replaces_file_list_synthesis_with_parent_dirs(
     assert!(finalizer_summary.is_some());
 }
 #[test]
-fn preferred_route_clarify_question_only_uses_explicit_route_clarify() {
+fn preferred_route_clarify_question_does_not_reuse_route_text() {
     let mut route = scalar_route_result();
-    route.needs_clarify = true;
-    route.clarify_question = "请确认要读取哪个文件？".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
-        ..Default::default()
-    };
-    assert_eq!(
-        super::preferred_route_clarify_question(Some(&ctx)),
-        Some("请确认要读取哪个文件？")
-    );
-
-    let mut route = scalar_route_result();
-    route.clarify_question = "不会被复用".to_string();
-    let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     assert_eq!(super::preferred_route_clarify_question(Some(&ctx)), None);
@@ -717,15 +701,12 @@ fn preferred_route_clarify_question_only_uses_explicit_route_clarify() {
 #[test]
 fn finalize_structured_clarify_context_uses_route_reason_code() {
     let mut route = scalar_route_result();
-    route.needs_clarify = true;
-    route.route_reason =
-        "semantic_contract_requires_evidence; clarify_reason_code:missing_read_target".to_string();
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_hint.clear();
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

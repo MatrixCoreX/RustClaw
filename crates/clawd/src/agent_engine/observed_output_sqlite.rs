@@ -55,13 +55,9 @@ enum SqliteTableObservedOutputKind {
 }
 
 fn sqlite_table_observed_output_kind(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> Option<SqliteTableObservedOutputKind> {
-    let locator_hint = route
-        .output_contract
-        .locator_hint
-        .trim()
-        .to_ascii_lowercase();
+    let locator_hint = route.locator_hint.trim().to_ascii_lowercase();
     if !(locator_hint.ends_with(".sqlite") || locator_hint.ends_with(".db")) {
         return None;
     }
@@ -82,7 +78,7 @@ fn sqlite_table_observed_output_kind(
 
 pub(super) fn db_basic_tables_summary_candidate(
     _state: Option<&AppState>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     body: &str,
     _prefer_english: bool,
 ) -> Option<String> {
@@ -145,13 +141,9 @@ fn sqlite_database_kind_from_contract_selector(
 }
 
 fn sqlite_database_kind_from_locator(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> Option<SqliteDatabaseKindClass> {
-    let locator = route
-        .output_contract
-        .locator_hint
-        .trim()
-        .to_ascii_lowercase();
+    let locator = route.locator_hint.trim().to_ascii_lowercase();
     if locator.is_empty() {
         return None;
     }
@@ -171,7 +163,7 @@ fn sqlite_database_kind_from_locator(
 }
 
 pub(super) fn db_basic_database_kind_judgment_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     body: &str,
     request_text: Option<&str>,
     _prefer_english: bool,
@@ -191,7 +183,7 @@ pub(super) fn db_basic_database_kind_judgment_candidate(
 }
 
 fn sqlite_database_kind_judgment_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     table_names: &[String],
     request_text: Option<&str>,
 ) -> Option<String> {
@@ -256,7 +248,7 @@ fn sqlite_table_listing_markdown(table_names: &[String]) -> Option<String> {
 }
 
 pub(super) fn run_cmd_sqlite_direct_answer_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     body: &str,
     request_text: Option<&str>,
     _prefer_english: bool,
@@ -290,7 +282,7 @@ pub(super) fn run_cmd_sqlite_direct_answer_candidate(
 }
 
 pub(super) fn db_basic_database_kind_judgment_from_loop_state_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     request_text: Option<&str>,
     _prefer_english: bool,
@@ -312,7 +304,7 @@ pub(super) fn db_basic_database_kind_judgment_from_loop_state_candidate(
 }
 
 fn sqlite_table_inventory_machine_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     table_names: &[String],
 ) -> String {
     let mut lines = vec![
@@ -324,7 +316,7 @@ fn sqlite_table_inventory_machine_answer(
     if table_names.is_empty() {
         lines.push("db_kind=empty".to_string());
     }
-    let locator = route.output_contract.locator_hint.trim();
+    let locator = route.locator_hint.trim();
     if !locator.is_empty() {
         push_sqlite_machine_line(&mut lines, "db_path", locator);
     }
@@ -335,7 +327,7 @@ fn sqlite_table_inventory_machine_answer(
 }
 
 fn sqlite_database_kind_machine_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     kind: SqliteDatabaseKindClass,
     source: SqliteDatabaseKindSource,
     table_names: &[String],
@@ -348,7 +340,7 @@ fn sqlite_database_kind_machine_answer(
         format!("classification_source={}", source.as_token()),
         format!("table_count={}", table_names.len()),
     ];
-    let locator = route.output_contract.locator_hint.trim();
+    let locator = route.locator_hint.trim();
     if !locator.is_empty() {
         push_sqlite_machine_line(&mut lines, "db_path", locator);
     }

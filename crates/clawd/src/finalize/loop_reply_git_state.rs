@@ -18,14 +18,16 @@ struct GitMachineState {
     changed_count: Option<usize>,
 }
 
-fn route_git_repository_state_requires_language_synthesis(route: &crate::RouteResult) -> bool {
+fn route_git_repository_state_requires_language_synthesis(
+    route: &crate::IntentOutputContract,
+) -> bool {
     route_requests_git_repository_state(route)
-        && route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
+        && route.requires_content_evidence
+        && !route.delivery_required
         && (matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-        ) || route.output_contract.exact_sentence_count.is_some())
+        ) || route.exact_sentence_count.is_some())
 }
 
 pub(super) async fn replace_git_repository_state_machine_delivery_with_observed_synthesis(
@@ -36,7 +38,7 @@ pub(super) async fn replace_git_repository_state_machine_delivery_with_observed_
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_git_repository_state_requires_language_synthesis(route) {
@@ -109,12 +111,12 @@ pub(super) fn replace_git_repository_state_delivery_with_requested_machine_field
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_requests_git_repository_state(route)
-        || route.output_contract.delivery_required
-        || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+        || route.delivery_required
+        || route.response_shape != crate::OutputResponseShape::Strict
     {
         return false;
     }
@@ -164,9 +166,9 @@ pub(super) fn replace_git_repository_state_delivery_with_requested_machine_field
     true
 }
 
-fn route_requests_git_repository_state(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
-        || crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requests_git_repository_state(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::GitRepositoryState)
+        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
             == Some(crate::evidence_policy::FinalAnswerShape::GitStateSummary)
 }
 
@@ -203,12 +205,6 @@ fn git_machine_request_surfaces(ctx: &AgentRunContext) -> Vec<&str> {
         ctx.original_user_request.as_deref(),
         ctx.user_request.as_deref(),
         ctx.context_bundle_summary.as_deref(),
-        ctx.route_result
-            .as_ref()
-            .map(|route| route.resolved_intent.as_str()),
-        ctx.route_result
-            .as_ref()
-            .map(|route| route.route_reason.as_str()),
     ]
     .into_iter()
     .flatten()

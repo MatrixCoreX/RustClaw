@@ -5,10 +5,10 @@ async fn finalize_loop_reply_returns_graceful_result_for_permission_denied_conte
     let state = test_state();
     let task = claimed_task("task-content-error-finalize");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "/etc/shadow".to_string();
+    route.requires_content_evidence = true;
+    route.locator_hint = "/etc/shadow".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -63,11 +63,11 @@ async fn finalize_loop_reply_treats_structured_run_cmd_failure_as_user_result() 
     let state = test_state();
     let task = claimed_task("task-structured-run-cmd-nonzero");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let structured_error = serde_json::json!({
@@ -117,12 +117,12 @@ async fn finalize_loop_reply_sanitizes_contract_rejection_error() {
     let state = test_state();
     let task = claimed_task("task-contract-rejection-sanitized");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
-    route.output_contract.locator_hint = "docs/release_checklist.md".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
+    route.locator_hint = "docs/release_checklist.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let structured_error = serde_json::json!({

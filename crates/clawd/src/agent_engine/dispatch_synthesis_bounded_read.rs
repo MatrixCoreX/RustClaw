@@ -7,7 +7,7 @@ pub(super) fn synthesize_bounded_read_range_direct_answer(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|context| context.output_contract())?;
     if !route_allows_bounded_read_range_direct_answer(route) {
         return None;
     }
@@ -20,8 +20,8 @@ pub(super) fn synthesize_bounded_read_range_direct_answer(
         .find_map(bounded_read_range_answer_from_output)
 }
 
-fn route_allows_bounded_read_range_direct_answer(route: &crate::RouteResult) -> bool {
-    let contract = route.effective_output_contract();
+fn route_allows_bounded_read_range_direct_answer(route: &crate::IntentOutputContract) -> bool {
+    let contract = route.clone();
     !contract.delivery_required
         && matches!(
             contract.response_shape,
@@ -33,8 +33,8 @@ fn route_allows_bounded_read_range_direct_answer(route: &crate::RouteResult) -> 
                 | OutputLocatorKind::Filename
                 | OutputLocatorKind::CurrentWorkspace
         )
-        && route.output_contract_is_unclassified()
-        && !route.output_contract_marker_is_any(&[
+        && route.semantic_kind_is_unclassified()
+        && !route.semantic_kind_is_any(&[
             OutputSemanticKind::ContentExcerptSummary,
             OutputSemanticKind::ContentExcerptWithSummary,
             OutputSemanticKind::ExcerptKindJudgment,

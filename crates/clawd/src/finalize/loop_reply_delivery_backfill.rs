@@ -21,8 +21,8 @@ fn contractual_last_respond_delivery_value(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    let contract = &route.output_contract;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
+    let contract = route;
     let answer = loop_state
         .last_user_visible_respond
         .as_deref()
@@ -66,11 +66,7 @@ fn contractual_last_respond_delivery_value(
     if last_respond_should_defer_to_publishable_evidence_summary(route, loop_state, answer) {
         return None;
     }
-    match crate::output_contract_verifier::verify_output_contract(
-        contract,
-        answer,
-        &route.resolved_intent,
-    ) {
+    match crate::output_contract_verifier::verify_output_contract(contract, answer, "") {
         crate::output_contract_verifier::OutputContractVerdict::Pass => Some(answer.to_string()),
         crate::output_contract_verifier::OutputContractVerdict::Reshape { reshaped, .. } => {
             Some(reshaped)
@@ -80,7 +76,7 @@ fn contractual_last_respond_delivery_value(
 }
 
 fn last_respond_should_defer_to_publishable_evidence_summary(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
@@ -89,7 +85,7 @@ fn last_respond_should_defer_to_publishable_evidence_summary(
     }
     let summary = valid_publishable_synthesis_output(loop_state)
         .or_else(|| latest_publishable_respond_step_output(loop_state));
-    if route.output_contract_marker_is_any(&[
+    if route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::RawCommandOutput,
         crate::OutputSemanticKind::CommandOutputSummary,
     ]) && !publishable_summary_has_multi_source_observation(loop_state)
@@ -97,7 +93,7 @@ fn last_respond_should_defer_to_publishable_evidence_summary(
         return false;
     }
     match (
-        crate::evidence_policy::final_answer_shape_for_route(route),
+        crate::evidence_policy::final_answer_shape_for_output_contract(route),
         summary,
     ) {
         (Some(crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence), Some(summary)) => {
@@ -165,14 +161,14 @@ pub(super) fn publishable_summary_has_multi_source_observation(loop_state: &Loop
 fn free_answer_route_allows_terminal_respond_delivery(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     !contract.delivery_required
         && !contract.requires_content_evidence
         && contract.response_shape == crate::OutputResponseShape::Free
-        && route.output_contract_is_unclassified()
+        && route.semantic_kind_is_unclassified()
 }
 
 pub(crate) fn latest_publishable_respond_step_output(loop_state: &LoopState) -> Option<&str> {
@@ -238,12 +234,12 @@ pub(super) fn last_respond_matches_single_line_observation(
 }
 
 pub(super) fn strict_raw_command_output_exact_observation_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
-    let contract = route.effective_output_contract();
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+    let contract = route.clone();
+    if !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
         || contract.response_shape != crate::OutputResponseShape::Strict
         || !contract.requires_content_evidence
         || contract.delivery_required
@@ -489,7 +485,7 @@ pub(super) fn backfill_delivery_from_last_outputs(
 
     if loop_state.delivery_messages.is_empty() {
         if agent_run_context
-            .and_then(|ctx| ctx.route_result.as_ref())
+            .and_then(|ctx| ctx.output_contract())
             .is_some_and(|route| raw_command_output_needs_structural_projection(route, loop_state))
             && loop_state
                 .last_user_visible_respond
@@ -569,7 +565,7 @@ fn backfill_synthesis_for_content_evidence_delivery(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_expects_synthesis_over_raw_observation(route) {
@@ -608,7 +604,7 @@ fn backfill_latest_tail_read_range_delivery(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_allows_latest_tail_read_range_delivery(route) {
@@ -677,17 +673,17 @@ pub(super) fn replace_raw_read_delivery_with_synthesis(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if !contract.requires_content_evidence
         || contract.delivery_required
         || matches!(
             contract.response_shape,
             crate::OutputResponseShape::FileToken
         )
-        || (route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+        || (route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
             && contract.response_shape == crate::OutputResponseShape::Strict)
     {
         return false;
@@ -730,10 +726,10 @@ pub(super) fn replace_raw_observation_delivery_with_synthesis(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if !contract.requires_content_evidence || contract.delivery_required {
         return false;
     }
@@ -918,8 +914,10 @@ pub(super) fn current_delivery_is_latest_publishable_synthesis(
         && crate::finalize::parse_delivery_token(synthesis).is_none()
 }
 
-pub(crate) fn route_expects_synthesis_over_raw_observation(route: &crate::RouteResult) -> bool {
-    let contract = route.effective_output_contract();
+pub(crate) fn route_expects_synthesis_over_raw_observation(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    let contract = route.clone();
     if contract.delivery_required
         || matches!(
             contract.response_shape,
@@ -932,7 +930,7 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(route: &crate::RouteR
         return true;
     }
     if contract.requires_content_evidence
-        && route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+        && route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
         && contract.response_shape == crate::OutputResponseShape::Free
         && crate::evidence_policy::final_answer_shape_for_output_contract(&contract)
             .is_some_and(|shape| shape.allows_model_language())
@@ -940,7 +938,7 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(route: &crate::RouteR
         return true;
     }
     if contract.requires_content_evidence
-        && route.output_contract_marker_is_any(&[
+        && route.semantic_kind_is_any(&[
             crate::OutputSemanticKind::ContentExcerptSummary,
             crate::OutputSemanticKind::ContentExcerptWithSummary,
             crate::OutputSemanticKind::ExcerptKindJudgment,
@@ -959,8 +957,8 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(route: &crate::RouteR
     if !contract.requires_content_evidence || !constrained_sentence_delivery {
         return false;
     }
-    route.output_contract_is_unclassified()
-        || route.output_contract_marker_is_any(&[
+    route.semantic_kind_is_unclassified()
+        || route.semantic_kind_is_any(&[
             crate::OutputSemanticKind::RawCommandOutput,
             crate::OutputSemanticKind::CommandOutputSummary,
             crate::OutputSemanticKind::GitRepositoryState,

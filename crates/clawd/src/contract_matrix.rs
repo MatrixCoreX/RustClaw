@@ -1,4 +1,4 @@
-use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind, RouteResult};
+use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
 #[cfg(test)]
 use anyhow::{Context, Result};
 #[cfg(test)]
@@ -22,9 +22,9 @@ use runtime::{
 pub(crate) use runtime::{
     action_matches_policy_tokens, action_policy_for_output_contract,
     action_trace_for_output_contract, bundled_contract_matrix,
-    compact_prompt_line_for_output_contract, final_answer_shape_for_output_contract,
-    final_answer_shape_for_route, fnv1a_hex, required_evidence_for_output_contract,
-    runtime_contract_snapshot_for_output_contract, trace_snapshot_for_output_contract,
+    compact_prompt_line_for_output_contract, final_answer_shape_for_output_contract, fnv1a_hex,
+    required_evidence_for_output_contract, runtime_contract_snapshot_for_output_contract,
+    trace_snapshot_for_output_contract,
 };
 #[cfg(test)]
 pub(crate) use runtime::{

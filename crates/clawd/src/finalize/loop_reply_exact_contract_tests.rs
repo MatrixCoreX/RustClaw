@@ -3,10 +3,10 @@ use super::*;
 #[test]
 fn exact_contract_keeps_rich_content_evidence_delivery_over_short_observed_projection() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint =
         "README.md; scripts/nl_tests/fixtures/device_local/docs; configs/skills_registry.toml"
             .to_string();
     let delivery = "以下为本次只读巡检结果：\n\n| 检查项 | 结果 |\n|---|---|\n| README.md 是否存在 | 存在 |\n| docs 文件名 | release_checklist.md、service_notes.md |\n| fs_basic.planner_kind | tool |";
@@ -23,10 +23,10 @@ fn exact_contract_keeps_rich_content_evidence_delivery_over_short_observed_proje
 #[test]
 fn exact_contract_does_not_keep_rich_delivery_when_exact_delivery_is_required() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.delivery_required = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.delivery_required = true;
+    route.locator_kind = crate::OutputLocatorKind::Path;
     let delivery = "result:\n- README.md\n- configs/skills_registry.toml";
 
     assert!(
@@ -74,13 +74,12 @@ fn exact_contract_keeps_latest_terminal_table_over_short_observed_projection() {
     loop_state.last_publishable_synthesis_output = Some(table.to_string());
     let mut delivery_messages = vec![table.to_string()];
     let mut route = free_route_result();
-    route.resolved_intent = "multi target readonly inspection".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "README.md; scripts/nl_tests/fixtures/device_local/docs; scripts/nl_tests/fixtures/device_local/logs; configs/skills_registry.toml".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "README.md; scripts/nl_tests/fixtures/device_local/docs; scripts/nl_tests/fixtures/device_local/logs; configs/skills_registry.toml".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -118,12 +117,12 @@ fn exact_contract_replaces_incomplete_directory_groups_synthesis_with_observed_g
     loop_state.last_publishable_synthesis_output = Some(incomplete.to_string());
     let mut delivery_messages = vec![incomplete.to_string()];
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -171,12 +170,12 @@ fn exact_contract_keeps_mixed_directory_content_synthesis_with_read_evidence() {
     loop_state.last_publishable_synthesis_output = Some(answer.to_string());
     let mut delivery_messages = vec![answer.to_string()];
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -227,11 +226,11 @@ fn exact_contract_keeps_publishable_synthesis_over_raw_observed_inventory() {
     loop_state.last_publishable_synthesis_output = Some("垃圾代码端分析报告.md".to_string());
     let mut delivery_messages = vec!["垃圾代码端分析报告.md".to_string()];
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.output_contract.locator_hint = "document".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.locator_hint = "document".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -267,16 +266,13 @@ fn exact_contract_keeps_model_language_verdict_over_observed_scalar() {
     loop_state.last_user_visible_respond = Some(planned.clone());
     let mut delivery_messages = vec![planned.clone()];
     let mut route = scalar_route_result();
-    route.resolved_intent =
-        "Check if /tmp/rustclaw-missing-ja.txt exists; if not, respond briefly in Japanese"
-            .to_string();
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -314,14 +310,13 @@ fn archive_pack_exact_contract_prefers_observed_archive_path_over_exit_code_resp
     loop_state.last_user_visible_respond = Some("0".to_string());
     let mut delivery_messages = vec!["0".to_string()];
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -362,15 +357,13 @@ fn archive_pack_contract_prefers_observed_archive_path() {
     loop_state.last_user_visible_respond = Some("0".to_string());
     let mut delivery_messages = vec!["0".to_string()];
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=archive.pack".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -413,14 +406,13 @@ fn archive_pack_exact_contract_prefers_observed_path_over_late_control_token() {
     loop_state.last_user_visible_respond = Some("needs_user_confirmation".to_string());
     let mut delivery_messages = vec!["needs_user_confirmation".to_string()];
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -459,11 +451,11 @@ fn exact_contract_keeps_planned_subset_over_raw_observed_file_paths() {
     loop_state.last_user_visible_respond = Some(planned.clone());
     let mut delivery_messages = vec![planned.clone()];
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -507,11 +499,11 @@ fn exact_contract_keeps_explicit_json_delivery_over_observed_phrase() {
     let mut delivery_messages =
         vec![r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#.to_string()];
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_hint = "README.md".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.locator_hint = "README.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;

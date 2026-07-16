@@ -15,10 +15,10 @@ fn requested_machine_kv_summary_restores_path_fact_over_filename_marker_delivery
         r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":769},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_hint = "rustclaw.service".to_string();
+    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.locator_hint = "rustclaw.service".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut delivery_messages = vec!["rustclaw.service".to_string()];

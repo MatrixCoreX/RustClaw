@@ -55,7 +55,7 @@ pub(super) fn build_agent_run_context_from_prepared_flow(
         value => Some(value.to_string()),
     };
     crate::agent_engine::AgentRunContext {
-        route_result: None,
+        output_contract: None,
         execution_recipe_hint: None,
         execution_recipe_plan_hint: None,
         turn_analysis: None,

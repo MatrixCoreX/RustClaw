@@ -5,21 +5,32 @@ async fn finalize_loop_reply_keeps_clarify_machine_envelope_internal_by_default(
     let state = test_state();
     let task = claimed_task("task-deferred-clarify-envelope");
     let mut route = free_route_result();
-    route.needs_clarify = true;
-    route.route_reason =
-        "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"
-            .to_string();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.pending_user_input_required = true;
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.clarify_reason_code".to_string(),
+        "missing_read_target".to_string(),
+    );
+    loop_state
+        .output_vars
+        .insert("agent_loop.missing_slot".to_string(), "locator".to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.message_key".to_string(),
+        "clawd.clarify.missing_read_target".to_string(),
+    );
     let model_question = "Which file should I read from?";
     loop_state
         .delivery_messages
@@ -72,16 +83,30 @@ async fn finalize_loop_reply_marks_agent_loop_terminal_clarify_without_route_cla
     let state = test_state();
     let task = claimed_task("task-loop-terminal-clarify-no-route-clarify");
     let mut route = free_route_result();
-    route.needs_clarify = false;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.pending_user_input_required = true;
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.clarify_reason_code".to_string(),
+        "missing_read_target".to_string(),
+    );
+    loop_state
+        .output_vars
+        .insert("agent_loop.missing_slot".to_string(), "locator".to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.message_key".to_string(),
+        "clawd.clarify.missing_read_target".to_string(),
+    );
     loop_state.output_vars.insert(
         "agent_loop.terminal_intent".to_string(),
         "clarify".to_string(),
@@ -143,17 +168,13 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
     let state = test_state();
     let task = claimed_task("task-requested-clarify-envelope");
     let mut route = free_route_result();
-    route.needs_clarify = true;
-    route.route_reason =
-        "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"
-            .to_string();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         turn_analysis: Some(crate::turn_context::TurnAnalysis {
             turn_type: Some(crate::turn_context::TurnType::TaskRequest),
             target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -170,6 +191,21 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.pending_user_input_required = true;
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.clarify_reason_code".to_string(),
+        "missing_read_target".to_string(),
+    );
+    loop_state
+        .output_vars
+        .insert("agent_loop.missing_slot".to_string(), "locator".to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.message_key".to_string(),
+        "clawd.clarify.missing_read_target".to_string(),
+    );
     let model_question = "Which file should I read from?";
     loop_state
         .delivery_messages
@@ -244,14 +280,13 @@ async fn finalize_loop_reply_keeps_agent_loop_clarify_machine_fields_structured_
     let state = test_state();
     let task = claimed_task("task-agent-loop-nonblocking-clarify-line");
     let mut route = free_route_result();
-    route.needs_clarify = false;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -359,16 +394,12 @@ async fn finalize_loop_reply_does_not_attach_clarify_envelope_after_completed_ac
     let state = test_state();
     let task = claimed_task("task-deferred-clarify-act-complete");
     let mut route = free_route_result();
-    route.needs_clarify = true;
-    route.route_reason =
-        "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"
-            .to_string();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -433,16 +464,12 @@ async fn finalize_loop_reply_does_not_mark_answer_delivery_as_clarify_from_route
     let state = test_state();
     let task = claimed_task("task-route-marker-answer-delivery");
     let mut route = free_route_result();
-    route.needs_clarify = true;
-    route.route_reason =
-        "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"
-            .to_string();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::None;
+    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);

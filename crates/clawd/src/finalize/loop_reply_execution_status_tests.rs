@@ -33,12 +33,11 @@ fn deterministic_observed_execution_status_answer_reports_mixed_results() {
 #[test]
 fn status_shape_does_not_precede_with_generic_content_answer() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=service.status".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(1);
@@ -65,13 +64,12 @@ fn status_shape_does_not_precede_with_generic_content_answer() {
 #[test]
 fn agent_loop_rich_content_precedes_status_summary_without_legacy_content_flag() {
     let mut route = free_route_result();
-    route.route_reason = "".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = false;
+    route.delivery_required = false;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(4);
@@ -116,13 +114,13 @@ fn agent_loop_rich_content_precedes_status_summary_without_legacy_content_flag()
 fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_path() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config_copy".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "configs/config_copy".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -150,14 +148,13 @@ fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_pat
 fn deterministic_missing_observed_target_answer_respects_scalar_existence_shape() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -185,14 +182,13 @@ fn deterministic_missing_observed_target_answer_respects_scalar_existence_shape(
 fn deterministic_missing_observed_target_answer_uses_machine_payload_for_non_bilingual_existence() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
-    route.resolved_intent = "/tmp/rustclaw-missing-ja.txt が存在するか確認してください".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some(
             "/tmp/rustclaw-missing-ja.txt が存在するか確認してください".to_string(),
         ),
@@ -223,14 +219,14 @@ fn deterministic_missing_observed_target_answer_uses_machine_payload_for_non_bil
 fn deterministic_missing_observed_target_answer_reports_missing_archive_path() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -267,13 +263,13 @@ fn deterministic_missing_observed_target_answer_reports_missing_archive_path() {
 fn deterministic_missing_observed_target_answer_skips_after_later_fallback_success() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "plan/missing.md".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "plan/missing.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(3);
@@ -387,12 +383,12 @@ fn deterministic_observed_execution_status_answer_attaches_before_llm_fallback()
 #[test]
 fn observed_fallback_allowed_for_matrix_route_after_planned_synthesis() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.locator_kind = crate::OutputLocatorKind::Path;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(3);
@@ -415,13 +411,12 @@ fn observed_fallback_allowed_for_matrix_route_after_planned_synthesis() {
 #[test]
 fn content_answer_candidate_prevents_status_summary_replacement() {
     let mut route = free_route_result();
-    route.resolved_intent = "List schema files and identify the largest one.".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.locator_kind = crate::OutputLocatorKind::Path;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(3);
@@ -606,11 +601,11 @@ fn deterministic_execution_failed_step_contract_replaces_verbose_status() {
     let state = test_state();
     let task = claimed_task("task-deterministic-failed-step-only");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(3);
@@ -719,11 +714,11 @@ fn deterministic_execution_failed_step_contract_replaces_verbose_status() {
 fn failed_step_language_contract_rejects_success_stdout_backfill() {
     let task = claimed_task("task-failed-step-no-success-stdout-backfill");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(4);
@@ -752,11 +747,11 @@ fn failed_step_language_contract_rejects_success_stdout_backfill() {
 fn failed_step_language_contract_prefers_final_respond_over_synthesis_stdout() {
     let task = claimed_task("task-failed-step-final-respond-over-synthesis");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(4);
@@ -791,11 +786,11 @@ fn deterministic_execution_failed_step_ignores_contract_gap_errors() {
     let state = test_state();
     let task = claimed_task("task-deterministic-failed-step-contract-gap");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(4);

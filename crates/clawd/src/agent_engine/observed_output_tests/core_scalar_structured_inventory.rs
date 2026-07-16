@@ -86,9 +86,9 @@ fn market_quote_scalar_direct_answer_uses_planner_contract_and_registry_semantic
         &["market_probe"],
     );
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::MarketQuote;
+    route.semantic_kind = OutputSemanticKind::MarketQuote;
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let mut loop_state = LoopState::new(2);
@@ -122,9 +122,9 @@ fn market_quote_scalar_direct_answer_does_not_use_skill_name_branch() {
         &["crypto"],
     );
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::MarketQuote;
+    route.semantic_kind = OutputSemanticKind::MarketQuote;
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let mut loop_state = LoopState::new(2);
@@ -158,7 +158,7 @@ fn multi_count_quantity_comparison_guard_lists_all_count_rows() {
         r#"{"action":"count_inventory","path":"crates/skills","resolved_path":"/repo/crates/skills","recursive":false,"counts":{"total":35,"files":0,"dirs":35,"hidden":0}}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+    route.semantic_kind = OutputSemanticKind::QuantityComparison;
 
     let guard = multi_count_quantity_comparison_guard_entry(&loop_state, Some(&route))
         .expect("multi-count guard");
@@ -214,7 +214,7 @@ fn names_only_inventory_direct_answer_does_not_need_llm_synthesis() {
     let state = AppState::test_default_with_fixture_provider();
     let route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let mut loop_state = LoopState::new(2);
@@ -278,7 +278,7 @@ fn names_only_inventory_free_shape_defers_to_llm_synthesis() {
     let state = AppState::test_default_with_fixture_provider();
     let route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let mut loop_state = LoopState::new(2);
@@ -337,7 +337,7 @@ fn names_only_inventory_free_shape_defers_to_llm_synthesis() {
 fn dirs_only_inventory_names_by_kind_can_direct_answer_observation_only_plan() {
     let route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let mut loop_state = LoopState::new(2);
@@ -430,21 +430,8 @@ fn observed_outputs_keep_latest_content_read_for_same_path() {
     assert!(joined.contains("new tail evidence"), "entries: {joined}");
 }
 
-fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> RouteResult {
-    RouteResult {
-        resolved_intent: "Run an observation, then produce the requested final wording."
-            .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> IntentOutputContract {
+    IntentOutputContract {
             exact_sentence_count: None,
             response_shape,
             requires_content_evidence: true,
@@ -454,18 +441,17 @@ fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> Route
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "/workspace/project".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    }
+        }
 }
 
 #[test]
 fn execution_failed_step_guard_prefers_failed_machine_fields_over_success_stdout() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let ctx = AgentRunContext {
-        route_result: Some(route.clone()),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let mut loop_state = LoopState::new(3);
@@ -509,7 +495,7 @@ fn execution_failed_step_guard_prefers_failed_machine_fields_over_success_stdout
         ),
     ));
 
-    let guard = execution_failed_step_guard_entry(&loop_state, ctx.route_result.as_ref()).unwrap();
+    let guard = execution_failed_step_guard_entry(&loop_state, ctx.output_contract()).unwrap();
 
     assert!(route_disallows_direct_observation_passthrough(&route));
     assert!(guard.contains("final_answer_shape=failed_step_with_evidence"));
@@ -529,11 +515,11 @@ fn execution_failed_step_guard_prefers_failed_machine_fields_over_success_stdout
 #[test]
 fn execution_failed_step_guard_skips_contract_policy_gap_errors() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let mut loop_state = LoopState::new(3);
@@ -546,7 +532,7 @@ fn execution_failed_step_guard_skips_contract_policy_gap_errors() {
         .executed_step_results
         .push(ok_step("step_2", "run_cmd", "note.txt alpha beta removed\n"));
 
-    let guard = execution_failed_step_guard_entry(&loop_state, ctx.route_result.as_ref());
+    let guard = execution_failed_step_guard_entry(&loop_state, ctx.output_contract());
 
     assert!(
         guard.is_none(),
@@ -557,49 +543,49 @@ fn execution_failed_step_guard_skips_contract_policy_gap_errors() {
 #[test]
 fn scalar_path_observed_route_rejects_content_evidence_contract() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.requires_content_evidence = true;
 
     assert!(route_requests_scalar_path_only(&route));
     assert!(!route_allows_path_batch_scalar_path_observed_answer(&route));
 
-    route.output_contract.requires_content_evidence = false;
+    route.requires_content_evidence = false;
     assert!(route_allows_path_batch_scalar_path_observed_answer(&route));
 }
 
 #[test]
 fn observed_output_route_policy_uses_direct_output_contract() {
     let mut scalar_path_route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    scalar_path_route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    scalar_path_route.output_contract.requires_content_evidence = false;
+    scalar_path_route.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    scalar_path_route.requires_content_evidence = false;
     assert!(route_requests_scalar_path_only(&scalar_path_route));
     assert!(route_allows_path_batch_scalar_path_observed_answer(
         &scalar_path_route
     ));
 
-    scalar_path_route.output_contract.requires_content_evidence = true;
+    scalar_path_route.requires_content_evidence = true;
     assert!(!route_allows_path_batch_scalar_path_observed_answer(
         &scalar_path_route
     ));
 
     let mut file_names_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    file_names_route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+    file_names_route.semantic_kind = OutputSemanticKind::FileNames;
     assert!(route_prefers_plain_fs_search_paths(&file_names_route));
     assert!(route_allows_raw_listing_direct_answer(Some(
         &file_names_route
     )));
 
     let mut failed_step_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    failed_step_route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
-    failed_step_route.output_contract.locator_kind = OutputLocatorKind::None;
-    failed_step_route.output_contract.locator_hint.clear();
+    failed_step_route.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
+    failed_step_route.locator_kind = OutputLocatorKind::None;
+    failed_step_route.locator_hint.clear();
     assert!(route_disallows_direct_observation_passthrough(
         &failed_step_route
     ));
 
     let mut quantity_route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    quantity_route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
-    quantity_route.output_contract.requires_content_evidence = true;
+    quantity_route.semantic_kind = OutputSemanticKind::QuantityComparison;
+    quantity_route.requires_content_evidence = true;
     assert!(route_quantity_comparison_requires_model_language_synthesis(
         &quantity_route
     ));
@@ -608,9 +594,9 @@ fn observed_output_route_policy_uses_direct_output_contract() {
 #[test]
 fn scalar_count_answer_detects_non_numeric_diagnostic_line() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config_copy".to_string();
+    route.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "configs/config_copy".to_string();
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -698,11 +684,11 @@ fn direct_scalar_ignores_exit_zero_prefix() {
 #[test]
 fn direct_scalar_extracts_system_basic_runtime_status_value() {
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route_result.output_contract.locator_kind = OutputLocatorKind::None;
-    route_result.output_contract.locator_hint.clear();
+    route_result.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route_result.locator_kind = OutputLocatorKind::None;
+    route_result.locator_hint.clear();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..Default::default()
     };
     let mut loop_state = LoopState::new(2);
@@ -726,20 +712,7 @@ fn direct_scalar_defers_git_oneline_log_record_to_synthesis() {
         "git_basic",
         "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
     ));
-    let route_result = RouteResult {
-        resolved_intent: "查看当前工作区最近一次 git 提交的标题，并简短告诉我。".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "Self-contained workspace inspection request for git commit title."
-            .to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             requires_content_evidence: true,
@@ -749,10 +722,9 @@ fn direct_scalar_defers_git_oneline_log_record_to_synthesis() {
             semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: ".".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -846,10 +818,10 @@ fn direct_scalar_returns_container_read_field_json_for_scalar_contract() {
             r#"{"action":"read_field","exists":true,"field_path":"package.version","value":{"workspace":true},"value_text":"{\"workspace\":true}","value_type":"object"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "Cargo.toml".to_string();
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "Cargo.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -868,10 +840,10 @@ fn direct_scalar_preserves_resolved_extract_field_label_for_non_exact_match() {
             r#"{"action":"extract_field","exists":true,"field_path":"model.vendor","resolved_field_path":"llm.selected_vendor","match_strategy":"missing_parent_leaf_key_suffix","value_text":"minimax","value":"minimax","value_type":"string"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "configs/config.toml".to_string();
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "configs/config.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -890,10 +862,10 @@ fn direct_scalar_reads_array_identity_field_value_without_label() {
             r#"{"action":"extract_field","exists":true,"field_path":"archive_basic.group","resolved_field_path":"skills[name=archive_basic].group","match_strategy":"array_item_key_path","value_text":"system","value":"system","value_type":"string"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "configs/skills_registry.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -912,10 +884,10 @@ fn direct_answer_reads_array_identity_extract_field_value_without_label() {
             r#"{"action":"extract_field","exists":true,"field_path":"skills.[name=archive_basic].group","resolved_field_path":"skills.[name=archive_basic].group","match_strategy":"exact_path","value_text":"system","value":"system","value_type":"string"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "configs/skills_registry.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -934,10 +906,10 @@ fn direct_answer_reads_config_basic_extract_field_value() {
             r#"{"action":"extract_field","exists":true,"field_path":"run_cmd.planner_kind","value_text":"tool","value":"tool","value_type":"string"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "configs/skills_registry.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -957,10 +929,10 @@ fn direct_answer_reads_config_basic_read_fields_values() {
             r#"{"action":"read_fields","path":"package.json","resolved_path":"/tmp/package.json","count":2,"results":[{"field_path":"name","exists":true,"value_type":"string","value_text":"react-example","value":"react-example"},{"field_path":"version","exists":true,"value_type":"string","value_text":"1.0.0","value":"1.0.0"}]}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "package.json".to_string();
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "package.json".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -979,11 +951,11 @@ fn direct_scalar_reads_structured_keys_value_list() {
             r#"{"action":"structured_keys","exists":true,"container_type":"object","count":3,"keys":["app","features","paths"],"field_path":""}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint =
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint =
         "scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1002,12 +974,11 @@ fn direct_answer_does_not_treat_root_level_as_missing_key() {
             r#"{"action":"structured_keys","exists":true,"container_type":"object","count":3,"keys":["app","features","paths"],"field_path":""}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.resolved_intent = "List root-level keys in app_config.toml only".to_string();
-    route_result.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "app_config.toml".to_string();
+    route_result.semantic_kind = OutputSemanticKind::StructuredKeys;
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "app_config.toml".to_string();
     let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
+            output_contract: Some(route_result.clone()),
             original_user_request: Some(
                 "List root-level keys in scripts/nl_tests/fixtures/device_local/configs/app_config.toml only."
                     .to_string(),
@@ -1030,10 +1001,10 @@ fn direct_answer_defers_container_extract_field_to_synthesis() {
             r#"{"action":"extract_field","exists":true,"field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "package.json".to_string();
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "package.json".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1051,11 +1022,11 @@ fn direct_answer_formats_schema_enum_extract_field_with_resolved_path() {
             r#"{"action":"extract_field","exists":true,"field_path":"target","resolved_field_path":"properties.reference_resolution.properties.target","match_strategy":"unique_bare_key","value":{"type":"string","enum":["none","current_action_result","current_turn_locator"]},"value_type":"object"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint =
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint =
         "prompts/schemas/agent_loop_decision_envelope.schema.json".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1076,10 +1047,10 @@ fn direct_answer_formats_config_basic_validate_result_as_pass_fail() {
             r#"{"action":"validate_structured","path":"configs/config.toml","resolved_path":"/tmp/configs/config.toml","format":"toml","valid":true,"root_type":"object"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "configs/config.toml".to_string();
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "configs/config.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         original_user_request: Some(
             "Validate configs/config.toml and answer pass or fail.".to_string(),
         ),
@@ -1101,11 +1072,11 @@ fn direct_scalar_formats_config_validation_result_in_request_language() {
             r#"{"action":"validate_structured","path":"configs/config.toml","resolved_path":"/tmp/configs/config.toml","format":"toml","valid":true,"root_type":"object"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "configs/config.toml".to_string();
+    route_result.semantic_kind = OutputSemanticKind::ConfigValidation;
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "configs/config.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         original_user_request: Some("只检查 configs/config.toml 是否是合法 TOML。".to_string()),
         ..AgentRunContext::default()
     };
@@ -1134,21 +1105,7 @@ fn direct_scalar_defers_recent_structured_scalar_comparison_to_llm() {
             "system_basic",
             r#"{"action":"extract_field","path":"crates/clawd/Cargo.toml","resolved_path":"/tmp/crates/clawd/Cargo.toml","field_path":"package.name","exists":true,"value_type":"string","value_text":"clawd","value":"clawd"}"#,
         ));
-    let route_result = RouteResult {
-            resolved_intent:
-                "UI/package.json 里的 name 和 crates/clawd/Cargo.toml 里的 package.name 一样吗？只回答一样或不一样"
-                    .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "llm_contract:compare_targets".to_string(),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
                 exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
@@ -1158,10 +1115,9 @@ fn direct_scalar_defers_recent_structured_scalar_comparison_to_llm() {
                 semantic_kind: crate::OutputSemanticKind::QuantityComparison,
                 locator_hint: "UI/package.json|crates/clawd/Cargo.toml".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
-            },
-        };
+            };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert!(
@@ -1183,11 +1139,11 @@ fn direct_scalar_defers_multiple_structured_scalars_without_semantic_contract() 
             r#"{"action":"read_field","path":"crates/clawd/Cargo.toml","resolved_path":"/tmp/crates/clawd/Cargo.toml","field_path":"package.name","resolved_field_path":"package.name","exists":true,"value_type":"string","value_text":"clawd","value":"clawd"}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint =
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint =
         "UI/package.json|crates/clawd/Cargo.toml".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         original_user_request: Some(
             "Read two structured fields, then provide one final line.".to_string(),
         ),
@@ -1218,19 +1174,7 @@ fn direct_scalar_formats_recent_structured_scalar_equality() {
             "system_basic",
             r#"{"action":"extract_field","field_path":"crate_name","exists":true,"value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "Are those two names the same? Answer same or different".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "llm_contract:same_or_different".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             requires_content_evidence: true,
@@ -1240,10 +1184,9 @@ fn direct_scalar_formats_recent_structured_scalar_equality() {
             semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
             locator_hint: String::new(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -1265,20 +1208,7 @@ fn direct_scalar_formats_compare_paths_equality_with_explicit_existence_fields()
         "fs_basic",
         r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"path":"service_notes.md"},"right":{"exists":true,"path":"release_checklist.md"}},"text":"{}"}"#,
     ));
-    let route_result = RouteResult {
-        resolved_intent: "Compare two paths and return same_path plus existence fields."
-            .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "llm_contract:path_metadata_compare".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
@@ -1288,10 +1218,9 @@ fn direct_scalar_formats_compare_paths_equality_with_explicit_existence_fields()
             semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
             locator_hint: "service_notes.md | release_checklist.md".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1315,20 +1244,7 @@ fn direct_scalar_equality_ignores_duplicate_structured_source() {
             "config_basic",
             r#"{"action":"extract_field","path":"/tmp/Cargo.toml","resolved_path":"/tmp/Cargo.toml","field_path":"workspace.package.version","resolved_field_path":"workspace.package.version","exists":true,"value_text":"0.1.7","value":"0.1.7","value_type":"string"}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "Compare the Cargo.toml version with the version mentioned in README.md."
-            .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "llm_contract:compare_targets".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: Some(1),
             response_shape: OutputResponseShape::OneSentence,
             requires_content_evidence: true,
@@ -1338,10 +1254,9 @@ fn direct_scalar_equality_ignores_duplicate_structured_source() {
             semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
             locator_hint: "/tmp/Cargo.toml | /tmp/README.md".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1363,21 +1278,7 @@ fn direct_answer_formats_recent_structured_scalar_equality_for_strict_route() {
             "config_basic",
             r#"{"action":"extract_field","field_path":"package.name","exists":true,"value_text":"clawd","value":"clawd","value_type":"string"}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent:
-            "Read two names and answer in one line with whether they are the same or different."
-                .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "llm_contract:same_or_different".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: Some(1),
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
@@ -1389,10 +1290,9 @@ fn direct_answer_formats_recent_structured_scalar_equality_for_strict_route() {
                 "scripts/nl_tests/fixtures/device_local/package.json and crates/clawd/Cargo.toml"
                     .to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
+            output_contract: Some(route_result.clone()),
             original_user_request: Some("Read the name from scripts/nl_tests/fixtures/device_local/package.json. Read package.name from crates/clawd/Cargo.toml. Then answer in one line with the two names and whether they are the same or different.".to_string()),
             ..AgentRunContext::default()
         };
@@ -1448,19 +1348,7 @@ fn direct_answer_formats_wrapped_config_basic_structured_scalar_equality() {
         })
         .to_string(),
     ));
-    let route_result = RouteResult {
-        resolved_intent: "Compare two structured field values.".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "llm_contract:same_or_different".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: Some(1),
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
@@ -1470,10 +1358,9 @@ fn direct_answer_formats_wrapped_config_basic_structured_scalar_equality() {
             semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
             locator_hint: "UI/package.json | crates/clawd/Cargo.toml".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1504,21 +1391,7 @@ name = "clawd"
 version.workspace = true
 "#,
     ));
-    let route_result = RouteResult {
-            resolved_intent:
-                "读取 UI/package.json 里的 name 字段，再读取 crates/clawd/Cargo.toml 里的 package.name 字段，最后用一行输出：前者、后者、一样或不一样"
-                    .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "llm_contract:same_or_different".to_string(),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
                 exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
@@ -1528,10 +1401,9 @@ version.workspace = true
                 semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
-            },
-        };
+            };
     let _agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -1594,20 +1466,7 @@ fn direct_scalar_missing_field_language_uses_original_request_before_resolved_pr
             "system_basic",
             r#"{"action":"extract_field","exists":false,"field_path":"name","value_text":"","value":null,"value_type":"null"}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "Read the name field from package.json and output only its value."
-            .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "llm_contract:field_extract".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             requires_content_evidence: true,
@@ -1617,10 +1476,9 @@ fn direct_scalar_missing_field_language_uses_original_request_before_resolved_pr
             semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "package.json".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         original_user_request: Some("读取 package.json 里的 name 字段，只输出值".to_string()),
         user_request: Some(
             "Read the name field from package.json and output only its value.".to_string(),

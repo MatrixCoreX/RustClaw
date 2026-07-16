@@ -16,13 +16,13 @@ fn content_evidence_contractual_terminal_answer_is_kept_before_meta_classifier()
         .executed_step_results
         .push(ok_step_result("step_2", "respond", answer));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "release_checklist.md".to_string();
+    route.response_shape = crate::OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "release_checklist.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -58,12 +58,12 @@ fn content_evidence_one_sentence_terminal_answer_is_kept_without_semantic_kind()
         .executed_step_results
         .push(ok_step_result("step_2", "respond", answer));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.response_shape = crate::OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -104,11 +104,11 @@ fn content_evidence_keeps_strict_json_projection_before_meta_classifier() {
         .executed_step_results
         .push(ok_step_result("step_3", "synthesize_answer", answer));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -144,13 +144,13 @@ fn content_evidence_scalar_heading_terminal_answer_is_kept_before_meta_classifie
         .executed_step_results
         .push(ok_step_result("step_2", "respond", answer));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md".to_string();
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -179,11 +179,11 @@ fn content_evidence_contractual_terminal_answer_requires_observation() {
         .executed_step_results
         .push(ok_step_result("step_1", "respond", answer));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = crate::OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -210,32 +210,19 @@ fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
         started_at: 0,
         finished_at: 0,
     });
-    let route = crate::RouteResult {
-        resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "docs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "docs".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     assert_eq!(
@@ -267,32 +254,19 @@ fn single_listing_entry_passthrough_is_dropped_for_content_evidence() {
         started_at: 0,
         finished_at: 0,
     });
-    let route = crate::RouteResult {
-        resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
-            locator_hint: "docs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+        locator_hint: "docs".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         auto_locator_path: Some("/tmp/docs".to_string()),
         ..Default::default()
     };

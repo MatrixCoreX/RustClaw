@@ -23,7 +23,7 @@ use web_service::{
 
 pub(super) fn recover_requested_machine_kv_summary_final_answer(
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
@@ -83,7 +83,7 @@ fn machine_kv_recovery_blocked_by_required_content_gap(
 
 pub(super) fn apply_requested_machine_kv_summary_to_final_answer(
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
@@ -100,7 +100,7 @@ pub(super) fn apply_requested_machine_kv_summary_to_final_answer(
 
 pub(super) fn apply_requested_machine_kv_summary_to_final_answer_force_structured(
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
@@ -117,7 +117,7 @@ pub(super) fn apply_requested_machine_kv_summary_to_final_answer_force_structure
 
 fn apply_requested_machine_kv_summary_to_final_answer_inner(
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
@@ -480,12 +480,12 @@ fn machine_summary_value_to_json(value: &str) -> serde_json::Value {
 }
 
 fn final_answer_preserves_terminal_scalar_contract(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
 ) -> bool {
-    if route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route_result.output_contract.delivery_required
+    if route_result.response_shape != crate::OutputResponseShape::Scalar
+        || route_result.delivery_required
     {
         return false;
     }
@@ -507,7 +507,7 @@ fn final_answer_preserves_terminal_scalar_contract(
 }
 
 fn task_final_scalar_candidate_matches_route(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     candidate: &str,
 ) -> bool {
     if candidate.is_empty()
@@ -594,7 +594,7 @@ fn task_observed_scalar_from_json(value: &serde_json::Value) -> Option<String> {
 }
 
 fn final_answer_preserves_delivery_artifact(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
@@ -605,16 +605,18 @@ fn final_answer_preserves_delivery_artifact(
                 .any(|message| !crate::extract_delivery_file_tokens(message).is_empty()))
 }
 
-fn route_expects_delivery_artifact(route_result: &crate::RouteResult) -> bool {
-    route_result.wants_file_delivery
-        || route_result.output_contract.delivery_required
+fn route_expects_delivery_artifact(route_result: &crate::IntentOutputContract) -> bool {
+    route_result.delivery_required
+        || route_result.delivery_required
         || matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::FileToken
         )
-        || crate::evidence_policy::final_answer_shape_for_route(route_result).is_some_and(|shape| {
-            shape.class() == crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
-        })
+        || crate::evidence_policy::final_answer_shape_for_output_contract(route_result).is_some_and(
+            |shape| {
+                shape.class() == crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
+            },
+        )
 }
 
 fn final_answer_preserves_transform_structured_delivery(
@@ -758,13 +760,13 @@ fn machine_token_char(ch: char) -> bool {
 }
 
 fn final_answer_preserves_publishable_evidence_summary(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
     answer_messages: &[String],
     requested_summary: &str,
 ) -> bool {
-    let contract = route_result.effective_output_contract();
+    let contract = route_result.clone();
     if contract.delivery_required
         || matches!(
             contract.response_shape,
@@ -814,10 +816,10 @@ fn journal_has_observed_tool_evidence(journal: &crate::task_journal::TaskJournal
 }
 
 fn route_allows_model_language_delivery(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     response_shape: crate::OutputResponseShape,
 ) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route_result)
+    crate::evidence_policy::final_answer_shape_for_output_contract(route_result)
         .is_some_and(|shape| shape.allows_model_language())
         || matches!(
             response_shape,
@@ -826,15 +828,16 @@ fn route_allows_model_language_delivery(
 }
 
 fn final_answer_preserves_grounded_summary_delivery(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
-    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route_result) else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_output_contract(route_result)
+    else {
         return false;
     };
-    let contract = route_result.effective_output_contract();
+    let contract = route_result.clone();
     if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::GroundedSummary
         || contract.delivery_required
         || matches!(
@@ -1043,36 +1046,21 @@ mod tests {
     use super::*;
     use crate::{
         IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-        OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+        OutputSemanticKind,
     };
     use serde_json::json;
 
-    fn service_status_route() -> RouteResult {
-        RouteResult {
-            resolved_intent:
-                "Check clawd service/process status and return target, status, manager_type."
-                    .to_string(),
-            needs_clarify: false,
-            route_reason: String::new(),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            clarify_question: String::new(),
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                exact_sentence_count: None,
-                response_shape: OutputResponseShape::Strict,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::None,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::ServiceStatus,
-                locator_hint: String::new(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
+    fn service_status_route() -> IntentOutputContract {
+        IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::ServiceStatus,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
         }
     }
 
@@ -1084,7 +1072,7 @@ mod tests {
             "ask",
             "Check clawd service/process status only; return target, status, manager_type.",
         );
-        journal.record_output_contract(&route.effective_output_contract());
+        journal.record_output_contract(&route.clone());
         journal
             .step_results
             .push(crate::task_journal::TaskJournalStepTrace::ok(

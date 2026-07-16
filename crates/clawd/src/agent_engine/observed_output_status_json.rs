@@ -10,12 +10,12 @@ struct StatusJsonObservation {
 }
 
 pub(super) fn multi_status_json_summary_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<String> {
-    if route.output_contract.delivery_required
+    if route.delivery_required
         || matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Scalar
                 | crate::OutputResponseShape::Strict
                 | crate::OutputResponseShape::FileToken

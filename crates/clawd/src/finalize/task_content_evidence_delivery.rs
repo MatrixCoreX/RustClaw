@@ -15,11 +15,11 @@ pub(super) fn has_any_delivery_file_token(text: &str, messages: &[String]) -> bo
             .any(|message| !crate::extract_delivery_file_tokens(message).is_empty())
 }
 
-pub(super) fn route_has_file_delivery_contract(route_result: &crate::RouteResult) -> bool {
-    route_result.wants_file_delivery
-        || route_result.output_contract.delivery_required
+pub(super) fn route_has_file_delivery_contract(route_result: &crate::IntentOutputContract) -> bool {
+    route_result.delivery_required
+        || route_result.delivery_required
         || matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::FileToken
         )
 }
@@ -132,7 +132,7 @@ fn latest_file_delivery_token_from_journal(
 }
 
 pub(super) fn backfill_file_delivery_token_from_journal(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
@@ -155,12 +155,12 @@ pub(super) fn backfill_file_delivery_token_from_journal(
 }
 
 pub(super) fn backfill_content_evidence_file_delivery_from_journal(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
 ) -> bool {
-    let contract = route_result.effective_output_contract();
+    let contract = route_result.clone();
     if !contract.requires_content_evidence || !route_has_file_delivery_contract(route_result) {
         return false;
     }
@@ -204,7 +204,7 @@ pub(super) fn backfill_content_evidence_file_delivery_from_journal(
 }
 
 pub(super) fn backfill_file_delivery_contract_from_journal(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,

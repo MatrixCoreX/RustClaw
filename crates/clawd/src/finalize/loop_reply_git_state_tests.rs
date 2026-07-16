@@ -18,11 +18,10 @@ fn git_status_summary_defers_to_synthesis_instead_of_raw_passthrough() {
     });
 
     let mut route = free_route_result();
-    route.resolved_intent = "检查当前仓库是否有未提交改动，用一句话告诉我".to_string();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -64,13 +63,12 @@ fn git_repository_state_one_sentence_defers_direct_structured_answer() {
     });
 
     let mut route = free_route_result();
-    route.resolved_intent = "检查当前仓库是否有未提交改动，用一句话告诉我".to_string();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GitRepositoryState;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::GitRepositoryState;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -120,12 +118,12 @@ fn git_repository_state_free_summary_defers_direct_structured_answer() {
     });
 
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GitRepositoryState;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::GitRepositoryState;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -159,9 +157,9 @@ fn scalar_git_log_does_not_use_non_builtin_raw_passthrough() {
     });
 
     let mut route = scalar_route_result();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -203,18 +201,16 @@ fn git_repository_state_strict_requested_machine_fields_drop_changed_list() {
     );
 
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.resolved_intent =
-        "Return a machine summary with branch and worktree_state fields only.".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::GitRepositoryState;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         original_user_request: Some(
             "Answer only the branch and worktree_state machine fields.".to_string(),
         ),
         user_request: Some("branch worktree_state".to_string()),
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -268,15 +264,13 @@ fn git_status_contract_strict_requested_machine_fields() {
     );
 
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.route_reason = "capability_ref=git.status".to_string();
-    route.resolved_intent = "field=branch field=worktree_state".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::GitRepositoryState;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         user_request: Some("branch worktree_state".to_string()),
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;

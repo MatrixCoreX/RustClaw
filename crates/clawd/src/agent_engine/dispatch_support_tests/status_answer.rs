@@ -15,29 +15,16 @@ fn deterministic_status_answer_defers_for_agent_loop_rich_content() {
         payload_json: String::new(),
     };
     let agent_run_context = AgentRunContext {
-        route_result: Some(crate::RouteResult {
-            resolved_intent: "summarize archive and database observations".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "".to_string(),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Low,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                exact_sentence_count: None,
-                response_shape: crate::OutputResponseShape::Free,
-                requires_content_evidence: false,
-                delivery_required: false,
-                locator_kind: crate::OutputLocatorKind::None,
-                delivery_intent: crate::OutputDeliveryIntent::None,
-                semantic_kind: crate::OutputSemanticKind::None,
-                locator_hint: String::new(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
+        output_contract: Some(crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Free,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
         }),
         ..Default::default()
     };

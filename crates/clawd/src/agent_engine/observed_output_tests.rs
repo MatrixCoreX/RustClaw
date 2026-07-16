@@ -34,8 +34,7 @@ use super::{
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
     AppState, ClaimedTask, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult,
-    ScheduleKind, SkillViewsSnapshot,
+    OutputResponseShape, OutputSemanticKind, SkillViewsSnapshot,
 };
 use claw_core::skill_registry::SkillsRegistry;
 

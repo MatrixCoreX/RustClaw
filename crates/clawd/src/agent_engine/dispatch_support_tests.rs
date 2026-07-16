@@ -1194,32 +1194,19 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
         "system_basic",
         r#"{"action":"path_batch_facts","facts":[{"path":".","resolved_path":"/home/guagua/rustclaw","exists":true}]}"#,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "current workspace path".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "scalar path".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: false,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1247,33 +1234,19 @@ fn contract_matrix_synthesis_prefers_observed_answer_over_step_status() {
         started_at: 0,
         finished_at: 0,
     });
-    let route = crate::RouteResult {
-        resolved_intent: "把 test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果"
-            .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "structured_contract_hint_fast_path; contract_hint_fast_path".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ArchiveUnpack,
-            locator_hint: "/tmp/test_bundle.zip | tmp/contract_matrix_unpacked".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ArchiveUnpack,
+        locator_hint: "/tmp/test_bundle.zip | tmp/contract_matrix_unpacked".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1301,32 +1274,19 @@ fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
         "fs_basic",
         r#"{"extra":{"action":"count_inventory","path":"logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}},"text":"{\"action\":\"count_inventory\",\"path\":\"logs\",\"recursive\":false,\"counts\":{\"total\":2,\"files\":2,\"dirs\":0,\"total_size_bytes\":2698}}"}"#,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "count two directory child totals and compare them".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "quantity compare".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::QuantityComparison,
-            locator_hint: "docs | logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+        locator_hint: "docs | logs".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1352,32 +1312,19 @@ fn synthesize_direct_fallback_defers_multi_count_quantity_comparison_to_model() 
         "fs_basic",
         r#"{"extra":{"action":"count_inventory","path":"logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}},"text":"{\"action\":\"count_inventory\",\"path\":\"logs\",\"recursive\":false,\"counts\":{\"total\":2,\"files\":2,\"dirs\":0,\"total_size_bytes\":2698}}"}"#,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "count two directory child totals and compare them".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "quantity compare".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::QuantityComparison,
-            locator_hint: "docs | logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+        locator_hint: "docs | logs".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1398,34 +1345,19 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
         "config_basic",
         r#"{"extra":{"action":"extract_field","exists":true,"field_path":"name","path":"/repo/UI/package.json","resolved_path":"/repo/UI/package.json","value":"react-example","value_text":"react-example","value_type":"string"},"text":"{\"action\":\"extract_field\",\"exists\":true,\"field_path\":\"name\",\"path\":\"/repo/UI/package.json\",\"resolved_path\":\"/repo/UI/package.json\",\"value\":\"react-example\",\"value_text\":\"react-example\",\"value_type\":\"string\"}"}"#,
     ));
-    let route = crate::RouteResult {
-        resolved_intent:
-            "summarize repository layout and UI role from directory listing and package name"
-                .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "directory purpose summary".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: Some(1),
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: Some(1),
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1447,34 +1379,19 @@ fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model()
         "fs_basic",
         r#"{"action":"read_range","excerpt":"7|{\"status\":\"ok\",\"response\":\"path resolved\"}\n8|{\"status\":\"ok\",\"response\":\"db inspected\"}\n9|{\"status\":\"ok\",\"response\":\"log tailed\"}\n10|{\"status\":\"ok\",\"response\":\"binding remembered\"}","path":"/tmp/model_io.log"}"#,
     ));
-    let route = crate::RouteResult {
-        resolved_intent:
-            "read the last four log lines and summarize the observed phenomenon in one sentence"
-                .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "content excerpt summary".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-            locator_hint: "/tmp/model_io.log".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        locator_hint: "/tmp/model_io.log".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1497,32 +1414,19 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));
-    let route = crate::RouteResult {
-        resolved_intent: "Run commands and summarize the observed outputs.".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "command output summary".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::None,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::CommandOutputSummary,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::None,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::CommandOutputSummary,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1547,32 +1451,19 @@ fn deterministic_scalar_markdown_heading_uses_structural_read_evidence() {
         "fs_basic",
         r##"{"action":"read_range","excerpt":"1|# Release Checklist","path":"/tmp/release_checklist.md"}"##,
     ));
-    let mut route = crate::RouteResult {
-        resolved_intent: "extract one scalar from a markdown file".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "scalar markdown heading".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "/tmp/release_checklist.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let mut route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "/tmp/release_checklist.md".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route.clone()),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1581,9 +1472,9 @@ fn deterministic_scalar_markdown_heading_uses_structural_read_evidence() {
         Some("Release Checklist")
     );
 
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.response_shape = crate::OutputResponseShape::Strict;
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     assert!(deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).is_none());
@@ -1597,32 +1488,19 @@ fn deterministic_scalar_markdown_heading_defers_when_read_evidence_has_body() {
         "fs_basic",
         r##"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"/tmp/release_checklist.md"}"##,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "extract one scalar from a markdown file".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "scalar markdown body".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "/tmp/release_checklist.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "/tmp/release_checklist.md".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1631,32 +1509,19 @@ fn deterministic_scalar_markdown_heading_defers_when_read_evidence_has_body() {
 
 #[test]
 fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
-    let route = crate::RouteResult {
-        resolved_intent: "读 README.md 前 2 行".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "plain observed read".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Filename,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Filename,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "README.md".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1665,33 +1530,19 @@ fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
 
 #[test]
 fn synthesize_route_blocks_direct_fallback_for_failed_step_language_contract() {
-    let route = crate::RouteResult {
-        resolved_intent: "Run an ordered command sequence and report only the failed step."
-            .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "execution_failed_step_contract".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::None,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::None,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1703,32 +1554,19 @@ fn synthesize_route_blocks_direct_fallback_for_failed_step_language_contract() {
 
 #[test]
 fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
-    let route = crate::RouteResult {
-        resolved_intent: "List files from a known directory.".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "structured file listing".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::FileNames,
-            locator_hint: "document".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::FileNames,
+        locator_hint: "document".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1737,32 +1575,19 @@ fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
 
 #[test]
 fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
-    let route = crate::RouteResult {
-        resolved_intent: "Validate config syntax from structured parser evidence.".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "structured config validation".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ConfigValidation,
-            locator_hint: "configs/config.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ConfigValidation,
+        locator_hint: "configs/config.toml".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some(
             "Validate only the TOML syntax of configs/config.toml and answer pass or fail."
                 .to_string(),
@@ -1786,33 +1611,19 @@ fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
 
 #[test]
 fn synthesize_route_allows_observed_fallback_for_unclassified_delivery() {
-    let route = crate::RouteResult {
-        resolved_intent: "Run a command, then produce a short final reply based on the result."
-            .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "execution plus synthesis".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1821,32 +1632,19 @@ fn synthesize_route_allows_observed_fallback_for_unclassified_delivery() {
 
 #[test]
 fn synthesize_route_allows_direct_fallback_for_strict_plain_observation() {
-    let route = crate::RouteResult {
-        resolved_intent: "Return an already formatted observed result.".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "strict formatted output".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "logs".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1855,32 +1653,19 @@ fn synthesize_route_allows_direct_fallback_for_strict_plain_observation() {
 
 #[test]
 fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
-    let route = crate::RouteResult {
-        resolved_intent: "Run a command and return its raw output.".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "raw command output".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1896,32 +1681,19 @@ fn strict_raw_tail_read_uses_direct_observed_fallback_before_composer() {
         "fs_basic",
         r#"{"action":"read_range","mode":"tail","requested_n":2,"excerpt":"98|WARN provider failed: http 401: Please carry the API secret key\n99|WARN memory preference fallback failed: http 401","path":"/tmp/clawd-dev.log"}"#,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "Read the last two lines of the selected log file.".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "raw tail read".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
-            locator_hint: "/tmp/clawd-dev.log".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+        locator_hint: "/tmp/clawd-dev.log".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 

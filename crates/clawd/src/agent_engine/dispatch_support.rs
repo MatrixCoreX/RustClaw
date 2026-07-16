@@ -246,13 +246,10 @@ mod tests;
 
 fn route_requires_file_token_delivery(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .map(|route| {
-            route.output_contract.delivery_required
-                || matches!(
-                    route.output_contract.response_shape,
-                    OutputResponseShape::FileToken
-                )
+            route.delivery_required
+                || matches!(route.response_shape, OutputResponseShape::FileToken)
         })
         .unwrap_or(false)
 }
@@ -825,7 +822,7 @@ pub(super) async fn handle_synthesize_answer_action(
     );
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
-            if let Some(route) = agent_run_context.and_then(|context| context.route_result.as_ref())
+            if let Some(route) = agent_run_context.and_then(|context| context.output_contract())
             {
                 if let Some(answer) =
                     crate::agent_engine::observed_output::structured_scalar_equality_direct_answer(
@@ -888,9 +885,9 @@ pub(super) async fn handle_synthesize_answer_action(
                 }
             }
             if agent_run_context
-                .and_then(|context| context.route_result.as_ref())
+                .and_then(|context| context.output_contract())
                 .is_none_or(|route| {
-                    !route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
+                    !route.semantic_kind_is(crate::OutputSemanticKind::ConfigMutation)
                 })
             {
                 if let Some((answer, _summary)) =
@@ -920,7 +917,7 @@ pub(super) async fn handle_synthesize_answer_action(
                 return Ok(answer);
             }
             let requires_synthesized_delivery = agent_run_context
-                .and_then(|context| context.route_result.as_ref())
+                .and_then(|context| context.output_contract())
                 .is_some_and(
                     crate::agent_engine::observed_output::route_requires_synthesized_delivery,
                 );

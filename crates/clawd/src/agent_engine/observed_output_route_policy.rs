@@ -17,7 +17,7 @@ pub(super) fn observed_language_supports_bilingual_template(language_hint: &str)
 }
 
 pub(super) fn route_should_synthesize_non_bilingual_existence_with_path(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     allow_localized_direct_template: bool,
 ) -> bool {
     if allow_localized_direct_template {
@@ -27,26 +27,26 @@ pub(super) fn route_should_synthesize_non_bilingual_existence_with_path(
         return false;
     };
     route_contract_marker_is(route, crate::OutputSemanticKind::ExistenceWithPath)
-        && crate::evidence_policy::final_answer_shape_for_route(route)
+        && crate::evidence_policy::final_answer_shape_for_output_contract(route)
             .is_some_and(|shape| shape.allows_model_language())
 }
 
 pub(super) fn route_contract_marker_is(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     semantic_kind: crate::OutputSemanticKind,
 ) -> bool {
-    route.output_contract_marker_is(semantic_kind)
+    route.semantic_kind_is(semantic_kind)
 }
 
 pub(super) fn route_contract_marker_is_any(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     semantic_kinds: &[crate::OutputSemanticKind],
 ) -> bool {
-    route.output_contract_marker_is_any(semantic_kinds)
+    route.semantic_kind_is_any(semantic_kinds)
 }
 
-pub(super) fn route_is_unclassified_contract(route: &crate::RouteResult) -> bool {
-    route.output_contract_is_unclassified()
+pub(super) fn route_is_unclassified_contract(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is_unclassified()
 }
 
 pub(super) fn observed_request_prefers_english_template(
@@ -79,18 +79,17 @@ pub(super) fn observed_request_prefers_english_template(
 }
 
 pub(crate) fn route_quantity_comparison_requires_model_language_synthesis(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
-    !route.needs_clarify
-        && route_contract_marker_is(route, crate::OutputSemanticKind::QuantityComparison)
-        && route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
-        && route.output_contract.response_shape == crate::OutputResponseShape::Free
+    route_contract_marker_is(route, crate::OutputSemanticKind::QuantityComparison)
+        && route.requires_content_evidence
+        && !route.delivery_required
+        && route.response_shape == crate::OutputResponseShape::Free
 }
 
 pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> String {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
-    let response_shape = route.map(|route| route.output_contract.response_shape);
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract());
+    let response_shape = route.map(|route| route.response_shape);
     let route_has_marker =
         |semantic_kind| route.is_some_and(|route| route_contract_marker_is(route, semantic_kind));
     if route_has_marker(crate::OutputSemanticKind::RawCommandOutput)
@@ -109,20 +108,20 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
             if route_quantity_comparison_requires_model_language_synthesis(route) {
                 return "style_policy=evidence_synthesis passthrough=disallowed synthesis=quantity_comparison include=requested_model_language_synthesis".to_string();
             }
-            if let Some(count) = route.output_contract.exact_sentence_count {
+            if let Some(count) = route.exact_sentence_count {
                 return format!(
                     "style_policy=evidence_synthesis passthrough=disallowed sentence_count={count}"
                 );
             }
-            if route.output_contract.response_shape == crate::OutputResponseShape::OneSentence {
+            if route.response_shape == crate::OutputResponseShape::OneSentence {
                 return "style_policy=evidence_synthesis passthrough=disallowed response_shape=one_sentence include_all_deliverables=true".to_string();
             }
             return "style_policy=evidence_synthesis passthrough=disallowed response_shape=requested_final_wording".to_string();
         }
     }
     if let Some(count) = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .and_then(|route| route.output_contract.exact_sentence_count)
+        .and_then(|ctx| ctx.output_contract())
+        .and_then(|route| route.exact_sentence_count)
     {
         return format!("style_policy=exact_sentence_count sentence_count={count}");
     }
@@ -152,7 +151,7 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
     .to_string()
 }
 
-pub(crate) fn route_requires_synthesized_delivery(route: &crate::RouteResult) -> bool {
+pub(crate) fn route_requires_synthesized_delivery(route: &crate::IntentOutputContract) -> bool {
     if route_allows_strict_plain_observation_passthrough(route) {
         return false;
     }
@@ -162,23 +161,22 @@ pub(crate) fn route_requires_synthesized_delivery(route: &crate::RouteResult) ->
     if route_quantity_comparison_requires_model_language_synthesis(route) {
         return true;
     }
-    let constrained_sentence_delivery = route.output_contract.response_shape
+    let constrained_sentence_delivery = route.response_shape
         == crate::OutputResponseShape::OneSentence
-        || route.output_contract.exact_sentence_count.is_some();
-    route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
+        || route.exact_sentence_count.is_some();
+    route.requires_content_evidence
+        && !route.delivery_required
         && route_is_unclassified_contract(route)
         && constrained_sentence_delivery
 }
 
-pub(crate) fn route_disallows_direct_observation_passthrough(route: &crate::RouteResult) -> bool {
+pub(crate) fn route_disallows_direct_observation_passthrough(
+    route: &crate::IntentOutputContract,
+) -> bool {
     if route_requires_synthesized_delivery(route) {
         return true;
     }
-    if route.needs_clarify
-        || !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-    {
+    if false || !route.requires_content_evidence || route.delivery_required {
         return false;
     }
     if route_contract_marker_is(route, crate::OutputSemanticKind::CommandOutputSummary) {
@@ -188,9 +186,9 @@ pub(crate) fn route_disallows_direct_observation_passthrough(route: &crate::Rout
         return true;
     }
     if route_contract_marker_is(route, crate::OutputSemanticKind::RawCommandOutput)
-        && route.output_contract.response_shape == crate::OutputResponseShape::Strict
-        && route.output_contract.locator_kind == crate::OutputLocatorKind::None
-        && crate::evidence_policy::final_answer_shape_for_route(route)
+        && route.response_shape == crate::OutputResponseShape::Strict
+        && route.locator_kind == crate::OutputLocatorKind::None
+        && crate::evidence_policy::final_answer_shape_for_output_contract(route)
             .is_some_and(|shape| shape.allows_model_language())
     {
         return true;
@@ -206,19 +204,19 @@ pub(crate) fn route_disallows_direct_observation_passthrough(route: &crate::Rout
         return false;
     }
     matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-    ) || route.output_contract.exact_sentence_count.is_some()
+    ) || route.exact_sentence_count.is_some()
 }
 
 pub(super) fn route_git_repository_state_requires_language_synthesis(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::GitRepositoryState)
-        && route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
+        && route.requires_content_evidence
+        && !route.delivery_required
         && (matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-        ) || route.output_contract.exact_sentence_count.is_some())
+        ) || route.exact_sentence_count.is_some())
 }

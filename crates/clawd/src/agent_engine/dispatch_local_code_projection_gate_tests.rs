@@ -3,10 +3,7 @@ use serde_json::json;
 use super::*;
 use crate::agent_engine::AgentRunContext;
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
-use crate::{
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    ResumeBehavior, RiskCeiling, ScheduleKind,
-};
+use crate::{IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape};
 
 fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
     StepExecutionResult {
@@ -24,32 +21,19 @@ fn context_with_machine_fields(
     response_shape: OutputResponseShape,
     fields: &[&str],
 ) -> AgentRunContext {
-    let route = crate::RouteResult {
-        resolved_intent: "local code strict json".to_string(),
-        needs_clarify: false,
-        route_reason: "".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        clarify_question: String::new(),
-        wants_file_delivery: response_shape == OutputResponseShape::FileToken,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: Default::default(),
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         execution_recipe_hint: None,
         execution_recipe_plan_hint: None,
         turn_analysis: Some(crate::turn_context::TurnAnalysis {

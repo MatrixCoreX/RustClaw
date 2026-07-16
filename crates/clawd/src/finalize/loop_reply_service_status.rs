@@ -1,7 +1,7 @@
 use crate::agent_engine::LoopState;
 
 pub(crate) fn service_status_system_basic_info_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<String> {
     if !crate::finalize::route_matches_service_status_output_contract(route) {
@@ -80,7 +80,7 @@ pub(crate) fn service_status_system_basic_info_answer(
 }
 
 fn should_preserve_health_check_summary_synthesis(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     system_health_only: bool,
 ) -> bool {
@@ -88,7 +88,7 @@ fn should_preserve_health_check_summary_synthesis(
         return false;
     }
     if matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
     ) {
         return false;
@@ -153,10 +153,10 @@ fn looks_like_machine_field_path(value: &str) -> bool {
 }
 
 fn should_preserve_service_control_one_sentence(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    if route.output_contract.response_shape != crate::OutputResponseShape::OneSentence {
+    if route.response_shape != crate::OutputResponseShape::OneSentence {
         return false;
     }
     if !has_successful_service_control_status_observation(loop_state) {
@@ -322,9 +322,8 @@ fn json_value_has_service_control_status_shape(value: &serde_json::Value) -> boo
             || value.get("summary").is_some())
 }
 
-fn service_status_selector_is_system_health_only(route: &crate::RouteResult) -> bool {
+fn service_status_selector_is_system_health_only(route: &crate::IntentOutputContract) -> bool {
     route
-        .output_contract
         .self_extension
         .structured_field_selector
         .as_deref()

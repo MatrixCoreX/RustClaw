@@ -8,7 +8,7 @@ fn code_change_recipe_requires_profile_specific_verification() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("修复当前仓库里的 clawd 入口逻辑，并验证编译或测试通过。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -74,7 +74,7 @@ fn code_change_recipe_accepts_structured_cargo_check_verification() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("修复当前仓库里的 clawd 入口逻辑，并验证编译通过。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -140,7 +140,7 @@ fn code_change_recipe_accepts_run_cmd_cargo_check_verification() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("修复当前仓库里的 clawd 入口逻辑，并验证编译通过。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -197,7 +197,7 @@ fn code_change_recipe_accepts_structured_custom_validation_step() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("修复当前仓库里的脚本，并运行自定义检查脚本验证通过。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![

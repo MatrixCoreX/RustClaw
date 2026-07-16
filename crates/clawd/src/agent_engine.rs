@@ -266,11 +266,11 @@ pub(crate) struct LoopState {
     pub(crate) last_recipe_progress_scope:
         Option<crate::execution_recipe::ExecutionRecipeTargetScope>,
     pub(crate) recipe_scope_ready_hint_sent: bool,
-    /// §7.1 output_contract 贯穿全链：RouteResult 里的 output_contract 与 route marker
+    /// §7.1 output_contract 贯穿全链：IntentOutputContract 里的 output_contract 与 route marker
     /// 合并成 effective machine contract 后挂到 LoopState 上。下游 synthesis/finalize
-    /// 和无 RouteResult 入参的 preflight 必须看见这些字段，否则容易把结构化
+    /// 和无 IntentOutputContract 入参的 preflight 必须看见这些字段，否则容易把结构化
     /// existence_with_path / scalar / file_token 契约答成自由段落。
-    /// 默认 None：测试与不走 RouteResult 的 ad-hoc 路径保持向后兼容。
+    /// 默认 None：测试与不走 IntentOutputContract 的 ad-hoc 路径保持向后兼容。
     pub(crate) output_contract: Option<crate::IntentOutputContract>,
     /// True only while executing the current round's verifier-approved actions.
     /// Preflight uses this as a narrow bridge from legacy route guards to the
@@ -278,7 +278,7 @@ pub(crate) struct LoopState {
     /// dispatch returns.
     pub(crate) verified_action_window_active: bool,
     /// Machine boundary fact from AGENT_LOOP_BOUNDARY_OBSERVATIONS. This lets
-    /// the loop accept a terminal clarification even when legacy RouteResult
+    /// the loop accept a terminal clarification even when legacy IntentOutputContract
     /// fields were normalized back to an execution gate for planner entry.
     pub(crate) boundary_observation_needs_clarify: bool,
     /// Machine boundary fact for an active waiting user-input turn. Respond-only
@@ -315,7 +315,7 @@ struct RoundOutcome {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentRunContext {
-    pub(crate) route_result: Option<crate::RouteResult>,
+    pub(crate) output_contract: Option<crate::IntentOutputContract>,
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(crate) execution_recipe_plan_hint: Option<crate::execution_recipe::ExecutionRecipePlanHint>,
     pub(crate) turn_analysis: Option<crate::turn_context::TurnAnalysis>,
@@ -328,6 +328,12 @@ pub(crate) struct AgentRunContext {
     /// Cross-turn recent execution context for planner access to prior observed outputs,
     /// aliases, and targets when the current turn references previous turns.
     pub(crate) cross_turn_recent_execution_context: Option<String>,
+}
+
+impl AgentRunContext {
+    pub(crate) fn output_contract(&self) -> Option<&crate::IntentOutputContract> {
+        self.output_contract.as_ref()
+    }
 }
 
 struct RespondActionOutcome {

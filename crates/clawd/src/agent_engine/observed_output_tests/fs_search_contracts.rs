@@ -74,12 +74,11 @@ fn fs_search_file_paths_contract_filters_with_structured_pattern() {
             r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/agent_intelligence_architecture_plan_20260511_已完成.md","plan/builtin_skill_capability_governance_plan_20260510.md","plan/codex_style_agent_architecture_refactor_plan_20260511.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","plan/llm_first_agent_convergence_plan_20260511.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.resolved_intent = "Read plan/definitely_missing_20260511.md; if missing, search the plan directory for md files related to execution_intent and return only found paths.".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/home/guagua/rustclaw/plan".to_string();
+    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/home/guagua/rustclaw/plan".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -98,12 +97,11 @@ fn fs_search_file_paths_contract_uses_planner_semantic_kind() {
             r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
-    route.resolved_intent = "machine contract only".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/home/guagua/rustclaw/plan".to_string();
+    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/home/guagua/rustclaw/plan".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -122,14 +120,11 @@ fn fs_search_file_paths_contract_preserves_multi_candidates_when_not_decisive() 
             r#"{"action":"find_name","pattern":"README","count":5,"results":["README.md","README.zh-CN.md","UI/README.md","data/vendor/whisper.cpp/examples/whisper.android.java/README_files","data/vendor/whisper.cpp/README.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.resolved_intent =
-            "Find files named README under the current repo. If there are multiple candidates, list candidates instead of choosing one."
-                .to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
+    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "/home/guagua/rustclaw".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -157,14 +152,11 @@ fn fs_search_file_paths_contract_i18n_expands_to_five_full_paths() {
         r#"{"action":"find_name","count":6,"results":["README.md","README.zh-CN.md","README_cn.md","RUSTCLAW_SERVICE_README.md","UI/README.md","Cargo.toml"],"root":""}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.resolved_intent =
-        "Find README-like files in the current repository and list the first five full paths."
-            .to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = String::new();
+    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = String::new();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let state = AppState::test_default_with_fixture_provider();
@@ -198,10 +190,10 @@ fn direct_scalar_count_uses_latest_fs_search_count() {
             r#"{"action":"find_name","count":10,"patterns":["clarify"],"results":["a.txt","b.txt"],"root":"scripts/nl_tests/cases"}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.semantic_kind = OutputSemanticKind::ScalarCount;
 
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -298,13 +290,13 @@ fn raw_command_output_grep_text_direct_answer_returns_matching_lines() {
         r#"{"action":"grep_text","query":"ERROR","count":1,"match_count":1,"matches":[{"path":"scripts/nl_tests/fixtures/device_local/logs/app.log","line":16,"text":"2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata"}],"results":["scripts/nl_tests/fixtures/device_local/logs/app.log"]}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "scripts/nl_tests/fixtures/device_local/logs/app.log".to_string();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -346,10 +338,10 @@ fn virtual_fs_basic_grep_text_output_can_direct_answer_file_paths() {
             r#"{"action":"grep_text","query":"FirstLayerDecision","count":4,"match_count":5,"matches":[{"path":"README.md","line":45,"text":"FirstLayerDecision"},{"path":"README.md","line":95,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/ask_flow.rs","line":10,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/intent_router.rs","line":20,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/main.rs","line":30,"text":"FirstLayerDecision"}]}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
-    route_result.output_contract.requires_content_evidence = true;
+    route_result.semantic_kind = OutputSemanticKind::FilePaths;
+    route_result.requires_content_evidence = true;
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -368,10 +360,10 @@ fn content_presence_direct_answer_includes_matching_text_evidence() {
             r##"{"action":"grep_text","query":"release","case_insensitive":true,"count":1,"match_count":1,"matches":[{"path":"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","line":1,"text":"# Release Checklist"}]}"##,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
-    route_result.output_contract.requires_content_evidence = true;
+    route_result.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+    route_result.requires_content_evidence = true;
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -396,13 +388,13 @@ fn content_presence_direct_answer_uses_name_results_when_content_empty() {
         r##"{"action":"grep_text","query":"abcd","case_insensitive":false,"count":0,"match_count":0,"matches":[],"name_count":4,"name_results":["scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"],"root":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"}"##,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
-    route_result.output_contract.requires_content_evidence = true;
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint =
+    route_result.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+    route_result.requires_content_evidence = true;
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint =
         "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -424,12 +416,12 @@ fn content_presence_direct_answer_no_match_uses_machine_fields() {
         r##"{"action":"grep_text","query":"missing-token","case_insensitive":true,"count":0,"match_count":0,"matches":[],"root":"docs"}"##,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
-    route_result.output_contract.requires_content_evidence = true;
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "docs".to_string();
+    route_result.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+    route_result.requires_content_evidence = true;
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "docs".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -453,12 +445,12 @@ fn doc_parse_content_presence_uses_machine_selector_without_llm() {
         r##"{"text":"# Release Checklist\n\n1. Verify config loading.\n2. Confirm migrations."}"##,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
-    route_result.output_contract.requires_content_evidence = true;
-    route_result.output_contract.locator_hint =
+    route_result.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+    route_result.requires_content_evidence = true;
+    route_result.locator_hint =
         "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
     let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
+            output_contract: Some(route_result.clone()),
             auto_locator_path: Some(
                 "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string(),
             ),
@@ -514,28 +506,15 @@ fn fs_search_find_ext_directory_contract_returns_parent_dirs() {
             "fs_search",
             r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "list directories containing sh files".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             semantic_kind: OutputSemanticKind::DirectoryNames,
             ..IntentOutputContract::default()
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
         ..AgentRunContext::default()
     };
@@ -553,28 +532,15 @@ fn virtual_fs_basic_find_ext_directory_contract_returns_parent_dirs() {
             "fs_basic",
             r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "list unique directories containing sh scripts".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             semantic_kind: OutputSemanticKind::DirectoryNames,
             ..IntentOutputContract::default()
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
         ..AgentRunContext::default()
     };
@@ -593,13 +559,10 @@ fn directory_purpose_summary_find_ext_waits_when_content_evidence_required() {
         r#"{"extra":{"action":"find_ext","count":5,"ext":"toml","results":["Cargo.toml","configs/config.toml","configs/skills_registry.toml","configs/channels/telegram.toml","configs/i18n/rss_fetch.en-US.toml"],"root":""},"text":"{\"action\":\"find_ext\",\"count\":5,\"ext\":\"toml\",\"results\":[\"Cargo.toml\",\"configs/config.toml\",\"configs/skills_registry.toml\",\"configs/channels/telegram.toml\",\"configs/i18n/rss_fetch.en-US.toml\"],\"root\":\"\"}"}"#,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    route_result.resolved_intent =
-        "Find all TOML files in the repository and briefly describe representative entries"
-            .to_string();
-    route_result.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
-    route_result.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route_result.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
+    route_result.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
         ..AgentRunContext::default()
     };
@@ -634,10 +597,8 @@ fn multi_status_json_direct_answer_keeps_all_observed_status_files() {
         r#"{"healthy":true,"status":"login_required","account_label":"primary"}"#,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    route_result.resolved_intent =
-        "run a basic health check here and summarize only the most important findings".to_string();
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         auto_locator_path: Some("/home/guagua/rustclaw/run".to_string()),
         ..AgentRunContext::default()
     };
@@ -706,19 +667,7 @@ fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
             "fs_search",
             r#"{"action":"find_name","count":1,"results":["scripts/nl_tests/fixtures/locator_smart/stem_unique/ABCD.txt"],"root":"scripts/nl_tests/fixtures/locator_smart/stem_unique"}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "在目标目录里找 abcd，只输出路径".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
@@ -728,10 +677,9 @@ fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
             semantic_kind: OutputSemanticKind::FileNames,
             locator_hint: "scripts/nl_tests/fixtures/locator_smart/stem_unique".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -879,19 +827,7 @@ fn observed_entries_preserve_full_find_name_results_for_synthesis() {
 
 #[test]
 fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
-    let route_result = RouteResult {
-        resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             requires_content_evidence: true,
@@ -901,10 +837,9 @@ fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     let contract = observed_contract_json(Some(&agent_run_context));
@@ -983,18 +918,15 @@ fn observed_direct_answer_defers_non_bilingual_existence_with_path_template() {
             r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/rustclaw-missing-ja.txt"}],"include_missing":true}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.resolved_intent =
-            "ファイルパス /tmp/rustclaw-missing-ja.txt の存在確認。存在しない場合は日本語で短く回答する。"
-                .to_string();
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+    route_result.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route_result.locator_kind = OutputLocatorKind::Path;
+    route_result.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
     let agent_run_context = AgentRunContext {
             original_user_request: Some(
                 "/tmp/rustclaw-missing-ja.txt が存在するか確認してください。存在しない場合は日本語で短く答えてください。"
                     .to_string(),
             ),
-            route_result: Some(route_result),
+            output_contract: Some(route_result.clone()),
             ..AgentRunContext::default()
         };
 
@@ -1020,19 +952,7 @@ fn observed_direct_answer_defers_non_bilingual_existence_with_path_template() {
 
 #[test]
 fn observed_response_style_hint_reflects_output_contract_shape() {
-    let mut route_result = RouteResult {
-        resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let mut route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             requires_content_evidence: true,
@@ -1042,10 +962,9 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let mut agent_run_context = AgentRunContext {
-        route_result: Some(route_result.clone()),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert!(observed_response_style_hint(Some(&agent_run_context))
@@ -1057,68 +976,68 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("include_all_deliverables=true"));
 
-    route_result.output_contract.exact_sentence_count = Some(3);
-    agent_run_context.route_result = Some(route_result.clone());
+    route_result.exact_sentence_count = Some(3);
+    agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("sentence_count=3"));
-    route_result.output_contract.exact_sentence_count = None;
+    route_result.exact_sentence_count = None;
 
-    route_result.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route_result.output_contract.response_shape = OutputResponseShape::Strict;
-    route_result.output_contract.exact_sentence_count = Some(1);
-    agent_run_context.route_result = Some(route_result.clone());
+    route_result.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route_result.response_shape = OutputResponseShape::Strict;
+    route_result.exact_sentence_count = Some(1);
+    agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=exact_observed_value"));
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("requested_format=preserve"));
-    route_result.output_contract.exact_sentence_count = None;
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route_result.exact_sentence_count = None;
+    route_result.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
 
-    route_result.output_contract.response_shape = OutputResponseShape::Scalar;
-    agent_run_context.route_result = Some(route_result.clone());
+    route_result.response_shape = OutputResponseShape::Scalar;
+    agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=scalar"));
     assert!(observed_response_style_hint(Some(&agent_run_context)).contains("bare_value=true"));
 
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    agent_run_context.route_result = Some(route_result.clone());
+    route_result.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=existence_with_path"));
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("scalar_override=path_required"));
 
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
-    route_result.output_contract.response_shape = OutputResponseShape::OneSentence;
-    agent_run_context.route_result = Some(route_result.clone());
+    route_result.semantic_kind = OutputSemanticKind::ScalarCount;
+    route_result.response_shape = OutputResponseShape::OneSentence;
+    agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=scalar_count"));
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("aggregate_only=explicit_request_only"));
 
-    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route_result.output_contract.response_shape = OutputResponseShape::Free;
-    agent_run_context.route_result = Some(route_result.clone());
+    route_result.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route_result.response_shape = OutputResponseShape::Free;
+    agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("passthrough=disallowed"));
     assert!(route_disallows_direct_observation_passthrough(
-        agent_run_context.route_result.as_ref().unwrap()
+        agent_run_context.output_contract.as_ref().unwrap()
     ));
     assert!(observed_contract_json(Some(&agent_run_context))
         .contains(r#""direct_observation_passthrough_allowed":false"#));
 
-    route_result.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route_result.output_contract.response_shape = OutputResponseShape::Strict;
-    route_result.output_contract.locator_kind = OutputLocatorKind::None;
-    route_result.output_contract.locator_hint.clear();
-    agent_run_context.route_result = Some(route_result.clone());
+    route_result.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route_result.response_shape = OutputResponseShape::Strict;
+    route_result.locator_kind = OutputLocatorKind::None;
+    route_result.locator_hint.clear();
+    agent_run_context.output_contract = Some(route_result.clone());
     assert!(route_disallows_direct_observation_passthrough(
-        agent_run_context.route_result.as_ref().unwrap()
+        agent_run_context.output_contract.as_ref().unwrap()
     ));
     assert!(observed_contract_json(Some(&agent_run_context))
         .contains(r#""direct_observation_passthrough_allowed":false"#));
 
-    route_result.output_contract.response_shape = OutputResponseShape::FileToken;
-    agent_run_context.route_result = Some(route_result);
+    route_result.response_shape = OutputResponseShape::FileToken;
+    agent_run_context.output_contract = Some(route_result);
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=file_token"));
     assert!(observed_response_style_hint(Some(&agent_run_context))
@@ -1131,7 +1050,7 @@ fn chat_wrapped_free_unclassified_contract_allows_finalizer_passthrough() {
     assert!(!route_requires_synthesized_delivery(&route));
 
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let contract = observed_contract_json(Some(&agent_run_context));
@@ -1151,11 +1070,10 @@ fn single_file_delivery_uses_path_batch_fact_as_file_token() {
     std::fs::write(&file, "release checklist").expect("write temp file");
 
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::FileToken);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = file.display().to_string();
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = file.display().to_string();
 
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -1183,7 +1101,7 @@ fn single_file_delivery_uses_path_batch_fact_as_file_token() {
     loop_state.has_tool_or_skill_output = true;
 
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
@@ -1206,12 +1124,11 @@ fn single_file_delivery_ignores_prior_read_range_rejections_after_path_fact() {
     std::fs::write(&file, "release checklist").expect("write temp file");
 
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::FileToken);
-    route.wants_file_delivery = false;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = file.display().to_string();
+    route.requires_content_evidence = false;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = file.display().to_string();
 
     let contract_error = "__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.read_range` is rejected by contract `generic_delivery` (rejected_not_allowed)\",\"extra\":{\"action\":\"system_basic.read_range\",\"contract_match\":\"generic_delivery\",\"decision\":\"rejected_not_allowed\"},\"skill\":\"system_basic\"}";
     let mut loop_state = LoopState::new(2);
@@ -1247,7 +1164,7 @@ fn single_file_delivery_ignores_prior_read_range_rejections_after_path_fact() {
     loop_state.has_recoverable_failure_context = true;
 
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
@@ -1265,7 +1182,7 @@ fn chat_wrapped_one_sentence_unclassified_contract_requires_synthesized_delivery
     assert!(route_requires_synthesized_delivery(&route));
 
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let contract = observed_contract_json(Some(&agent_run_context));
@@ -1277,9 +1194,9 @@ fn chat_wrapped_one_sentence_unclassified_contract_requires_synthesized_delivery
 #[test]
 fn quantity_comparison_free_shape_requires_model_synthesis() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = OutputSemanticKind::QuantityComparison;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
 
     assert!(route_quantity_comparison_requires_model_language_synthesis(
         &route
@@ -1287,7 +1204,7 @@ fn quantity_comparison_free_shape_requires_model_synthesis() {
     assert!(route_requires_synthesized_delivery(&route));
 
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     assert!(observed_response_style_hint(Some(&agent_run_context))
@@ -1299,11 +1216,11 @@ fn quantity_comparison_free_shape_requires_model_synthesis() {
 #[test]
 fn chat_wrapped_strict_exact_sentence_contract_requires_synthesized_delivery() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.exact_sentence_count = Some(1);
+    route.exact_sentence_count = Some(1);
     assert!(route_requires_synthesized_delivery(&route));
 
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let contract = observed_contract_json(Some(&agent_run_context));
@@ -1324,7 +1241,7 @@ fn strict_plain_observation_contract_allows_passthrough() {
         "model_io.log.2026-05-14 215M\nmodel_io.log.2026-05-11 149M\n",
     ));
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -1340,11 +1257,11 @@ fn strict_plain_observation_contract_allows_passthrough() {
 #[test]
 fn raw_command_contract_allows_observation_passthrough() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
     assert!(!route_requires_synthesized_delivery(&route));
 
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let contract = observed_contract_json(Some(&agent_run_context));
@@ -1370,19 +1287,7 @@ fn direct_observation_passthrough_detector_matches_raw_output() {
 
 #[test]
 fn route_observation_facts_pin_resolved_path_for_existence_summary() {
-    let route_result = RouteResult {
-        resolved_intent: "check service file and explain purpose".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
@@ -1392,10 +1297,9 @@ fn route_observation_facts_pin_resolved_path_for_existence_summary() {
             semantic_kind: OutputSemanticKind::ExistenceWithPathSummary,
             locator_hint: "rustclaw.service".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let ctx = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         auto_locator_path: Some("/home/guagua/rustclaw/rustclaw.service".to_string()),
         ..AgentRunContext::default()
     };

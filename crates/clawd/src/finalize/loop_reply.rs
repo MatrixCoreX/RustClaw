@@ -634,7 +634,7 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.delivery_messages.is_empty() {
-        if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+        if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
             if let Some((answer, summary)) =
                 direct_raw_command_output_projection(state, route, &loop_state)
             {
@@ -1210,7 +1210,7 @@ pub(crate) async fn finalize_loop_reply(
     }
     if !replaced_grounded_answer
         || route_requires_raw_tail_read_passthrough(
-            agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+            agent_run_context.and_then(|ctx| ctx.output_contract()),
         )
         || tail_read_directory_inventory_projection_available(&loop_state, agent_run_context)
     {
@@ -1573,7 +1573,7 @@ pub(crate) async fn finalize_loop_reply(
         loop_state.last_user_visible_respond = Some(rendered);
     }
     let exact_delivery_requested = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .map(output_contract_requests_exact_delivery)
         .unwrap_or(false);
     if !exact_delivery_requested {
@@ -1790,7 +1790,7 @@ pub(crate) async fn finalize_loop_reply(
             &delivery_deduped,
         ),
     );
-    if let Some(route_result) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+    if let Some(route_result) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
         let defer_to_post_write_readback =
             crate::answer_verifier::post_write_content_evidence_missing_before_verifier(
                 &journal,
@@ -1808,10 +1808,8 @@ pub(crate) async fn finalize_loop_reply(
             );
         }
         if !defer_to_post_write_readback {
-            let answer_contract = crate::answer_verifier::AnswerContract::new(
-                user_text,
-                route_result.output_contract.clone(),
-            );
+            let answer_contract =
+                crate::answer_verifier::AnswerContract::new(user_text, route_result.clone());
             if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
                 state,
                 task,
@@ -1855,10 +1853,7 @@ fn effective_agent_run_context_for_finalization(
     }
     let mut context = agent_run_context.cloned().unwrap_or_default();
     if let Some(output_contract) = loop_state.output_contract.as_ref() {
-        let route = context.route_result.get_or_insert_with(|| {
-            crate::RouteResult::from_planner_output_contract(output_contract.clone())
-        });
-        route.output_contract = output_contract.clone();
+        context.output_contract = Some(output_contract.clone());
     }
     Some(context)
 }

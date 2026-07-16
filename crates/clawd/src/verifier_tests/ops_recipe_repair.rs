@@ -8,7 +8,7 @@ fn ops_recipe_rewrites_combined_run_cmd_into_apply_then_validate() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -63,14 +63,12 @@ fn ops_recipe_rewrites_combined_run_cmd_into_apply_then_validate() {
 fn ops_recipe_split_does_not_infer_success_marker_from_request_text() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result(false);
-    route.resolved_intent =
-        "start local http service and verify homepage contains ops-demo-ok".to_string();
+    let mut route = route_result();
     let result = verify_plan(
             &state,
             &task,
             VerifyInput {
-                output_contract: Some(&route.output_contract),
+                output_contract: Some(&route),
                 request_text: Some(
                     "Start a static HTTP server in the background, then use curl to verify that the homepage contains ops-demo-ok; when validation passes, explicitly output VALIDATION_PASSED and finish immediately.",
                 ),
@@ -111,15 +109,12 @@ fn ops_recipe_split_does_not_infer_success_marker_from_request_text() {
 fn ops_recipe_does_not_infer_http_expect_contains_marker_from_route_text() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result(false);
-    route.resolved_intent =
-        "verify local http service homepage contains ops-repair-ok and repair if needed"
-            .to_string();
+    let mut route = route_result();
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -157,12 +152,12 @@ fn ops_recipe_does_not_infer_http_expect_contains_marker_from_route_text() {
 fn ops_recipe_does_not_infer_http_expect_contains_marker_from_request_text() {
     let state = test_state();
     let task = test_task();
-    let route = route_result(false);
+    let route = route_result();
     let result = verify_plan(
             &state,
             &task,
             VerifyInput {
-                output_contract: Some(&route.output_contract),
+                output_contract: Some(&route),
                 request_text: Some(
                     "First verify whether the local static HTTP service serves a homepage containing ops-repair-ok. If verification fails, repair it and verify again until it passes.",
                 ),
@@ -202,11 +197,7 @@ fn ops_recipe_does_not_infer_http_expect_contains_marker_from_request_text() {
 fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result(false);
-    route.resolved_intent =
-        "verify local http service homepage contains ops-repair-ok and repair if needed"
-            .to_string();
-    route.resume_behavior = crate::ResumeBehavior::ResumeExecute;
+    let mut route = route_result();
     let initial_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -220,7 +211,7 @@ fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -276,7 +267,7 @@ fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -332,9 +323,7 @@ fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
 fn ops_recipe_service_repair_round_plan_stays_valid_after_failed_status_preflight() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result(false);
-    route.resolved_intent = "repair sing-box and verify the service is running".to_string();
-    route.resume_behavior = crate::ResumeBehavior::ResumeExecute;
+    let mut route = route_result();
     let initial_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -356,7 +345,7 @@ fn ops_recipe_service_repair_round_plan_stays_valid_after_failed_status_prefligh
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![inspect_step.clone()]),
@@ -415,7 +404,7 @@ fn ops_recipe_service_repair_round_plan_stays_valid_after_failed_status_prefligh
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -461,7 +450,7 @@ fn ops_recipe_code_change_accepts_run_cmd_build_validation_after_mutation() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -521,7 +510,7 @@ fn ops_recipe_package_change_requires_validation_after_install() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -579,7 +568,7 @@ fn ops_recipe_database_change_accepts_schema_validation_after_execute() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -644,10 +633,7 @@ fn ops_recipe_database_change_accepts_schema_validation_after_execute() {
 fn ops_recipe_repair_round_rewrites_combined_run_cmd_plan() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result(false);
-    route.resolved_intent =
-        "repair local demo file and verify it contains ops-repair-ok".to_string();
-    route.resume_behavior = crate::ResumeBehavior::ResumeExecute;
+    let mut route = route_result();
     let mut repair_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -664,7 +650,7 @@ fn ops_recipe_repair_round_rewrites_combined_run_cmd_plan() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -709,10 +695,7 @@ fn ops_recipe_repair_round_rewrites_combined_run_cmd_plan() {
 fn ops_recipe_apply_phase_skips_leading_validation_before_mutation() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result(false);
-    route.resolved_intent =
-        "验证首页包含 ops-repair-ok，失败就修复 document/nl_ops_http_demo/index.html 后重试"
-            .to_string();
+    let mut route = route_result();
     let mut apply_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -728,7 +711,7 @@ fn ops_recipe_apply_phase_skips_leading_validation_before_mutation() {
             &state,
             &task,
             VerifyInput {
-                output_contract: Some(&route.output_contract),
+                output_contract: Some(&route),
                 request_text: Some(
                     "先验证首页是否包含 ops-repair-ok，如果失败就修复 document/nl_ops_http_demo/index.html，然后再次验证直到通过。",
                 ),

@@ -19,7 +19,7 @@ enum SizeComparisonAnswerStyle {
 }
 
 fn size_comparison_answer_style(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     user_text: &str,
 ) -> SizeComparisonAnswerStyle {
     if crate::contract_test_hints::value(user_text, "selector_answer_style")
@@ -528,9 +528,9 @@ fn count_inventory_total_observation_count(loop_state: &crate::agent_engine::Loo
 
 pub(super) fn inventory_ranked_size_list_answer(
     body: &str,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> Option<String> {
-    if route.output_contract.response_shape != crate::OutputResponseShape::Strict {
+    if route.response_shape != crate::OutputResponseShape::Strict {
         return None;
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
@@ -582,9 +582,8 @@ pub(super) fn inventory_ranked_size_list_answer(
     )
 }
 
-fn route_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
+fn route_list_selector_limit(route: &crate::IntentOutputContract) -> Option<usize> {
     route
-        .output_contract
         .self_extension
         .list_selector
         .limit
@@ -610,13 +609,10 @@ pub(super) fn direct_quantity_comparison_from_compare_paths(
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
-        || route.output_contract.delivery_required
-        || matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        )
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
+    if !route.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison)
+        || route.delivery_required
+        || matches!(route.response_shape, crate::OutputResponseShape::FileToken)
     {
         return None;
     }
@@ -649,7 +645,7 @@ pub(super) fn direct_quantity_comparison_from_compare_paths(
                     return Some(answer);
                 }
                 if strict_quantity_comparison_json_fallback_allowed(user_text, style)
-                    && route.output_contract.response_shape == crate::OutputResponseShape::Strict
+                    && route.response_shape == crate::OutputResponseShape::Strict
                 {
                     if let Some(answer) = strict_quantity_comparison_json_answer(&output) {
                         return Some(answer);
@@ -660,7 +656,7 @@ pub(super) fn direct_quantity_comparison_from_compare_paths(
                         count_inventory_size_answer_with_shape(
                             &output,
                             prefer_english,
-                            route.output_contract.response_shape,
+                            route.response_shape,
                         )
                     })
                     .or_else(|| {
@@ -707,7 +703,7 @@ pub(super) fn direct_compare_paths_required_metadata_from_observed_output(
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     if !route_allows_compare_paths_required_metadata_projection(route) {
         return None;
     }
@@ -759,14 +755,14 @@ fn compare_paths_required_metadata_answer(answer: &str) -> bool {
     has_same_path && has_left_exists && has_right_exists
 }
 
-fn route_allows_compare_paths_required_metadata_projection(route: &crate::RouteResult) -> bool {
-    !route.output_contract.delivery_required
-        && route.output_contract.requires_content_evidence
-        && crate::evidence_policy::required_evidence_fields_for_output_contract(
-            &route.output_contract,
-        )
-        .iter()
-        .any(|field| matches!(field.as_str(), "exists" | "kind"))
+fn route_allows_compare_paths_required_metadata_projection(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    !route.delivery_required
+        && route.requires_content_evidence
+        && crate::evidence_policy::required_evidence_fields_for_output_contract(route)
+            .iter()
+            .any(|field| matches!(field.as_str(), "exists" | "kind"))
 }
 
 fn strict_quantity_comparison_json_fallback_allowed(
@@ -779,7 +775,7 @@ fn strict_quantity_comparison_json_fallback_allowed(
 
 fn compare_paths_existence_verdict_answer(
     body: &str,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> Option<String> {
     if !route_allows_compare_paths_required_metadata_projection(route) {
         return None;
@@ -848,15 +844,13 @@ pub(super) fn replace_delivery_with_deterministic_quantity_comparison_answer(
         latest_delivery_preserves_observed_quantity_size_facts(loop_state)
     {
         let strict_response = agent_run_context
-            .and_then(|ctx| ctx.route_result.as_ref())
-            .is_some_and(|route| {
-                route.output_contract.response_shape == crate::OutputResponseShape::Strict
-            });
+            .and_then(|ctx| ctx.output_contract())
+            .is_some_and(|route| route.response_shape == crate::OutputResponseShape::Strict);
         if strict_response {
             let facts = observed_quantity_size_facts(loop_state);
             if !structured_quantity_json_preserves_observed_size_facts(&existing_answer, &facts) {
                 let preserve_model_language = agent_run_context
-                    .and_then(|ctx| ctx.route_result.as_ref())
+                    .and_then(|ctx| ctx.output_contract())
                     .is_some_and(|route| {
                         strict_quantity_comparison_should_preserve_model_language_delivery(
                             route,
@@ -910,7 +904,7 @@ pub(super) fn replace_delivery_with_deterministic_quantity_comparison_answer(
 }
 
 fn strict_quantity_comparison_should_preserve_model_language_delivery(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
@@ -919,7 +913,7 @@ fn strict_quantity_comparison_should_preserve_model_language_delivery(
     {
         return false;
     }
-    route.output_contract.exact_sentence_count.is_some()
+    route.exact_sentence_count.is_some()
         || latest_plan_requested_synthesis(loop_state)
         || loop_state
             .last_publishable_synthesis_output

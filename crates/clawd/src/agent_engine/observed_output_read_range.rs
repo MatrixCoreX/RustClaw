@@ -31,7 +31,7 @@ pub(super) fn first_meaningful_excerpt_sentence(text: &str) -> Option<String> {
 }
 
 pub(super) fn content_excerpt_summary_direct_answer_candidate(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     body: &str,
 ) -> Option<String> {
     if !route.is_some_and(|route| {
@@ -118,7 +118,7 @@ pub(super) fn find_content_presence_match_line(
 
 pub(super) fn doc_parse_content_presence_direct_answer_candidate(
     _state: Option<&AppState>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     body: &str,
     request_text: Option<&str>,
     path_hint: Option<&str>,
@@ -136,7 +136,7 @@ pub(super) fn doc_parse_content_presence_direct_answer_candidate(
     let path = path_hint
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| route.output_contract.locator_hint.trim());
+        .unwrap_or_else(|| route.locator_hint.trim());
     if let Some((line, matched_text)) =
         find_content_presence_match_line(&text, &query, case_insensitive)
     {
@@ -482,7 +482,7 @@ pub(super) fn compose_content_excerpt_with_summary_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> String {
     if !agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is(
                 route,

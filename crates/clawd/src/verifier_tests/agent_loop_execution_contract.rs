@@ -4,17 +4,16 @@ use super::*;
 fn agent_loop_execution_boundary_does_not_require_legacy_output_contract() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result(false);
-    route.route_reason = "inline_structured_payload_context_execute".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let mut route = route_result();
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.response_shape = crate::OutputResponseShape::Strict;
 
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {

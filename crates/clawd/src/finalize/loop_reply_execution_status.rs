@@ -48,17 +48,16 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     agent_run_context: Option<&AgentRunContext>,
     loop_state: &crate::agent_engine::LoopState,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    let agent_loop_rich_content = route.output_contract.response_shape
-        == crate::OutputResponseShape::Free
-        && !route.output_contract.delivery_required
+    let agent_loop_rich_content = route.response_shape == crate::OutputResponseShape::Free
+        && !route.delivery_required
         && successful_content_observation_count(loop_state) >= 2;
-    if !route.output_contract.requires_content_evidence && !agent_loop_rich_content {
+    if !route.requires_content_evidence && !agent_loop_rich_content {
         return false;
     }
-    if route.output_contract_marker_is_any(&[
+    if route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ExecutionFailedStep,
         crate::OutputSemanticKind::RawCommandOutput,
     ]) || crate::finalize::route_matches_service_status_output_contract(route)
@@ -238,17 +237,17 @@ pub(super) fn deterministic_missing_observed_target_answer(
     }
     let path = missing_file_path_from_loop(loop_state, agent_run_context)?;
     let contract_marker = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(crate::RouteResult::effective_output_contract_semantic_kind);
+        .and_then(|ctx| ctx.output_contract())
+        .map(|contract| contract.semantic_kind);
     let final_answer_shape = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .and_then(crate::evidence_policy::final_answer_shape_for_route);
+        .and_then(|ctx| ctx.output_contract())
+        .and_then(crate::evidence_policy::final_answer_shape_for_output_contract);
     let scalar_count = contract_marker == Some(crate::OutputSemanticKind::ScalarCount);
     let concise_existence = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            let contract = route.effective_output_contract();
-            route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
+            let contract = route.clone();
+            route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
                 && !contract.delivery_required
                 && matches!(
                     contract.response_shape,
@@ -281,10 +280,8 @@ fn route_requests_execution_failed_step_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .is_some_and(|route| {
-            route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
-        })
+        .and_then(|ctx| ctx.output_contract())
+        .is_some_and(|route| route.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep))
 }
 
 fn command_label_for_execution_step(

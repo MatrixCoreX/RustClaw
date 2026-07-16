@@ -86,7 +86,7 @@ pub(super) fn git_repository_state_answer(
 
 pub(super) fn git_basic_direct_answer_candidate(
     _state: Option<&AppState>,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     body: &str,
     branch: Option<&str>,
     response_shape: Option<crate::OutputResponseShape>,
@@ -100,7 +100,7 @@ pub(super) fn git_basic_direct_answer_candidate(
     ) {
         return None;
     }
-    let effective_response_shape = if route.output_contract.exact_sentence_count == Some(1) {
+    let effective_response_shape = if route.exact_sentence_count == Some(1) {
         Some(crate::OutputResponseShape::OneSentence)
     } else {
         response_shape
@@ -130,7 +130,7 @@ pub(super) fn git_basic_direct_answer_candidate(
 
 pub(super) fn latest_git_repository_state_direct_answer(
     state: Option<&AppState>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     response_shape: Option<crate::OutputResponseShape>,
     allow_localized_direct_template: bool,

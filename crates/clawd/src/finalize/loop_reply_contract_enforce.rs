@@ -22,7 +22,7 @@ pub(super) async fn enforce_delivery_output_contract(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return;
     };
     if loop_state.delivery_messages.is_empty()
@@ -171,8 +171,8 @@ pub(super) async fn enforce_delivery_output_contract(
         crate::intercept_response_payload_for_delivery(
             state,
             user_text,
-            route.wants_file_delivery,
-            &route.output_contract,
+            route.delivery_required,
+            route,
             seed_text,
             loop_state.delivery_messages.clone(),
         );
@@ -203,11 +203,12 @@ pub(super) async fn enforce_delivery_output_contract(
         )
     {
         let verdict = crate::output_contract_verifier::verify_output_contract(
-            &route.output_contract,
+            route,
             &normalized_text,
             user_text,
         );
-        let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
+        let final_answer_shape =
+            crate::evidence_policy::final_answer_shape_for_output_contract(route);
         let final_answer_shape_token = final_answer_shape
             .map(crate::evidence_policy::FinalAnswerShape::as_str)
             .unwrap_or("none");
@@ -220,7 +221,7 @@ pub(super) async fn enforce_delivery_output_contract(
                     "verify_contract_emitted task_id={} owner_layer={} verdict=pass response_shape={:?} final_answer_shape={} final_answer_shape_class={}",
                     task.task_id,
                     verdict.owner_layer(),
-                    route.output_contract.response_shape,
+                    route.response_shape,
                     final_answer_shape_token,
                     final_answer_shape_class,
                 );
@@ -234,7 +235,7 @@ pub(super) async fn enforce_delivery_output_contract(
                     "verify_contract_emitted task_id={} owner_layer={} verdict=reshape response_shape={:?} final_answer_shape={} final_answer_shape_class={} reason_code={} reason={} from={} to={}",
                     task.task_id,
                     verdict.owner_layer(),
-                    route.output_contract.response_shape,
+                    route.response_shape,
                     final_answer_shape_token,
                     final_answer_shape_class,
                     reason_code,
@@ -257,7 +258,7 @@ pub(super) async fn enforce_delivery_output_contract(
                     "verify_contract_emitted task_id={} owner_layer={} verdict=reject response_shape={:?} final_answer_shape={} final_answer_shape_class={} reason_code={} reason={} dropped_candidate={}",
                     task.task_id,
                     verdict.owner_layer(),
-                    route.output_contract.response_shape,
+                    route.response_shape,
                     final_answer_shape_token,
                     final_answer_shape_class,
                     reason_code,
@@ -268,9 +269,9 @@ pub(super) async fn enforce_delivery_output_contract(
                     crate::language_policy::task_response_language_hint(state, task, user_text);
                 let contract = crate::fallback::UserResponseContract::verify_rejected(
                     user_text,
-                    &route.resolved_intent,
-                    &format!("{:?}", route.output_contract.response_shape),
-                    &format!("{:?}", route.effective_output_contract_semantic_kind()),
+                    "",
+                    &format!("{:?}", route.response_shape),
+                    &format!("{:?}", route.semantic_kind),
                     reason_code,
                     reason,
                     &language_hint,
@@ -294,11 +295,11 @@ pub(super) async fn enforce_delivery_output_contract(
 }
 
 fn model_language_evidence_summary_should_skip_low_level_reshape(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     candidate: &str,
 ) -> bool {
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if contract.delivery_required
         || matches!(
             contract.response_shape,
@@ -308,7 +309,7 @@ fn model_language_evidence_summary_should_skip_low_level_reshape(
         return false;
     }
     if !matches!(
-        crate::evidence_policy::final_answer_shape_for_route(route),
+        crate::evidence_policy::final_answer_shape_for_output_contract(route),
         Some(
             crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence
                 | crate::evidence_policy::FinalAnswerShape::RawOutputOrShortSummary
@@ -320,7 +321,7 @@ fn model_language_evidence_summary_should_skip_low_level_reshape(
     if !planned_delivery_is_publishable_model_language_answer(candidate) {
         return false;
     }
-    if route.output_contract_marker_is_any(&[
+    if route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::RawCommandOutput,
         crate::OutputSemanticKind::CommandOutputSummary,
     ]) && !publishable_summary_has_multi_source_observation(loop_state)
@@ -338,23 +339,23 @@ fn model_language_evidence_summary_should_skip_low_level_reshape(
 }
 
 pub(super) fn route_accepts_filesystem_mutation_synthesis(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     synthesis: &str,
 ) -> bool {
     if !filesystem_mutation_synthesis_payload_is_complete(synthesis) {
         return false;
     }
     let route_accepts_lifecycle = route
-        .output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
-        || (!route.output_contract.delivery_required
-            && !route.wants_file_delivery
-            && (route.output_contract.requires_content_evidence
+        .semantic_kind_is(crate::OutputSemanticKind::FilesystemMutationResult)
+        || (!route.delivery_required
+            && !route.delivery_required
+            && (route.requires_content_evidence
                 || matches!(
-                    route.output_contract.response_shape,
+                    route.response_shape,
                     crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
                 ))
             && matches!(
-                route.effective_output_contract_semantic_kind(),
+                route.semantic_kind,
                 crate::OutputSemanticKind::None
                     | crate::OutputSemanticKind::CommandOutputSummary
                     | crate::OutputSemanticKind::ExecutionFailedStep
@@ -391,11 +392,11 @@ fn filesystem_mutation_synthesis_payload_is_complete(synthesis: &str) -> bool {
 }
 
 pub(super) fn route_prefers_content_evidence_synthesis(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     synthesis: &str,
 ) -> bool {
-    let contract = route.effective_output_contract();
-    let content_summary_contract = route.output_contract_marker_is_any(&[
+    let contract = route.clone();
+    let content_summary_contract = route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
         crate::OutputSemanticKind::ExcerptKindJudgment,
@@ -408,8 +409,8 @@ pub(super) fn route_prefers_content_evidence_synthesis(
         && !contract.delivery_required
         && (contract.response_shape == crate::OutputResponseShape::OneSentence
             || contract.exact_sentence_count.is_some())
-        && (route.output_contract_is_unclassified()
-            || route.output_contract_marker_is_any(&[
+        && (route.semantic_kind_is_unclassified()
+            || route.semantic_kind_is_any(&[
                 crate::OutputSemanticKind::ContentExcerptSummary,
                 crate::OutputSemanticKind::ContentExcerptWithSummary,
                 crate::OutputSemanticKind::ExcerptKindJudgment,
@@ -505,8 +506,8 @@ pub(super) fn should_drop_passthrough_delivery_for_content_evidence(
     }
 
     let route_has_semantic_answer_contract = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .is_some_and(|route| !route.output_contract_is_unclassified());
+        .and_then(|ctx| ctx.output_contract())
+        .is_some_and(|route| !route.semantic_kind_is_unclassified());
     let direct_structured_answer = route_has_semantic_answer_contract
         .then(|| direct_structured_observed_answer(None, loop_state, agent_run_context))
         .flatten()
@@ -558,10 +559,10 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
     agent_run_context: Option<&AgentRunContext>,
     respond: &str,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if !contract.requires_content_evidence {
         return false;
     }
@@ -580,7 +581,7 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
         return true;
     }
     if matches!(
-        route.effective_output_contract_semantic_kind(),
+        route.semantic_kind,
         crate::OutputSemanticKind::RawCommandOutput
     ) {
         return strict_raw_command_output_exact_observation_answer(route, loop_state, respond);
@@ -590,10 +591,7 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
     {
         return true;
     }
-    let has_answer_semantic = !matches!(
-        route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::None
-    );
+    let has_answer_semantic = !matches!(route.semantic_kind, crate::OutputSemanticKind::None);
     let has_constrained_answer_shape = matches!(
         contract.response_shape,
         crate::OutputResponseShape::Scalar
@@ -633,11 +631,7 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
         return false;
     }
     !matches!(
-        crate::output_contract_verifier::verify_output_contract(
-            &route.output_contract,
-            answer,
-            &route.resolved_intent,
-        ),
+        crate::output_contract_verifier::verify_output_contract(route, answer, "",),
         crate::output_contract_verifier::OutputContractVerdict::Reject { .. }
     )
 }
@@ -689,7 +683,7 @@ pub(super) fn discard_raw_passthrough_delivery_when_structured_answer_available(
         .filter(|answer| !answer.is_empty() && answer != current_delivery);
 
     let exact_delivery_requested = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .map(output_contract_requests_exact_delivery)
         .unwrap_or(false);
     if structured_answer.is_none()

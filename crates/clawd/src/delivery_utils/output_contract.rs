@@ -530,7 +530,7 @@ fn legacy_terminal_clarify_machine_line(raw: &str) -> bool {
     if trimmed.is_empty() || serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
         return false;
     }
-    let markers = crate::RouteReasonMarkers::new(trimmed);
+    let markers = crate::MachineTokenMarkers::new(trimmed);
     markers.machine_value("terminal_intent") == Some("clarify")
         || markers.machine_value("agent_loop.terminal_intent") == Some("clarify")
 }

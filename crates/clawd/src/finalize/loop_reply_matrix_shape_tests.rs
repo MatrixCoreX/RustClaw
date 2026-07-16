@@ -5,14 +5,13 @@ fn matrix_shape_replaces_stale_file_token_delivery_with_observed_directory_listi
     let state = test_state();
     let task = claimed_task("task-stale-file-token-listing");
     let mut route = free_route_result();
-    route.wants_file_delivery = false;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.locator_kind = crate::OutputLocatorKind::None;
+    route.locator_hint.clear();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -94,15 +93,14 @@ fn matrix_shape_replaces_stale_file_token_delivery_with_bounded_read_excerpt() {
     let state = test_state();
     let task = claimed_task("task-stale-file-token-read-range");
     let mut route = free_route_result();
-    route.wants_file_delivery = false;
-    route.output_contract.delivery_required = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/README.md".to_string();
+    route.delivery_required = true;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/README.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -178,15 +176,14 @@ fn matrix_shape_keeps_direct_file_delivery_respond_over_bounded_read_excerpt() {
     let state = test_state();
     let task = claimed_task("task-direct-file-token-read-range-kept");
     let mut route = free_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/README.md".to_string();
+    route.delivery_required = true;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/README.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -245,14 +242,13 @@ fn matrix_shape_keeps_file_token_when_plan_uses_runtime_file_selection_template(
     let state = test_state();
     let task = claimed_task("task-file-token-template-kept");
     let mut route = free_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.locator_kind = crate::OutputLocatorKind::None;
+    route.locator_hint.clear();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -309,15 +305,14 @@ fn active_bound_inventory_path_overrides_bare_path_directory_listing_contract() 
     let state = test_state();
     let task = claimed_task("task-active-bound-inventory-path");
     let mut route = free_route_result();
-    route.resolved_intent = "List contents of directory scripts/nl_tests/fixtures/locator_smart/case_only\n\n### ACTIVE_EXECUTION_ANCHOR\nfollowup_source_request: find report\nfollowup_op_kind: Read\nfollowup_bound_target: case_only/report.md\nobserved_bound_target: case_only/report.md".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "scripts/nl_tests/fixtures/locator_smart/case_only".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "scripts/nl_tests/fixtures/locator_smart/case_only".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
+        cross_turn_recent_execution_context: Some("### ACTIVE_EXECUTION_ANCHOR\nfollowup_source_request: find report\nfollowup_op_kind: Read\nfollowup_bound_target: case_only/report.md\nobserved_bound_target: case_only/report.md".to_string()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -359,13 +354,13 @@ fn matrix_shape_guard_replaces_unstructured_strict_list_with_observed_list() {
     let state = test_state();
     let task = claimed_task("task-matrix-shape-guard-list");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "document".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "document".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -403,13 +398,13 @@ fn matrix_shape_guard_replaces_scalar_count_field_placeholder_with_observed_valu
     let state = test_state();
     let task = claimed_task("task-matrix-shape-guard-scalar-count");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "logs".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -442,11 +437,11 @@ fn matrix_shape_guard_replaces_scalar_count_field_placeholder_with_observed_valu
 #[test]
 fn matrix_strict_list_shape_builds_list_from_observed_json() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "document".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "document".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -465,11 +460,11 @@ fn matrix_strict_list_shape_builds_list_from_observed_json() {
 #[test]
 fn matrix_strict_list_ignores_inventory_json_hidden_in_visible_text() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "document".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "document".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let hidden_payload = serde_json::json!({
         "action": "find_ext",
         "count": 2,
@@ -495,23 +490,14 @@ fn matrix_strict_list_ignores_inventory_json_hidden_in_visible_text() {
 #[test]
 fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route.output_contract.self_extension.list_selector.limit = Some(3);
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .include_metadata = Some(false);
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.limit = Some(3);
+    route.self_extension.list_selector.include_metadata = Some(false);
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -536,17 +522,13 @@ fn matrix_path_list_inventory_uses_planner_semantic_kind() {
     let state = test_state();
     let task = claimed_task("task-fs-path-list-inventory-capability-shape");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route.output_contract.self_extension.list_selector.limit = Some(2);
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.limit = Some(2);
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -584,11 +566,11 @@ fn matrix_filesystem_find_entries_contract_builds_path_list() {
     let state = test_state();
     let task = claimed_task("task-fs-find-capability-ref-path-list");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -620,9 +602,9 @@ fn matrix_filesystem_find_entries_contract_builds_path_list() {
 #[test]
 fn matrix_path_list_collects_grep_text_name_results_from_wrapped_extra() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
@@ -647,13 +629,13 @@ fn matrix_file_name_list_prefers_wrapped_names_over_size_summary_synthesis() {
     let state = test_state();
     let task = claimed_task("task-matrix-file-name-list-wrapped-names");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "document".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "document".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -744,11 +726,11 @@ fn generic_observed_machine_projection_uses_grep_matches() {
 #[test]
 fn matrix_strict_list_shape_builds_directory_names_from_inventory_dirs() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -767,10 +749,9 @@ fn matrix_strict_list_shape_builds_directory_names_from_inventory_dirs() {
 #[test]
 fn name_list_renderer_uses_file_names_contract() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=filesystem.list_file_names".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -789,10 +770,9 @@ fn name_list_renderer_uses_file_names_contract() {
 #[test]
 fn name_list_renderer_uses_directory_names_contract() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=filesystem.list_directory_names".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -811,9 +791,8 @@ fn name_list_renderer_uses_directory_names_contract() {
 #[test]
 fn name_list_contract_requires_observed_projection() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=filesystem.list_directory_names".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
+    route.response_shape = crate::OutputResponseShape::Strict;
 
     assert!(super::super::route_requires_observed_output_projection(
         &route
@@ -823,9 +802,8 @@ fn name_list_contract_requires_observed_projection() {
 #[test]
 fn path_list_contract_requires_observed_projection() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.response_shape = crate::OutputResponseShape::Strict;
 
     assert!(super::super::route_requires_observed_output_projection(
         &route
@@ -835,9 +813,8 @@ fn path_list_contract_requires_observed_projection() {
 #[test]
 fn table_listing_contract_requires_observed_projection() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=database.list_tables".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+    route.response_shape = crate::OutputResponseShape::Strict;
 
     assert!(super::super::route_requires_observed_output_projection(
         &route
@@ -847,9 +824,8 @@ fn table_listing_contract_requires_observed_projection() {
 #[test]
 fn created_archive_path_contract_requires_observed_projection() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=archive.pack".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+    route.response_shape = crate::OutputResponseShape::Scalar;
 
     assert!(super::super::route_requires_observed_output_projection(
         &route
@@ -861,11 +837,11 @@ fn structured_keys_contract_builds_observed_list() {
     let state = test_state();
     let task = claimed_task("task-config-key-list-capability-shape");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -901,17 +877,12 @@ fn structured_keys_contract_builds_observed_list() {
 #[test]
 fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.route_reason = "capability_ref=archive.list".to_string();
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "tmp/test_bundle.zip".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -933,11 +904,11 @@ fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
 #[test]
 fn matrix_archive_member_list_defaults_untyped_selector_to_file_entries() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "tmp/test_bundle.zip".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -954,12 +925,11 @@ fn matrix_archive_member_list_defaults_untyped_selector_to_file_entries() {
 #[test]
 fn matrix_archive_member_list_accepts_archive_list_contract() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.route_reason = "capability_ref=archive.list".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "tmp/test_bundle.zip".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -980,14 +950,13 @@ fn matrix_archive_member_list_replaces_synthesis_with_observed_projection() {
     let state = test_state();
     let task = claimed_task("task-archive-member-list-observed-projection");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.route_reason = "capability_ref=archive.list".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "tmp/test_bundle.zip".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1023,10 +992,10 @@ fn matrix_archive_member_list_replaces_synthesis_with_observed_projection() {
 #[test]
 fn matrix_strict_list_shape_builds_hidden_entry_list_from_inventory() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1045,11 +1014,11 @@ fn matrix_strict_list_shape_builds_hidden_entry_list_from_inventory() {
 #[test]
 fn matrix_strict_list_shape_respects_hidden_entry_selector_limit() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
-    route.output_contract.self_extension.list_selector.limit = Some(3);
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+    route.self_extension.list_selector.limit = Some(3);
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1068,11 +1037,11 @@ fn matrix_strict_list_shape_respects_hidden_entry_selector_limit() {
 #[test]
 fn matrix_grouped_name_list_shape_builds_groups_from_names_by_kind() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "workspace".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "workspace".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1095,12 +1064,12 @@ fn matrix_grouped_name_list_shape_builds_groups_from_names_by_kind() {
 #[test]
 fn matrix_grouped_name_list_shape_preserves_observed_sort_order() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "scripts".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
-    route.output_contract.self_extension.list_selector.sort_by = Some("name_desc".to_string());
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "scripts".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.self_extension.list_selector.sort_by = Some("name_desc".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1123,11 +1092,11 @@ fn matrix_grouped_name_list_shape_preserves_observed_sort_order() {
 #[test]
 fn matrix_grouped_name_list_shape_reads_wrapped_inventory_extra() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "workspace".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "workspace".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1152,13 +1121,11 @@ fn matrix_grouped_name_list_shape_reads_wrapped_inventory_extra() {
 #[test]
 fn grouped_name_list_renderer_uses_directory_entry_contract() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=filesystem.list_entries".to_string();
-    route.resolved_intent = "capability_ref=filesystem.list_entries".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "workspace".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "workspace".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1179,11 +1146,11 @@ fn grouped_name_list_renderer_uses_directory_entry_contract() {
 #[test]
 fn matrix_grouped_name_list_ignores_inventory_json_hidden_in_visible_text() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "workspace".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "workspace".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let hidden_payload = serde_json::json!({
         "action": "inventory_dir",
         "counts": {"dirs": 2, "files": 3, "total": 5},
@@ -1213,10 +1180,10 @@ fn matrix_grouped_name_list_ignores_inventory_json_hidden_in_visible_text() {
 #[test]
 fn mixed_listing_contract_prefers_grounded_synthesis_after_file_read() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let answer = "这个仓库的 UI 更像一个独立前端，因为 UI/package.json 的 name 是 react-example，并且 UI 目录有独立构建脚本。";
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.executed_step_results.push(ok_step_result(
@@ -1246,12 +1213,10 @@ fn mixed_listing_contract_prefers_grounded_synthesis_after_file_read() {
 #[test]
 fn mixed_listing_synthesis_uses_directory_entry_contract() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=filesystem.list_entries".to_string();
-    route.resolved_intent = "capability_ref=filesystem.list_entries".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let answer = "UI/package.json 显示这个前端包名是 react-example。";
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.executed_step_results.push(ok_step_result(
@@ -1283,13 +1248,13 @@ fn matrix_shape_guard_replaces_unstructured_grouped_name_list_with_observed_grou
     let state = test_state();
     let task = claimed_task("task-matrix-shape-guard-grouped-name-list");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "workspace".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "workspace".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1330,13 +1295,13 @@ fn matrix_shape_guard_does_not_override_pending_clarify_delivery() {
     let state = test_state();
     let task = claimed_task("task-matrix-shape-guard-pending-clarify");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "workspace".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "workspace".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1402,14 +1367,13 @@ fn matrix_shape_guard_replaces_unstructured_table_with_markdown_table() {
     let state = test_state();
     let task = claimed_task("task-matrix-shape-guard-table");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "data/app.sqlite".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    route.route_reason = "capability_ref=database.list_tables".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "data/app.sqlite".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1447,13 +1411,13 @@ fn matrix_shape_guard_uses_sqlite_table_listing_contract() {
     let state = test_state();
     let task = claimed_task("task-matrix-shape-guard-table-capability-ref");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "data/app.sqlite".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "data/app.sqlite".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);

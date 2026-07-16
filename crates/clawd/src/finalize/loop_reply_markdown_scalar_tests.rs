@@ -10,7 +10,7 @@ fn direct_scalar_observed_answer_extracts_markdown_heading_from_read_range() {
     ));
     let route = scalar_route_result();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
 
@@ -25,10 +25,10 @@ fn direct_scalar_observed_answer_extracts_markdown_heading_from_read_range() {
     ));
 
     let mut route = scalar_route_result();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let (answer, _) =
@@ -65,7 +65,7 @@ fn direct_scalar_observed_answer_skips_separator_markdown_heading() {
     ));
     let route = scalar_route_result();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
 
@@ -82,16 +82,13 @@ fn observed_markdown_heading_scalar_replaces_repaired_strict_delivery() {
         r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
     ));
     let mut route = free_route_result();
-    route.route_reason =
-        "llm_semantic_contract_repair:malformed_contract_repairs_needed_but_conservative_route_valid"
-            .to_string();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "note file".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "note file".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["# Release Checklist".to_string()];
@@ -120,13 +117,13 @@ fn observed_markdown_heading_scalar_keeps_locatorless_strict_delivery() {
         r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::None;
+    route.locator_hint.clear();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["# Release Checklist".to_string()];
@@ -153,14 +150,13 @@ fn observed_markdown_heading_scalar_replaces_ungrounded_delivery() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.route_reason = "agent_loop_content_evidence; planner_loop_execute".to_string();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["# Service Notes".to_string()];
@@ -189,13 +185,13 @@ fn observed_markdown_heading_scalar_replaces_one_sentence_locator_delivery() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md".to_string();
+    route.response_shape = crate::OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["Service Notes".to_string()];
@@ -224,13 +220,13 @@ fn observed_markdown_heading_scalar_suppresses_summary_for_free_locator_delivery
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md".to_string();
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["Service Notes".to_string()];
@@ -259,13 +255,13 @@ fn observed_markdown_heading_scalar_reduces_strict_observed_markdown_body() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["# Service Notes\n\nRustClaw test fixture service notes.".to_string()];
@@ -295,12 +291,12 @@ fn observed_markdown_heading_scalar_reduces_scalar_wrapped_observed_markdown_bod
         r#"{"extra":{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.\n4|2. Confirm database migrations are applied.","path":"release_checklist.md","resolved_path":"/repo/release_checklist.md"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|# Release Checklist\\n2|\\n3|1. Verify configuration loads correctly.\\n4|2. Confirm database migrations are applied.\",\"path\":\"release_checklist.md\"}"}"#,
     ));
     let mut route = scalar_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "release_checklist.md".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "release_checklist.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec![
@@ -334,16 +330,13 @@ fn observed_markdown_heading_scalar_strips_heading_marker_for_title_selector() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = scalar_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md".to_string();
-    route
-        .output_contract
-        .self_extension
-        .structured_field_selector = Some("title".to_string());
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md".to_string();
+    route.self_extension.structured_field_selector = Some("title".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["# Service Notes".to_string()];
@@ -374,13 +367,13 @@ fn observed_markdown_heading_scalar_replaces_bounded_strict_wrapper_from_observe
         r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "release_checklist.md".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "release_checklist.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["자료A의 제목은 'Release Checklist'입니다.".to_string()];
@@ -411,13 +404,13 @@ fn observed_markdown_heading_scalar_keeps_heading_prefixed_summary_without_selec
         r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "release_checklist.md".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "release_checklist.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["Release Checklist covers deployment checks.".to_string()];
@@ -452,16 +445,13 @@ fn direct_scalar_observed_answer_prefers_observed_heading_for_title_selector() {
         "자료A의 제목은 'Release Checklist'입니다.",
     ));
     let mut route = scalar_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "release_checklist.md".to_string();
-    route
-        .output_contract
-        .self_extension
-        .structured_field_selector = Some("title".to_string());
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "release_checklist.md".to_string();
+    route.self_extension.structured_field_selector = Some("title".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
 
@@ -484,13 +474,13 @@ fn observed_markdown_heading_scalar_keeps_free_observed_markdown_body() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md".to_string();
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery = vec!["# Service Notes\n\nRustClaw test fixture service notes.".to_string()];

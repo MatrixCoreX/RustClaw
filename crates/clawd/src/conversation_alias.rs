@@ -595,7 +595,7 @@ pub(super) fn merge_alias_bindings_for_turn(
     prior_state: Option<&ConversationState>,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     resolved_prompt_for_execution: &str,
 ) -> Vec<SessionAliasBinding> {
     let mut alias_bindings = merge_alias_bindings(prior_state, turn_analysis);
@@ -640,7 +640,7 @@ fn structural_alias_bindings_from_prompt(
     prior_state: Option<&ConversationState>,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     resolved_prompt_for_execution: &str,
 ) -> Vec<SessionAliasBinding> {
     let mut out = Vec::new();
@@ -665,7 +665,7 @@ fn structural_alias_bindings_from_prompt(
     let rebinds = structural_alias_rebinds_from_prompt(prior_state, prompt);
     if !rebinds.is_empty() {
         out.extend(rebinds);
-    } else if route_result.should_refresh_long_term_memory {
+    } else if false {
         out.extend(structural_alias_bindings_from_single_locator_prefix(prompt));
     }
     out
@@ -1011,18 +1011,18 @@ fn push_unique_alias_candidate(out: &mut Vec<String>, candidate: String) {
 
 pub(crate) fn structural_alias_binding_from_prompt(
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     resolved_prompt_for_execution: &str,
 ) -> Option<SessionAliasBinding> {
-    if route_result.output_contract.requires_content_evidence {
+    if route_result.requires_content_evidence {
         return None;
     }
     let alias = single_structural_quoted_alias(prompt)?;
     let target = single_structural_locator_target([
         prompt,
         resolved_prompt_for_execution,
-        route_result.resolved_intent.as_str(),
-        route_result.output_contract.locator_hint.as_str(),
+        "",
+        route_result.locator_hint.as_str(),
     ])?;
     Some(SessionAliasBinding {
         alias,

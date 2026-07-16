@@ -63,9 +63,6 @@ pub(super) fn final_reply_language_hint(
         if let Some(request) = ctx.user_request.as_deref() {
             candidates.push(request);
         }
-        if let Some(route) = ctx.route_result.as_ref() {
-            candidates.push(route.resolved_intent.as_str());
-        }
     }
     candidates.push(user_text);
     if let Some(hint) = crate::language_policy::first_clear_request_language_hint(candidates) {
@@ -76,10 +73,15 @@ pub(super) fn final_reply_language_hint(
 
 pub(super) fn route_resolved_intent(agent_run_context: Option<&AgentRunContext>) -> String {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.resolved_intent.trim().to_string())
-        .filter(|value| !value.is_empty())
+        .and_then(|ctx| {
+            ctx.original_user_request
+                .as_deref()
+                .or(ctx.user_request.as_deref())
+        })
+        .map(str::trim)
+        .filter(|intent| !intent.is_empty())
         .unwrap_or_default()
+        .to_string()
 }
 
 pub(super) async fn execution_recipe_budget_exhausted_message(
@@ -368,8 +370,8 @@ fn can_attach_execution_recipe_closeout(
     }
     let is_scalar = matches!(
         agent_run_context
-            .and_then(|ctx| ctx.route_result.as_ref())
-            .map(|route| route.output_contract.response_shape),
+            .and_then(|ctx| ctx.output_contract())
+            .map(|route| route.response_shape),
         Some(crate::OutputResponseShape::Scalar)
     );
     !is_scalar
@@ -472,8 +474,10 @@ pub(super) fn delivery_text_has_exact_marker_line(text: &str, marker: &str) -> b
     !marker.is_empty() && text.lines().map(str::trim).any(|line| line == marker)
 }
 
-pub(super) fn route_allows_model_language_final_answer(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+pub(super) fn route_allows_model_language_final_answer(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -481,9 +485,9 @@ pub(super) fn route_prefers_language_rendered_execution_failed_step(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
+            route.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep)
                 && route_allows_model_language_final_answer(route)
         })
 }

@@ -59,37 +59,47 @@ pub(crate) fn should_attempt_observed_fallback(
     has_tool_or_skill_output || has_recoverable_failure_context
 }
 
-pub(crate) fn route_matches_service_status_output_contract(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        || crate::evidence_policy::final_answer_shape_for_route(route)
+pub(crate) fn route_matches_service_status_output_contract(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
+        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
             == Some(crate::evidence_policy::FinalAnswerShape::StatusWithSource)
 }
 
-pub(crate) fn route_matches_service_control_machine_summary(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+pub(crate) fn route_matches_service_control_machine_summary(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
 }
 
-pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::IntentOutputContract) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         == Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
 }
 
-pub(crate) fn route_matches_single_path_output_contract(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
-        || crate::evidence_policy::final_answer_shape_for_route(route).is_some_and(|shape| {
-            shape.class() == crate::evidence_policy::FinalAnswerShapeClass::SinglePath
-        })
+pub(crate) fn route_matches_single_path_output_contract(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly)
+        || crate::evidence_policy::final_answer_shape_for_output_contract(route).is_some_and(
+            |shape| shape.class() == crate::evidence_policy::FinalAnswerShapeClass::SinglePath,
+        )
 }
 
-pub(crate) fn route_matches_validation_verdict_output_contract(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::evidence_policy::final_answer_shape_for_route(route)
+pub(crate) fn route_matches_validation_verdict_output_contract(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::ConfigValidation)
+        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
             == Some(crate::evidence_policy::FinalAnswerShape::ValidationVerdict)
 }
 
-pub(crate) fn route_matches_config_risk_output_contract(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment)
-        || crate::evidence_policy::final_answer_shape_for_route(route)
+pub(crate) fn route_matches_config_risk_output_contract(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::ConfigRiskAssessment)
+        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
             == Some(crate::evidence_policy::FinalAnswerShape::RiskAssessment)
 }
 
@@ -622,35 +632,22 @@ pub(crate) fn observed_read_path_matches_request(
 
 #[cfg(test)]
 mod tests {
-    fn route_with_capability_ref(capability_ref: &str) -> crate::RouteResult {
-        crate::RouteResult {
-            resolved_intent: String::new(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: format!("capability_ref={capability_ref}"),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        }
+    fn unclassified_output_contract() -> crate::IntentOutputContract {
+        crate::IntentOutputContract::default()
     }
 
     #[test]
     fn service_status_output_contract_uses_status_shape_for_system_health_check() {
         let mut contract = crate::IntentOutputContract::default();
         contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-        let route = crate::RouteResult::from_planner_output_contract(contract);
+        let route = contract;
 
         assert!(super::route_matches_service_status_output_contract(&route));
     }
 
     #[test]
-    fn service_status_output_contract_does_not_match_generic_system_namespace() {
-        let route = route_with_capability_ref("system.runtime_status");
+    fn service_status_output_contract_does_not_match_unclassified_contract() {
+        let route = unclassified_output_contract();
 
         assert!(!super::route_matches_service_status_output_contract(&route));
     }
@@ -659,10 +656,10 @@ mod tests {
     fn single_path_output_contract_matches_capability_owned_single_path_shape() {
         let mut contract = crate::IntentOutputContract::default();
         contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-        let route = crate::RouteResult::from_planner_output_contract(contract);
+        let route = contract;
 
         assert_eq!(
-            crate::evidence_policy::final_answer_shape_for_route(&route),
+            crate::evidence_policy::final_answer_shape_for_output_contract(&route),
             Some(crate::evidence_policy::FinalAnswerShape::CreatedArchivePath)
         );
 
@@ -671,7 +668,7 @@ mod tests {
 
     #[test]
     fn single_path_output_contract_does_not_match_status_shape() {
-        let route = route_with_capability_ref("system.health_check");
+        let route = unclassified_output_contract();
 
         assert!(!super::route_matches_single_path_output_contract(&route));
     }

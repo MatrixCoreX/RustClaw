@@ -3,27 +3,28 @@ use std::path::Path;
 
 use super::*;
 
-pub(super) fn archive_member_list_prefers_observed_projection(route: &crate::RouteResult) -> bool {
+pub(super) fn archive_member_list_prefers_observed_projection(
+    route: &crate::IntentOutputContract,
+) -> bool {
     route_requests_archive_list(route)
-        && (crate::evidence_policy::final_answer_shape_for_route(route)
+        && (crate::evidence_policy::final_answer_shape_for_output_contract(route)
             == Some(crate::evidence_policy::FinalAnswerShape::ArchiveMemberList)
-            || route.output_contract.response_shape == crate::OutputResponseShape::Strict)
+            || route.response_shape == crate::OutputResponseShape::Strict)
 }
 
-fn route_requests_archive_list(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveList)
-        || crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requests_archive_list(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::ArchiveList)
+        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
             == Some(crate::evidence_policy::FinalAnswerShape::ArchiveMemberList)
 }
 
 pub(super) fn file_name_list_prefers_observed_projection(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
-        || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+    if !route.semantic_kind_is(crate::OutputSemanticKind::FileNames)
+        || route.response_shape != crate::OutputResponseShape::Strict
         || route
-            .output_contract
             .self_extension
             .list_selector
             .sort_by
@@ -132,7 +133,7 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
     agent_run_context: Option<&AgentRunContext>,
     shape_class: crate::evidence_policy::FinalAnswerShapeClass,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract());
     match shape_class {
         crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact => {
             direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
@@ -233,7 +234,7 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
 }
 
 pub(in crate::finalize::loop_reply) fn matrix_strict_list_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     if !route_supports_matrix_strict_list_observed_answer(route) {
@@ -270,7 +271,7 @@ pub(in crate::finalize::loop_reply) fn matrix_strict_list_observed_answer(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) else {
             continue;
         };
-        if route.output_contract_marker_is(crate::OutputSemanticKind::HiddenEntriesCheck) {
+        if route.semantic_kind_is(crate::OutputSemanticKind::HiddenEntriesCheck) {
             collect_matrix_hidden_entries(&value, &mut items);
         } else {
             collect_matrix_strict_list_items(route, &value, &mut items);
@@ -288,7 +289,7 @@ pub(in crate::finalize::loop_reply) fn matrix_strict_list_observed_answer(
 }
 
 pub(super) fn stale_file_token_delivery_listing_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     delivery_messages: &[String],
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
@@ -306,11 +307,11 @@ pub(super) fn stale_file_token_delivery_listing_answer(
 }
 
 pub(super) fn stale_file_token_delivery_bounded_read_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     delivery_messages: &[String],
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if !route_has_file_token_delivery_signal(route)
         || !contract.requires_content_evidence
         || !current_delivery_is_file_token(delivery_messages)
@@ -327,9 +328,9 @@ pub(super) fn stale_file_token_delivery_bounded_read_answer(
         .map(|answer| (answer, matrix_observed_shape_summary(loop_state)))
 }
 
-fn route_has_file_token_delivery_signal(route: &crate::RouteResult) -> bool {
-    let contract = route.effective_output_contract();
-    route.wants_file_delivery
+fn route_has_file_token_delivery_signal(route: &crate::IntentOutputContract) -> bool {
+    let contract = route.clone();
+    route.delivery_required
         || contract.delivery_required
         || matches!(
             contract.response_shape,
@@ -341,8 +342,8 @@ fn route_has_file_token_delivery_signal(route: &crate::RouteResult) -> bool {
         )
 }
 
-fn route_has_unresolved_file_token_delivery_contract(route: &crate::RouteResult) -> bool {
-    let contract = route.effective_output_contract();
+fn route_has_unresolved_file_token_delivery_contract(route: &crate::IntentOutputContract) -> bool {
+    let contract = route.clone();
     route_has_file_token_delivery_signal(route)
         && matches!(contract.locator_kind, crate::OutputLocatorKind::None)
         && contract.locator_hint.trim().is_empty()
@@ -588,13 +589,13 @@ fn grep_text_matches_answer_from_value(value: &serde_json::Value) -> Option<Stri
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult) -> bool {
+fn route_supports_matrix_strict_list_observed_answer(route: &crate::IntentOutputContract) -> bool {
     route_requests_archive_list(route)
         || route_requests_name_list(route)
         || route_requests_filesystem_path_list(route)
         || route_requests_key_list_or_summary(route)
         || matches!(
-            route.effective_output_contract_semantic_kind(),
+            route.semantic_kind,
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::HiddenEntriesCheck
@@ -604,24 +605,23 @@ fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult)
         )
 }
 
-fn route_requests_name_list(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requests_name_list(route: &crate::IntentOutputContract) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         == Some(crate::evidence_policy::FinalAnswerShape::NameList)
 }
 
-fn route_requests_filesystem_path_list(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requests_filesystem_path_list(route: &crate::IntentOutputContract) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         == Some(crate::evidence_policy::FinalAnswerShape::PathList)
 }
 
-fn route_requests_key_list_or_summary(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requests_key_list_or_summary(route: &crate::IntentOutputContract) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         == Some(crate::evidence_policy::FinalAnswerShape::KeyListOrKeySummary)
 }
 
-fn matrix_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
+fn matrix_list_selector_limit(route: &crate::IntentOutputContract) -> Option<usize> {
     route
-        .output_contract
         .self_extension
         .list_selector
         .limit
@@ -630,10 +630,10 @@ fn matrix_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
 }
 
 fn matrix_inventory_file_paths_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
+    if !route.semantic_kind_is(crate::OutputSemanticKind::FilePaths)
         && !route_requests_filesystem_path_list(route)
     {
         return None;
@@ -718,10 +718,10 @@ fn inventory_file_paths_from_value(value: &serde_json::Value) -> Option<Vec<Stri
 }
 
 fn matrix_ranked_size_list_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::FileNames) {
+    if !route.semantic_kind_is(crate::OutputSemanticKind::FileNames) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -816,7 +816,7 @@ fn push_matrix_hidden_entry_item(raw: &str, items: &mut BTreeMap<String, String>
 }
 
 pub(in crate::finalize::loop_reply) fn matrix_grouped_name_list_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     if !crate::finalize::route_prefers_grouped_name_list_output(route) {
@@ -861,7 +861,7 @@ pub(in crate::finalize::loop_reply) fn matrix_grouped_name_list_observed_answer(
 }
 
 fn ordered_matrix_grouped_name_list_from_value(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
 ) -> Option<String> {
     if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
@@ -874,14 +874,7 @@ fn ordered_matrix_grouped_name_list_from_value(
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|sort_by| !sort_by.is_empty())?;
-    if sort_by == "name"
-        && route
-            .output_contract
-            .self_extension
-            .list_selector
-            .sort_by
-            .is_none()
-    {
+    if sort_by == "name" && route.self_extension.list_selector.sort_by.is_none() {
         return None;
     }
     let names_by_kind = value
@@ -895,7 +888,7 @@ fn ordered_matrix_grouped_name_list_from_value(
 }
 
 fn push_ordered_matrix_grouped_name_lines(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     title: &str,
     value: Option<&serde_json::Value>,
     lines: &mut Vec<String>,
@@ -924,7 +917,7 @@ fn push_ordered_matrix_grouped_name_lines(
 }
 
 pub(super) fn matrix_docker_text_list_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     if !route_requests_docker_text_list_projection(route) {
@@ -957,7 +950,7 @@ pub(super) fn matrix_docker_text_list_observed_answer(
 }
 
 pub(super) fn docker_text_list_candidate_is_observed(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     candidate: &str,
 ) -> bool {
@@ -979,9 +972,11 @@ pub(super) fn docker_text_list_candidate_is_observed(
     })
 }
 
-pub(super) fn route_requests_docker_text_list_projection(route: &crate::RouteResult) -> bool {
+pub(super) fn route_requests_docker_text_list_projection(
+    route: &crate::IntentOutputContract,
+) -> bool {
     matches!(
-        crate::evidence_policy::final_answer_shape_for_route(route),
+        crate::evidence_policy::final_answer_shape_for_output_contract(route),
         Some(
             crate::evidence_policy::FinalAnswerShape::ContainerList
                 | crate::evidence_policy::FinalAnswerShape::ImageList
@@ -990,7 +985,7 @@ pub(super) fn route_requests_docker_text_list_projection(route: &crate::RouteRes
 }
 
 fn collect_matrix_grouped_name_items(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     dirs: &mut BTreeMap<String, String>,
     files: &mut BTreeMap<String, String>,
@@ -1010,7 +1005,7 @@ fn collect_matrix_grouped_name_items(
 }
 
 fn push_matrix_grouped_name_array(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: Option<&serde_json::Value>,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1025,7 +1020,7 @@ fn push_matrix_grouped_name_array(
 }
 
 fn push_matrix_grouped_name_item(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     raw: &str,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1048,7 +1043,7 @@ fn push_matrix_grouped_name_lines(
 }
 
 fn collect_matrix_strict_list_items(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1101,28 +1096,19 @@ fn collect_matrix_strict_list_items(
     }
 }
 
-fn route_requests_file_name_list(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
-        || route
-            .output_contract
-            .self_extension
-            .list_selector
-            .target_kind
+fn route_requests_file_name_list(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::FileNames)
+        || route.self_extension.list_selector.target_kind
             == crate::OutputScalarCountTargetKind::File
 }
 
-fn route_requests_directory_name_list(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryNames)
-        || route
-            .output_contract
-            .self_extension
-            .list_selector
-            .target_kind
-            == crate::OutputScalarCountTargetKind::Dir
+fn route_requests_directory_name_list(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::DirectoryNames)
+        || route.self_extension.list_selector.target_kind == crate::OutputScalarCountTargetKind::Dir
 }
 
 fn collect_matrix_file_name_items(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1151,7 +1137,7 @@ fn collect_matrix_file_name_items(
 }
 
 fn collect_matrix_file_name_object(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1175,7 +1161,7 @@ fn collect_matrix_file_name_object(
 }
 
 fn collect_matrix_directory_name_items(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1210,7 +1196,7 @@ fn collect_matrix_directory_name_items(
 }
 
 fn collect_matrix_directory_name_object(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1234,7 +1220,7 @@ fn collect_matrix_directory_name_object(
 }
 
 fn collect_matrix_archive_member_items(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1269,7 +1255,7 @@ fn collect_matrix_archive_member_items(
 }
 
 fn push_matrix_archive_member_item(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     archive_hint: Option<&str>,
     raw: &str,
     kind: Option<&str>,
@@ -1285,11 +1271,11 @@ fn push_matrix_archive_member_item(
 }
 
 fn archive_member_matches_list_selector(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     raw: &str,
     kind: Option<&str>,
 ) -> bool {
-    let selector = &route.output_contract.self_extension.list_selector;
+    let selector = &route.self_extension.list_selector;
     let target_kind = if selector.target_kind == crate::OutputScalarCountTargetKind::Any
         && !selector.target_kind_specified
     {
@@ -1337,7 +1323,7 @@ fn archive_parent_prefix_for_member_display(archive_hint: &str) -> Option<String
 }
 
 fn push_matrix_string_arrays(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
     keys: &[&str],
@@ -1350,7 +1336,7 @@ fn push_matrix_string_arrays(
 }
 
 fn push_matrix_array_items(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1367,7 +1353,7 @@ fn push_matrix_array_items(
 }
 
 fn collect_matrix_list_object_fields(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1389,7 +1375,7 @@ fn collect_matrix_list_object_fields(
 }
 
 fn push_matrix_list_item(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     raw: &str,
     items: &mut BTreeMap<String, String>,
 ) {
@@ -1399,14 +1385,14 @@ fn push_matrix_list_item(
     items.entry(display.to_ascii_lowercase()).or_insert(display);
 }
 
-fn matrix_list_display_item(route: &crate::RouteResult, raw: &str) -> Option<String> {
+fn matrix_list_display_item(route: &crate::IntentOutputContract, raw: &str) -> Option<String> {
     let item = raw.trim().trim_matches('`').trim();
     if item.is_empty() {
         return None;
     }
     if route_requests_name_list(route)
         || matches!(
-            route.effective_output_contract_semantic_kind(),
+            route.semantic_kind,
             crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::DirectoryNames
         )
     {

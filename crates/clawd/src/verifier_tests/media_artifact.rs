@@ -5,14 +5,14 @@ fn generated_file_path_report_does_not_repair_media_artifact_output_with_text_wr
     let state = test_state();
     let task = test_task();
     let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_hint = "document/skill_audio_smoke.mp3".to_string();
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.delivery_required = false;
+    route.locator_hint = "document/skill_audio_smoke.mp3".to_string();
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -54,12 +54,11 @@ fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
     let state = test_state();
     let task = test_task();
     let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
-    route.risk_ceiling = crate::RiskCeiling::Medium;
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -96,14 +95,14 @@ fn generated_file_path_report_does_not_write_stat_json_over_media_path() {
     let state = test_state();
     let task = test_task();
     let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_hint = "document/rust_icon_pixel_smoke.png".to_string();
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.delivery_required = false;
+    route.locator_hint = "document/rust_icon_pixel_smoke.png".to_string();
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![

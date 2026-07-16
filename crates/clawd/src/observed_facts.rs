@@ -133,7 +133,7 @@ pub(crate) fn sync_active_observed_facts_from_ask_outcome_tx(
     tx: &rusqlite::Transaction<'_>,
     task: &ClaimedTask,
     _prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
     journal: &crate::task_journal::TaskJournal,
@@ -152,7 +152,7 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
     answer_text: &str,
     answer_messages: &[String],
     journal: &crate::task_journal::TaskJournal,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
 ) -> ObservedFacts {
     let mut combined = answer_text.trim().to_string();
     let publishable_messages = answer_messages
@@ -219,7 +219,7 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
                 })
                 .or_else(|| scalar_path_answer_bound_target(&combined, route_result))
                 .or_else(|| {
-                    let hint = route_result.output_contract.locator_hint.trim();
+                    let hint = route_result.locator_hint.trim();
                     (!hint.is_empty()).then(|| hint.to_string())
                 })
         })
@@ -244,32 +244,28 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
         observed_entry_count,
         slice_spec: crate::followup_frame::derive_slice_spec_from_journal(journal),
         output_shape: (!matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::Free
         ))
-        .then(|| {
-            route_result
-                .output_contract
-                .response_shape
-                .as_str()
-                .to_string()
-        }),
+        .then(|| route_result.response_shape.as_str().to_string()),
         delivery_targets,
     }
 }
 
-pub(crate) fn route_allows_observed_bound_target(route_result: &crate::RouteResult) -> bool {
+pub(crate) fn route_allows_observed_bound_target(
+    route_result: &crate::IntentOutputContract,
+) -> bool {
     !route_uses_non_binding_workspace_evidence(route_result)
 }
 
-fn route_uses_non_binding_workspace_evidence(route_result: &crate::RouteResult) -> bool {
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
+fn route_uses_non_binding_workspace_evidence(route_result: &crate::IntentOutputContract) -> bool {
+    route_result.semantic_kind_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
 }
 
-fn route_contract_can_publish_ordered_entries(route_result: &crate::RouteResult) -> bool {
-    route_result.wants_file_delivery
-        || route_result.output_contract.delivery_required
-        || route_result.output_contract_marker_is_any(&[
+fn route_contract_can_publish_ordered_entries(route_result: &crate::IntentOutputContract) -> bool {
+    route_result.delivery_required
+        || route_result.delivery_required
+        || route_result.semantic_kind_is_any(&[
             crate::OutputSemanticKind::FileNames,
             crate::OutputSemanticKind::DirectoryNames,
             crate::OutputSemanticKind::DirectoryEntryGroups,
@@ -278,7 +274,7 @@ fn route_contract_can_publish_ordered_entries(route_result: &crate::RouteResult)
             crate::OutputSemanticKind::SqliteTableNamesOnly,
         ])
         || matches!(
-            route_result.output_contract.delivery_intent,
+            route_result.delivery_intent,
             crate::OutputDeliveryIntent::DirectoryLookup
                 | crate::OutputDeliveryIntent::DirectoryBatchFiles
         )
@@ -293,7 +289,7 @@ fn combined_contains_delivery_file_token(combined: &str) -> bool {
 
 fn scalar_path_answer_bound_target(
     combined: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
 ) -> Option<String> {
     if !scalar_path_contract_can_bind_target(route_result) {
         return None;
@@ -308,18 +304,18 @@ fn scalar_path_answer_bound_target(
     }
     normalize_scalar_path_bound_target(
         line,
-        route_result.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly),
+        route_result.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly),
     )
 }
 
-fn scalar_path_contract_can_bind_target(route_result: &crate::RouteResult) -> bool {
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
+fn scalar_path_contract_can_bind_target(route_result: &crate::IntentOutputContract) -> bool {
+    route_result.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly)
         || (matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::Scalar
-        ) && route_result.output_contract.requires_content_evidence
+        ) && route_result.requires_content_evidence
             && matches!(
-                route_result.output_contract.locator_kind,
+                route_result.locator_kind,
                 crate::OutputLocatorKind::Path
                     | crate::OutputLocatorKind::Filename
                     | crate::OutputLocatorKind::CurrentWorkspace

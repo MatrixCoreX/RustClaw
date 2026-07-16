@@ -61,11 +61,11 @@ fn requested_machine_kv_summary_preserves_richer_recent_scalar_delivery() {
         vec!["same_path=false\nleft_exists=true\nright_exists=true".to_string()];
     loop_state.last_user_visible_respond = delivery_messages.last().cloned();
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -104,12 +104,12 @@ fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
     ];
     loop_state.last_user_visible_respond = delivery_messages.last().cloned();
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
+    route.response_shape = OutputResponseShape::Strict;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -139,7 +139,7 @@ fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
 #[test]
 fn hook_policy_surface_json_can_replace_short_token_delivery() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -178,10 +178,10 @@ fn hook_policy_surface_json_can_replace_short_token_delivery() {
 fn grounded_compound_delivery_preserves_latest_terminal_language_over_observed_projection() {
     let task = claimed_task("task-grounded-compound-terminal");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.requires_content_evidence = false;
+    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(1);
@@ -251,11 +251,11 @@ fn requested_machine_kv_summary_preserves_publishable_summary_over_marker_only_s
     loop_state.last_user_visible_respond = Some(tagged_table.clone());
     loop_state.last_publishable_synthesis_output = Some(tagged_table);
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -308,11 +308,11 @@ fn requested_machine_kv_summary_preserves_structured_media_dry_run_projection() 
     let mut delivery_messages = vec![current.to_string()];
     loop_state.last_user_visible_respond = Some(current.to_string());
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -351,11 +351,11 @@ fn requested_machine_kv_summary_preserves_async_cancel_adapter_projection() {
     let mut delivery_messages = vec![current.to_string()];
     loop_state.last_user_visible_respond = Some(current.to_string());
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -394,12 +394,12 @@ fn requested_machine_kv_summary_preserves_publishable_command_summary() {
     let mut delivery_messages = vec![full_answer.to_string()];
     loop_state.last_user_visible_respond = Some(full_answer.to_string());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some(
             "Run pwd, inspect the local port, and answer with the working directory and whether a port is visible."
                 .to_string(),
@@ -468,12 +468,12 @@ fn requested_machine_kv_summary_preserves_web_search_listing_delivery() {
     let mut delivery_messages = vec![answer.clone()];
     loop_state.last_user_visible_respond = Some(answer.clone());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::Strict;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -506,12 +506,12 @@ fn requested_machine_kv_summary_restores_web_search_candidates_over_scalar_summa
     let mut delivery_messages = vec!["source=doc.rust-lang.org top_k=3".to_string()];
     loop_state.last_user_visible_respond = delivery_messages.first().cloned();
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::Strict;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -552,16 +552,12 @@ fn requested_machine_kv_summary_restores_service_status_terminal_delivery() {
     let mut delivery_messages = vec!["docker.version".to_string()];
     loop_state.last_user_visible_respond = Some("docker.version".to_string());
     let mut route = free_route_result();
-    route.resolved_intent = "docker.version".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route
-        .output_contract
-        .self_extension
-        .structured_field_selector = Some("docker.version".to_string());
+    route.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.self_extension.structured_field_selector = Some("docker.version".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -598,16 +594,12 @@ fn requested_machine_kv_summary_restores_service_contract_terminal_delivery() {
     let mut delivery_messages = vec!["service.status".to_string()];
     loop_state.last_user_visible_respond = Some("service.status".to_string());
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=service.status".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route
-        .output_contract
-        .self_extension
-        .structured_field_selector = Some("service.status".to_string());
+    route.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.self_extension.structured_field_selector = Some("service.status".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -682,12 +674,11 @@ fn requested_machine_kv_summary_preserves_colon_field_value_delivery() {
     loop_state.last_user_visible_respond = Some(answer.to_string());
     let mut delivery_messages = vec![answer.to_string()];
     let mut route = free_route_result();
-    route.resolved_intent = "text_excerpt detected_format".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -902,7 +893,7 @@ fn requested_machine_kv_summary_overrides_scalar_path_when_explicit_pair_is_obse
     loop_state.last_user_visible_respond = Some(current.to_string());
     let mut finalizer_summary = None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
 
@@ -1341,13 +1332,11 @@ fn requested_machine_kv_summary_restores_config_guard_payload_for_summary_route(
     let mut delivery_messages = vec!["count=2".to_string()];
     let mut finalizer_summary = None;
     let mut route = free_route_result();
-    route.resolved_intent =
-        "Inspect configs/config.toml and report disabled skill count plus empty fields."
-            .to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
+    route.self_extension.structured_field_selector = Some("risk_count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

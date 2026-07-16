@@ -109,13 +109,12 @@ fn execution_summary_suppressed_for_grounded_content_answer() {
         "`additionalProperties: false` makes future schema extension more brittle.".to_string(),
     );
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "prompts/schemas/agent_loop_decision_envelope.schema.json".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "prompts/schemas/agent_loop_decision_envelope.schema.json".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
 
@@ -157,7 +156,7 @@ fn execution_summary_is_not_attached_before_final_delivery() {
         "model_io.log\nact_plan.log\n",
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let mut delivery = vec!["这更像运行日志。".to_string()];
@@ -207,12 +206,11 @@ fn contract_matrix_delivery_suppresses_hardcoded_execution_summary() {
         "notes.txt\nnested/config.ini\n",
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.output_contract.requires_content_evidence = true;
-    route.route_reason = "structured_contract_hint_fast_path; contract_hint_fast_path".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut delivery = vec![
@@ -234,11 +232,11 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_name_list_answer(
         r#"{"action":"inventory_dir","names":["README.txt"],"names_only":true}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut delivery = vec![
@@ -260,11 +258,11 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_status_answer() {
         r#"status=200 {"ok":true}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut delivery = vec![
@@ -310,7 +308,7 @@ fn execution_summary_is_not_attached_for_japanese_request() {
         "act_plan.log\nclawd.log\nclawd.run.log\n",
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         original_user_request: Some("logs ディレクトリのファイル名を3つだけ一覧して。".to_string()),
         ..Default::default()
     };
@@ -353,10 +351,10 @@ fn execution_summary_suppressed_for_scalar_value_contract() {
         r#"{"action":"extract_field","field_path":"name","value_text":"rustclaw-nl-fixture"}"#,
     ));
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut delivery = vec!["rustclaw-nl-fixture".to_string()];
@@ -371,7 +369,7 @@ fn execution_summary_suppressed_for_scalar_value_contract() {
 fn execution_summary_drops_existing_summary_for_scalar_delivery_contract() {
     let route = scalar_route_result();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -400,11 +398,11 @@ fn execution_summary_drops_existing_summary_for_scalar_delivery_contract() {
 fn execution_summary_drops_existing_summary_when_structured_keys_delivery_matches_scalar_observation(
 ) {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -435,11 +433,11 @@ fn execution_summary_drops_existing_summary_when_structured_keys_delivery_matche
 #[test]
 fn execution_summary_drops_existing_summary_for_config_guard_delivery() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -465,11 +463,11 @@ fn execution_summary_drops_existing_summary_for_config_guard_delivery() {
 #[test]
 fn execution_summary_drops_existing_summary_for_transform_result_delivery() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -495,11 +493,11 @@ fn execution_summary_drops_existing_summary_for_transform_result_delivery() {
 #[test]
 fn execution_summary_drops_existing_summary_for_strict_synthesized_delivery() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -530,11 +528,11 @@ fn execution_summary_drops_existing_summary_for_strict_synthesized_delivery() {
 #[test]
 fn execution_summary_drops_existing_summary_for_synthesized_content_delivery() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -574,9 +572,9 @@ fn execution_summary_suppressed_for_multi_structured_scalar_synthesis() {
     ));
     loop_state.last_publishable_synthesis_output = Some("rustclaw-nl-fixture != clawd".to_string());
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -593,11 +591,11 @@ fn execution_summary_suppressed_for_scalar_content_synthesis() {
     ));
     loop_state.last_publishable_synthesis_output = Some("Release Checklist".to_string());
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -642,7 +640,7 @@ fn execution_summary_is_not_attached_for_multiple_execution_steps() {
         .executed_step_results
         .push(ok_step_result("step_2", "run_cmd", "Sun May 3\n"));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let mut delivery = vec!["为什么程序员喜欢黑夜？因为 bug 比较容易显现。".to_string()];
@@ -684,7 +682,7 @@ fn execution_summary_message_builder_returns_none_for_english_requests() {
         "model_io.log\nact_plan.log\n",
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -760,7 +758,7 @@ fn execution_summary_builder_stays_disabled_for_shifted_rounds() {
         r#"{"action":"path_batch_facts","count":1}"#,
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -837,7 +835,7 @@ fn execution_summary_builder_stays_disabled_when_global_step_ids_shift() {
     ));
 
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     assert!(
@@ -854,7 +852,7 @@ fn virtual_tool_execution_summary_builder_stays_disabled_without_plan_step() {
         r#"{"action":"inventory_dir","count":5}"#,
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -891,7 +889,7 @@ fn virtual_tool_execution_summary_builder_stays_disabled_when_plan_used_call_ski
         r#"{"action":"path_batch_facts","count":2}"#,
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -912,7 +910,7 @@ fn observed_synthesis_unavailable_fails_loud_without_execution_summary() {
         "Cargo.toml\nREADME.md\n",
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -967,7 +965,7 @@ fn execution_summary_is_not_attached_for_exact_observed_passthrough_delivery() {
         "/home/guagua/rustclaw\n",
     ));
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let mut delivery = vec!["/home/guagua/rustclaw".to_string()];
@@ -987,9 +985,9 @@ fn execution_summary_is_not_attached_for_exact_observed_passthrough_delivery() {
 #[test]
 fn execution_summary_skips_for_raw_command_output_route() {
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1005,11 +1003,11 @@ fn execution_summary_skips_for_raw_command_output_route() {
 #[test]
 fn execution_summary_suppressed_for_strict_content_excerpt_contract() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1046,12 +1044,12 @@ fn execution_summary_suppressed_for_strict_content_excerpt_contract() {
 #[test]
 fn execution_summary_suppressed_for_generic_path_content_contract() {
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs/clawd.log".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs/clawd.log".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1074,11 +1072,11 @@ fn execution_summary_suppressed_for_generic_path_content_contract() {
 #[test]
 fn execution_summary_sanitizes_log_excerpt_secrets_and_ansi() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1094,10 +1092,10 @@ fn execution_summary_sanitizes_log_excerpt_secrets_and_ansi() {
 #[test]
 fn execution_summary_suppressed_for_exact_file_names_contract() {
     let mut route = free_route_result();
-    route.output_contract.locator_hint = "document".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.locator_hint = "document".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1117,12 +1115,12 @@ fn execution_summary_suppressed_for_exact_file_names_contract() {
 #[test]
 fn execution_summary_skips_for_exact_sentence_count_contract() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.exact_sentence_count = Some(3);
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.exact_sentence_count = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1146,11 +1144,11 @@ fn execution_summary_skips_for_exact_sentence_count_contract() {
 #[test]
 fn execution_summary_skips_for_scalar_count_contract() {
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1170,11 +1168,11 @@ fn execution_summary_skips_for_scalar_count_contract() {
 #[test]
 fn execution_summary_skips_for_scalar_count_inventory_observation() {
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1194,10 +1192,10 @@ fn execution_summary_skips_for_scalar_count_inventory_observation() {
 #[test]
 fn execution_summary_skips_for_strict_json_container_delivery() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1219,9 +1217,9 @@ fn execution_summary_skips_for_strict_json_container_delivery() {
 #[test]
 fn execution_summary_suppressed_for_file_names_contract_even_with_original_user_request() {
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some("先列出 logs 目录下前 5 个文件名".to_string()),
         user_request: Some("List the first five filenames under logs.".to_string()),
         ..Default::default()
@@ -1244,10 +1242,10 @@ fn execution_summary_suppressed_for_file_names_contract_even_with_original_user_
 #[test]
 fn execution_summary_is_not_attached_for_failed_file_token_delivery() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_required = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1289,12 +1287,11 @@ fn execution_summary_is_not_attached_for_failed_file_token_delivery() {
 #[test]
 fn execution_summary_suppressed_for_successful_file_token_delivery() {
     let mut route = free_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1335,10 +1332,10 @@ fn execution_summary_suppressed_for_successful_file_token_delivery() {
 #[test]
 fn execution_summary_suppressed_for_existence_with_path_contract() {
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_hint = "rustclaw.service".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.locator_hint = "rustclaw.service".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1358,11 +1355,11 @@ fn execution_summary_suppressed_for_existence_with_path_contract() {
 #[test]
 fn execution_summary_suppressed_for_sqlite_table_names_contract() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableNamesOnly;
-    route.output_contract.locator_hint = "/tmp/test.sqlite".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::SqliteTableNamesOnly;
+    route.locator_hint = "/tmp/test.sqlite".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1399,7 +1396,7 @@ fn execution_summary_suppressed_for_sqlite_table_names_contract() {
 fn execution_summary_includes_direct_fs_search_structured_observation() {
     let route = free_route_result();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1425,11 +1422,11 @@ fn execution_summary_includes_direct_fs_search_structured_observation() {
 #[test]
 fn execution_summary_suppressed_for_scalar_contract_without_reading_user_text() {
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
-    route.output_contract.locator_hint = ".".to_string();
+    route.response_shape = OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+    route.locator_hint = ".".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1459,7 +1456,7 @@ fn execution_summary_suppressed_for_scalar_contract_without_reading_user_text() 
 #[test]
 fn execution_summary_builder_stays_disabled_for_long_outputs() {
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1481,7 +1478,7 @@ fn execution_summary_builder_stays_disabled_for_recoverable_crypto_account_error
         .push(err_step_result("step_1", "crypto", err));
 
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let summaries =

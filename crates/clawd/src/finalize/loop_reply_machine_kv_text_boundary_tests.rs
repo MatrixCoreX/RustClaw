@@ -12,12 +12,11 @@ fn requested_machine_kv_summary_does_not_preserve_web_listing_from_visible_text_
     let mut delivery_messages = vec!["Hidden Result Title".to_string()];
     loop_state.last_user_visible_respond = Some("Hidden Result Title".to_string());
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "capability_ref=web.search_results command_output".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;

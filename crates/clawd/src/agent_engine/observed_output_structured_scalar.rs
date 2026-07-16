@@ -133,7 +133,7 @@ pub(crate) fn latest_structured_scalar_observation_text(loop_state: &LoopState) 
 }
 
 pub(super) fn multiple_structured_scalar_observations_need_synthesis(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     loop_state: &LoopState,
 ) -> bool {
     let observations = recent_structured_scalar_observations(loop_state, 2);
@@ -158,14 +158,14 @@ pub(super) fn multiple_structured_scalar_observations_need_synthesis(
 
 pub(crate) fn structured_scalar_equality_direct_answer(
     _state: Option<&AppState>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     _agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::RecentScalarEqualityCheck,
-    ) || route.output_contract.delivery_required
+    ) || route.delivery_required
     {
         return None;
     }
@@ -242,7 +242,7 @@ pub(super) fn route_needs_structured_scalar_pair_synthesis(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
             recent_structured_scalar_observation_count(loop_state) > 1
                 && super::output_route_policy::route_contract_marker_is_any(

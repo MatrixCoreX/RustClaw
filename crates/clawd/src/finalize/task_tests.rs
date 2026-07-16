@@ -14,7 +14,7 @@ use super::{
     finalize_ask_checkpointed, journal_has_checkpointed_nonterminal_lifecycle,
     journal_has_missing_file_search_evidence, machine_payload_observed_facts,
     non_failure_final_status, normalize_existing_file_delivery_token_answer,
-    planner_route_result_for_finalization, promote_verified_terminal_answer_after_verifier_pass,
+    planner_output_contract_for_finalization, promote_verified_terminal_answer_after_verifier_pass,
     record_answer_verifier_required_evidence_rollout_attribution,
     recover_answer_verifier_gap_with_deterministic_machine_evidence,
     recover_requested_machine_kv_summary_final_answer, resume_context_has_directory_lookup_failure,
@@ -50,49 +50,33 @@ mod verified_terminal_promotion;
 #[path = "task_tests/verifier_retry_machine_evidence.rs"]
 mod verifier_retry_machine_evidence;
 
-fn route_result() -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: "test".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    }
+fn route_result() -> crate::IntentOutputContract {
+    crate::IntentOutputContract::default()
 }
 
 #[test]
 fn finalization_uses_planner_contract_from_answer_journal() {
     let mut route = route_result();
-    route.route_reason = "planner_output_contract_v1".to_string();
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_required = true;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
 
-    let selected = planner_route_result_for_finalization(Some(&journal));
+    let selected = planner_output_contract_for_finalization(Some(&journal));
 
-    assert_eq!(selected.route_reason, "planner_output_contract_v1");
     assert_eq!(
-        selected.output_contract.response_shape,
+        selected.response_shape,
         crate::OutputResponseShape::FileToken
     );
-    assert!(selected.output_contract.delivery_required);
+    assert!(selected.delivery_required);
 }
 
 #[test]
 fn finalization_uses_machine_fallback_when_planner_contract_is_unavailable() {
-    let selected = planner_route_result_for_finalization(None);
+    let selected = planner_output_contract_for_finalization(None);
 
-    assert_eq!(selected.route_reason, "planner_output_contract_unavailable");
-    assert!(selected.output_contract.semantic_kind_is_unclassified());
-    assert!(!selected.output_contract.delivery_required);
+    assert!(selected.semantic_kind_is_unclassified());
+    assert!(!selected.delivery_required);
 }
 
 // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。
@@ -178,9 +162,8 @@ fn answer_verifier_high_confidence_gap_forces_task_failure() {
 #[test]
 fn direct_answer_verifier_gap_triggers_direct_retry() {
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.delivery_required = false;
-    route.wants_file_delivery = false;
+    route.requires_content_evidence = false;
+    route.delivery_required = false;
 
     let journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "direct response request");
@@ -201,9 +184,8 @@ fn direct_answer_verifier_gap_triggers_direct_retry() {
 #[test]
 fn observed_tool_evidence_verifier_gap_triggers_direct_retry() {
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.wants_file_delivery = false;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "summarize observed evidence");
@@ -249,7 +231,7 @@ fn observed_tool_evidence_verifier_gap_triggers_direct_retry() {
 #[test]
 fn observed_tool_evidence_retry_ignores_failed_tool_step() {
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "summarize observed evidence");
@@ -315,9 +297,8 @@ fn requested_machine_kv_summary_final_guard_replaces_raw_observation_answer() {
 fn requested_machine_kv_summary_final_guard_preserves_colon_field_values() {
     let prompt = "Return text_excerpt and detected_format.";
     let mut route = route_result();
-    route.resolved_intent = "text_excerpt detected_format".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptWithSummary;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptWithSummary;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-colon-fields", "ask", prompt);
     journal
@@ -358,14 +339,11 @@ fn requested_machine_kv_summary_final_guard_preserves_colon_field_values() {
 fn requested_machine_kv_summary_failure_recovery_projects_read_range_fields() {
     let prompt = "用 read_range 读取 docs/service_notes.md 第 1 到 6 行，最终只回答机器字段 path 和 total_lines。";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route
-        .output_contract
-        .self_extension
-        .structured_field_selector = Some("total_lines".to_string());
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.self_extension.structured_field_selector = Some("total_lines".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-read-range-machine-kv", "ask", prompt);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
@@ -415,10 +393,10 @@ fn requested_machine_kv_summary_failure_recovery_projects_read_range_fields() {
 fn requested_machine_kv_summary_final_guard_preserves_compare_paths_existence_fields() {
     let prompt = "return same_path=false and both exist fields";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-compare-paths-final", "ask", prompt);
     journal
@@ -451,11 +429,11 @@ fn requested_machine_kv_summary_final_guard_preserves_compare_paths_existence_fi
 fn requested_machine_kv_summary_final_guard_preserves_content_evidence_synthesis() {
     let prompt = "Read README.md first 20 lines and answer existence, line count, and title.";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_hint = "README.md".to_string();
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.locator_hint = "README.md".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-content-evidence-final", "ask", prompt);
     journal
@@ -486,10 +464,10 @@ fn requested_machine_kv_summary_final_guard_preserves_content_evidence_synthesis
 fn requested_machine_kv_summary_final_guard_preserves_generated_file_report_fields() {
     let prompt = "return dry_run=true provider/model planned_outputs and output_path";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-generated-file-report-final",
         "ask",
@@ -522,10 +500,10 @@ fn requested_machine_kv_summary_final_guard_preserves_generated_file_report_fiel
 fn requested_machine_kv_summary_final_guard_preserves_async_poll_report_fields() {
     let prompt = "return task_id job_id status and async_poll_adapter_result";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-async-poll-report-final", "ask", prompt);
     let mut answer_text = concat!(
@@ -554,13 +532,12 @@ fn requested_machine_kv_summary_final_guard_preserves_async_poll_report_fields()
 fn requested_machine_kv_summary_final_guard_ignores_internal_route_tokens() {
     let prompt = "Return async timeout policy fields.";
     let mut route = route_result();
-    route.route_reason = "current_workspace_scope_from_current_request=false".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-internal", "ask", prompt);
     journal.record_context_bundle_summary(
         "current_workspace_scope_from_current_request=false".to_string(),
     );
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -615,9 +592,9 @@ fn existing_file_delivery_token_answer_canonicalizes_workspace_relative_path() {
 #[test]
 fn delivery_path_gap_without_observation_finalizes_as_clarify() {
     let mut route = route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+    route.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-delivery-clarify", "ask", "prompt");
@@ -964,12 +941,12 @@ fn raw_tail_read_failure_recovery_returns_observed_excerpt() {
         payload_json: "{}".to_string(),
     };
     let mut route = route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/workspace/logs/clawd-dev.log".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "/workspace/logs/clawd-dev.log".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-raw-tail-recovery", "ask", "prompt");
     journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
@@ -1092,12 +1069,12 @@ fn content_tail_read_failure_recovery_selects_observed_log_line() {
         payload_json: "{}".to_string(),
     };
     let mut route = route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/workspace/logs/clawd.run.log".to_string();
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "/workspace/logs/clawd.run.log".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-content-tail-recovery", "ask", "prompt");
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
@@ -1149,9 +1126,9 @@ fn content_tail_read_failure_recovery_selects_observed_log_line() {
 #[test]
 fn config_guard_candidates_recovery_uses_nested_observed_evidence() {
     let mut route = route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-config-guard-candidates-recovery",
         "ask",
@@ -1219,9 +1196,9 @@ fn config_guard_candidates_recovery_uses_nested_observed_evidence() {
 #[test]
 fn config_guard_candidates_recovery_handles_truncated_output_excerpt() {
     let mut route = route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-config-guard-truncated-recovery",
         "ask",
@@ -1266,9 +1243,9 @@ fn config_guard_candidates_recovery_handles_truncated_output_excerpt() {
 #[test]
 fn config_guard_candidates_recovery_allows_validation_route_after_guard_observation() {
     let mut route = route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-config-validation-guard-recovery",
         "ask",
@@ -1355,7 +1332,7 @@ fn assistant_memory_source_text_drops_execution_summary_only_answers() {
 #[test]
 fn scalar_delivery_does_not_reinsert_execution_summary() {
     let mut route = route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.response_shape = crate::OutputResponseShape::Scalar;
 
     assert!(!should_reinsert_execution_summaries_for_delivery(
         &route, "1.0.0"
@@ -1365,7 +1342,7 @@ fn scalar_delivery_does_not_reinsert_execution_summary() {
 #[test]
 fn scalar_delivery_drops_existing_execution_summary_messages() {
     let mut route = route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.response_shape = crate::OutputResponseShape::Scalar;
     let mut messages = vec![
         "**执行过程**\n1. 调用工具 `fs_basic`\n   输出：ok".to_string(),
         "{\"workspace\":true}".to_string(),
@@ -1379,7 +1356,7 @@ fn scalar_delivery_drops_existing_execution_summary_messages() {
 #[test]
 fn strict_structured_delivery_drops_existing_execution_summary_messages() {
     let mut route = route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.response_shape = crate::OutputResponseShape::Strict;
     let answer = r#"{"info":17,"warn":2,"error":1}"#;
     let mut messages = vec![
         "**执行过程**\n1. 调用技能 `log_analyze`\n   输出：ok".to_string(),
@@ -1397,8 +1374,8 @@ fn strict_structured_delivery_drops_existing_execution_summary_messages() {
 #[test]
 fn strict_file_delivery_keeps_execution_summary_available() {
     let mut route = route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.delivery_required = true;
 
     assert!(should_reinsert_execution_summaries_for_delivery(
         &route,
@@ -1409,9 +1386,8 @@ fn strict_file_delivery_keeps_execution_summary_available() {
 #[test]
 fn config_validation_delivery_drops_existing_execution_summary_messages() {
     let mut route = route_result();
-    route.route_reason = "capability_ref=config.validate".to_string();
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
+    route.response_shape = crate::OutputResponseShape::OneSentence;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
     let mut messages = vec![
         "**Execution**\n1. Called tool `config_basic`\n   Output: valid".to_string(),
         "pass".to_string(),
@@ -1425,7 +1401,7 @@ fn config_validation_delivery_drops_existing_execution_summary_messages() {
 #[test]
 fn free_delivery_keeps_execution_summary_available() {
     let mut route = route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.response_shape = crate::OutputResponseShape::Free;
 
     assert!(should_reinsert_execution_summaries_for_delivery(
         &route,
@@ -1506,7 +1482,7 @@ fn journal_missing_file_search_evidence_detects_read_file_error_marker() {
 }
 
 #[test]
-fn missing_file_delivery_reply_uses_structured_search_evidence() {
+fn missing_file_search_evidence_is_detected_without_route_hint() {
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal
         .step_results
@@ -1527,21 +1503,6 @@ fn missing_file_delivery_reply_uses_structured_search_evidence() {
         "文件 `definitely_missing_named_file_rustclaw_001.txt` 未找到。".to_string(),
     )
     .with_task_journal(journal);
-    let route = crate::RouteResult {
-        resolved_intent: "send definitely_missing_named_file_rustclaw_001.txt".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "explicit filename".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: true,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    assert!(route.wants_file_delivery);
     assert!(journal_has_missing_file_search_evidence(
         answer.task_journal.as_ref()
     ));
@@ -1569,22 +1530,9 @@ fn missing_file_delivery_reply_uses_output_contract_file_token_even_without_want
         "找不到文件 `definitely_missing_named_file_rustclaw_001.txt`。".to_string(),
     )
     .with_task_journal(journal);
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    let mut route = crate::IntentOutputContract::default();
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_required = true;
 
     assert!(super::should_use_missing_file_delivery_reply(
         &route, &answer
@@ -1593,22 +1541,9 @@ fn missing_file_delivery_reply_uses_output_contract_file_token_even_without_want
 
 #[test]
 fn resume_failure_missing_file_delivery_is_success_result() {
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    let mut route = crate::IntentOutputContract::default();
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_required = true;
     let resume_ctx = json!({
         "failed_step": {
             "action": "skill(run_cmd)",
@@ -1633,22 +1568,9 @@ fn resume_failure_missing_file_delivery_is_success_result() {
 
 #[test]
 fn resume_failure_missing_file_delivery_rejects_prose_only_error() {
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    let mut route = crate::IntentOutputContract::default();
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_required = true;
     let resume_ctx = json!({
         "failed_step": {
             "action": "skill(run_cmd)",
@@ -1666,11 +1588,11 @@ fn resume_failure_missing_file_delivery_rejects_prose_only_error() {
 #[test]
 fn resume_failure_unbound_path_lookup_is_clarify_result() {
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "case_only/report.md".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "case_only/report.md".to_string();
     let resume_ctx = json!({
         "completed_messages": [
             "subtask#1 skill(system_basic): success\n{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"error\":\"not found\",\"exists\":false,\"kind\":\"missing\",\"path\":\"case_only/report.md\"}],\"include_missing\":true}"
@@ -1702,11 +1624,11 @@ fn resume_failure_unbound_path_lookup_is_clarify_result() {
 #[test]
 fn resume_failure_unbound_directory_lookup_is_clarify_result_without_path_batch() {
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "case_only/report.md".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "case_only/report.md".to_string();
     let resume_ctx = json!({
         "completed_messages": [],
         "failed_step": {
@@ -1734,10 +1656,10 @@ fn resume_failure_unbound_directory_lookup_is_clarify_result_without_path_batch(
 #[test]
 fn resume_failure_unbound_path_lookup_does_not_reclassify_delivery() {
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
     let resume_ctx = json!({
         "completed_messages": [
             "subtask#1 skill(system_basic): success\n{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":false,\"path\":\"missing.txt\"}],\"include_missing\":true}"
@@ -1757,21 +1679,8 @@ fn resume_failure_unbound_path_lookup_does_not_reclassify_delivery() {
 
 #[test]
 fn resume_failure_structured_service_status_is_success_result() {
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    let mut route = crate::IntentOutputContract::default();
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     let resume_ctx = json!({
         "failed_step": {
             "action": "skill(service_control)",
@@ -1826,21 +1735,8 @@ fn resume_failure_structured_service_status_is_success_result() {
 
 #[test]
 fn resume_failure_execution_failed_step_is_success_answer_with_remaining_actions() {
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    let mut route = crate::IntentOutputContract::default();
+    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
     let resume_ctx = json!({
         "failed_step": {
             "action": "skill(run_cmd)",

@@ -495,9 +495,8 @@ fn post_write_readback_projection_replaces_stale_terminal_json() {
 fn publishable_strict_json_projection_replaces_stale_verifier_candidate() {
     let answer = r#"{"changed_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"test_command":["python3 test_calc_core.py","python3 - <<'PY'\nfrom calc_core import safe_div\nprint(safe_div(1,0))\nPY"],"test_status":"passed","functions":["add","sub","mul","safe_div"],"error_codes":["division_by_zero"]}"#;
     let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason = "".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-strict-json-projection-promote",
         "ask",
@@ -1071,9 +1070,9 @@ fn answer_verifier_retry_summary_respects_explicit_retry_flag() {
 #[test]
 fn answer_verifier_retry_summary_skips_file_delivery_candidate_disambiguation() {
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step(
         "step_1",
@@ -1107,8 +1106,8 @@ fn answer_verifier_retry_summary_skips_file_delivery_candidate_disambiguation() 
 #[test]
 fn answer_verifier_retry_summary_skips_confirmed_missing_file_delivery() {
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::FileSingle;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-missing-file-delivery", "ask", "prompt");
     journal.push_step_result(&ok_step(
@@ -1146,9 +1145,8 @@ fn answer_verifier_retry_summary_skips_confirmed_missing_file_delivery() {
 #[test]
 fn confirmed_missing_file_delivery_suppresses_retry_without_legacy_delivery_intent() {
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::None;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-missing-file-delivery-no-intent",
         "ask",
@@ -1187,8 +1185,7 @@ fn confirmed_missing_file_delivery_suppresses_retry_without_legacy_delivery_inte
 #[test]
 fn confirmed_missing_file_delivery_does_not_suppress_success_token_claim() {
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
+    route.delivery_required = true;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-missing-file-delivery-token-claim",
         "ask",
@@ -1239,7 +1236,7 @@ fn answer_verifier_retry_summary_skips_clarify_final_status() {
 #[test]
 fn quantity_comparison_structural_answer_suppresses_false_verifier_retry() {
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+    route.semantic_kind = OutputSemanticKind::QuantityComparison;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
         step_id: "step_1".to_string(),
@@ -1287,7 +1284,7 @@ fn quantity_comparison_structural_answer_suppresses_false_verifier_retry() {
 #[test]
 fn quantity_comparison_suppression_reads_total_size_bytes() {
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+    route.semantic_kind = OutputSemanticKind::QuantityComparison;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
         step_id: "step_1".to_string(),
@@ -1336,7 +1333,7 @@ fn quantity_comparison_suppression_reads_total_size_bytes() {
 fn terminal_model_answer_suppresses_output_format_only_verifier_retry() {
     let answer = "RustClaw combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step(
         "step_1",
@@ -1374,10 +1371,10 @@ fn terminal_model_answer_suppresses_output_format_only_verifier_retry() {
 fn raw_observation_output_format_gap_does_not_suppress_structural_retry() {
     let raw_answer = "2026-04-01 WARN latency increased\n2026-04-01 ERROR provider timeout";
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step(
         "step_1",
@@ -1413,7 +1410,7 @@ fn raw_observation_output_format_gap_does_not_suppress_structural_retry() {
 fn terminal_model_answer_does_not_suppress_non_format_evidence_gap() {
     let answer = "RustClaw combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step("step_1", "synthesize_answer", answer));
     journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
@@ -1447,8 +1444,8 @@ fn terminal_model_answer_replaces_raw_observation_before_verifier() {
     let raw_readme = "# RustClaw\n\nRustClaw is a local Rust agent runtime centered on `clawd`.";
     let answer = "RustClaw 是以 `clawd` 为核心的本地 Rust 智能体运行时。它整合多渠道聊天、任务执行、工具和技能路由等能力。它面向通过聊天应用或浏览器完成日常使用和管理。";
     let mut route = route_result(OutputResponseShape::Strict);
-    route.output_contract.exact_sentence_count = Some(3);
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.exact_sentence_count = Some(3);
+    route.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     let read_step_output = json!({
         "extra": {
@@ -1482,7 +1479,7 @@ fn terminal_model_answer_replaces_raw_observation_before_verifier() {
 #[test]
 fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observed_scalar() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.locator_kind = OutputLocatorKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-service-status-terminal", "ask", "status");
     let service_output = json!({
@@ -1523,8 +1520,8 @@ fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observe
 #[test]
 fn terminal_model_answer_does_not_replace_single_machine_projection_with_observed_scalar() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "AGENTS.md".to_string();
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "AGENTS.md".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-single-machine-projection-terminal",
         "ask",
@@ -1570,8 +1567,8 @@ fn terminal_model_answer_does_not_replace_single_machine_projection_with_observe
 #[test]
 fn permission_denied_content_access_suppresses_missing_evidence_retry() {
     let mut route = route_result(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route.output_contract.locator_hint = "/etc/shadow".to_string();
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.locator_hint = "/etc/shadow".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-permission-denied", "ask", "prompt");
     journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
@@ -1638,9 +1635,8 @@ fn file_token_delivery_suppresses_list_count_verifier_retry_when_grounded() {
     std::fs::write(&file, "report").expect("write temp file");
 
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::FileSingle;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal
         .step_results
@@ -1707,9 +1703,8 @@ fn file_token_delivery_does_not_suppress_when_token_is_not_grounded() {
     std::fs::write(&ungrounded, "ungrounded").expect("write ungrounded file");
 
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::FileSingle;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal
         .step_results

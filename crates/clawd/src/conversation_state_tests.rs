@@ -65,21 +65,8 @@ fn active_session_snapshot_defaults_to_empty() {
     assert!(snapshot.active_observed_facts.is_none());
 }
 
-fn route_result_for_test(needs_clarify: bool) -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    }
+fn output_contract_for_test() -> crate::IntentOutputContract {
+    crate::IntentOutputContract::default()
 }
 
 fn empty_journal_for_test() -> crate::task_journal::TaskJournal {
@@ -96,7 +83,7 @@ fn journal_with_final_status(
 
 fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     prompt: &str,
     resolved_prompt_for_execution: &str,
@@ -113,7 +100,7 @@ fn next_last_primary_task_prompt(
 
 fn next_last_primary_task_output(
     prior_state: Option<&ConversationState>,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     resolved_prompt_for_execution: &str,
     answer_text: &str,
@@ -132,7 +119,7 @@ fn next_last_primary_task_output(
 
 #[test]
 fn plain_chat_without_task_turn_does_not_promote_primary_task() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let promoted = next_last_primary_task_prompt(
         None,
         &route_result,
@@ -158,7 +145,7 @@ fn plain_chat_without_task_turn_does_not_promote_primary_task() {
 
 #[test]
 fn standalone_task_request_preserves_existing_primary_task() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -194,13 +181,13 @@ fn standalone_task_request_preserves_existing_primary_task() {
 
 #[test]
 fn standalone_side_answer_preserves_existing_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route_result.output_contract.requires_content_evidence = false;
-    route_result.output_contract.delivery_required = false;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut route_result = output_contract_for_test();
+    route_result.response_shape = crate::OutputResponseShape::OneSentence;
+    route_result.requires_content_evidence = false;
+    route_result.delivery_required = false;
+    route_result.locator_kind = crate::OutputLocatorKind::None;
+    route_result.delivery_intent = crate::OutputDeliveryIntent::None;
+    route_result.semantic_kind = crate::OutputSemanticKind::None;
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -249,13 +236,13 @@ fn standalone_side_answer_preserves_existing_primary_task() {
 
 #[test]
 fn direct_standalone_side_answer_preserves_existing_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route_result.output_contract.requires_content_evidence = false;
-    route_result.output_contract.delivery_required = false;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut route_result = output_contract_for_test();
+    route_result.response_shape = crate::OutputResponseShape::OneSentence;
+    route_result.requires_content_evidence = false;
+    route_result.delivery_required = false;
+    route_result.locator_kind = crate::OutputLocatorKind::None;
+    route_result.delivery_intent = crate::OutputDeliveryIntent::None;
+    route_result.semantic_kind = crate::OutputSemanticKind::None;
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -299,7 +286,7 @@ fn direct_standalone_side_answer_preserves_existing_primary_task() {
 
 #[test]
 fn standalone_new_deliverable_replaces_existing_primary_task() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -344,7 +331,7 @@ fn standalone_new_deliverable_replaces_existing_primary_task() {
 
 #[test]
 fn standalone_task_request_without_prior_can_start_primary_task() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -375,7 +362,7 @@ fn standalone_task_request_without_prior_can_start_primary_task() {
 
 #[test]
 fn standalone_freeform_answer_candidate_without_prior_starts_primary_task() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -413,7 +400,7 @@ fn standalone_freeform_answer_candidate_without_prior_starts_primary_task() {
 
 #[test]
 fn standalone_freeform_answer_candidate_with_prior_preserves_primary_task() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -450,7 +437,7 @@ fn standalone_freeform_answer_candidate_with_prior_preserves_primary_task() {
 
 #[test]
 fn standalone_replacement_answer_candidate_replaces_prior_primary_task() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -494,7 +481,7 @@ fn standalone_replacement_answer_candidate_replaces_prior_primary_task() {
 
 #[test]
 fn active_task_non_success_preserves_prior_primary_output() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskCorrect),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::ReuseActive),
@@ -552,9 +539,7 @@ fn model_fallback_preserves_primary_state_from_structured_source() {
 
 #[test]
 fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.should_refresh_long_term_memory = true;
-    route_result.agent_display_name_hint = "巡检爪".to_string();
+    let mut route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -592,8 +577,8 @@ fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
 
 #[test]
 fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    let mut route_result = output_contract_for_test();
+    route_result.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let prior_state = ConversationState {
         last_primary_task_prompt: Some(
             "再看一下 scripts/nl_tests/fixtures/device_local/logs 目录有多少个直接子项，只输出数字"
@@ -643,8 +628,8 @@ fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
 
 #[test]
 fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    let mut route_result = output_contract_for_test();
+    route_result.response_shape = crate::OutputResponseShape::Scalar;
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -676,8 +661,8 @@ fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task
 
 #[test]
 fn standalone_scalar_chat_request_without_answer_marker_does_not_start_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    let mut route_result = output_contract_for_test();
+    route_result.response_shape = crate::OutputResponseShape::Scalar;
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -709,9 +694,9 @@ fn standalone_scalar_chat_request_without_answer_marker_does_not_start_primary_t
 
 #[test]
 fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.output_contract.requires_content_evidence = true;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    let mut route_result = output_contract_for_test();
+    route_result.requires_content_evidence = true;
+    route_result.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -752,9 +737,9 @@ fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
 
 #[test]
 fn unannotated_evidence_backed_deliverable_starts_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.output_contract.requires_content_evidence = true;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    let mut route_result = output_contract_for_test();
+    route_result.requires_content_evidence = true;
+    route_result.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
     let prompt = next_last_primary_task_prompt(
         None,
@@ -784,7 +769,7 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task() {
 
 #[test]
 fn unannotated_structured_listing_replaces_prior_primary_task() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let mut journal = crate::task_journal::TaskJournal::new("list");
     journal
         .step_results
@@ -837,10 +822,10 @@ fn unannotated_structured_listing_replaces_prior_primary_task() {
 
 #[test]
 fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
-    let mut route_result = route_result_for_test(false);
-    route_result.output_contract.requires_content_evidence = true;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    let mut route_result = output_contract_for_test();
+    route_result.requires_content_evidence = true;
+    route_result.response_shape = crate::OutputResponseShape::Scalar;
+    route_result.semantic_kind = crate::OutputSemanticKind::ScalarCount;
 
     let prompt = next_last_primary_task_prompt(
         None,
@@ -864,7 +849,7 @@ fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
 
 #[test]
 fn task_append_persists_compact_primary_without_runtime_envelope() {
-    let route_result = route_result_for_test(false);
+    let route_result = output_contract_for_test();
     let prior_state = ConversationState {
         last_primary_task_prompt: Some("帮我写个方案".to_string()),
         ..ConversationState::default()
@@ -1030,7 +1015,7 @@ fn alias_only_state_patch_clears_stale_active_pointers() {
             active_observed_facts_task_id: Some("old-observed".to_string()),
         },
     );
-    let route = route_result_for_test(false);
+    let route = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -1097,9 +1082,8 @@ fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
     let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_alias_patch";
     let calc_path = format!("{project_dir}/calc_core.py");
     let test_path = format!("{project_dir}/test_calc_core.py");
-    let mut route = route_result_for_test(false);
-    route.route_reason = "alias_state_patch_ack".to_string();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let mut route = output_contract_for_test();
+    route.response_shape = crate::OutputResponseShape::Strict;
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: None,
         target_task_policy: None,
@@ -1217,7 +1201,7 @@ fn merge_alias_bindings_prefers_structured_state_patch() {
 
 #[test]
 fn structured_alias_state_patch_suppresses_prompt_alias_heuristics() {
-    let route = route_result_for_test(false);
+    let route = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: None,
         target_task_policy: None,
@@ -1289,26 +1273,8 @@ fn alias_surface_match_accepts_user_defined_separator_variants() {
 }
 
 #[test]
-fn memory_turn_with_single_locator_derives_short_alias_suffixes() {
-    let mut route = route_result_for_test(false);
-    route.should_refresh_long_term_memory = true;
-    let merged = super::merge_alias_bindings_for_turn(
-        None,
-        None,
-        "Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.",
-        &route,
-        "",
-    );
-
-    assert!(merged.iter().any(|binding| {
-        binding.alias == "note file"
-            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
-    }));
-}
-
-#[test]
 fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag() {
-    let route = route_result_for_test(false);
+    let route = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -1333,7 +1299,7 @@ fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag
 
 #[test]
 fn preference_memory_turn_with_machine_alias_derives_exact_token() {
-    let route = route_result_for_test(false);
+    let route = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -1361,7 +1327,7 @@ fn preference_memory_turn_with_machine_alias_derives_exact_token() {
 
 #[test]
 fn compact_alias_memory_turn_with_single_locator_derives_structured_binding() {
-    let route = route_result_for_test(false);
+    let route = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -1386,7 +1352,7 @@ fn compact_alias_memory_turn_with_single_locator_derives_structured_binding() {
 
 #[test]
 fn planner_execute_single_locator_does_not_create_prompt_alias_binding() {
-    let route = route_result_for_test(false);
+    let route = output_contract_for_test();
     let merged = super::merge_alias_bindings_for_turn(
         None,
         None,
@@ -1400,7 +1366,7 @@ fn planner_execute_single_locator_does_not_create_prompt_alias_binding() {
 
 #[test]
 fn quoted_alias_with_single_locator_binds_without_memory_turn_analysis() {
-    let route = route_result_for_test(true);
+    let route = output_contract_for_test();
     let merged = super::merge_alias_bindings_for_turn(
         None,
         None,
@@ -1499,8 +1465,7 @@ fn current_locator_rebinds_all_mentioned_alias_surfaces() {
 
 #[test]
 fn structural_prompt_alias_binding_uses_quote_and_single_locator() {
-    let mut route = route_result_for_test(false);
-    route.risk_ceiling = crate::RiskCeiling::Low;
+    let mut route = output_contract_for_test();
 
     let binding = super::structural_alias_binding_from_prompt(
         "先记一下，后面我说“那个文件”就是 /tmp/device/README.md",
@@ -1600,10 +1565,7 @@ fn ordered_listing_outcome_refreshes_active_session_pointers_for_status_query() 
 
 #[test]
 fn clarify_task_request_persists_primary_prompt_for_followups() {
-    let mut route_result = route_result_for_test(true);
-    route_result.resolved_intent = "帮我写个方案".to_string();
-    route_result.clarify_question = "请补充主题".to_string();
-    route_result.route_reason = "clarify".to_string();
+    let mut route_result = output_contract_for_test();
     let persisted = next_last_primary_task_prompt(
         None,
         &route_result,
@@ -1621,11 +1583,8 @@ fn clarify_task_request_persists_primary_prompt_for_followups() {
 }
 
 #[test]
-fn clarify_task_prompt_without_turn_analysis_is_preserved_when_not_locator_driven() {
-    let mut route_result = route_result_for_test(true);
-    route_result.resolved_intent = "Help me write a proposal".to_string();
-    route_result.clarify_question = "What is the topic and audience?".to_string();
-    route_result.route_reason = "missing_task_slots".to_string();
+fn clarify_task_prompt_without_turn_analysis_is_not_inferred_from_route_trace() {
+    let mut route_result = output_contract_for_test();
     let persisted = next_last_primary_task_prompt(
         None,
         &route_result,
@@ -1633,5 +1592,5 @@ fn clarify_task_prompt_without_turn_analysis_is_preserved_when_not_locator_drive
         "Help me write a proposal",
         "Help me write a proposal",
     );
-    assert_eq!(persisted.as_deref(), Some("Help me write a proposal"));
+    assert_eq!(persisted, None);
 }

@@ -12,24 +12,11 @@ fn locator_question_prefers_matching_answer_text() {
 
 #[test]
 fn derive_locator_clarify_state_from_semantic_clarify() {
-    let route = crate::RouteResult {
-        resolved_intent: "看一下那个日志最后 5 行".to_string(),
-        needs_clarify: true,
-        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
-        route_reason: "clarify".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            ..crate::IntentOutputContract::default()
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        ..crate::IntentOutputContract::default()
     };
     let clarify_state = derive_clarify_state_for_ask_outcome(
         "task-1",
@@ -51,20 +38,7 @@ fn derive_locator_clarify_state_from_semantic_clarify() {
 
 #[test]
 fn derive_user_input_clarify_state_for_freeform_waiting_request() {
-    let route = crate::RouteResult {
-        resolved_intent: "draft a proposal after the user provides enough details".to_string(),
-        needs_clarify: true,
-        clarify_question: "QUESTION".to_string(),
-        route_reason: "clarify".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
+    let route = crate::IntentOutputContract::default();
     let clarify_state = derive_clarify_state_for_ask_outcome(
         "task-freeform",
         "Help me draft a proposal",
@@ -84,25 +58,12 @@ fn derive_user_input_clarify_state_for_freeform_waiting_request() {
 
 #[test]
 fn derive_locator_clarify_state_preserves_non_free_output_shape() {
-    let route = crate::RouteResult {
-        resolved_intent: "看一下那个日志".to_string(),
-        needs_clarify: true,
-        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
-        route_reason: "clarify".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            ..crate::IntentOutputContract::default()
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        ..crate::IntentOutputContract::default()
     };
     let clarify_state = derive_clarify_state_for_ask_outcome(
         "task-2",
@@ -123,26 +84,13 @@ fn derive_locator_clarify_state_preserves_non_free_output_shape() {
 }
 
 #[test]
-fn derive_locator_clarify_state_preserves_resolved_intent_context() {
-    let route = crate::RouteResult {
-        resolved_intent: "读取指定文件中的名字字段（name），仅输出该字段的值".to_string(),
-        needs_clarify: true,
-        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
-        route_reason: "clarify".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            ..crate::IntentOutputContract::default()
-        },
+fn derive_locator_clarify_state_uses_source_request_without_route_trace_marker() {
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        ..crate::IntentOutputContract::default()
     };
     let clarify_state = derive_clarify_state_for_ask_outcome(
         "task-structured",
@@ -159,35 +107,21 @@ fn derive_locator_clarify_state_preserves_resolved_intent_context() {
     assert!(clarify_state
         .source_request
         .starts_with("读一下那个文件里的名字字段，只输出值"));
-    assert!(clarify_state.source_request.contains("[RESOLVED_INTENT]"));
-    assert!(clarify_state.source_request.contains("name"));
+    assert!(!clarify_state.source_request.contains("[RESOLVED_INTENT]"));
 }
 
 #[test]
 fn derive_locator_clarify_state_preserves_structured_field_selector_token() {
-    let route = crate::RouteResult {
-        resolved_intent: "Read the selected structured file field value".to_string(),
-        needs_clarify: true,
-        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
-        route_reason: "clarify missing locator".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            self_extension: crate::SelfExtensionContract {
-                structured_field_selector: Some("name".to_string()),
-                ..crate::SelfExtensionContract::default()
-            },
-            ..crate::IntentOutputContract::default()
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        self_extension: crate::SelfExtensionContract {
+            structured_field_selector: Some("name".to_string()),
+            ..crate::SelfExtensionContract::default()
         },
+        ..crate::IntentOutputContract::default()
     };
     let clarify_state = derive_clarify_state_for_ask_outcome(
         "task-structured-selector",
@@ -213,29 +147,16 @@ fn derive_locator_clarify_state_preserves_structured_field_selector_token() {
 
 #[test]
 fn derive_locator_clarify_state_marks_non_content_probe_as_existence_contract() {
-    let route = crate::RouteResult {
-        resolved_intent: "Check whether the referenced script exists.".to_string(),
-        needs_clarify: true,
-        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
-        route_reason: "clarify missing locator".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::None,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: false,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::None,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
 
     let clarify_state = derive_clarify_state_for_ask_outcome(
@@ -324,25 +245,12 @@ fn clarify_candidate_targets_fall_back_to_structured_fuzzy_locator_candidates() 
 
 #[test]
 fn derive_clarify_state_seeds_candidate_targets_from_prior_session() {
-    let route = crate::RouteResult {
-        resolved_intent: "把那个文件发给我".to_string(),
-        needs_clarify: true,
-        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
-        route_reason: "clarify".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: true,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::FileToken,
-            delivery_required: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            ..crate::IntentOutputContract::default()
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::FileToken,
+        delivery_required: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        ..crate::IntentOutputContract::default()
     };
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,

@@ -219,14 +219,12 @@ pub(super) fn normalized_state_patch_key(key: &str) -> String {
 }
 
 pub(super) fn current_delivery_is_publishable_evidence_summary(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     current: &str,
     requested_summary: &str,
 ) -> bool {
-    if matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::FileToken
-    ) || !route_allows_model_language_delivery(route)
+    if matches!(route.response_shape, crate::OutputResponseShape::FileToken)
+        || !route_allows_model_language_delivery(route)
         || (machine_kv_units(requested_summary).is_empty()
             && bare_machine_markers(requested_summary).is_empty())
     {
@@ -258,11 +256,11 @@ pub(super) fn current_delivery_is_publishable_evidence_summary(
         && (nonempty_lines > 1 || token_count >= 6 || current_chars >= 48)
 }
 
-fn route_allows_model_language_delivery(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_allows_model_language_delivery(route: &crate::IntentOutputContract) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         .is_some_and(|shape| shape.allows_model_language())
         || matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
         )
 }
@@ -339,17 +337,17 @@ fn current_delivery_has_value_for_marker(current: &str, marker: &str) -> bool {
 }
 
 pub(super) fn route_required_machine_evidence_is_present_in_current_delivery(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     current: &str,
 ) -> bool {
-    if !route.output_contract.requires_content_evidence {
+    if !route.requires_content_evidence {
         return false;
     }
     let current_keys = machine_kv_unit_keys(current);
     if current_keys.is_empty() {
         return false;
     }
-    crate::evidence_policy::required_evidence_fields_for_route(route)
+    crate::evidence_policy::required_evidence_fields_for_output_contract(route)
         .iter()
         .any(|field| current_keys.iter().any(|key| key == field))
 }

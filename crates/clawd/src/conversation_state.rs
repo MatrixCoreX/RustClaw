@@ -89,7 +89,7 @@ fn normalized_locale_hint(payload: Option<&Value>) -> Option<String> {
 
 fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     journal: &crate::task_journal::TaskJournal,
     prompt: &str,
@@ -126,7 +126,7 @@ fn next_last_primary_task_prompt(
     if current_prompt.is_empty() {
         return prior_prompt;
     }
-    if unannotated_structured_listing_starts_primary_task(route_result, turn_analysis, journal) {
+    if unannotated_structured_listing_starts_primary_task(turn_analysis, journal) {
         return Some(current_prompt.to_string());
     }
     let Some(turn_type) = turn_analysis.and_then(|analysis| analysis.turn_type) else {
@@ -137,7 +137,7 @@ fn next_last_primary_task_prompt(
         if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
             return Some(current_prompt.to_string());
         }
-        if route_result.needs_clarify && prior_prompt.is_none() {
+        if false && prior_prompt.is_none() {
             return Some(current_prompt.to_string());
         }
         return prior_prompt;
@@ -281,7 +281,7 @@ fn prior_last_primary_task_output(prior_state: Option<&ConversationState>) -> Op
 }
 
 fn standalone_contextual_chat_result_starts_primary_task(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     let allowed_turn = turn_analysis.is_none()
@@ -296,22 +296,18 @@ fn standalone_contextual_chat_result_starts_primary_task(
             )
         );
     if !allowed_turn
-        || route_result.needs_clarify
-        || route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
+        || route_result.requires_content_evidence
+        || route_result.delivery_required
+        || !matches!(route_result.locator_kind, crate::OutputLocatorKind::None)
         || !matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
-        || !matches!(
-            route_result.output_contract.delivery_intent,
+            route_result.delivery_intent,
             crate::OutputDeliveryIntent::None
         )
     {
         return false;
     }
     matches!(
-        route_result.effective_output_contract_semantic_kind(),
+        route_result.semantic_kind,
         crate::OutputSemanticKind::QuantityComparison
             | crate::OutputSemanticKind::RecentScalarEqualityCheck
     )
@@ -333,15 +329,14 @@ fn has_prior_primary_task(prior_state: Option<&ConversationState>) -> bool {
 }
 
 fn unannotated_evidence_backed_deliverable_starts_primary_task(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     if turn_analysis.is_some()
-        || route_result.needs_clarify
-        || !route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
+        || !route_result.requires_content_evidence
+        || route_result.delivery_required
         || matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
     {
@@ -352,17 +347,15 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task(
 }
 
 fn unannotated_structured_listing_starts_primary_task(
-    route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     turn_analysis.is_none()
-        && !route_result.needs_clarify
         && !crate::followup_frame::derive_ordered_entries_from_journal(journal).is_empty()
 }
 
 fn standalone_preference_or_memory_turn_clears_primary_task(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     matches!(
@@ -374,12 +367,9 @@ fn standalone_preference_or_memory_turn_clears_primary_task(
             crate::turn_context::TargetTaskPolicy::ReuseActive
                 | crate::turn_context::TargetTaskPolicy::ReplaceActive
         )
-    ) && !route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
-        && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
+    ) && !route_result.requires_content_evidence
+        && !route_result.delivery_required
+        && matches!(route_result.locator_kind, crate::OutputLocatorKind::None)
 }
 
 fn state_patch_requests_primary_task_replacement(
@@ -401,7 +391,7 @@ fn state_patch_requests_primary_task_replacement(
 
 fn standalone_task_request_preserves_prior_primary(
     prior_primary_task_prompt: Option<&str>,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
@@ -422,17 +412,14 @@ fn standalone_task_request_preserves_prior_primary(
             Some(crate::turn_context::TargetTaskPolicy::Standalone)
         )
         && route_allows_standalone_scalar_non_promotion(route_result)
-        && !route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
-        && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
+        && !route_result.requires_content_evidence
+        && !route_result.delivery_required
+        && matches!(route_result.locator_kind, crate::OutputLocatorKind::None)
 }
 
 fn standalone_scalar_result_should_not_promote(
     _prior_primary_task_prompt: Option<&str>,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     let is_standalone_task_request =
@@ -444,45 +431,34 @@ fn standalone_scalar_result_should_not_promote(
             Some(crate::turn_context::TargetTaskPolicy::Standalone)
         ) && route_allows_standalone_scalar_non_promotion(route_result);
     if !is_standalone_task_request
-        || route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
-        || !matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
+        || route_result.requires_content_evidence
+        || route_result.delivery_required
+        || !matches!(route_result.locator_kind, crate::OutputLocatorKind::None)
     {
         return false;
     }
     matches!(
-        route_result.output_contract.response_shape,
+        route_result.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     )
 }
 
-fn route_allows_standalone_scalar_non_promotion(route_result: &crate::RouteResult) -> bool {
-    route_result.schedule_kind == crate::ScheduleKind::None
-        && !route_result.needs_clarify
-        && !route_result.wants_file_delivery
-        && !route_result.should_refresh_long_term_memory
-        && !route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
+fn route_allows_standalone_scalar_non_promotion(
+    route_result: &crate::IntentOutputContract,
+) -> bool {
+    !route_result.delivery_required
+        && !route_result.requires_content_evidence
+        && matches!(route_result.locator_kind, crate::OutputLocatorKind::None)
         && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
-        && matches!(
-            route_result.output_contract.delivery_intent,
+            route_result.delivery_intent,
             crate::OutputDeliveryIntent::None
         )
-        && matches!(
-            route_result.effective_output_contract_semantic_kind(),
-            crate::OutputSemanticKind::None
-        )
+        && matches!(route_result.semantic_kind, crate::OutputSemanticKind::None)
 }
 
 fn standalone_scalar_output_should_not_promote(
     prior_state: Option<&ConversationState>,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     _resolved_prompt_for_execution: &str,
 ) -> bool {
@@ -517,7 +493,7 @@ fn current_turn_answer_text(answer_text: &str, answer_messages: &[String]) -> Op
 
 fn standalone_chat_deliverable_starts_primary_task(
     prior_state: Option<&ConversationState>,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     if has_prior_primary_task(prior_state)
@@ -534,22 +510,18 @@ fn standalone_chat_deliverable_starts_primary_task(
             Some(crate::turn_context::TurnType::TaskRequest),
             Some(crate::turn_context::TargetTaskPolicy::Standalone)
         )
-    ) && !route_result.needs_clarify
-        && !route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
-        && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
+    ) && !route_result.requires_content_evidence
+        && !route_result.delivery_required
+        && matches!(route_result.locator_kind, crate::OutputLocatorKind::None)
         && !matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
 }
 
 fn next_last_primary_task_output(
     prior_state: Option<&ConversationState>,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     journal: &crate::task_journal::TaskJournal,
     resolved_prompt_for_execution: &str,
@@ -581,8 +553,7 @@ fn next_last_primary_task_output(
             let latest_output = current_turn_answer_text(answer_text, answer_messages);
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }
-        if unannotated_structured_listing_starts_primary_task(route_result, turn_analysis, journal)
-        {
+        if unannotated_structured_listing_starts_primary_task(turn_analysis, journal) {
             let latest_output = current_turn_answer_text(answer_text, answer_messages);
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }
@@ -735,7 +706,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
     task: &ClaimedTask,
     payload: Option<&Value>,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     resolved_prompt_for_execution: &str,
     answer_text: &str,
@@ -932,7 +903,7 @@ fn current_outcome_has_ordered_entries(
 }
 
 fn current_outcome_has_session_anchor(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     semantic_clarify: bool,
 ) -> bool {

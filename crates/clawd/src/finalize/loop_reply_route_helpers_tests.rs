@@ -1,5 +1,4 @@
 use super::structured_json_values_from_output;
-use crate::finalize::loop_reply::route_helpers;
 
 #[test]
 fn structured_json_values_from_output_ignores_visible_text_json_payload() {
@@ -15,14 +14,4 @@ fn structured_json_values_from_output_ignores_visible_text_json_payload() {
     assert!(!values
         .iter()
         .any(|value| value.get("count") == Some(&serde_json::json!(99))));
-}
-
-#[test]
-fn route_clarify_reason_code_uses_machine_token_facade() {
-    assert_eq!(
-        route_helpers::route_clarify_reason_code(
-            "ordinary_clarify_deferred_to_agent_loop, clarify_reason_code=missing_locator"
-        ),
-        Some("missing_locator")
-    );
 }

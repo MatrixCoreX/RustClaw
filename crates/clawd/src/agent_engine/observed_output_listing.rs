@@ -119,7 +119,7 @@ pub(super) fn looks_like_shell_long_listing_line(line: &str) -> bool {
 }
 
 pub(super) fn current_turn_request_text<'a>(
-    route: Option<&'a crate::RouteResult>,
+    _route: Option<&'a crate::IntentOutputContract>,
     agent_run_context: Option<&'a AgentRunContext>,
 ) -> Option<&'a str> {
     agent_run_context
@@ -131,47 +131,44 @@ pub(super) fn current_turn_request_text<'a>(
                 .filter(|text| !text.trim().is_empty())
         })
         .filter(|text| !text.trim().is_empty())
-        .or_else(|| {
-            route
-                .map(|route| route.resolved_intent.as_str())
-                .filter(|text| !text.trim().is_empty())
-        })
 }
 
-pub(super) fn route_requests_scalar_count(route: &crate::RouteResult) -> bool {
+pub(super) fn route_requests_scalar_count(route: &crate::IntentOutputContract) -> bool {
     super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::ScalarCount,
     )
 }
 
-pub(super) fn route_requests_scalar_existence(route: &crate::RouteResult) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+pub(super) fn route_requests_scalar_existence(route: &crate::IntentOutputContract) -> bool {
+    route.response_shape == crate::OutputResponseShape::Scalar
         && super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::ExistenceWithPath,
         )
-        && !route.output_contract.delivery_required
+        && !route.delivery_required
 }
 
-pub(super) fn route_requests_hidden_entries_check(route: &crate::RouteResult) -> bool {
+pub(super) fn route_requests_hidden_entries_check(route: &crate::IntentOutputContract) -> bool {
     super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::HiddenEntriesCheck,
     )
 }
 
-pub(crate) fn route_prefers_direct_observed_answer_for_scalar(route: &crate::RouteResult) -> bool {
+pub(crate) fn route_prefers_direct_observed_answer_for_scalar(
+    route: &crate::IntentOutputContract,
+) -> bool {
     route_requests_scalar_existence(route)
-        || (route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        || (route.response_shape == crate::OutputResponseShape::Scalar
             && route_requests_hidden_entries_check(route))
 }
 
 pub(crate) fn scalar_route_prefers_structured_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+    route.response_shape == crate::OutputResponseShape::Scalar
         && (route_prefers_direct_observed_answer_for_scalar(route)
             || extract_latest_generic_successful_output(loop_state).is_some_and(|observed| {
                 observed.skill == "health_check"
@@ -191,11 +188,13 @@ fn observed_output_action_is(observed: &GenericObservedOutput, expected_action: 
         .unwrap_or(false)
 }
 
-pub(super) fn route_allows_scalar_read_range_direct_answer(route: &crate::RouteResult) -> bool {
+pub(super) fn route_allows_scalar_read_range_direct_answer(
+    route: &crate::IntentOutputContract,
+) -> bool {
     matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-    ) && !route.output_contract.delivery_required
+    ) && !route.delivery_required
         && (super::output_route_policy::route_is_unclassified_contract(route)
             || super::output_route_policy::route_contract_marker_is_any(
                 route,
@@ -206,16 +205,16 @@ pub(super) fn route_allows_scalar_read_range_direct_answer(route: &crate::RouteR
             ))
 }
 
-pub(super) fn route_requests_scalar_path_only(route: &crate::RouteResult) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+pub(super) fn route_requests_scalar_path_only(route: &crate::IntentOutputContract) -> bool {
+    route.response_shape == crate::OutputResponseShape::Scalar
         && super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::ScalarPathOnly,
         )
 }
 
-pub(super) fn route_requests_file_basename(route: &crate::RouteResult) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+pub(super) fn route_requests_file_basename(route: &crate::IntentOutputContract) -> bool {
+    route.response_shape == crate::OutputResponseShape::Scalar
         && super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::FileBasename,
@@ -223,22 +222,22 @@ pub(super) fn route_requests_file_basename(route: &crate::RouteResult) -> bool {
 }
 
 pub(super) fn route_allows_path_batch_scalar_path_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
-    route_requests_scalar_path_only(route) && !route.output_contract.requires_content_evidence
+    route_requests_scalar_path_only(route) && !route.requires_content_evidence
 }
 
 pub(super) fn route_allows_path_batch_file_basename_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
     route_requests_file_basename(route)
-        && !route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
+        && !route.requires_content_evidence
+        && !route.delivery_required
 }
 
 pub(super) fn recent_file_path_candidate_for_scalar_path(
     loop_state: &LoopState,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
 ) -> Option<String> {
     if !route.is_some_and(route_requests_scalar_path_only) {
         return None;
@@ -267,31 +266,31 @@ pub(super) fn recent_file_path_candidate_for_scalar_path(
         .map(ToString::to_string)
 }
 
-pub(super) fn route_prefers_plain_fs_search_paths(route: &crate::RouteResult) -> bool {
+pub(super) fn route_prefers_plain_fs_search_paths(route: &crate::IntentOutputContract) -> bool {
     route_requests_scalar_path_only(route)
-        || (route.output_contract.response_shape == crate::OutputResponseShape::Strict
-            && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
+        || (route.response_shape == crate::OutputResponseShape::Strict
+            && route.locator_kind == crate::OutputLocatorKind::Path
             && super::output_route_policy::route_contract_marker_is(
                 route,
                 crate::OutputSemanticKind::ExistenceWithPath,
             )
-            && !route.output_contract.delivery_required)
+            && !route.delivery_required)
         || (matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         ) && super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::FileNames,
         ))
         || (matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         ) && super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::DirectoryNames,
         ))
         || (matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         ) && super::output_route_policy::route_contract_marker_is(
             route,
@@ -312,29 +311,31 @@ fn looks_like_plain_path_literal(text: &str) -> bool {
 }
 
 pub(super) fn route_scalar_has_plain_path_terminal_respond(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+    route.response_shape == crate::OutputResponseShape::Scalar
         && super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::ExistenceWithPath,
         )
-        && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
-        && !route.output_contract.delivery_required
+        && route.locator_kind == crate::OutputLocatorKind::Path
+        && !route.delivery_required
         && loop_state
             .last_user_visible_respond
             .as_deref()
             .is_some_and(looks_like_plain_path_literal)
 }
 
-pub(super) fn route_allows_raw_listing_direct_answer(route: Option<&crate::RouteResult>) -> bool {
+pub(super) fn route_allows_raw_listing_direct_answer(
+    route: Option<&crate::IntentOutputContract>,
+) -> bool {
     route.is_none_or(|route| {
-        if !route.output_contract.requires_content_evidence {
+        if !route.requires_content_evidence {
             return true;
         }
-        if !route.output_contract.delivery_required
-            && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
+        if !route.delivery_required
+            && route.locator_kind == crate::OutputLocatorKind::Path
             && (super::output_route_policy::route_is_unclassified_contract(route)
                 || super::output_route_policy::route_contract_marker_is(
                     route,
@@ -356,13 +357,13 @@ pub(super) fn route_allows_raw_listing_direct_answer(route: Option<&crate::Route
 }
 
 pub(super) fn route_allows_strict_plain_observation_passthrough(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
-    route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
+    route.requires_content_evidence
+        && !route.delivery_required
         && super::output_route_policy::route_is_unclassified_contract(route)
-        && route.output_contract.response_shape == crate::OutputResponseShape::Strict
-        && route.output_contract.exact_sentence_count.is_none()
+        && route.response_shape == crate::OutputResponseShape::Strict
+        && route.exact_sentence_count.is_none()
 }
 
 pub(super) fn strict_plain_observation_passthrough_candidate(body: &str) -> Option<String> {
@@ -510,9 +511,8 @@ pub(super) fn latest_hidden_entries(loop_state: &LoopState) -> Option<Vec<String
     }
 }
 
-fn hidden_entries_answer_limit(route: &crate::RouteResult) -> usize {
+fn hidden_entries_answer_limit(route: &crate::IntentOutputContract) -> usize {
     route
-        .output_contract
         .self_extension
         .list_selector
         .limit
@@ -524,7 +524,7 @@ fn hidden_entries_answer_limit(route: &crate::RouteResult) -> usize {
 
 pub(super) fn hidden_entries_direct_answer(
     _state: Option<&AppState>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     _prefer_english: bool,
 ) -> Option<String> {
@@ -532,13 +532,13 @@ pub(super) fn hidden_entries_direct_answer(
         return None;
     }
     if !matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
     ) {
         return None;
     }
     let hidden_entries = latest_hidden_entries(loop_state)?;
-    if route.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+    if route.response_shape == crate::OutputResponseShape::Scalar {
         return Some(hidden_entries.len().to_string());
     }
     if hidden_entries.is_empty() {
@@ -563,7 +563,7 @@ pub(super) fn hidden_entries_direct_answer(
 }
 
 pub(super) fn count_answer_from_latest_listing(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<String> {
     if !route_requests_scalar_count(route) {
@@ -574,7 +574,7 @@ pub(super) fn count_answer_from_latest_listing(
 }
 
 pub(super) fn count_answer_from_latest_fs_search(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<String> {
     if !route_requests_scalar_count(route) {
@@ -601,16 +601,16 @@ pub(super) fn count_answer_from_latest_fs_search(
 }
 
 pub(super) fn directory_purpose_summary_find_ext_answer_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::DirectoryPurposeSummary,
-    ) || route.output_contract.delivery_required
-        || route.output_contract.requires_content_evidence
+    ) || route.delivery_required
+        || route.requires_content_evidence
         || matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         )
     {

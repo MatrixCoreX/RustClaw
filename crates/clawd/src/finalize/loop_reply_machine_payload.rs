@@ -112,15 +112,15 @@ fn route_allows_machine_payload_visible_render(
     agent_run_context: Option<&AgentRunContext>,
     is_observed_projection: bool,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return is_observed_projection;
     };
-    if route.output_contract.delivery_required || route.wants_file_delivery {
+    if route.delivery_required {
         return false;
     }
     is_observed_projection
         || matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
         )
 }

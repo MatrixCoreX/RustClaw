@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn final_answer_preserves_weather_query_machine_report(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
@@ -36,7 +36,7 @@ fn text_has_clean_line_value_for_marker(text: &str, marker: &str) -> bool {
 }
 
 pub(super) fn final_answer_preserves_web_search_listing(
-    _route_result: &crate::RouteResult,
+    _route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
     answer_messages: &[String],
@@ -110,12 +110,12 @@ fn web_search_candidate_listing_from_pairs(pairs: Vec<(String, String)>) -> Opti
 }
 
 pub(super) fn final_answer_preserves_service_control_status_summary(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
-    let contract = route_result.effective_output_contract();
+    let contract = route_result.clone();
     if contract.delivery_required
         || matches!(
             contract.response_shape,
@@ -240,10 +240,8 @@ fn candidate_has_observed_status_value(candidate: &str, observed: &str) -> bool 
         .contains(observed.to_ascii_lowercase().as_str())
 }
 
-fn route_is_weather_query(route: &crate::RouteResult) -> bool {
-    route
-        .output_contract
-        .semantic_kind_is(crate::OutputSemanticKind::WeatherQuery)
+fn route_is_weather_query(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::WeatherQuery)
 }
 
 pub(super) fn web_search_candidate_title_sources_from_output(

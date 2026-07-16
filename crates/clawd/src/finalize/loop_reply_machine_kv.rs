@@ -53,9 +53,9 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         return false;
     }
     if agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+            route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
                 && raw_command_machine_field_delivery_satisfies_request(route, &current)
         })
     {
@@ -650,11 +650,11 @@ fn service_status_one_sentence_delivery_should_be_preserved(
     agent_run_context: Option<&AgentRunContext>,
     current: &str,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_is_service_status_contract(route)
-        || route.output_contract.response_shape != crate::OutputResponseShape::OneSentence
+        || route.response_shape != crate::OutputResponseShape::OneSentence
     {
         return false;
     }
@@ -671,14 +671,13 @@ fn current_delivery_satisfies_service_status_selector(
     agent_run_context: Option<&AgentRunContext>,
     current: &str,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_is_service_status_contract(route) {
         return false;
     }
     let Some(selector) = route
-        .output_contract
         .self_extension
         .structured_field_selector
         .as_deref()
@@ -987,12 +986,8 @@ fn current_delivery_is_terminal_scalar_answer(
     agent_run_context: Option<&AgentRunContext>,
     current: &str,
 ) -> bool {
-    let route = match agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
-        Some(route)
-            if route.output_contract.response_shape == crate::OutputResponseShape::Scalar =>
-        {
-            route
-        }
+    let route = match agent_run_context.and_then(|ctx| ctx.output_contract()) {
+        Some(route) if route.response_shape == crate::OutputResponseShape::Scalar => route,
         _ => return false,
     };
     terminal_scalar_respond_matches_route(route, current)
@@ -1004,9 +999,9 @@ fn latest_terminal_scalar_respond_replacement(
     current: &str,
     requested_summary: &str,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.delivery_required
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
+    if route.response_shape != crate::OutputResponseShape::Scalar
+        || route.delivery_required
         || !machine_field_placeholder_summary(current)
         || !machine_field_placeholder_summary(requested_summary)
     {
@@ -1030,7 +1025,10 @@ fn machine_field_placeholder_summary(value: &str) -> bool {
     )
 }
 
-fn terminal_scalar_respond_matches_route(route: &crate::RouteResult, candidate: &str) -> bool {
+fn terminal_scalar_respond_matches_route(
+    route: &crate::IntentOutputContract,
+    candidate: &str,
+) -> bool {
     let candidate = candidate.trim();
     if candidate.is_empty()
         || candidate
@@ -1210,14 +1208,13 @@ fn service_status_selector_only_summary(
     agent_run_context: Option<&AgentRunContext>,
     current: &str,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_is_service_status_contract(route) {
         return false;
     }
     let Some(selector) = route
-        .output_contract
         .self_extension
         .structured_field_selector
         .as_deref()
@@ -1233,7 +1230,7 @@ fn latest_publishable_service_status_terminal_delivery(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     if !route_is_service_status_contract(route) {
         return None;
     }
@@ -1264,12 +1261,12 @@ fn latest_publishable_service_status_terminal_delivery(
         })
 }
 
-fn route_is_service_status_contract(route: &crate::RouteResult) -> bool {
+fn route_is_service_status_contract(route: &crate::IntentOutputContract) -> bool {
     crate::finalize::route_matches_service_status_output_contract(route)
 }
 
 fn publishable_service_status_terminal_delivery(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     candidate: &str,
 ) -> Option<String> {
     let candidate = candidate.trim();
@@ -1277,7 +1274,6 @@ fn publishable_service_status_terminal_delivery(
         || candidate.starts_with('{')
         || candidate.starts_with('[')
         || route
-            .output_contract
             .self_extension
             .structured_field_selector
             .as_deref()
@@ -1309,17 +1305,17 @@ fn current_delivery_is_richer_than_requested_machine_summary(
     if current_delivery_has_values_for_requested_marker_summary(current, requested_summary) {
         return true;
     }
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if route.output_contract.delivery_required {
+    if route.delivery_required {
         return false;
     }
     if current_delivery_is_publishable_evidence_summary(route, current, requested_summary) {
         return true;
     }
     let preserves_richer_delivery = route
-        .output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
+        .semantic_kind_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         || route_required_machine_evidence_is_present_in_current_delivery(route, current);
     if !preserves_richer_delivery {
         return false;

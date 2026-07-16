@@ -146,11 +146,10 @@ fn latest_file_delivery_observation_treats_missing_path_facts_as_terminal_missin
         .unwrap()];
 
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -260,13 +259,12 @@ async fn finalize_loop_reply_returns_not_found_for_missing_file_delivery() {
     let state = test_state();
     let task = claimed_task("task-missing-file-delivery");
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "definitely_missing_named_file.txt".to_string();
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.requires_content_evidence = true;
+    route.locator_hint = "definitely_missing_named_file.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -322,16 +320,12 @@ async fn finalize_loop_reply_inherits_language_for_missing_file_delivery_path_re
     let state = test_state();
     let task = claimed_task("task-missing-file-delivery-path-reply-language");
     let mut route = scalar_route_result();
-    route.resolved_intent =
-        "继续上一轮请求：把缺失路径对应的文件发给用户，不要贴内容。".to_string();
-    route.wants_file_delivery = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint =
-        "/home/guagua/rustclaw/definitely_missing_named_file.txt".to_string();
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.requires_content_evidence = true;
+    route.locator_hint = "/home/guagua/rustclaw/definitely_missing_named_file.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some("把那个文件发给我，不要贴内容".to_string()),
         user_request: Some("/home/guagua/rustclaw/definitely_missing_named_file.txt".to_string()),
         ..Default::default()
@@ -378,14 +372,12 @@ async fn finalize_loop_reply_returns_not_found_for_wrapped_fs_basic_missing_file
     let state = test_state();
     let task = claimed_task("task-wrapped-missing-file-delivery");
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint =
-        "document/definitely_missing_text_match_case_001.txt".to_string();
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.requires_content_evidence = true;
+    route.locator_hint = "document/definitely_missing_text_match_case_001.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -455,13 +447,12 @@ async fn finalize_loop_reply_returns_not_found_for_run_cmd_not_found_delivery() 
     let state = test_state();
     let task = claimed_task("task-missing-file-delivery-run-cmd");
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "/tmp/definitely-missing.txt".to_string();
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.requires_content_evidence = true;
+    route.locator_hint = "/tmp/definitely-missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -504,13 +495,12 @@ async fn finalize_loop_reply_returns_not_found_for_missing_path_facts_delivery()
     let state = test_state();
     let task = claimed_task("task-missing-file-delivery-path-facts");
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "/tmp/definitely-missing.txt".to_string();
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.requires_content_evidence = true;
+    route.locator_hint = "/tmp/definitely-missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -571,13 +561,12 @@ async fn finalize_loop_reply_keeps_missing_file_delivery_when_synthesis_is_non_t
     let state = test_state();
     let task = claimed_task("task-missing-file-delivery-synthesis");
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "/tmp/definitely-missing.txt".to_string();
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.requires_content_evidence = true;
+    route.locator_hint = "/tmp/definitely-missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

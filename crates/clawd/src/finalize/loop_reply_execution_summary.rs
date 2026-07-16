@@ -26,8 +26,8 @@ pub(super) fn should_attach_execution_summary(
 }
 
 #[cfg(test)]
-pub(super) fn route_requires_content_excerpt_evidence(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::required_evidence_fields_for_route(route)
+pub(super) fn route_requires_content_excerpt_evidence(route: &crate::IntentOutputContract) -> bool {
+    crate::evidence_policy::required_evidence_fields_for_output_contract(route)
         .iter()
         .any(|field| field == "content_excerpt")
 }
@@ -94,7 +94,7 @@ pub(super) fn structured_listing_observation_for_test(value: &serde_json::Value)
 }
 
 pub(super) fn directory_entry_groups_prefers_observed_groups(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
     crate::finalize::route_prefers_grouped_name_list_output(route)
@@ -106,7 +106,7 @@ pub(super) fn directory_entry_groups_prefers_observed_groups(
 }
 
 pub(super) fn latest_grounded_synthesis_for_mixed_listing_contract(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     if !crate::finalize::route_prefers_grouped_name_list_output(route)
@@ -445,7 +445,7 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     agent_run_context: Option<&AgentRunContext>,
     delivery_messages: &[String],
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     let has_publishable_answer = delivery_messages.iter().any(|message| {
@@ -459,8 +459,8 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
         return true;
     }
     if has_publishable_answer
-        && route.output_contract.requires_content_evidence
-        && !route.output_contract_is_unclassified()
+        && route.requires_content_evidence
+        && !route.semantic_kind_is_unclassified()
     {
         return true;
     }
@@ -470,7 +470,7 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     if route_requires_content_excerpt_evidence(route) && has_publishable_answer {
         return true;
     }
-    if route.output_contract.response_shape == crate::OutputResponseShape::Strict
+    if route.response_shape == crate::OutputResponseShape::Strict
         && delivery_messages
             .iter()
             .any(|message| delivery_message_is_json_container(message))
@@ -511,11 +511,11 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     if delivery_matches_grounded_content_answer(loop_state, route, delivery_messages) {
         return true;
     }
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if contract.response_shape != crate::OutputResponseShape::Scalar {
         return false;
     }
-    if !route.output_contract_is_unclassified() {
+    if !route.semantic_kind_is_unclassified() {
         return false;
     }
     delivery_messages.iter().any(|message| {
@@ -526,19 +526,13 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
 
 #[cfg(test)]
 fn delivery_token_contract_suppresses_execution_summary(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery_messages: &[String],
 ) -> bool {
-    let delivery_contract = route.wants_file_delivery
-        || route.output_contract.delivery_required
-        || !matches!(
-            route.output_contract.delivery_intent,
-            crate::OutputDeliveryIntent::None
-        )
-        || matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        );
+    let delivery_contract = route.delivery_required
+        || route.delivery_required
+        || !matches!(route.delivery_intent, crate::OutputDeliveryIntent::None)
+        || matches!(route.response_shape, crate::OutputResponseShape::FileToken);
     delivery_contract && delivery_messages_include_delivery_token(delivery_messages)
 }
 
@@ -560,14 +554,14 @@ fn delivery_messages_have_execution_summary(delivery_messages: &[String]) -> boo
 
 #[cfg(test)]
 fn delivery_keeps_execution_summary_for_context(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     delivery_messages: &[String],
 ) -> bool {
-    if output_contract_requests_exact_delivery(route) || route.output_contract.delivery_required {
+    if output_contract_requests_exact_delivery(route) || route.delivery_required {
         return false;
     }
-    if route.output_contract.response_shape == crate::OutputResponseShape::Strict {
+    if route.response_shape == crate::OutputResponseShape::Strict {
         return false;
     }
     let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
@@ -639,13 +633,13 @@ fn delivery_matches_observed_markdown_heading_delivery(
     agent_run_context: Option<&AgentRunContext>,
     delivery_messages: &[String],
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_allows_observed_markdown_heading_scalar_delivery(route)
-        || route.output_contract.delivery_required
+        || route.delivery_required
         || matches!(
-            route.effective_output_contract_semantic_kind(),
+            route.semantic_kind,
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::FilePaths
@@ -679,11 +673,11 @@ fn delivery_matches_observed_markdown_heading_delivery(
 #[cfg(test)]
 fn delivery_matches_latest_read_range_synthesis(
     loop_state: &LoopState,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery_messages: &[String],
 ) -> bool {
-    if !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
+    if !route.requires_content_evidence
+        || route.delivery_required
         || !latest_publishable_synthesis_step_matches(loop_state)
     {
         return false;
@@ -708,10 +702,10 @@ fn delivery_matches_latest_read_range_synthesis(
 #[cfg(test)]
 fn delivery_matches_latest_structured_scalar_observation(
     loop_state: &LoopState,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery_messages: &[String],
 ) -> bool {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::StructuredKeys) {
+    if !route.semantic_kind_is(crate::OutputSemanticKind::StructuredKeys) {
         return false;
     }
     let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
@@ -724,20 +718,20 @@ fn delivery_matches_latest_structured_scalar_observation(
 #[cfg(test)]
 fn delivery_matches_synthesized_content_answer(
     loop_state: &LoopState,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery_messages: &[String],
 ) -> bool {
-    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+    if !route.requires_content_evidence || route.delivery_required {
         return false;
     }
     if !matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
     ) {
         return false;
     }
     if !matches!(
-        route.effective_output_contract_semantic_kind(),
+        route.semantic_kind,
         crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
     ) {
         return false;
@@ -768,25 +762,24 @@ fn delivery_matches_synthesized_content_answer(
 #[cfg(test)]
 fn delivery_matches_grounded_content_answer(
     loop_state: &LoopState,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery_messages: &[String],
 ) -> bool {
-    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+    if !route.requires_content_evidence || route.delivery_required {
         return false;
     }
     if !matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
     ) {
         return false;
     }
-    if matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::FileToken
-    ) || matches!(
-        route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::RawCommandOutput
-    ) {
+    if matches!(route.response_shape, crate::OutputResponseShape::FileToken)
+        || matches!(
+            route.semantic_kind,
+            crate::OutputSemanticKind::RawCommandOutput
+        )
+    {
         return false;
     }
     if route_requires_evidence_policy_deterministic_final_answer(route) {
@@ -829,10 +822,10 @@ fn delivery_matches_grounded_content_answer(
 #[cfg(test)]
 fn delivery_has_synthesized_answer_result(
     loop_state: &LoopState,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery_messages: &[String],
 ) -> bool {
-    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+    if !route.requires_content_evidence || route.delivery_required {
         return false;
     }
     let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {

@@ -13,7 +13,7 @@ use crate::execution_recipe::{
 };
 use crate::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind, SkillViewsSnapshot,
+    OutputSemanticKind, SkillViewsSnapshot,
 };
 use claw_core::skill_registry::SkillsRegistry;
 use std::sync::{Arc, RwLock};
@@ -1586,30 +1586,17 @@ image_edit_skills = ["legacy_image_edit"]
 fn route_with_contract(
     semantic_kind: OutputSemanticKind,
     locator_kind: OutputLocatorKind,
-) -> RouteResult {
-    RouteResult {
-        resolved_intent: "test".to_string(),
-        needs_clarify: false,
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Low,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        clarify_question: String::new(),
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+) -> IntentOutputContract {
+    IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     }
 }
 
@@ -1650,10 +1637,10 @@ fn planner_contract_selects_grounded_summary_budget() {
     );
 
     assert_eq!(
-        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route.output_contract)),
+        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
         LoopBudgetProfile::GroundedSummary
     );
-    let adjusted = policy.adjusted_for_context(recipe, Some(&route.output_contract));
+    let adjusted = policy.adjusted_for_context(recipe, Some(&route));
     assert_eq!(adjusted.max_rounds, 4);
     assert_eq!(adjusted.max_tool_calls, 16);
     assert_eq!(adjusted.no_progress_limit, 2);
@@ -1668,7 +1655,7 @@ fn planner_contract_budget_does_not_depend_on_legacy_route_trace() {
     );
 
     assert_eq!(
-        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route.output_contract)),
+        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
         LoopBudgetProfile::GroundedSummary
     );
 }
@@ -1681,15 +1668,15 @@ fn workspace_delivery_contract_selects_multi_step_budget() {
         OutputSemanticKind::GeneratedFileDelivery,
         OutputLocatorKind::Filename,
     );
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::FileToken;
 
     assert_eq!(
-        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route.output_contract)),
+        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
         LoopBudgetProfile::MultiStepWorkspace
     );
-    let adjusted = policy.adjusted_for_context(recipe, Some(&route.output_contract));
+    let adjusted = policy.adjusted_for_context(recipe, Some(&route));
     assert_eq!(adjusted.max_rounds, 6);
     assert_eq!(adjusted.max_steps, 56);
     assert_eq!(adjusted.max_tool_calls, 24);

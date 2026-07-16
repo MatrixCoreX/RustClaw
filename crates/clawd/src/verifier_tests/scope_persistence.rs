@@ -8,7 +8,7 @@ fn external_workspace_scope_persisted_target_allows_followup_validation_plan() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("继续修外部工作区里的项目，并验证通过。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -61,7 +61,7 @@ fn greenfield_scope_persisted_creation_allows_followup_validation_plan() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("继续验证刚创建的新项目。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {

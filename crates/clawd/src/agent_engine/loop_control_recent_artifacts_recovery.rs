@@ -87,20 +87,16 @@ fn observed_recent_artifact_inventory(reply: &AskReply) -> Option<RecentArtifact
 }
 
 pub(super) fn recent_artifacts_inventory_observation_can_finalize(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    if !route_allows_recent_artifacts_recovery(&route.output_contract) {
+    if !route_allows_recent_artifacts_recovery(route) {
         return false;
     }
     let Some(mut inventory) = observed_recent_artifact_inventory_from_loop_state(loop_state) else {
         return false;
     };
-    apply_recent_artifact_selector(
-        &route.output_contract,
-        &route.resolved_intent,
-        &mut inventory,
-    );
+    apply_recent_artifact_selector(route, "", &mut inventory);
     !inventory.entries.is_empty()
 }
 

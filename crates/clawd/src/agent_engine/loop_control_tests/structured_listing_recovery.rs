@@ -50,7 +50,7 @@ fn structured_listing_recovery_projects_complete_names_by_kind_for_workspace_sum
     let mut reply =
         AskReply::non_llm("crates and README.md".to_string()).with_task_journal(journal);
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
 
     assert!(try_recover_structured_listing_answer_verifier_gap(
         Some(&answer_contract(&route)),
@@ -114,9 +114,8 @@ fn structured_listing_recovery_accepts_directory_lookup_legacy_delivery_flags_fr
     assert!(excerpt.contains("modified_ts"));
 
     let mut route = route_result(OutputResponseShape::Free);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::DirectoryLookup;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::DirectoryLookup;
     let mut reply =
         AskReply::non_llm("listing was incomplete".to_string()).with_task_journal(journal);
 
@@ -138,9 +137,8 @@ fn structured_listing_recovery_does_not_override_artifact_file_delivery() {
         r#"{"action":"inventory_dir","names_by_kind":{"dirs":["crates"],"files":["README.md"],"other":[]},"path":"."}"#,
     );
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.delivery_required = true;
+    route.delivery_intent = OutputDeliveryIntent::FileSingle;
     let mut reply =
         AskReply::non_llm("FILE delivery still missing".to_string()).with_task_journal(journal);
 
@@ -175,7 +173,7 @@ fn structured_listing_recovery_does_not_override_workspace_summary_with_content_
     let mut reply = AskReply::non_llm("RustClaw is a local agent runtime.".to_string())
         .with_task_journal(journal);
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
 
     assert!(!try_recover_structured_listing_answer_verifier_gap(
         Some(&answer_contract(&route)),

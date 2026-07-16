@@ -6,10 +6,10 @@ use super::route_result;
 #[test]
 fn content_evidence_file_delivery_backfills_read_range_from_journal_excerpt() {
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.requires_content_evidence = true;
+    route.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "deliver config content");
@@ -47,10 +47,10 @@ fn content_evidence_file_delivery_backfills_read_range_from_journal_excerpt() {
 #[test]
 fn content_evidence_file_delivery_backfills_missing_file_token_from_read_range_path() {
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.requires_content_evidence = true;
+    route.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "deliver config content");
@@ -83,9 +83,9 @@ fn content_evidence_file_delivery_backfills_missing_file_token_from_read_range_p
 #[test]
 fn file_delivery_backfills_missing_file_token_from_write_output_path() {
     let mut route = route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "write and deliver json");

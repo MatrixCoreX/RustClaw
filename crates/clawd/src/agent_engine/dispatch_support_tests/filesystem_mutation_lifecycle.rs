@@ -38,7 +38,7 @@ fn filesystem_mutation_lifecycle_structured_answer_combines_all_steps() {
         "removed /home/guagua/rustclaw/tmp/nl_codex_resume_smoke",
     ));
     let ctx = AgentRunContext {
-        route_result: Some(filesystem_mutation_route()),
+        output_contract: Some(filesystem_mutation_route()),
         ..AgentRunContext::default()
     };
 
@@ -109,7 +109,7 @@ fn filesystem_mutation_lifecycle_structured_answer_uses_observed_scratch_steps_f
         r#"{"extra":{"action":"remove_path","path":"tmp/nl_codex_resume_smoke","resolved_path":"tmp/nl_codex_resume_smoke","target_kind":"directory","recursive":true},"text":"removed tmp/nl_codex_resume_smoke"}"#,
     ));
     let ctx = AgentRunContext {
-        route_result: Some(generic_content_route()),
+        output_contract: Some(generic_content_route()),
         ..AgentRunContext::default()
     };
 
@@ -164,7 +164,7 @@ fn kb_filesystem_mutation_structured_answer_keeps_kb_observations_over_readback(
         r#"{"extra":{"action":"stats","status":"ok","namespace":"nl_basic_skill_coverage","stats":{"docs":1,"chunks":1,"file_types":{"md":1}}}}"#,
     ));
     let ctx = AgentRunContext {
-        route_result: Some(filesystem_mutation_route()),
+        output_contract: Some(filesystem_mutation_route()),
         ..AgentRunContext::default()
     };
 
@@ -240,37 +240,23 @@ fn kb_filesystem_mutation_structured_answer_keeps_kb_observations_over_readback(
     assert!(answer.contains("service_notes.md"), "answer: {answer}");
 }
 
-fn filesystem_mutation_route() -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: "scratch filesystem lifecycle".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "filesystem mutation result".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::High,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::FilesystemMutationResult,
-            locator_hint: "tmp/nl_codex_resume_smoke".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+fn filesystem_mutation_route() -> crate::IntentOutputContract {
+    crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::FilesystemMutationResult,
+        locator_hint: "tmp/nl_codex_resume_smoke".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     }
 }
 
-fn generic_content_route() -> crate::RouteResult {
+fn generic_content_route() -> crate::IntentOutputContract {
     let mut route = filesystem_mutation_route();
-    route.route_reason = "generic path content".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = crate::OutputResponseShape::Free;
     route
 }

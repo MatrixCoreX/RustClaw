@@ -77,8 +77,7 @@ use super::{
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
     AgentRuntimeConfig, AppState, ClaimedTask, IntentOutputContract, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult,
-    ScheduleKind, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+    OutputResponseShape, OutputSemanticKind, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
@@ -492,56 +491,43 @@ fn assert_missing_file_delivery_text(text: &str) {
     );
 }
 
-fn scalar_route_result() -> RouteResult {
-    RouteResult {
-        resolved_intent: "extract scalar".to_string(),
-        needs_clarify: false,
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        clarify_question: String::new(),
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Filename,
-            delivery_intent: Default::default(),
-            semantic_kind: Default::default(),
-            locator_hint: "package.json".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+fn scalar_route_result() -> IntentOutputContract {
+    IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Filename,
+        delivery_intent: Default::default(),
+        semantic_kind: Default::default(),
+        locator_hint: "package.json".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     }
 }
 
-fn free_route_result() -> RouteResult {
+fn free_route_result() -> IntentOutputContract {
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = false;
     route
 }
 
 #[test]
 fn finalization_prefers_latest_planner_contract_over_initial_context() {
     let context = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.output_contract = Some(scalar_route_result().output_contract);
+    loop_state.output_contract = Some(scalar_route_result());
 
     let effective = effective_agent_run_context_for_finalization(Some(&context), &loop_state)
         .expect("effective finalization context");
     assert_eq!(
         effective
-            .route_result
+            .output_contract
             .as_ref()
-            .map(|route| route.output_contract.response_shape),
+            .map(|contract| contract.response_shape),
         Some(OutputResponseShape::Scalar)
     );
 }
@@ -592,10 +578,10 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
     let state = test_state();
     let task = claimed_task("task-control-envelope");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
-    let planner_output_contract = route.output_contract.clone();
+    route.semantic_kind = OutputSemanticKind::DocumentHeading;
+    let planner_output_contract = route.clone();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         turn_analysis: Some(crate::turn_context::TurnAnalysis {
             turn_type: Some(crate::turn_context::TurnType::TaskRequest),
             target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -675,7 +661,7 @@ async fn finalize_loop_reply_does_not_attach_control_envelope_without_structured
     let state = test_state();
     let task = claimed_task("task-no-control-envelope");
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -729,9 +715,8 @@ async fn finalize_loop_reply_does_not_attach_control_envelope_from_route_machine
     let state = test_state();
     let task = claimed_task("task-control-envelope-route-token");
     let mut route = scalar_route_result();
-    route.route_reason = "runtime requested control_intent=act machine token".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);

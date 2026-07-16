@@ -10,7 +10,7 @@ pub(super) fn filesystem_mutation_synthesis_reply(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<AskReply> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     let synthesis = valid_publishable_synthesis_output(loop_state)?;
     if !route_accepts_filesystem_mutation_synthesis(route, synthesis) {
         return None;
@@ -52,12 +52,12 @@ pub(super) fn filesystem_mutation_synthesis_reply(
     )
 }
 
-fn route_prefers_status_line_for_filesystem_mutation(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
-        && !route.output_contract.delivery_required
-        && !route.wants_file_delivery
+fn route_prefers_status_line_for_filesystem_mutation(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::FilesystemMutationResult)
+        && !route.delivery_required
+        && !route.delivery_required
         && matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
         )
 }

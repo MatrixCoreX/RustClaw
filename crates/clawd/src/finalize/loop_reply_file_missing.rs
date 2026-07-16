@@ -12,13 +12,10 @@ use super::{
 
 pub(super) fn route_requires_file_token(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .map(|route| {
-            route.output_contract.delivery_required
-                || matches!(
-                    route.output_contract.response_shape,
-                    crate::OutputResponseShape::FileToken
-                )
+            route.delivery_required
+                || matches!(route.response_shape, crate::OutputResponseShape::FileToken)
         })
         .unwrap_or(false)
 }
@@ -27,9 +24,9 @@ pub(super) fn route_requires_compound_content_file_delivery(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            let contract = route.effective_output_contract();
+            let contract = route.clone();
             contract.delivery_required
                 && contract.delivery_intent == crate::OutputDeliveryIntent::FileSingle
                 && contract.requires_content_evidence
@@ -37,21 +34,18 @@ pub(super) fn route_requires_compound_content_file_delivery(
                     contract.response_shape,
                     crate::OutputResponseShape::FileToken
                 )
-                && (route
-                    .output_contract
-                    .semantic_kind
-                    .is_content_excerpt_summary()
-                    || route.output_contract_is_unclassified())
+                && (route.semantic_kind.is_content_excerpt_summary()
+                    || route.semantic_kind_is_unclassified())
         })
 }
 
 pub(super) fn route_allows_file_token_only_fallback(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return true;
     };
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     !(contract.delivery_required && contract.requires_content_evidence)
 }
 
@@ -59,9 +53,9 @@ fn route_allows_compound_content_summary_with_file_token(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            let contract = route.effective_output_contract();
+            let contract = route.clone();
             contract.delivery_required && contract.requires_content_evidence
         })
 }
@@ -152,14 +146,14 @@ fn route_locator_file_token(
     state: &AppState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     if !matches!(
-        route.output_contract.locator_kind,
+        route.locator_kind,
         crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
     ) {
         return None;
     }
-    let hint = route.output_contract.locator_hint.trim();
+    let hint = route.locator_hint.trim();
     if hint.is_empty() {
         return None;
     }
@@ -203,9 +197,9 @@ pub(super) fn generated_delivery_existing_file_content_synthesis_token(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    let contract = route.effective_output_contract();
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::GeneratedFileDelivery)
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
+    let contract = route.clone();
+    if !route.semantic_kind_is(crate::OutputSemanticKind::GeneratedFileDelivery)
         || !contract.delivery_required
         || contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
         || contract.response_shape != crate::OutputResponseShape::FileToken
@@ -410,8 +404,8 @@ pub(super) fn should_return_missing_file_delivery_reply(
 
 fn route_locator_hint(agent_run_context: Option<&AgentRunContext>) -> Option<&str> {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.locator_hint.trim())
+        .and_then(|ctx| ctx.output_contract())
+        .map(|route| route.locator_hint.trim())
         .filter(|value| !value.is_empty())
 }
 
@@ -546,8 +540,11 @@ pub(super) async fn missing_file_delivery_reply_from_loop(
         task,
         user_text,
         agent_run_context
-            .and_then(|ctx| ctx.route_result.as_ref())
-            .map(|route| route.resolved_intent.as_str())
+            .and_then(|ctx| {
+                ctx.original_user_request
+                    .as_deref()
+                    .or(ctx.user_request.as_deref())
+            })
             .unwrap_or(""),
         missing_path.as_deref(),
         &language_hint,

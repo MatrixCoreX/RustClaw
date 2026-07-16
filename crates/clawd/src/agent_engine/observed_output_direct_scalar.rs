@@ -2,7 +2,8 @@ use super::*;
 
 pub(super) fn structured_scalar_candidate(
     state: Option<&AppState>,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
+    request_text: Option<&str>,
     skill: &str,
     body: &str,
     locator_hint: Option<&str>,
@@ -12,7 +13,7 @@ pub(super) fn structured_scalar_candidate(
     prefer_english: bool,
 ) -> Option<String> {
     if skill == "package_manager" {
-        let response_shape = route.map(|route| route.output_contract.response_shape);
+        let response_shape = route.map(|route| route.response_shape);
         return package_manager_summary_candidate(
             state,
             body,
@@ -58,7 +59,7 @@ pub(super) fn structured_scalar_candidate(
                 archive_entry_existence_direct_answer(
                     state,
                     route,
-                    Some(route.resolved_intent.as_str()),
+                    request_text,
                     &summary,
                     auto_locator_path.or(locator_hint),
                     prefer_english,
@@ -99,16 +100,14 @@ pub(super) fn structured_scalar_candidate(
         return db_basic_scalar_candidate(&value);
     }
     if skill == "service_control" {
-        let response_shape = route.map(|route| route.output_contract.response_shape);
+        let response_shape = route.map(|route| route.response_shape);
         let service_status_route = route.is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is(
                 route,
                 crate::OutputSemanticKind::ServiceStatus,
             )
         });
-        if route.is_some_and(|route| {
-            route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        }) {
+        if route.is_some_and(|route| route.response_shape == crate::OutputResponseShape::Scalar) {
             return service_control_status_direct_answer_candidate(&value, response_shape);
         }
         if service_status_route {
@@ -211,7 +210,7 @@ pub(super) fn structured_scalar_candidate(
             }),
         "inventory_dir" => {
             let hidden_count_route = route.is_some_and(|route| {
-                route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+                route.response_shape == crate::OutputResponseShape::Scalar
                     && route_requests_hidden_entries_check(route)
             });
             if hidden_count_route {
@@ -243,9 +242,8 @@ pub(super) fn structured_scalar_candidate(
         "tree_summary" => tree_summary_direct_answer_candidate(state, &value, prefer_english),
         "dir_compare" => dir_compare_direct_answer_candidate(state, &value, prefer_english),
         "extract_field" | "read_field" => {
-            if route.is_some_and(|route| {
-                route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-            }) {
+            if route.is_some_and(|route| route.response_shape != crate::OutputResponseShape::Scalar)
+            {
                 return None;
             }
             if value
@@ -261,8 +259,7 @@ pub(super) fn structured_scalar_candidate(
                             serde_json::Value::Object(_) | serde_json::Value::Array(_)
                         ) {
                             let scalar_contract = route.is_some_and(|route| {
-                                route.output_contract.response_shape
-                                    == crate::OutputResponseShape::Scalar
+                                route.response_shape == crate::OutputResponseShape::Scalar
                             });
                             if !scalar_contract {
                                 return None;
@@ -277,8 +274,7 @@ pub(super) fn structured_scalar_candidate(
                             ));
                         }
                         if route.is_some_and(|route| {
-                            route.output_contract.response_shape
-                                == crate::OutputResponseShape::Scalar
+                            route.response_shape == crate::OutputResponseShape::Scalar
                         }) && json_trimmed_str(&value, "match_strategy")
                             .is_some_and(|strategy| strategy == "array_item_key_path")
                         {
@@ -303,7 +299,7 @@ pub(super) fn structured_scalar_candidate(
                     serde_json::Value::Object(_) | serde_json::Value::Array(_)
                 ) {
                     let scalar_contract = route.is_some_and(|route| {
-                        route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+                        route.response_shape == crate::OutputResponseShape::Scalar
                     });
                     if !scalar_contract {
                         return None;
@@ -337,9 +333,8 @@ pub(super) fn structured_scalar_candidate(
             Some(missing_extract_field_machine_answer(field_path))
         }
         "extract_fields" | "read_fields" => {
-            if route.is_some_and(|route| {
-                route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-            }) {
+            if route.is_some_and(|route| route.response_shape != crate::OutputResponseShape::Scalar)
+            {
                 return None;
             }
             structured_scalar_observation_from_value(&value).map(|observation| observation.text)
@@ -363,14 +358,14 @@ pub(super) fn structured_scalar_candidate(
         "count_inventory" => count_inventory_direct_answer_candidate(
             state,
             value,
-            route.map(|route| route.output_contract.response_shape),
+            route.map(|route| route.response_shape),
             prefer_english,
         ),
         "structured_keys" => structured_keys_direct_answer_candidate(
             state,
             value,
-            route.map(|route| route.resolved_intent.as_str()),
-            route.map(|route| route.output_contract.response_shape),
+            request_text,
+            route.map(|route| route.response_shape),
             prefer_english,
         ),
         _ => None,
@@ -378,13 +373,11 @@ pub(super) fn structured_scalar_candidate(
 }
 
 pub(super) fn market_quote_scalar_candidate(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     value: &serde_json::Value,
 ) -> Option<String> {
     let route = route?;
-    if !route_is_market_quote(route)
-        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-    {
+    if !route_is_market_quote(route) || route.response_shape != crate::OutputResponseShape::Scalar {
         return None;
     }
     let quote = value
@@ -409,10 +402,8 @@ pub(super) fn market_quote_scalar_candidate(
     })
 }
 
-fn route_is_market_quote(route: &crate::RouteResult) -> bool {
-    route
-        .output_contract
-        .semantic_kind_is(crate::OutputSemanticKind::MarketQuote)
+fn route_is_market_quote(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::MarketQuote)
 }
 
 pub(super) fn market_quote_output_has_scalar_price(
@@ -497,7 +488,7 @@ pub(super) fn git_basic_commit_subject_candidate(body: &str) -> Option<String> {
 }
 
 pub(super) fn git_basic_scalar_candidate(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     body: &str,
 ) -> Option<String> {
     if route.is_some_and(|route| {
@@ -523,7 +514,7 @@ pub(super) fn git_basic_scalar_candidate(
 }
 
 pub(super) fn git_basic_current_branch_scalar_candidate(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     body: &str,
 ) -> Option<String> {
     if route.is_some_and(|route| {

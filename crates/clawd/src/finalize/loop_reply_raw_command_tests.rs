@@ -7,10 +7,10 @@ use crate::finalize::raw_command_machine_field_projection_from_journal;
 fn raw_command_chatact_prefers_exact_observed_output_over_planned_extra_content() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -45,11 +45,11 @@ fn raw_command_chatact_prefers_exact_observed_output_over_planned_extra_content(
 fn raw_command_multiline_output_replaces_reordered_synthesis() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -84,11 +84,11 @@ async fn finalize_loop_reply_replaces_drifted_raw_command_short_list_synthesis()
     let state = test_state();
     let task = claimed_task("task-raw-command-short-list-drift");
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let observed =
@@ -125,14 +125,11 @@ async fn finalize_loop_reply_replaces_drifted_raw_command_short_list_synthesis()
 fn raw_command_projection_plan_replaces_drifted_projected_answer() {
     let state = test_state();
     let mut route = free_route_result();
-    route.resolved_intent =
-        "List /home/guagua/rustclaw/scripts in descending name order and return only five names."
-            .to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -175,14 +172,11 @@ fn raw_command_projection_plan_replaces_drifted_projected_answer() {
 fn raw_command_projection_plan_replaces_unprojected_listing_output() {
     let state = test_state();
     let mut route = free_route_result();
-    route.resolved_intent =
-        "List /home/guagua/rustclaw/scripts in descending name order and return only five names."
-            .to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -240,13 +234,13 @@ fn raw_command_redirect_projection_returns_existing_workspace_file_path() {
     let output_path = tmp.path().join("workspace_note.txt");
     fs::write(&output_path, "workspace note").expect("write output file");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.locator_kind = crate::OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let raw_snapshot = format!(
@@ -297,11 +291,10 @@ fn raw_command_redirect_projection_returns_existing_workspace_file_path() {
 fn raw_command_requested_stdout_path_uses_observed_stdout_path_value() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.resolved_intent =
-        "Run pwd and return only exit_code and stdout_path machine fields.".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.self_extension.structured_field_selector = Some("exit_code,stdout_path".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(4);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
@@ -339,10 +332,10 @@ fn raw_command_requested_stdout_path_uses_observed_stdout_path_value() {
 fn raw_command_requested_stdout_uses_observed_stdout_value() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "Run printf and return only exit_code and stdout fields.".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.self_extension.structured_field_selector = Some("exit_code,stdout".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state
@@ -360,11 +353,10 @@ fn raw_command_requested_stdout_uses_observed_stdout_value() {
 fn raw_command_requested_stdout_path_ignores_temp_stdout_file_wrapper() {
     let state = test_state();
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.resolved_intent =
-        "Run pwd and return only exit_code and stdout_path machine fields.".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.self_extension.structured_field_selector = Some("exit_code,stdout_path".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(4);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
@@ -388,11 +380,10 @@ fn raw_command_requested_stdout_path_ignores_temp_stdout_file_wrapper() {
 #[test]
 fn raw_command_journal_projection_prefers_real_stdout_over_wrapper_metadata() {
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.resolved_intent =
-        "Run pwd and return only exit_code and stdout_path machine fields.".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.self_extension.structured_field_selector = Some("exit_code,stdout_path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-raw-command-journal", "ask", "prompt");
     journal
@@ -428,13 +419,12 @@ async fn finalize_loop_reply_keeps_requested_raw_command_machine_fields_exact() 
     let state = test_state();
     let task = claimed_task("task-raw-command-machine-fields-exact");
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.resolved_intent =
-        "Run pwd and return only exit_code and stdout_path machine fields.".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.self_extension.structured_field_selector = Some("exit_code,stdout_path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(4);
@@ -505,13 +495,13 @@ async fn finalize_loop_reply_returns_redirected_file_path_for_scalar_raw_command
         .delivery_messages
         .push(format!("/home/guagua/rustclaw\n{raw_snapshot}"));
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.locator_kind = crate::OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -539,11 +529,11 @@ async fn finalize_loop_reply_returns_redirected_file_path_for_scalar_raw_command
 fn backfill_suppresses_raw_run_cmd_when_plan_declares_projection() {
     let task = claimed_task("task-backfill-raw-projection");
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -583,11 +573,11 @@ fn raw_command_free_contract_keeps_publishable_synthesis_over_raw_projection() {
     loop_state.last_user_visible_respond = Some(raw_df.trim().to_string());
     loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -628,9 +618,9 @@ fn raw_command_projection_collapses_identical_repeated_outputs() {
         .executed_step_results
         .push(ok_step_result("step_2", "run_cmd", "ThinkPad-X1\n"));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
 
     let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
         .expect("raw command projection");
@@ -677,9 +667,9 @@ fn raw_command_projection_uses_latest_contiguous_run_cmd_group() {
         "/home/guagua/rustclaw\nguagua\nThinkPad-X1",
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
 
     let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
         .expect("raw command projection");
@@ -707,11 +697,11 @@ fn raw_command_direct_structured_replacement_keeps_multi_step_projection() {
     loop_state.delivery_messages.push("ThinkPad-X1".to_string());
     loop_state.last_user_visible_respond = Some("ThinkPad-X1".to_string());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;
@@ -756,9 +746,9 @@ fn raw_command_projection_accepts_wrapped_read_range_output() {
         .executed_step_results
         .push(ok_step_result("step_1", "fs_basic", &read_range_output));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
 
     let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
         .expect("read range raw command projection");
@@ -794,11 +784,11 @@ async fn finalize_loop_reply_uses_raw_read_projection_when_delivery_empty() {
         .push(ok_step_result("step_2", "synthesize_answer", synthesis));
     loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -841,11 +831,11 @@ fn direct_structured_observed_answer_accepts_wrapped_raw_read_range() {
         .executed_step_results
         .push(ok_step_result("step_1", "fs_basic", &read_range_output));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -881,11 +871,11 @@ fn raw_read_range_observed_answer_replaces_planned_error_interpretation() {
         .delivery_messages
         .push("planned interpretation of old log error".to_string());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut finalizer_summary = None;

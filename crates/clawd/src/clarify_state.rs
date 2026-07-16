@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use crate::{AppState, ClaimedTask};
 
 const CLARIFY_STATE_TTL_SECS: u64 = 30 * 60;
-const CLARIFY_STATE_RESOLVED_INTENT_MARKER: &str = "[RESOLVED_INTENT]";
 const STRUCTURED_FIELD_SELECTOR_TOKEN_PREFIX: &str = "structured_field_selector=";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,7 +132,7 @@ fn clarify_question_from_answer(answer_text: &str, answer_messages: &[String]) -
 fn derive_clarify_state_for_ask_outcome(
     task_id: &str,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,
@@ -143,11 +142,7 @@ fn derive_clarify_state_for_ask_outcome(
     if !semantic_clarify {
         return None;
     }
-    let pending_question =
-        clarify_question_from_answer(answer_text, answer_messages).or_else(|| {
-            let route_question = route_result.clarify_question.trim();
-            (!route_question.is_empty()).then(|| route_question.to_string())
-        })?;
+    let pending_question = clarify_question_from_answer(answer_text, answer_messages)?;
     let candidate_targets =
         derive_clarify_candidate_targets(fuzzy_locator_suggestions, prior_session_snapshot);
     let now_ts = crate::now_ts_u64();
@@ -157,23 +152,16 @@ fn derive_clarify_state_for_ask_outcome(
         missing_slot,
         pending_question,
         candidate_targets,
-        delivery_required: route_result.wants_file_delivery
-            || route_result.output_contract.delivery_required
+        delivery_required: route_result.delivery_required
             || matches!(
-                route_result.output_contract.response_shape,
+                route_result.response_shape,
                 crate::OutputResponseShape::FileToken
             ),
         output_shape: (!matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::Free
         ))
-        .then(|| {
-            route_result
-                .output_contract
-                .response_shape
-                .as_str()
-                .to_string()
-        }),
+        .then(|| route_result.response_shape.as_str().to_string()),
         semantic_kind,
         source_request: clarify_state_source_request(prompt, route_result),
         source_task_id: task_id.to_string(),
@@ -182,15 +170,12 @@ fn derive_clarify_state_for_ask_outcome(
     })
 }
 
-fn clarify_state_missing_slot(route_result: &crate::RouteResult) -> ClarifyMissingSlot {
-    if route_result.wants_file_delivery
-        || route_result.output_contract.delivery_required
-        || route_result.output_contract.requires_content_evidence
-        || !matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
-        || !route_result.output_contract.locator_hint.trim().is_empty()
+fn clarify_state_missing_slot(route_result: &crate::IntentOutputContract) -> ClarifyMissingSlot {
+    if route_result.delivery_required
+        || route_result.delivery_required
+        || route_result.requires_content_evidence
+        || !matches!(route_result.locator_kind, crate::OutputLocatorKind::None)
+        || !route_result.locator_hint.trim().is_empty()
     {
         ClarifyMissingSlot::Locator
     } else {
@@ -198,18 +183,14 @@ fn clarify_state_missing_slot(route_result: &crate::RouteResult) -> ClarifyMissi
     }
 }
 
-fn clarify_state_source_request(prompt: &str, route_result: &crate::RouteResult) -> String {
-    let source = prompt.trim();
-    let resolved = route_result.resolved_intent.trim();
-    let request = if resolved.is_empty() || resolved == source {
-        source.to_string()
-    } else {
-        format!("{source}\n{CLARIFY_STATE_RESOLVED_INTENT_MARKER}\n{resolved}")
-    };
+fn clarify_state_source_request(
+    prompt: &str,
+    route_result: &crate::IntentOutputContract,
+) -> String {
+    let request = prompt.trim().to_string();
     append_structured_field_selector_token(
         request,
         route_result
-            .output_contract
             .self_extension
             .structured_field_selector
             .as_deref(),
@@ -270,28 +251,19 @@ pub(crate) fn normalize_structured_field_selector_token(raw: &str) -> Option<Str
         .then(|| selector.to_string())
 }
 
-fn clarify_state_semantic_kind(route_result: &crate::RouteResult) -> Option<String> {
-    if !matches!(
-        route_result.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::None
-    ) {
-        return Some(
-            route_result
-                .output_contract
-                .semantic_kind
-                .as_str()
-                .to_string(),
-        );
+fn clarify_state_semantic_kind(route_result: &crate::IntentOutputContract) -> Option<String> {
+    if !matches!(route_result.semantic_kind, crate::OutputSemanticKind::None) {
+        return Some(route_result.semantic_kind.as_str().to_string());
     }
-    let non_content_locator_probe = !route_result.wants_file_delivery
-        && !route_result.output_contract.delivery_required
-        && !route_result.output_contract.requires_content_evidence
+    let non_content_locator_probe = !route_result.delivery_required
+        && !route_result.delivery_required
+        && !route_result.requires_content_evidence
         && matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         )
         && matches!(
-            route_result.output_contract.delivery_intent,
+            route_result.delivery_intent,
             crate::OutputDeliveryIntent::None
         );
     if non_content_locator_probe {
@@ -354,7 +326,7 @@ pub(crate) fn sync_active_clarify_state_from_ask_outcome_tx(
     tx: &rusqlite::Transaction<'_>,
     task: &ClaimedTask,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,

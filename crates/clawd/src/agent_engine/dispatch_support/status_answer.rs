@@ -4,11 +4,11 @@ pub(super) fn agent_loop_rich_content_should_defer_status(
     agent_run_context: Option<&AgentRunContext>,
     loop_state: &LoopState,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|context| context.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|context| context.output_contract()) else {
         return false;
     };
-    route.output_contract.response_shape == crate::OutputResponseShape::Free
-        && !route.output_contract.delivery_required
+    route.response_shape == crate::OutputResponseShape::Free
+        && !route.delivery_required
         && successful_content_observation_count(loop_state) >= 2
 }
 

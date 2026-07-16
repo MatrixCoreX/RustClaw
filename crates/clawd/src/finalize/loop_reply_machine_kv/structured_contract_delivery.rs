@@ -51,11 +51,15 @@ pub(super) fn should_restore_config_guard_payload(
     agent_run_context: Option<&AgentRunContext>,
     requested_summary: &str,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if route.output_contract.delivery_required
-        || !route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary)
+    if route.delivery_required
+        || !route.semantic_kind_is_any(&[
+            crate::OutputSemanticKind::ContentExcerptSummary,
+            crate::OutputSemanticKind::ConfigRiskAssessment,
+            crate::OutputSemanticKind::ConfigValidation,
+        ])
     {
         return false;
     }

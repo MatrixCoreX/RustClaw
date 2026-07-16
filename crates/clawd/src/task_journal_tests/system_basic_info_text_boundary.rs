@@ -5,8 +5,8 @@ fn system_basic_info_evidence_ignores_json_hidden_in_visible_text() {
     let mut journal =
         TaskJournal::for_task("task-system-basic-info-text-boundary", "ask", "show status");
     let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_output_contract(&route.effective_output_contract());
+    route.requires_content_evidence = true;
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -22,8 +22,7 @@ fn system_basic_info_evidence_ignores_json_hidden_in_visible_text() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(
         !coverage
             .observed_extractors
@@ -36,8 +35,8 @@ fn system_basic_info_evidence_ignores_json_hidden_in_visible_text() {
 fn system_basic_info_evidence_accepts_extra_machine_payload() {
     let mut journal = TaskJournal::for_task("task-system-basic-info-extra", "ask", "show status");
     let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_output_contract(&route.effective_output_contract());
+    route.requires_content_evidence = true;
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -60,8 +59,7 @@ fn system_basic_info_evidence_accepts_extra_machine_payload() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(
         coverage

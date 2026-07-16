@@ -42,7 +42,7 @@ impl ServiceStatusFailureObservation {
 }
 
 fn route_is_service_status(agent_run_context: Option<&AgentRunContext>) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     crate::finalize::route_matches_service_control_machine_summary(route)
@@ -69,8 +69,8 @@ fn extract_systemd_unit_from_error(error: &str) -> Option<String> {
 
 fn service_status_target_label(error: &str, agent_run_context: Option<&AgentRunContext>) -> String {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.locator_hint.trim())
+        .and_then(|ctx| ctx.output_contract())
+        .map(|route| route.locator_hint.trim())
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or_else(|| {
@@ -185,8 +185,8 @@ fn content_evidence_failed_step_locator(
     failed_step: &crate::executor::StepExecutionResult,
 ) -> Option<String> {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.locator_hint.trim())
+        .and_then(|ctx| ctx.output_contract())
+        .map(|route| route.locator_hint.trim())
         .filter(|locator| !locator.is_empty())
         .map(ToString::to_string)
         .or_else(|| {
@@ -350,8 +350,8 @@ fn missing_content_target_label(
     error: &str,
 ) -> String {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.locator_hint.trim())
+        .and_then(|ctx| ctx.output_contract())
+        .map(|route| route.locator_hint.trim())
         .filter(|locator| !locator.is_empty())
         .map(ToString::to_string)
         .or_else(|| {
@@ -617,7 +617,7 @@ pub(super) async fn content_evidence_step_failure_reply_from_loop(
         return None;
     }
     if agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(route_prefers_observed_answer)
         && direct_scalar_observed_answer(Some(state), loop_state, agent_run_context).is_some()
     {

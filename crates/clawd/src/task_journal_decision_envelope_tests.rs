@@ -2,24 +2,11 @@ use serde_json::{json, Value};
 
 use super::{TaskJournal, TaskJournalRoundTrace};
 
-fn route_for_round_envelope() -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            ..Default::default()
-        },
+fn route_for_round_envelope() -> crate::IntentOutputContract {
+    crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        ..Default::default()
     }
 }
 
@@ -30,7 +17,7 @@ fn trace_json_includes_round_decision_envelope() {
         goal: "read a field".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
-        output_contract: Some(route.output_contract.clone()),
+        output_contract: Some(route.clone()),
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_capability".to_string(),
@@ -44,7 +31,7 @@ fn trace_json_includes_round_decision_envelope() {
         raw_plan_text: String::new(),
     };
     let mut journal = TaskJournal::for_task("task-round-envelope", "ask", "prompt");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.rounds.push(TaskJournalRoundTrace {
         round_no: 2,
         goal: "read a field".to_string(),

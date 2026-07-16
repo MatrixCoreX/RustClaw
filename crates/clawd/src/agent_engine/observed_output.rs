@@ -213,7 +213,8 @@ const MARKET_QUOTE_SCALAR_SEMANTIC_TAG: &str = "market_quote_scalar";
 
 fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     state: Option<&AppState>,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
+    request_text: Option<&str>,
     loop_state: &LoopState,
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
@@ -259,6 +260,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     let answer = structured_scalar_candidate(
         state,
         route,
+        request_text,
         &observed_output.skill,
         &observed_output.body,
         locator_hint.filter(|hint| !hint.trim().is_empty()),
@@ -271,7 +273,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         allows_normalized_scalar_direct_fallback(
             &observed_output.skill,
             route,
-            route.map(|route| route.output_contract.response_shape),
+            route.map(|route| route.response_shape),
         )
         .then(|| normalized_scalar_candidate(&observed_output.body))
         .flatten()
@@ -285,7 +287,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
 }
 
 fn evidence_policy_checked_direct_candidate(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
     answer: String,
@@ -324,14 +326,14 @@ fn evidence_policy_checked_direct_candidate(
 }
 
 fn hidden_entries_empty_direct_candidate_satisfies_contract(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
     if !output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::HiddenEntriesCheck,
-    ) || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+    ) || route.response_shape != crate::OutputResponseShape::Strict
         || answer.trim().is_empty()
         || crate::finalize::looks_like_planner_artifact(answer)
         || crate::finalize::looks_like_internal_trace_artifact(answer)
@@ -342,14 +344,14 @@ fn hidden_entries_empty_direct_candidate_satisfies_contract(
 }
 
 fn hidden_entries_direct_candidate_satisfies_contract(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
     if !output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::HiddenEntriesCheck,
-    ) || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+    ) || route.response_shape != crate::OutputResponseShape::Strict
         || crate::finalize::looks_like_planner_artifact(answer)
         || crate::finalize::looks_like_internal_trace_artifact(answer)
     {
@@ -372,14 +374,14 @@ fn hidden_entries_direct_candidate_satisfies_contract(
 }
 
 fn system_basic_scalar_path_candidate_satisfies_contract(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
     if !output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::ScalarPathOnly,
-    ) || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+    ) || route.response_shape != crate::OutputResponseShape::Scalar
     {
         return false;
     }
@@ -402,9 +404,8 @@ fn system_basic_scalar_path_candidate_satisfies_contract(
     })
 }
 
-fn hidden_entries_contract_limit(route: &crate::RouteResult) -> usize {
+fn hidden_entries_contract_limit(route: &crate::IntentOutputContract) -> usize {
     route
-        .output_contract
         .self_extension
         .list_selector
         .limit
@@ -414,34 +415,33 @@ fn hidden_entries_contract_limit(route: &crate::RouteResult) -> usize {
         .min(8)
 }
 
-fn route_requires_evidence_policy_grounded_direct_candidate(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requires_evidence_policy_grounded_direct_candidate(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         .is_some_and(|shape| !shape.allows_model_language())
 }
 
 fn route_requires_evidence_policy_grounding_for_direct_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
     route_requires_evidence_policy_grounded_direct_candidate(route)
 }
 
-fn route_allows_model_language_direct_candidate(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_allows_model_language_direct_candidate(route: &crate::IntentOutputContract) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
 fn evidence_policy_direct_candidate_satisfies_contract(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
     candidate: &str,
 ) -> bool {
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "observed-output-direct-candidate",
-        "ask",
-        route.resolved_intent.as_str(),
-    );
-    journal.record_output_contract(&route.effective_output_contract());
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("observed-output-direct-candidate", "ask", "");
+    journal.record_output_contract(&route.clone());
     for step in &loop_state.executed_step_results {
         journal.push_step_result(step);
     }
@@ -466,10 +466,7 @@ fn evidence_policy_direct_candidate_satisfies_contract(
             finished_at: 0,
         });
     }
-    let answer_contract = crate::answer_verifier::AnswerContract::new(
-        &route.resolved_intent,
-        route.output_contract.clone(),
-    );
+    let answer_contract = crate::answer_verifier::AnswerContract::new("", route.clone());
     crate::answer_verifier::structurally_satisfies_answer_contract(
         &answer_contract,
         &journal,
@@ -478,7 +475,7 @@ fn evidence_policy_direct_candidate_satisfies_contract(
 }
 
 fn latest_observation_lacks_required_content_evidence(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
     if !route_uses_enforced_generic_path_content_profile(route) {
@@ -501,14 +498,10 @@ fn latest_observation_lacks_required_content_evidence(
         .as_deref()
         .and_then(|body| serde_json::from_str::<serde_json::Value>(body.trim()).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    crate::evidence_policy::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        &step.skill,
-        &args,
-    )
-    .is_some_and(|policy| {
-        policy.decision == crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
-    })
+    crate::evidence_policy::action_policy_for_output_contract(Some(route), &step.skill, &args)
+        .is_some_and(|policy| {
+            policy.decision == crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
+        })
 }
 
 fn step_provides_path_content_evidence(step: &crate::executor::StepExecutionResult) -> bool {
@@ -551,13 +544,13 @@ fn step_provides_path_content_evidence(step: &crate::executor::StepExecutionResu
     }
 }
 
-fn route_uses_enforced_generic_path_content_profile(route: &crate::RouteResult) -> bool {
+fn route_uses_enforced_generic_path_content_profile(route: &crate::IntentOutputContract) -> bool {
     output_route_policy::route_is_unclassified_contract(route)
-        && route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
-        && route.output_contract.response_shape == crate::OutputResponseShape::Free
+        && route.requires_content_evidence
+        && !route.delivery_required
+        && route.response_shape == crate::OutputResponseShape::Free
         && matches!(
-            route.output_contract.locator_kind,
+            route.locator_kind,
             crate::OutputLocatorKind::Path
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::CurrentWorkspace
@@ -575,6 +568,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_with_locator_hint(
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         None,
         None,
+        None,
         loop_state,
         locator_hint,
         auto_locator_path,
@@ -588,7 +582,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract());
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
@@ -604,7 +598,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
     ) {
         return None;
     }
-    if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+    if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
         if let Some(answer) =
             structured_scalar_equality_direct_answer(None, route, loop_state, agent_run_context)
         {
@@ -645,10 +639,11 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
             );
         }
     }
-    let locator_hint = route.map(|route| route.output_contract.locator_hint.as_str());
+    let locator_hint = route.map(|route| route.locator_hint.as_str());
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         None,
         route,
+        current_turn_request_text(route, agent_run_context),
         loop_state,
         locator_hint,
         auto_locator_path,
@@ -663,7 +658,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
     state: &AppState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract());
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
@@ -675,7 +670,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
         observed_request_prefers_english_template(Some(state), request_language_hint);
     let allow_localized_direct_template =
         observed_language_supports_bilingual_template(request_language_hint);
-    if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+    if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
         if let Some(answer) = structured_scalar_equality_direct_answer(
             Some(state),
             route,
@@ -721,10 +716,11 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
             );
         }
     }
-    let locator_hint = route.map(|route| route.output_contract.locator_hint.as_str());
+    let locator_hint = route.map(|route| route.locator_hint.as_str());
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         Some(state),
         route,
+        current_turn_request_text(route, agent_run_context),
         loop_state,
         locator_hint,
         auto_locator_path,
@@ -753,24 +749,24 @@ fn replace_internal_missing_sentinel_with_structured_observation(
 }
 
 fn observed_contract_json(agent_run_context: Option<&AgentRunContext>) -> String {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return "{}".to_string();
     };
     let direct_observation_passthrough_allowed =
         !route_disallows_direct_observation_passthrough(route);
-    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_output_contract(route);
     serde_json::json!({
-        "response_shape": route.output_contract.response_shape.as_str(),
+        "response_shape": route.response_shape.as_str(),
         "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
         "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
-        "exact_sentence_count": route.output_contract.exact_sentence_count,
-        "requires_content_evidence": route.output_contract.requires_content_evidence,
-        "delivery_required": route.output_contract.delivery_required,
+        "exact_sentence_count": route.exact_sentence_count,
+        "requires_content_evidence": route.requires_content_evidence,
+        "delivery_required": route.delivery_required,
         "direct_observation_passthrough_allowed": direct_observation_passthrough_allowed,
-        "locator_kind": route.output_contract.locator_kind.as_str(),
-        "delivery_intent": route.output_contract.delivery_intent.as_str(),
-        "locator_hint": route.output_contract.locator_hint,
-        "needs_clarify": route.needs_clarify,
+        "locator_kind": route.locator_kind.as_str(),
+        "delivery_intent": route.delivery_intent.as_str(),
+        "locator_hint": route.locator_hint,
+        "needs_clarify": false,
     })
     .to_string()
 }
@@ -794,16 +790,16 @@ fn observed_answer_fallback_can_use_compact_prompt(
     if observed_block.len() > MAX_COMPACT_OBSERVED_BLOCK_BYTES {
         return false;
     }
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if route.output_contract.delivery_required
-        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
-        || route.output_contract.response_shape == crate::OutputResponseShape::FileToken
+    if route.delivery_required
+        || route.delivery_intent != crate::OutputDeliveryIntent::None
+        || route.response_shape == crate::OutputResponseShape::FileToken
     {
         return false;
     }
-    crate::evidence_policy::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         .is_some_and(observed_answer_fallback_shape_can_use_compact_prompt)
         || observed_answer_fallback_capability_ref_can_use_compact_prompt(route)
 }
@@ -842,9 +838,9 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
 }
 
 fn observed_answer_fallback_capability_ref_can_use_compact_prompt(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
-    route.output_contract.semantic_kind_is_any(&[
+    route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::DockerPs,
         crate::OutputSemanticKind::DockerImages,
         crate::OutputSemanticKind::DockerLogs,
@@ -854,12 +850,12 @@ fn observed_answer_fallback_capability_ref_can_use_compact_prompt(
 }
 
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {
-    agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.resolved_intent.trim())
-        .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| user_text.trim())
-        .to_string()
+    current_turn_request_text(
+        agent_run_context.and_then(AgentRunContext::output_contract),
+        agent_run_context,
+    )
+    .unwrap_or_else(|| user_text.trim())
+    .to_string()
 }
 
 pub(crate) async fn try_synthesize_answer_from_observed_output(
@@ -905,13 +901,13 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     let mut observed_entries = observed_output_entries(loop_state);
     if let Some(guard) = execution_failed_step_guard_entry(
         loop_state,
-        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+        agent_run_context.and_then(|ctx| ctx.output_contract()),
     ) {
         observed_entries = vec![guard];
     } else {
         if let Some(guard) = multi_count_quantity_comparison_guard_entry(
             loop_state,
-            agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+            agent_run_context.and_then(|ctx| ctx.output_contract()),
         ) {
             observed_entries.insert(0, guard);
         }
@@ -920,13 +916,13 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         }
         if let Some(git_facts) = git_repository_state_facts_entry(
             loop_state,
-            agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+            agent_run_context.and_then(|ctx| ctx.output_contract()),
         ) {
             observed_entries.insert(0, git_facts);
         }
         if let Some(guard) = compound_listing_content_delivery_guard_entry(
             loop_state,
-            agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+            agent_run_context.and_then(|ctx| ctx.output_contract()),
         ) {
             observed_entries.insert(0, guard);
         }
@@ -1046,7 +1042,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     }
     if let Some(diagnostic) = scalar_count_diagnostic_line_for_answer(
         &answer,
-        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+        agent_run_context.and_then(|ctx| ctx.output_contract()),
         loop_state,
     ) {
         tracing::info!(
@@ -1057,7 +1053,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         answer = scalar_count_diagnostic_machine_answer(&diagnostic);
     }
     let direct_passthrough_disallowed = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(route_disallows_direct_observation_passthrough)
         && (answer_matches_observed_output_passthrough(&answer, loop_state)
             || answer_is_git_repository_state_machine_summary(&answer));
@@ -1069,7 +1065,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         );
         answer.clear();
     }
-    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let route_result = agent_run_context.and_then(|ctx| ctx.output_contract());
     let language_compatible = observed_answer_language_compatible_for_route(
         route_result,
         loop_state,
@@ -1149,13 +1145,13 @@ fn strict_raw_tail_read_observed_answer(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|context| context.output_contract())?;
     if !output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::RawCommandOutput,
-    ) || route.output_contract.response_shape != crate::OutputResponseShape::Strict
-        || !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
+    ) || route.response_shape != crate::OutputResponseShape::Strict
+        || !route.requires_content_evidence
+        || route.delivery_required
     {
         return None;
     }

@@ -40,7 +40,7 @@ fn planner_context_keeps_raw_request_without_pre_planner_route() {
         Some("raw request")
     );
     assert_eq!(context.user_request.as_deref(), Some("raw request"));
-    assert!(context.route_result.is_none());
+    assert!(context.output_contract.is_none());
     assert!(context.turn_analysis.is_none());
     assert!(context.auto_locator_path.is_none());
 }
