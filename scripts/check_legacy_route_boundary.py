@@ -174,6 +174,31 @@ def scan_agent_loop_machine_guard_boundary_text(rel_path: str, text: str) -> lis
     return findings
 
 
+def scan_task_journal_direct_contract_boundary_text(rel_path: str, text: str) -> list[Finding]:
+    journal_files = {
+        "crates/clawd/src/task_journal.rs",
+        "crates/clawd/src/task_journal/summary_trace.rs",
+        "crates/clawd/src/task_journal_decision_envelope.rs",
+        "crates/clawd/src/task_journal_evidence_coverage.rs",
+        "crates/clawd/src/task_journal_goal.rs",
+    }
+    if rel_path not in journal_files:
+        return []
+    findings: list[Finding] = []
+    pattern = re.compile(r"\bRouteResult\b|\broute_result\b|\broute_reason\b|for_route\b")
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if pattern.search(line):
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "task_journal_route_dependency",
+                    line.strip(),
+                )
+            )
+    return findings
+
+
 def line_number_for_offset(text: str, offset: int) -> int:
     return text.count("\n", 0, max(offset, 0)) + 1
 
@@ -247,6 +272,12 @@ def scan_repo() -> list[Finding]:
                 path.read_text(encoding="utf-8"),
             )
         )
+        findings.extend(
+            scan_task_journal_direct_contract_boundary_text(
+                rel_path,
+                path.read_text(encoding="utf-8"),
+            )
+        )
     output_types = SOURCE_ROOT / "turn_boundary_envelope.rs"
     findings.extend(
         scan_boundary_envelope_type_contract_text(
@@ -292,6 +323,10 @@ def run_self_test() -> int:
     assert scan_text(
         "crates/clawd/src/ask_flow.rs",
         "let label = route.route_label();",
+    )
+    assert scan_task_journal_direct_contract_boundary_text(
+        "crates/clawd/src/task_journal.rs",
+        "fn record_route_result(route: &RouteResult) {}",
     )
     assert scan_text(
         "crates/clawd/src/intent_router_normalizer_run.rs",

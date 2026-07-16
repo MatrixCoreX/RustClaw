@@ -929,9 +929,6 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
     {
         return None;
     }
-    if archive_pack_has_later_terminal_respond(loop_state) {
-        return None;
-    }
     for step in loop_state.executed_step_results.iter().rev() {
         if !step.is_ok()
             || matches!(
@@ -955,50 +952,6 @@ fn route_requests_archive_pack(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
         || crate::evidence_policy::final_answer_shape_for_route(route)
             == Some(crate::evidence_policy::FinalAnswerShape::CreatedArchivePath)
-}
-
-fn archive_pack_has_later_terminal_respond(loop_state: &LoopState) -> bool {
-    let mut saw_archive_pack_observation = false;
-    for step in loop_state.executed_step_results.iter().rev() {
-        if !step.is_ok() {
-            continue;
-        }
-        match step.skill.as_str() {
-            "respond" => {
-                if !saw_archive_pack_observation {
-                    return true;
-                }
-            }
-            "archive_basic" => {
-                if step
-                    .output
-                    .as_deref()
-                    .and_then(archive_pack_archive_path_from_observed_body)
-                    .is_some()
-                {
-                    saw_archive_pack_observation = true;
-                }
-            }
-            "synthesize_answer" | "think" => {}
-            _ => {}
-        }
-    }
-    false
-}
-
-fn archive_pack_archive_path_from_observed_body(body: &str) -> Option<String> {
-    let parsed: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
-    let extra = parsed.get("extra")?;
-    let action = extra.get("action").and_then(serde_json::Value::as_str)?;
-    if action.trim() != "pack" {
-        return None;
-    }
-    extra
-        .get("archive")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| archive_output_path_candidate(value))
-        .map(ToOwned::to_owned)
 }
 
 fn created_archive_path_from_observed_body(body: &str) -> Option<String> {

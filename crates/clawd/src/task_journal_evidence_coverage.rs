@@ -36,27 +36,27 @@ impl TaskJournalEvidenceCoverage {
     }
 }
 
-pub(crate) fn evidence_coverage_for_route(
-    route: &crate::RouteResult,
+pub(crate) fn evidence_coverage_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
     journal: &TaskJournal,
 ) -> TaskJournalEvidenceCoverage {
     let action_override = successful_action_required_evidence_override(journal);
-    let required_evidence = action_override
-        .clone()
-        .unwrap_or_else(|| crate::evidence_policy::required_evidence_fields_for_route(route));
+    let required_evidence = action_override.clone().unwrap_or_else(|| {
+        crate::evidence_policy::required_evidence_fields_for_output_contract(output_contract)
+    });
     let (observed_fields, mut observed_canonical, observed_extractors, observed_evidence_sources) =
         observed_evidence_field_sets(journal);
-    augment_route_canonical_evidence(
-        route,
+    augment_output_contract_canonical_evidence(
+        output_contract,
+        &required_evidence,
         &observed_fields,
         &observed_extractors,
         &mut observed_canonical,
     );
-    let effective_output_contract = route.effective_output_contract();
     let evidence_expression = if action_override.is_some() {
         None
     } else {
-        crate::evidence_policy::evidence_expression_for_output_contract(&effective_output_contract)
+        crate::evidence_policy::evidence_expression_for_output_contract(output_contract)
     };
     let missing_evidence = evidence_expression
         .as_ref()
@@ -64,7 +64,7 @@ pub(crate) fn evidence_coverage_for_route(
         .map(|expression| missing_evidence_for_expression(expression, &observed_canonical))
         .unwrap_or_else(|| missing_required_evidence(&required_evidence, &observed_canonical));
     let confidence = evidence_coverage_confidence(&required_evidence, &missing_evidence);
-    let repair_eligible = evidence_coverage_repair_eligible(route, &missing_evidence);
+    let repair_eligible = evidence_coverage_repair_eligible(output_contract, &missing_evidence);
     let source_refs = source_refs_from_observed_sources(&observed_evidence_sources);
     TaskJournalEvidenceCoverage {
         required_evidence,
@@ -178,10 +178,10 @@ pub(super) fn evidence_coverage_confidence(
 }
 
 pub(super) fn evidence_coverage_repair_eligible(
-    route: &crate::RouteResult,
+    output_contract: &crate::IntentOutputContract,
     missing_evidence: &[String],
 ) -> bool {
-    !missing_evidence.is_empty() && !route.output_contract.delivery_required
+    !missing_evidence.is_empty() && !output_contract.delivery_required
 }
 
 pub(super) fn observed_evidence_sources_trace_json(
@@ -264,17 +264,17 @@ fn evidence_expression_has_requirements(
 }
 
 pub(super) fn evidence_coverage_trace_json(
-    route: &crate::RouteResult,
+    output_contract: &crate::IntentOutputContract,
     journal: &TaskJournal,
 ) -> Value {
-    evidence_coverage_for_route(route, journal).to_trace_json()
+    evidence_coverage_for_output_contract(output_contract, journal).to_trace_json()
 }
 
 pub(super) fn task_outcome_summary_json(journal: &TaskJournal) -> Value {
     let final_shape = journal
-        .route_result
+        .output_contract
         .as_ref()
-        .and_then(crate::evidence_policy::trace_snapshot_for_route)
+        .and_then(crate::evidence_policy::trace_snapshot_for_output_contract)
         .and_then(|snapshot| {
             snapshot
                 .get("final_answer_shape")
@@ -282,9 +282,9 @@ pub(super) fn task_outcome_summary_json(journal: &TaskJournal) -> Value {
                 .map(ToString::to_string)
         });
     let missing_evidence = journal
-        .route_result
+        .output_contract
         .as_ref()
-        .map(|route| evidence_coverage_for_route(route, journal).missing_evidence)
+        .map(|contract| evidence_coverage_for_output_contract(contract, journal).missing_evidence)
         .unwrap_or_default();
     let missing_count = missing_evidence.len();
     let state = match journal.final_status {
@@ -336,7 +336,7 @@ pub(super) fn observed_evidence_field_sets(
     let mut observed_extractors = BTreeSet::new();
     let mut observed_evidence_sources = BTreeMap::<String, BTreeSet<String>>::new();
     for step in &journal.step_results {
-        if !step_can_supply_contract_evidence(step, journal.route_result.as_ref()) {
+        if !step_can_supply_contract_evidence(step, journal.output_contract.as_ref()) {
             continue;
         }
         let Some(evidence) = observed_evidence_for_step_trace(step) else {
@@ -415,13 +415,22 @@ fn ingest_observed_evidence_value(
     }
 }
 
-pub(super) fn augment_route_canonical_evidence(
-    route: &crate::RouteResult,
+pub(super) fn augment_output_contract_canonical_evidence(
+    output_contract: &crate::IntentOutputContract,
+    required_evidence: &[String],
     observed_fields: &BTreeSet<String>,
     observed_extractors: &BTreeSet<String>,
     observed_canonical: &mut BTreeSet<String>,
 ) {
-    if route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation) {
+    for required in required_evidence {
+        if observed_extractors
+            .iter()
+            .any(|extractor_ref| explicit_text_extractor_provides(extractor_ref, required))
+        {
+            observed_canonical.insert(required.clone());
+        }
+    }
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ConfigMutation) {
         if observed_field_present(observed_fields, "valid")
             || observed_field_present(observed_fields, "validated")
             || config_mutation_plan_fields_present(observed_fields)
@@ -430,12 +439,12 @@ pub(super) fn augment_route_canonical_evidence(
             observed_canonical.insert("valid".to_string());
         }
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison)
         && observed_canonical.contains("size_bytes")
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract_marker_is_any(&[
+    if output_contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::GitCommitSubject,
         crate::OutputSemanticKind::GitRepositoryState,
     ]) && (observed_canonical.contains("command_output")
@@ -444,7 +453,7 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
         && (observed_canonical.contains("content_excerpt")
             || observed_canonical.contains("field_value")
             || observed_fields.contains("excerpt")
@@ -452,7 +461,7 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("command_output".to_string());
     }
-    if route.output_contract_marker_is_any(&[
+    if output_contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::FileNames,
         crate::OutputSemanticKind::FilePaths,
     ]) && observed_canonical.contains("content_match")
@@ -460,7 +469,7 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("candidates".to_string());
     }
-    if route.output_contract_marker_is_any(&[
+    if output_contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ScalarPathOnly,
         crate::OutputSemanticKind::FileBasename,
     ]) && (observed_canonical.contains("path")
@@ -470,7 +479,7 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         && (observed_canonical.contains("content_excerpt")
             || observed_canonical.contains("content_match")
             || observed_fields.contains("excerpt")
@@ -478,40 +487,36 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarCount)
         && (observed_canonical.contains("value") || observed_canonical.contains("field_value"))
     {
         observed_canonical.insert("count".to_string());
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::StructuredKeys)
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::StructuredKeys)
         && (observed_canonical.contains("keys")
             || observed_field_with_prefix(observed_fields, "keys["))
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-        && route.output_contract.requires_content_evidence
+    if output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && output_contract.requires_content_evidence
         && current_workspace_inventory_fields_present(observed_fields, observed_canonical)
     {
         observed_canonical.insert("field_value".to_string());
     }
-    let docker_route_shape =
-        route_has_docker_answer_shape(route) || route_has_unshaped_docker_compat_marker(route);
+    let docker_contract_shape = output_contract_has_docker_answer_shape(output_contract);
     let observed_textual_runtime_output = observed_canonical.contains("command_output")
         || observed_canonical.contains("content_excerpt")
         || observed_fields.contains("text_excerpt");
-    if docker_route_shape && observed_textual_runtime_output {
-        if route_has_docker_field_value_answer_shape(route)
-            || route_has_unshaped_docker_field_value_compat_marker(route)
-        {
+    if docker_contract_shape && observed_textual_runtime_output {
+        if output_contract_has_docker_field_value_answer_shape(output_contract) {
             observed_canonical.insert("field_value".to_string());
-        } else if route_has_docker_candidate_answer_shape(route) {
+        } else if output_contract_has_docker_candidate_answer_shape(output_contract) {
             observed_canonical.insert("candidates".to_string());
         }
     }
-    if (route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        || route_has_service_status_answer_shape(route)
-        || route_has_unshaped_service_status_compat_marker(route))
+    if (output_contract.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
+        || output_contract_has_service_status_answer_shape(output_contract))
         && (observed_canonical.contains("status")
             || observed_canonical.contains("command_output")
             || observed_canonical.contains("content_excerpt")
@@ -519,27 +524,27 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if (route.output_contract_marker_is_any(&[
+    if output_contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
-    ]) || route_has_browser_http_excerpt_capability_marker(route))
-        && http_response_body_fields_present(observed_fields)
+    ]) && http_response_body_fields_present(observed_fields)
     {
         observed_canonical.insert("content_excerpt".to_string());
     }
-    if crate::machine_capability_ref::route_has_capability_namespace(route, &["x"])
-        && (observed_canonical.contains("command_output")
-            || observed_canonical.contains("content_excerpt")
-            || observed_fields.contains("text_excerpt"))
-    {
-        observed_canonical.insert("field_value".to_string());
-    }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::SqliteDatabaseKindJudgment)
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::SqliteDatabaseKindJudgment)
         && (observed_canonical.contains("candidates")
             || observed_fields.contains("rows")
             || observed_fields.contains("columns"))
     {
         observed_canonical.insert("field_value".to_string());
+    }
+    if output_contract.semantic_kind_is_any(&[
+        crate::OutputSemanticKind::SqliteTableListing,
+        crate::OutputSemanticKind::SqliteTableNamesOnly,
+    ]) && observed_fields.contains("rows")
+        && observed_fields.contains("columns")
+    {
+        observed_canonical.insert("candidates".to_string());
     }
 }
 
@@ -564,27 +569,31 @@ fn current_workspace_inventory_fields_present(
             || observed_field_with_prefix(observed_fields, "extra.counts."))
 }
 
-fn route_final_answer_shape(
-    route: &crate::RouteResult,
+fn output_contract_final_answer_shape(
+    output_contract: &crate::IntentOutputContract,
 ) -> Option<crate::evidence_policy::FinalAnswerShape> {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_output_contract(output_contract)
 }
 
-fn route_has_docker_answer_shape(route: &crate::RouteResult) -> bool {
-    route_has_docker_field_value_answer_shape(route)
-        || route_has_docker_candidate_answer_shape(route)
+fn output_contract_has_docker_answer_shape(output_contract: &crate::IntentOutputContract) -> bool {
+    output_contract_has_docker_field_value_answer_shape(output_contract)
+        || output_contract_has_docker_candidate_answer_shape(output_contract)
 }
 
-fn route_has_docker_field_value_answer_shape(route: &crate::RouteResult) -> bool {
+fn output_contract_has_docker_field_value_answer_shape(
+    output_contract: &crate::IntentOutputContract,
+) -> bool {
     matches!(
-        route_final_answer_shape(route),
+        output_contract_final_answer_shape(output_contract),
         Some(crate::evidence_policy::FinalAnswerShape::LifecycleResult)
     )
 }
 
-fn route_has_docker_candidate_answer_shape(route: &crate::RouteResult) -> bool {
+fn output_contract_has_docker_candidate_answer_shape(
+    output_contract: &crate::IntentOutputContract,
+) -> bool {
     matches!(
-        route_final_answer_shape(route),
+        output_contract_final_answer_shape(output_contract),
         Some(
             crate::evidence_policy::FinalAnswerShape::ContainerList
                 | crate::evidence_policy::FinalAnswerShape::ImageList
@@ -593,45 +602,15 @@ fn route_has_docker_candidate_answer_shape(route: &crate::RouteResult) -> bool {
     )
 }
 
-fn route_has_unshaped_docker_compat_marker(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["docker"],
-        &["inspect", "version"],
-    )
-}
-
-fn route_has_unshaped_docker_field_value_compat_marker(route: &crate::RouteResult) -> bool {
-    route_has_unshaped_docker_compat_marker(route)
-}
-
-fn route_has_service_status_answer_shape(route: &crate::RouteResult) -> bool {
+fn output_contract_has_service_status_answer_shape(
+    output_contract: &crate::IntentOutputContract,
+) -> bool {
     matches!(
-        route_final_answer_shape(route),
+        output_contract_final_answer_shape(output_contract),
         Some(
             crate::evidence_policy::FinalAnswerShape::LifecycleResult
                 | crate::evidence_policy::FinalAnswerShape::StatusWithSource
         )
-    )
-}
-
-fn route_has_unshaped_service_status_compat_marker(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["service", "service_control"],
-        &["logs", "verify"],
-    ) || crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["system", "system_basic"],
-        &["runtime_status"],
-    )
-}
-
-fn route_has_browser_http_excerpt_capability_marker(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["browser", "http", "web"],
-        &["extract", "get", "open", "read"],
     )
 }
 
@@ -646,7 +625,7 @@ pub(super) fn normalized_field_leaf(field: &str) -> &str {
 
 pub(super) fn step_can_supply_contract_evidence(
     step: &TaskJournalStepTrace,
-    route: Option<&crate::RouteResult>,
+    output_contract: Option<&crate::IntentOutputContract>,
 ) -> bool {
     if matches!(
         step.skill.as_str(),
@@ -654,10 +633,9 @@ pub(super) fn step_can_supply_contract_evidence(
     ) {
         return false;
     }
-    if let Some(route) = route {
-        if !route.output_contract.requires_content_evidence
-            && !route.output_contract.delivery_required
-            && !route.wants_file_delivery
+    if let Some(output_contract) = output_contract {
+        if !output_contract.requires_content_evidence
+            && !output_contract.delivery_required
             && step_reads_text_content(step)
         {
             return false;
@@ -666,16 +644,15 @@ pub(super) fn step_can_supply_contract_evidence(
     match step.status {
         crate::executor::StepExecutionStatus::Ok => true,
         crate::executor::StepExecutionStatus::Error => {
-            step_error_supplies_negative_contract_evidence(step, route)
+            step_error_supplies_negative_contract_evidence(step, output_contract)
                 || step.skill == "run_cmd"
-                    && route.is_some_and(|route| {
-                        route.output_contract_marker_is(
-                            crate::OutputSemanticKind::ExecutionFailedStep,
-                        ) || crate::evidence_policy::required_evidence_fields_for_output_contract(
-                            &route.effective_output_contract(),
-                        )
-                        .iter()
-                        .any(|field| field == "command_output")
+                    && output_contract.is_some_and(|contract| {
+                        contract.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep)
+                            || crate::evidence_policy::required_evidence_fields_for_output_contract(
+                                contract,
+                            )
+                            .iter()
+                            .any(|field| field == "command_output")
                     })
         }
     }
@@ -683,12 +660,12 @@ pub(super) fn step_can_supply_contract_evidence(
 
 pub(super) fn step_error_supplies_negative_contract_evidence(
     step: &TaskJournalStepTrace,
-    route: Option<&crate::RouteResult>,
+    output_contract: Option<&crate::IntentOutputContract>,
 ) -> bool {
-    let Some(route) = route else {
+    let Some(output_contract) = output_contract else {
         return false;
     };
-    if !route.output_contract_marker_is_any(&[
+    if !output_contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ContentPresenceCheck,
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,

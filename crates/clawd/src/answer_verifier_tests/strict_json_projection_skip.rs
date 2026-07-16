@@ -11,7 +11,7 @@ fn should_verify_answer_skips_journal_grounded_strict_json_code_projection() {
     let answer = r#"{"created_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-code-json", "ask", "create code");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -72,7 +72,7 @@ fn should_verify_answer_skips_post_readback_strict_json_projection_observation()
         "ask",
         "update code",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -134,7 +134,7 @@ fn should_verify_answer_skips_readback_only_local_code_projection_with_validatio
         "ask",
         "inspect code",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -181,7 +181,7 @@ fn should_verify_answer_rejects_unresolved_strict_json_projection_observation() 
         "ask",
         "update code",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -222,7 +222,7 @@ fn should_verify_answer_skips_publishable_code_projection_when_route_shape_is_no
         "ask",
         "create code",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -289,7 +289,7 @@ fn should_verify_answer_keeps_verifier_for_publishable_code_projection_without_r
         "ask",
         "create code",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -328,7 +328,7 @@ fn post_write_content_gap_defers_early_verifier_until_readback_exists() {
         "ask",
         "create code",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -374,7 +374,7 @@ fn post_write_content_gap_ignores_pre_write_readback() {
         "ask",
         "update code",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -436,7 +436,7 @@ fn should_verify_answer_requires_matching_synthesis_for_strict_json_skip() {
         "ask",
         "create code",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(

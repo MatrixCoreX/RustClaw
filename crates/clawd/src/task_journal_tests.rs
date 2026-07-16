@@ -1,10 +1,10 @@
 use serde_json::{json, Value};
 
 use super::{
-    delivery_payload_consistent, evidence_coverage_for_route, observed_evidence_from_output,
-    TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerStage, TaskJournalFinalizerSummary,
-    TaskJournalRolloutAttribution, TaskJournalRoundTrace, TaskJournalStepTrace,
-    TaskJournalVerifyIssue, TaskJournalVerifySummary,
+    delivery_payload_consistent, evidence_coverage_for_output_contract,
+    observed_evidence_from_output, TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerStage,
+    TaskJournalFinalizerSummary, TaskJournalRolloutAttribution, TaskJournalRoundTrace,
+    TaskJournalStepTrace, TaskJournalVerifyIssue, TaskJournalVerifySummary,
 };
 
 #[path = "task_journal_tests/observed_evidence_core_tests.rs"]
@@ -52,30 +52,9 @@ fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteR
 #[test]
 fn summary_json_includes_finalizer_and_task_metrics() {
     let mut journal = TaskJournal::for_task("task-1", "ask", "总结 README");
-    journal.record_route_result(&crate::RouteResult {
-        resolved_intent: "不要用现有技能，先规划一个新能力".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "structured self_extension contract".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            self_extension: crate::SelfExtensionContract {
-                mode: crate::SelfExtensionMode::PermanentExtension,
-                trigger: crate::SelfExtensionTrigger::ExplicitUserRequest,
-                execute_now: true,
-                scalar_count_filter: Default::default(),
-                list_selector: Default::default(),
-                structured_field_selector: None,
-            },
-            ..Default::default()
-        },
+    journal.record_output_contract(&crate::IntentOutputContract {
+        exact_sentence_count: Some(2),
+        ..Default::default()
     });
     journal.record_finalizer_summary(TaskJournalFinalizerSummary {
         stage: Some(TaskJournalFinalizerStage::ObservedGeneric),
@@ -246,54 +225,12 @@ fn summary_json_includes_finalizer_and_task_metrics() {
         .is_some_and(|signals| signals
             .iter()
             .any(|signal| signal.as_str() == Some("prompt_truncation_observed"))));
-    for legacy_field in [
-        "boundary_mode",
-        "route_trace_decision",
-        "route_gate_kind",
-        "initial_gate_ref",
-        "initial_hint_ref",
-        "legacy_first_layer_decision",
-        "legacy_route_label",
-    ] {
-        assert!(
-            summary
-                .get("route_result")
-                .and_then(|v| v.get(legacy_field))
-                .is_none(),
-            "route_result should not expose legacy field `{legacy_field}`"
-        );
-    }
-    assert!(summary
-        .get("route_result")
-        .and_then(|v| v.get("first_layer_decision"))
-        .is_none());
-    assert!(summary
-        .get("route_result")
-        .and_then(|v| v.get("route_label"))
-        .is_none());
+    assert!(summary.get("route_result").is_none());
     assert_eq!(
         summary
-            .get("route_result")
-            .and_then(|v| v.get("self_extension"))
-            .and_then(|v| v.get("mode"))
-            .and_then(Value::as_str),
-        Some("permanent_extension")
-    );
-    assert_eq!(
-        summary
-            .get("route_result")
-            .and_then(|v| v.get("self_extension"))
-            .and_then(|v| v.get("trigger"))
-            .and_then(Value::as_str),
-        Some("explicit_user_request")
-    );
-    assert_eq!(
-        summary
-            .get("route_result")
-            .and_then(|v| v.get("self_extension"))
-            .and_then(|v| v.get("execute_now"))
-            .and_then(Value::as_bool),
-        Some(true)
+            .pointer("/output_contract/exact_sentence_count")
+            .and_then(Value::as_u64),
+        Some(2)
     );
 }
 
@@ -332,7 +269,6 @@ fn summary_json_preserves_task_lifecycle_checkpoint_machine_fields() {
 
 #[test]
 fn agent_loop_decision_envelope_uses_structured_respond_clarify_intent() {
-    let route = route_for_semantic(crate::OutputSemanticKind::None);
     let plan = crate::PlanResult {
         goal: "collect missing locator".to_string(),
         missing_slots: Vec::new(),
@@ -358,8 +294,7 @@ fn agent_loop_decision_envelope_uses_structured_respond_clarify_intent() {
         plan_kind: crate::PlanKind::Single,
         raw_plan_text: String::new(),
     };
-    let envelope =
-        super::decision_envelope::agent_loop_round_plan_decision_envelope_json(&route, &plan);
+    let envelope = super::decision_envelope::agent_loop_round_plan_contract_envelope_json(&plan);
 
     assert_eq!(
         envelope.get("decision").and_then(Value::as_str),
@@ -417,7 +352,6 @@ fn agent_loop_decision_envelope_uses_structured_respond_clarify_intent() {
 
 #[test]
 fn agent_loop_decision_envelope_maps_structured_wait_and_stop_intents() {
-    let route = route_for_semantic(crate::OutputSemanticKind::None);
     let wait_plan = crate::PlanResult {
         goal: "require confirmation".to_string(),
         missing_slots: Vec::new(),
@@ -440,7 +374,7 @@ fn agent_loop_decision_envelope_maps_structured_wait_and_stop_intents() {
         raw_plan_text: String::new(),
     };
     let wait_envelope =
-        super::decision_envelope::agent_loop_round_plan_decision_envelope_json(&route, &wait_plan);
+        super::decision_envelope::agent_loop_round_plan_contract_envelope_json(&wait_plan);
 
     assert_eq!(
         wait_envelope.get("terminal_intent").and_then(Value::as_str),
@@ -479,7 +413,7 @@ fn agent_loop_decision_envelope_maps_structured_wait_and_stop_intents() {
         raw_plan_text: String::new(),
     };
     let stop_envelope =
-        super::decision_envelope::agent_loop_round_plan_decision_envelope_json(&route, &stop_plan);
+        super::decision_envelope::agent_loop_round_plan_contract_envelope_json(&stop_plan);
 
     assert_eq!(
         stop_envelope.get("terminal_intent").and_then(Value::as_str),
@@ -740,7 +674,7 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
         }],
     };
     let mut journal = TaskJournal::for_task("task-round-source", "ask", "inspect");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_rollout_attribution(TaskJournalRolloutAttribution {
         switch_name: "agent_loop_round_context".to_string(),
         event: "round_context_recorded".to_string(),
@@ -1038,7 +972,9 @@ fn trace_json_includes_memory_trace() {
 #[test]
 fn attach_to_result_caps_large_trace_and_preserves_contract_summary_fields() {
     let mut journal = TaskJournal::for_task("task-large-trace", "ask", "列出文件名");
-    journal.record_route_result(&route_for_semantic(crate::OutputSemanticKind::FileNames));
+    journal.record_output_contract(
+        &route_for_semantic(crate::OutputSemanticKind::FileNames).effective_output_contract(),
+    );
     for idx in 0..300 {
         journal.push_task_observation(json!({
             "idx": idx,
@@ -1521,32 +1457,20 @@ fn summary_json_does_not_mark_masked_run_cmd_validation_as_passed() {
 }
 
 #[test]
-fn trace_json_compacts_plan_action_ref_to_contract_action() {
+fn trace_json_preserves_planner_action_ref() {
     let mut journal = TaskJournal::for_task("task-service", "ask", "check service");
-    journal.record_route_result(&crate::RouteResult {
-        resolved_intent: "check clawd service".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            semantic_kind: crate::OutputSemanticKind::ServiceStatus,
-            ..Default::default()
-        },
-    });
+    let output_contract = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: crate::OutputSemanticKind::ServiceStatus,
+        ..Default::default()
+    };
+    journal.record_output_contract(&output_contract);
     let plan = crate::PlanResult {
         goal: "check service".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
-        output_contract: None,
+        output_contract: Some(output_contract),
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_skill".to_string(),
@@ -1570,7 +1494,7 @@ fn trace_json_compacts_plan_action_ref_to_contract_action() {
     let plan_action_ref = trace
         .pointer("/rounds/0/plan_result/steps/0/action_ref")
         .and_then(Value::as_str);
-    assert_eq!(plan_action_ref, Some("process_basic"));
+    assert_eq!(plan_action_ref, Some("process_basic.ps"));
     assert_eq!(
         trace
             .pointer("/rounds/0/plan_result/steps/0/raw_action_ref")
@@ -1581,7 +1505,7 @@ fn trace_json_compacts_plan_action_ref_to_contract_action() {
         trace
             .pointer("/rounds/0/plan_result/steps/0/matrix_action_ref")
             .and_then(Value::as_str),
-        Some("process_basic")
+        Some("process_basic.ps")
     );
 }
 

@@ -120,15 +120,12 @@ fn clarify_task_reply_is_replaced_with_placeholder_for_recent_turn_context() {
         "text": "LOCATOR_CLARIFY_PROMPT",
         "task_journal": {
             "summary": {
-                "final_status": "clarify",
-                "route_result": {
-                    "needs_clarify": true
-                }
+                "final_status": "clarify"
             }
         }
     });
-    // Keep phrase-based fallback matching out of this path; structured
-    // routing metadata should be enough to identify a clarify placeholder.
+    // Keep phrase-based fallback matching out of this path; the terminal
+    // journal status is enough to identify a clarification placeholder.
     let never_fallback = |_: &str| false;
     assert_eq!(
         classify_assistant_context_reply_kind(
@@ -142,15 +139,14 @@ fn clarify_task_reply_is_replaced_with_placeholder_for_recent_turn_context() {
 }
 
 #[test]
-fn legacy_route_gate_alone_does_not_make_recent_reply_clarify_placeholder() {
+fn historical_route_data_does_not_make_recent_reply_clarify_placeholder() {
     let parsed = json!({
         "text": "legacy trace only",
         "task_journal": {
             "summary": {
                 "final_status": "success",
                 "route_result": {
-                    "route_gate_kind": "clarify",
-                    "needs_clarify": false
+                    "needs_clarify": true
                 }
             }
         }

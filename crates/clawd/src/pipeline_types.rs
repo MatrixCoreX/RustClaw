@@ -254,46 +254,6 @@ impl OutputSemanticKind {
             Self::ContentExcerptSummary | Self::ContentExcerptWithSummary
         )
     }
-
-    pub(crate) fn is_registry_capability_bridge(self) -> bool {
-        matches!(
-            self,
-            Self::RssNewsFetch
-                | Self::WebPageSummary
-                | Self::WebSearchSummary
-                | Self::WeatherQuery
-                | Self::MarketQuote
-                | Self::ImageUnderstanding
-                | Self::PhotoOrganization
-                | Self::PublishingPreview
-                | Self::PackageManagerDetection
-                | Self::ToolDiscovery
-                | Self::DockerPs
-                | Self::DockerImages
-                | Self::DockerLogs
-                | Self::DockerContainerLifecycle
-        )
-    }
-
-    pub(crate) fn is_normalizer_schema_capability_bridge(self) -> bool {
-        self.is_registry_capability_bridge()
-            || matches!(
-                self,
-                Self::ConfigValidation
-                    | Self::ConfigMutation
-                    | Self::ConfigRiskAssessment
-                    | Self::GitCommitSubject
-                    | Self::GitRepositoryState
-                    | Self::SqliteTableListing
-                    | Self::SqliteTableNamesOnly
-                    | Self::SqliteDatabaseKindJudgment
-                    | Self::SqliteSchemaVersion
-                    | Self::ArchiveList
-                    | Self::ArchiveRead
-                    | Self::ArchivePack
-                    | Self::ArchiveUnpack
-            )
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -347,25 +347,32 @@ fn contract_matrix_evidence_matches_task_contract_defaults() {
     let matrix = load_workspace_matrix();
 
     for kind in OutputSemanticKind::ALL {
-        if kind.is_normalizer_schema_capability_bridge() {
-            continue;
-        }
         let output_contract = IntentOutputContract {
             semantic_kind: *kind,
             ..IntentOutputContract::default()
         };
-        let expected = fallback_required_evidence_fields_for_output_contract(&output_contract);
+        let fallback = fallback_required_evidence_fields_for_output_contract(&output_contract);
         let actual = matrix
             .semantic_contract(*kind)
             .expect("semantic contract")
             .normalized_required_evidence();
+        let resolved = required_evidence_for_output_contract(&output_contract)
+            .expect("resolved output contract evidence");
 
         assert_eq!(
             actual,
-            expected,
-            "evidence mismatch for semantic `{}`",
+            resolved,
+            "evidence mismatch for `{}`",
             kind.as_str()
         );
+        if !fallback.is_empty() {
+            assert_eq!(
+                actual,
+                fallback,
+                "fallback mismatch for `{}`",
+                kind.as_str()
+            );
+        }
     }
 }
 

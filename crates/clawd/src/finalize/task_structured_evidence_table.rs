@@ -83,7 +83,12 @@ pub(super) fn deterministic_structured_evidence_table_recovery(
     if !verifier_requested_structured_rewrite && !stale_failure_after_verifier_pass {
         return None;
     }
-    if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
+    if !crate::task_journal::evidence_coverage_for_output_contract(
+        &route.effective_output_contract(),
+        journal,
+    )
+    .is_complete()
+    {
         return None;
     }
     structured_evidence_table_from_journal(journal)

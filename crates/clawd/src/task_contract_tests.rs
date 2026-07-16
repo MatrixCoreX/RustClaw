@@ -290,24 +290,120 @@ fn task_contract_capability_ref_requires_exact_machine_token() {
 }
 
 #[test]
-fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_ref() {
-    for semantic_kind in [
-        OutputSemanticKind::WeatherQuery,
-        OutputSemanticKind::PackageManagerDetection,
-        OutputSemanticKind::DockerImages,
-        OutputSemanticKind::ConfigValidation,
-        OutputSemanticKind::ConfigMutation,
-        OutputSemanticKind::ConfigRiskAssessment,
-        OutputSemanticKind::GitCommitSubject,
-        OutputSemanticKind::GitRepositoryState,
-        OutputSemanticKind::SqliteTableListing,
-        OutputSemanticKind::SqliteTableNamesOnly,
-        OutputSemanticKind::SqliteDatabaseKindJudgment,
-        OutputSemanticKind::SqliteSchemaVersion,
-        OutputSemanticKind::ArchiveList,
-        OutputSemanticKind::ArchiveRead,
-        OutputSemanticKind::ArchivePack,
-        OutputSemanticKind::ArchiveUnpack,
+fn task_contract_uses_planner_semantic_matrix_without_capability_ref() {
+    for (semantic_kind, target, operation, delivery_shape, evidence) in [
+        (
+            OutputSemanticKind::WeatherQuery,
+            TaskTargetObject::Web,
+            TaskOperation::Summarize,
+            TaskDeliveryShape::Summary,
+            vec!["content_excerpt"],
+        ),
+        (
+            OutputSemanticKind::PackageManagerDetection,
+            TaskTargetObject::System,
+            TaskOperation::Inspect,
+            TaskDeliveryShape::Summary,
+            vec!["field_value"],
+        ),
+        (
+            OutputSemanticKind::DockerImages,
+            TaskTargetObject::Process,
+            TaskOperation::List,
+            TaskDeliveryShape::List,
+            vec!["candidates"],
+        ),
+        (
+            OutputSemanticKind::ConfigValidation,
+            TaskTargetObject::ConfigKey,
+            TaskOperation::Validate,
+            TaskDeliveryShape::Summary,
+            vec!["valid"],
+        ),
+        (
+            OutputSemanticKind::ConfigMutation,
+            TaskTargetObject::ConfigKey,
+            TaskOperation::Modify,
+            TaskDeliveryShape::Summary,
+            vec!["field_value", "path", "valid"],
+        ),
+        (
+            OutputSemanticKind::ConfigRiskAssessment,
+            TaskTargetObject::ConfigKey,
+            TaskOperation::Validate,
+            TaskDeliveryShape::Summary,
+            vec!["candidates", "count"],
+        ),
+        (
+            OutputSemanticKind::GitCommitSubject,
+            TaskTargetObject::System,
+            TaskOperation::Inspect,
+            TaskDeliveryShape::Raw,
+            vec!["field_value"],
+        ),
+        (
+            OutputSemanticKind::GitRepositoryState,
+            TaskTargetObject::System,
+            TaskOperation::Inspect,
+            TaskDeliveryShape::Summary,
+            vec!["field_value"],
+        ),
+        (
+            OutputSemanticKind::SqliteTableListing,
+            TaskTargetObject::Db,
+            TaskOperation::List,
+            TaskDeliveryShape::List,
+            vec!["candidates"],
+        ),
+        (
+            OutputSemanticKind::SqliteTableNamesOnly,
+            TaskTargetObject::Db,
+            TaskOperation::List,
+            TaskDeliveryShape::List,
+            vec!["candidates"],
+        ),
+        (
+            OutputSemanticKind::SqliteDatabaseKindJudgment,
+            TaskTargetObject::Db,
+            TaskOperation::Inspect,
+            TaskDeliveryShape::Summary,
+            vec!["field_value"],
+        ),
+        (
+            OutputSemanticKind::SqliteSchemaVersion,
+            TaskTargetObject::Db,
+            TaskOperation::Inspect,
+            TaskDeliveryShape::Raw,
+            vec!["field_value"],
+        ),
+        (
+            OutputSemanticKind::ArchiveList,
+            TaskTargetObject::Path,
+            TaskOperation::List,
+            TaskDeliveryShape::List,
+            vec!["candidates"],
+        ),
+        (
+            OutputSemanticKind::ArchiveRead,
+            TaskTargetObject::Path,
+            TaskOperation::Inspect,
+            TaskDeliveryShape::Summary,
+            vec!["content_excerpt"],
+        ),
+        (
+            OutputSemanticKind::ArchivePack,
+            TaskTargetObject::Path,
+            TaskOperation::Write,
+            TaskDeliveryShape::File,
+            vec!["path"],
+        ),
+        (
+            OutputSemanticKind::ArchiveUnpack,
+            TaskTargetObject::Path,
+            TaskOperation::Modify,
+            TaskDeliveryShape::Summary,
+            vec!["path"],
+        ),
     ] {
         let route = route_with_contract(IntentOutputContract {
             response_shape: OutputResponseShape::Strict,
@@ -319,10 +415,13 @@ fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_
 
         let contract = EvidencePolicyContract::from_route_result(&route);
 
-        assert_eq!(contract.target_object, TaskTargetObject::Unknown);
-        assert_eq!(contract.operation, TaskOperation::Inspect);
-        assert_eq!(contract.delivery_shape, TaskDeliveryShape::Raw);
-        assert!(contract.required_evidence_fields.is_empty());
+        assert_eq!(contract.target_object, target, "{semantic_kind:?}");
+        assert_eq!(contract.operation, operation, "{semantic_kind:?}");
+        assert_eq!(contract.delivery_shape, delivery_shape, "{semantic_kind:?}");
+        assert_eq!(
+            contract.required_evidence_fields, evidence,
+            "{semantic_kind:?}"
+        );
     }
 }
 

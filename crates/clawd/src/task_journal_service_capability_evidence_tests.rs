@@ -33,7 +33,7 @@ fn service_status_capability_refs_complete_field_value_evidence_without_semantic
     ] {
         let route = route_with_capability_ref(capability_ref);
         let mut journal = TaskJournal::for_task("task-service-evidence", "ask", capability_ref);
-        journal.record_route_result(&route);
+        journal.record_output_contract(&route.effective_output_contract());
         journal.push_task_observation(json!({
             "observed_evidence": {
                 "extractor": {
@@ -48,7 +48,8 @@ fn service_status_capability_refs_complete_field_value_evidence_without_semantic
             }
         }));
 
-        let coverage = evidence_coverage_for_route(&route, &journal);
+        let coverage =
+            evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
 
         assert!(coverage.is_complete(), "{capability_ref}: {coverage:?}");
         assert!(

@@ -1084,7 +1084,7 @@ mod tests {
             "ask",
             "Check clawd service/process status only; return target, status, manager_type.",
         );
-        journal.record_route_result(&route);
+        journal.record_output_contract(&route.effective_output_contract());
         journal
             .step_results
             .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -1148,7 +1148,7 @@ mod tests {
             "ask",
             &requested_fields,
         );
-        journal.record_route_result(&route);
+        journal.record_output_contract(&route.effective_output_contract());
         journal
             .step_results
             .push(crate::task_journal::TaskJournalStepTrace::ok(

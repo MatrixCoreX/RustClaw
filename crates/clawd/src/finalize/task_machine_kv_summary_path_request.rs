@@ -251,10 +251,6 @@ pub(super) fn task_machine_kv_request_surfaces(
         Some(prompt),
         Some(journal.input_text.as_str()),
         Some(route_result.resolved_intent.as_str()),
-        journal
-            .route_result
-            .as_ref()
-            .map(|route| route.resolved_intent.as_str()),
     ]
     .into_iter()
     .flatten()

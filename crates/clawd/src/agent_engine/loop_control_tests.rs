@@ -115,7 +115,7 @@ fn answer_contract_route_result_prefers_journal_effective_route() {
         "ask",
         "probe service status",
     );
-    journal.record_route_result(&effective_route);
+    journal.record_output_contract(&effective_route.effective_output_contract());
     let reply = AskReply::non_llm("ok".to_string()).with_task_journal(journal);
 
     let selected = answer_contract_route_result_for_reply(Some(&agent_run_context), &reply)
@@ -414,7 +414,7 @@ fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
     route.resolved_intent = "capability_ref=rss.latest_news category=general".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -467,7 +467,7 @@ fn rss_news_passed_verifier_preserves_observed_source_hosts() {
     route.resolved_intent = "capability_ref=rss.latest_news category=general".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: true,
@@ -514,7 +514,7 @@ fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() 
     let mut route = route_result(OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -579,7 +579,7 @@ fn workspace_project_summary_verifier_exhaustion_recovers_with_synthesis_output(
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-workspace", "ask", "prompt");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -628,7 +628,7 @@ fn workspace_project_summary_verifier_exhaustion_does_not_recover_unsupported_cl
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-workspace", "ask", "prompt");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -667,7 +667,7 @@ fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_exce
     let route = route_result(OutputResponseShape::Free);
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-read-range", "ask", "tail log");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -734,7 +734,7 @@ fn structured_scalar_output_format_gap_recovers_quoted_observed_value() {
     route.output_contract.locator_hint = "package.json".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-scalar-recovery", "ask", "field value");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,

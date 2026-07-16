@@ -22,7 +22,12 @@ pub(super) fn terminal_model_output_format_gap_satisfies_contract(
     {
         return false;
     }
-    if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
+    if !crate::task_journal::evidence_coverage_for_output_contract(
+        &route.effective_output_contract(),
+        journal,
+    )
+    .is_complete()
+    {
         return false;
     }
     if !finalizer_accepts_terminal_model_answer(route, journal) {
@@ -47,7 +52,12 @@ pub(in crate::agent_engine::loop_control) fn prefer_terminal_model_answer_for_ve
     let Some(journal) = reply.task_journal.as_ref() else {
         return false;
     };
-    if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
+    if !crate::task_journal::evidence_coverage_for_output_contract(
+        &route.effective_output_contract(),
+        journal,
+    )
+    .is_complete()
+    {
         return false;
     }
     if !finalizer_accepts_terminal_model_answer(route, journal) {

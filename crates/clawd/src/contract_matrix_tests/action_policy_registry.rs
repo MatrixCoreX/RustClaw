@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn publishing_preview_semantic_no_longer_owns_x_preview_policy() {
+fn publishing_preview_semantic_owns_x_preview_policy() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
             semantic_kind: OutputSemanticKind::PublishingPreview,
@@ -14,9 +14,9 @@ fn publishing_preview_semantic_no_longer_owns_x_preview_policy() {
         &serde_json::json!({"action":"preview","text":"RustClaw release notes","dry_run":true}),
     );
 
-    let policy = policy.expect("generic policy decision");
+    let policy = policy.expect("semantic policy decision");
     assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "publishing_preview");
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn non_bridge_package_actions_remain_structured_contract_inputs() {
 }
 
 #[test]
-fn registry_bridge_semantic_contracts_no_longer_allow_actions() {
+fn planner_semantic_contracts_own_registered_actions() {
     for (semantic_kind, skill, args) in [
         (
             OutputSemanticKind::SqliteTableListing,
@@ -105,11 +105,12 @@ fn registry_bridge_semantic_contracts_no_longer_allow_actions() {
             &args,
         );
 
-        let policy = policy.expect("generic policy decision");
+        let policy = policy.expect("semantic policy decision");
         assert!(policy.is_allowed(), "{policy:?}");
         assert_eq!(
-            policy.contract_match, "none",
-            "{semantic_kind:?} should not own {skill} policy through old matrix"
+            policy.contract_match,
+            semantic_kind.as_str(),
+            "{semantic_kind:?} should own {skill} policy through the planner contract"
         );
     }
 }

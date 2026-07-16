@@ -33,7 +33,7 @@ fn service_status_final_guard_preserves_observed_one_sentence_status_summary() {
         "ask",
         &prompt,
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -78,7 +78,7 @@ fn generic_route_preserves_structured_media_dry_run_report_over_short_machine_su
         "ask",
         prompt,
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     let expected_answer = concat!(
         "dry_run=true\n",
         "provider=minimax\n",

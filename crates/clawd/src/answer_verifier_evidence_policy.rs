@@ -114,6 +114,9 @@ pub(super) fn evidence_policy_table_answer_is_grounded_in_successful_observation
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
+    if sqlite_empty_table_answer_is_grounded(route, journal, candidate_answer) {
+        return true;
+    }
     let candidate_cells = markdown_table_data_cells(candidate_answer);
     if candidate_cells.is_empty() {
         return false;
@@ -123,6 +126,46 @@ pub(super) fn evidence_policy_table_answer_is_grounded_in_successful_observation
         return false;
     }
     candidate_cells.is_subset(&observed_cells) && observed_cells.is_subset(&candidate_cells)
+}
+
+fn sqlite_empty_table_answer_is_grounded(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if !route_contract_marker_is(route, crate::OutputSemanticKind::SqliteTableListing)
+        && !route_contract_marker_is(route, crate::OutputSemanticKind::SqliteTableNamesOnly)
+    {
+        return false;
+    }
+    let machine_fields = candidate_answer
+        .lines()
+        .filter_map(|line| line.trim().split_once('='))
+        .map(|(key, value)| (key.trim(), value.trim()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if machine_fields.get("table_count") != Some(&"0")
+        || machine_fields.get("has_tables") != Some(&"false")
+    {
+        return false;
+    }
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && step.skill == "db_basic"
+            && step
+                .output_excerpt
+                .as_deref()
+                .and_then(|output| serde_json::from_str::<serde_json::Value>(output).ok())
+                .is_some_and(|value| {
+                    value
+                        .get("columns")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|columns| !columns.is_empty())
+                        && value
+                            .get("rows")
+                            .and_then(serde_json::Value::as_array)
+                            .is_some_and(Vec::is_empty)
+                })
+    })
 }
 
 pub(super) fn evidence_policy_single_path_answer_is_grounded_in_successful_observation(

@@ -6,12 +6,12 @@
 //! prompt context, not ordinary semantic routing authority.
 
 pub(crate) use crate::contract_matrix::{
-    action_matches_policy_tokens, action_trace_for_route, capability_ref_action_policy_for_route,
-    compact_prompt_line_for_route, contract_trace_action_key_for_route,
+    action_matches_policy_tokens, action_trace_for_output_contract,
+    capability_ref_action_policy_for_route, compact_prompt_line_for_route,
     final_answer_shape_for_output_contract, final_answer_shape_for_route, fnv1a_hex,
-    required_evidence_for_output_contract, runtime_contract_snapshot_for_route,
-    trace_snapshot_for_route, ActionPolicyDecision, ActionRef, EvidenceExpression,
-    FailureAttribution, FinalAnswerShape, FinalAnswerShapeClass,
+    required_evidence_for_output_contract, runtime_contract_snapshot_for_output_contract,
+    trace_snapshot_for_output_contract, trace_snapshot_for_route, ActionPolicyDecision, ActionRef,
+    EvidenceExpression, FailureAttribution, FinalAnswerShape, FinalAnswerShapeClass,
 };
 
 pub(crate) use crate::task_contract::{
@@ -34,10 +34,6 @@ pub(crate) fn evidence_expression_for_output_contract(
 #[allow(dead_code)]
 pub(crate) fn delivery_shape_for_route(route: &crate::RouteResult) -> EvidenceDeliveryShape {
     crate::task_contract::delivery_shape_for_route(route)
-}
-
-pub(crate) fn missing_parameters_for_route(route: &crate::RouteResult) -> Vec<String> {
-    crate::task_contract::missing_parameters_for_route(route)
 }
 
 pub(crate) fn operation_for_route(route: &crate::RouteResult) -> EvidenceOperation {

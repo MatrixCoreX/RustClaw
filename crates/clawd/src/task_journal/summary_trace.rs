@@ -65,7 +65,6 @@ pub(super) fn verify_summary_json(verify: &TaskJournalVerifySummary) -> Value {
 pub(super) fn verify_trace_json(
     verify: &TaskJournalVerifySummary,
     plan: Option<&crate::PlanResult>,
-    route: Option<&crate::RouteResult>,
 ) -> Value {
     let first_issue = verify.issues.first();
     json!({
@@ -80,18 +79,20 @@ pub(super) fn verify_trace_json(
         "permission_decision": &verify.permission_decision,
         "needs_confirmation": verify.needs_confirmation,
         "issues": verify.issues.iter().map(|issue| {
-            verifier_issue_repair_signal_json(issue, plan, route)
+            verifier_issue_repair_signal_json(issue, plan)
         }).collect::<Vec<_>>(),
     })
 }
 
 pub(super) fn finalizer_summary_json(
     summary: &TaskJournalFinalizerSummary,
-    route: Option<&crate::RouteResult>,
+    output_contract: Option<&crate::IntentOutputContract>,
     journal: &TaskJournal,
 ) -> Value {
-    let evidence_coverage = route.map(|route| evidence_coverage_for_route(route, journal));
-    let final_answer_shape = route.and_then(crate::evidence_policy::final_answer_shape_for_route);
+    let evidence_coverage =
+        output_contract.map(|contract| evidence_coverage_for_output_contract(contract, journal));
+    let final_answer_shape =
+        output_contract.and_then(crate::evidence_policy::final_answer_shape_for_output_contract);
     json!({
         "stage": summary.stage.map(TaskJournalFinalizerStage::as_str),
         "disposition": summary.disposition.map(crate::finalize::FinalizerDisposition::as_str),
@@ -142,18 +143,9 @@ fn answer_verifier_repair_signal_json(summary: &TaskJournalAnswerVerifierSummary
     })
 }
 
-fn plan_step_action_ref(
-    step: &crate::PlanStep,
-    route: Option<&crate::RouteResult>,
-) -> Option<String> {
+fn plan_step_action_ref(step: &crate::PlanStep) -> Option<String> {
     let action = crate::evidence_policy::ActionRef::from_skill_args(&step.skill, &step.args)?;
-    let raw_key = action.as_key();
-    if let Some(compact) = route.and_then(|route| {
-        crate::evidence_policy::contract_trace_action_key_for_route(route, &raw_key)
-    }) {
-        return Some(compact);
-    }
-    Some(raw_key)
+    Some(action.as_key())
 }
 
 fn plan_step_raw_action_ref(step: &crate::PlanStep) -> Option<String> {
@@ -200,14 +192,12 @@ fn canonical_value_for_fingerprint(value: &Value) -> Value {
 fn verifier_issue_forbidden_repeat_fingerprint(
     issue: &TaskJournalVerifyIssue,
     plan: Option<&crate::PlanResult>,
-    route: Option<&crate::RouteResult>,
 ) -> Option<String> {
     let step = plan?
         .steps
         .iter()
         .find(|step| step.step_id == issue.step_id)?;
-    let action_ref =
-        plan_step_action_ref(step, route).or_else(|| plan_step_fallback_action_ref(step))?;
+    let action_ref = plan_step_action_ref(step).or_else(|| plan_step_fallback_action_ref(step))?;
     let args_fingerprint = crate::evidence_policy::fnv1a_hex(&format!(
         "{}\n{}",
         action_ref.trim(),
@@ -219,12 +209,11 @@ fn verifier_issue_forbidden_repeat_fingerprint(
 fn verifier_issue_repair_signal_json(
     issue: &TaskJournalVerifyIssue,
     plan: Option<&crate::PlanResult>,
-    route: Option<&crate::RouteResult>,
 ) -> Value {
     let rejected_action = plan
         .and_then(|plan| plan.steps.iter().find(|step| step.step_id == issue.step_id))
         .and_then(|step| {
-            plan_step_action_ref(step, route).or_else(|| plan_step_fallback_action_ref(step))
+            plan_step_action_ref(step).or_else(|| plan_step_fallback_action_ref(step))
         });
     crate::repair_signal::RepairSignal::from_verifier_issue_parts(
         &issue.step_id,
@@ -233,9 +222,7 @@ fn verifier_issue_repair_signal_json(
     )
     .with_missing_fields(&issue.missing_fields)
     .with_rejected_action(rejected_action)
-    .with_forbidden_repeat_fingerprint(verifier_issue_forbidden_repeat_fingerprint(
-        issue, plan, route,
-    ))
+    .with_forbidden_repeat_fingerprint(verifier_issue_forbidden_repeat_fingerprint(issue, plan))
     .to_json()
 }
 
@@ -243,27 +230,24 @@ pub(super) fn plan_summary_json(plan: &crate::PlanResult) -> Value {
     json!({
         "goal": crate::truncate_for_log(&plan.goal),
         "plan_kind": plan.plan_kind.as_str(),
-        "output_contract": plan.output_contract.as_ref().map(planner_output_contract_json),
+        "output_contract": plan.output_contract.as_ref().map(output_contract_json),
         "step_count": plan.steps.len(),
         "missing_slots": plan.missing_slots,
         "needs_confirmation": plan.needs_confirmation,
     })
 }
 
-pub(super) fn plan_trace_json(
-    plan: &crate::PlanResult,
-    route: Option<&crate::RouteResult>,
-) -> Value {
+pub(super) fn plan_trace_json(plan: &crate::PlanResult) -> Value {
     json!({
         "goal": crate::truncate_for_log(&plan.goal),
         "plan_kind": plan.plan_kind.as_str(),
         "planner_notes": crate::truncate_for_log(&plan.planner_notes),
         "raw_plan_text": crate::truncate_for_log(&plan.raw_plan_text),
-        "output_contract": plan.output_contract.as_ref().map(planner_output_contract_json),
+        "output_contract": plan.output_contract.as_ref().map(output_contract_json),
         "step_count": plan.steps.len(),
         "steps": plan.steps.iter().map(|step| {
             let raw_action_ref = plan_step_raw_action_ref(step);
-            let matrix_action_ref = plan_step_action_ref(step, route);
+            let matrix_action_ref = plan_step_action_ref(step);
             json!({
                 "step_id": &step.step_id,
                 "action_type": &step.action_type,
@@ -278,7 +262,7 @@ pub(super) fn plan_trace_json(
     })
 }
 
-fn planner_output_contract_json(contract: &crate::IntentOutputContract) -> Value {
+pub(super) fn output_contract_json(contract: &crate::IntentOutputContract) -> Value {
     json!({
         "response_shape": contract.response_shape.as_str(),
         "exact_sentence_count": contract.exact_sentence_count,
@@ -287,26 +271,6 @@ fn planner_output_contract_json(contract: &crate::IntentOutputContract) -> Value
         "locator_kind": contract.locator_kind.as_str(),
         "delivery_intent": contract.delivery_intent.as_str(),
         "result_kind": contract.semantic_kind.as_str(),
-    })
-}
-
-pub(super) fn route_result_json(route: &crate::RouteResult) -> Value {
-    json!({
-        "needs_clarify": route.needs_clarify,
-        "should_refresh_long_term_memory": route.should_refresh_long_term_memory,
-        "agent_display_name_hint": route.agent_display_name_hint,
-        "route_reason": crate::truncate_for_log(&route.route_reason),
-        "risk_ceiling": route.risk_ceiling.as_str(),
-        "self_extension": {
-            "mode": route.output_contract.self_extension.mode.as_str(),
-            "trigger": route.output_contract.self_extension.trigger.as_str(),
-            "execute_now": route.output_contract.self_extension.execute_now,
-            "structured_field_selector": route
-                .output_contract
-                .self_extension
-                .structured_field_selector
-                .as_deref(),
-        },
     })
 }
 
@@ -377,10 +341,7 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
     })
 }
 
-fn requested_capabilities_for_plan(
-    plan: &crate::PlanResult,
-    route: Option<&crate::RouteResult>,
-) -> Vec<RequestedPlanCapability> {
+fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPlanCapability> {
     let raw_steps = raw_plan_steps(&plan.raw_plan_text);
     plan.steps
         .iter()
@@ -395,7 +356,7 @@ fn requested_capabilities_for_plan(
                     action_ref: None,
                 });
             if requested.action_ref.is_none() {
-                requested.action_ref = plan_step_action_ref(normalized_step, route);
+                requested.action_ref = plan_step_action_ref(normalized_step);
             }
             requested
         })
@@ -406,18 +367,12 @@ pub(super) fn requested_capability_sequence(journal: &TaskJournal) -> Vec<Reques
     let mut requested = Vec::new();
     for round in &journal.rounds {
         if let Some(plan) = round.plan_result.as_ref() {
-            requested.extend(requested_capabilities_for_plan(
-                plan,
-                journal.route_result.as_ref(),
-            ));
+            requested.extend(requested_capabilities_for_plan(plan));
         }
     }
     if requested.is_empty() {
         if let Some(plan) = journal.plan_result.as_ref() {
-            requested.extend(requested_capabilities_for_plan(
-                plan,
-                journal.route_result.as_ref(),
-            ));
+            requested.extend(requested_capabilities_for_plan(plan));
         }
     }
     requested
@@ -452,12 +407,11 @@ pub(super) fn budget_profile_json(journal: &TaskJournal) -> Option<&str> {
 
 pub(super) fn round_capability_resolution_records_json(
     round: &TaskJournalRoundTrace,
-    route: Option<&crate::RouteResult>,
 ) -> Vec<Value> {
     let Some(plan) = round.plan_result.as_ref() else {
         return Vec::new();
     };
-    let requested = requested_capabilities_for_plan(plan, route);
+    let requested = requested_capabilities_for_plan(plan);
     plan.steps
         .iter()
         .zip(requested)
@@ -486,12 +440,11 @@ pub(super) fn capability_resolution_source(action_type: &str) -> &'static str {
 pub(super) fn verify_repair_signals_json(
     verify: Option<&TaskJournalVerifySummary>,
     plan: Option<&crate::PlanResult>,
-    route: Option<&crate::RouteResult>,
 ) -> Vec<Value> {
     verify
         .into_iter()
         .flat_map(|summary| summary.issues.iter())
-        .map(|issue| verifier_issue_repair_signal_json(issue, plan, route))
+        .map(|issue| verifier_issue_repair_signal_json(issue, plan))
         .collect()
 }
 
@@ -681,7 +634,7 @@ fn push_artifact_ref(refs: &mut Vec<Value>, field: &str, path: &str) {
 pub(super) fn step_trace_json(
     step: &TaskJournalStepTrace,
     requested: Option<&RequestedPlanCapability>,
-    route: Option<&crate::RouteResult>,
+    output_contract: Option<&crate::IntentOutputContract>,
 ) -> Value {
     let structured_error = step
         .error_excerpt
@@ -714,7 +667,7 @@ pub(super) fn step_trace_json(
         "error_kind": structured_error.as_ref().map(|value| value.error_kind.as_str()),
         "failure_attribution": failure_attribution.as_deref(),
         "contract_policy": contract_policy,
-        "contract": step_contract_trace_json(route, requested),
+        "contract": step_contract_trace_json(output_contract, requested),
         "sanitized_args_summary": requested.and_then(|value| value.action_ref.as_deref()),
         "sanitized_args_summary_status": requested
             .and_then(|value| value.action_ref.as_deref())
@@ -735,14 +688,15 @@ pub(super) fn step_trace_json(
 }
 
 fn step_contract_trace_json(
-    route: Option<&crate::RouteResult>,
+    output_contract: Option<&crate::IntentOutputContract>,
     requested: Option<&RequestedPlanCapability>,
 ) -> Option<Value> {
-    let route = route?;
-    let contract = crate::evidence_policy::trace_snapshot_for_route(route)?;
+    let output_contract = output_contract?;
+    let contract = crate::evidence_policy::trace_snapshot_for_output_contract(output_contract)?;
     let requested_action_ref = requested.and_then(|value| value.action_ref.as_deref());
-    let action_policy = requested_action_ref
-        .and_then(|action_ref| crate::evidence_policy::action_trace_for_route(route, action_ref));
+    let action_policy = requested_action_ref.and_then(|action_ref| {
+        crate::evidence_policy::action_trace_for_output_contract(output_contract, action_ref)
+    });
     Some(json!({
         "contract_match": contract.get("contract_match").and_then(Value::as_str),
         "policy_mode": contract.get("policy_mode").and_then(Value::as_str),

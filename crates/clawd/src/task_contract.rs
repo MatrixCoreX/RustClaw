@@ -376,8 +376,10 @@ pub(crate) fn target_object_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> TaskTargetObject {
     let semantic_kind = output_contract.semantic_kind;
-    if semantic_kind.is_normalizer_schema_capability_bridge() {
-        return target_object_for_locator_kind(output_contract.locator_kind);
+    if let Some(target) = matrix_contract_for_output_contract(output_contract)
+        .and_then(|contract| task_target_object_from_token(&contract.target_object))
+    {
+        return target;
     }
     match semantic_kind {
         OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
@@ -462,8 +464,10 @@ pub(crate) fn operation_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> TaskOperation {
     let semantic_kind = output_contract.semantic_kind;
-    if semantic_kind.is_normalizer_schema_capability_bridge() {
-        return operation_for_unclassified_output_contract(output_contract);
+    if let Some(operation) = matrix_contract_for_output_contract(output_contract)
+        .and_then(|contract| task_operation_from_token(&contract.operation))
+    {
+        return operation;
     }
     match semantic_kind {
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
@@ -530,22 +534,15 @@ pub(crate) fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape
     if let Some(shape) = delivery_shape_for_capability_ref(route) {
         return shape;
     }
-    if route
-        .effective_output_contract_semantic_kind()
-        .is_normalizer_schema_capability_bridge()
-    {
-        return delivery_shape_for_response_shape(route.output_contract.response_shape);
-    }
-    if matches!(
-        route.effective_output_contract_semantic_kind(),
-        OutputSemanticKind::FileNames
-            | OutputSemanticKind::DirectoryNames
-            | OutputSemanticKind::DirectoryEntryGroups
-            | OutputSemanticKind::FilePaths
-    ) {
-        return TaskDeliveryShape::List;
-    }
-    delivery_shape_for_response_shape(route.output_contract.response_shape)
+    delivery_shape_for_output_contract(&route.effective_output_contract())
+}
+
+fn delivery_shape_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> TaskDeliveryShape {
+    matrix_contract_for_output_contract(output_contract)
+        .and_then(|contract| task_delivery_shape_from_token(&contract.delivery_shape))
+        .unwrap_or_else(|| delivery_shape_for_response_shape(output_contract.response_shape))
 }
 
 fn delivery_shape_for_response_shape(response_shape: OutputResponseShape) -> TaskDeliveryShape {
@@ -562,13 +559,59 @@ pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<Str
         return fields;
     }
     let output_contract = route.effective_output_contract();
-    if output_contract
-        .semantic_kind
-        .is_normalizer_schema_capability_bridge()
-    {
-        return Vec::new();
-    }
     required_evidence_fields_for_output_contract(&output_contract)
+}
+
+fn matrix_contract_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> Option<&'static crate::contract_matrix::MatrixContract> {
+    if output_contract.semantic_kind == OutputSemanticKind::None {
+        return None;
+    }
+    crate::contract_matrix::bundled_contract_matrix()
+        .and_then(|matrix| matrix.semantic_contract(output_contract.semantic_kind))
+}
+
+fn task_target_object_from_token(value: &str) -> Option<TaskTargetObject> {
+    match value.trim() {
+        "path" => Some(TaskTargetObject::Path),
+        "directory" => Some(TaskTargetObject::Directory),
+        "config_key" => Some(TaskTargetObject::ConfigKey),
+        "service" => Some(TaskTargetObject::Service),
+        "process" => Some(TaskTargetObject::Process),
+        "db" => Some(TaskTargetObject::Db),
+        "system" => Some(TaskTargetObject::System),
+        "web" => Some(TaskTargetObject::Web),
+        "unknown" => Some(TaskTargetObject::Unknown),
+        _ => None,
+    }
+}
+
+fn task_operation_from_token(value: &str) -> Option<TaskOperation> {
+    match value.trim() {
+        "inspect" => Some(TaskOperation::Inspect),
+        "list" => Some(TaskOperation::List),
+        "count" => Some(TaskOperation::Count),
+        "read" => Some(TaskOperation::Read),
+        "write" => Some(TaskOperation::Write),
+        "modify" => Some(TaskOperation::Modify),
+        "run" => Some(TaskOperation::Run),
+        "validate" => Some(TaskOperation::Validate),
+        "summarize" => Some(TaskOperation::Summarize),
+        "unknown" => Some(TaskOperation::Unknown),
+        _ => None,
+    }
+}
+
+fn task_delivery_shape_from_token(value: &str) -> Option<TaskDeliveryShape> {
+    match value.trim() {
+        "one_sentence" => Some(TaskDeliveryShape::OneSentence),
+        "list" => Some(TaskDeliveryShape::List),
+        "raw" => Some(TaskDeliveryShape::Raw),
+        "file" => Some(TaskDeliveryShape::File),
+        "summary" => Some(TaskDeliveryShape::Summary),
+        _ => None,
+    }
 }
 
 fn required_evidence_fields_for_capability_ref(route: &RouteResult) -> Option<Vec<String>> {

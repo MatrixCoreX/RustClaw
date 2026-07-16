@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{evidence_coverage_for_route, TaskJournal, TaskJournalStepTrace};
+use super::{evidence_coverage_for_output_contract, TaskJournal, TaskJournalStepTrace};
 
 fn recent_artifacts_route() -> crate::RouteResult {
     crate::RouteResult {
@@ -32,7 +32,7 @@ fn recent_artifacts_directory_structure_satisfies_directory_judgment_evidence() 
         "ask",
         "judge recent workspace directories",
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.step_results.push(TaskJournalStepTrace::ok(
         "step_1",
         "fs_basic",
@@ -68,7 +68,8 @@ fn recent_artifacts_directory_structure_satisfies_directory_judgment_evidence() 
             .to_string(),
         ));
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage.observed_canonical.contains("directory_structure"));
     assert!(

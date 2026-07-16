@@ -868,6 +868,24 @@ pub(crate) fn evidence_extractor_registry_contains(
     explicit_evidence_extractor_spec(source_action_ref, extractor_kind).is_some()
 }
 
+pub(super) fn explicit_text_extractor_provides(extractor_ref: &str, field: &str) -> bool {
+    EVIDENCE_EXTRACTOR_REGISTRY
+        .iter()
+        .chain(EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY)
+        .chain(std::iter::once(
+            &MATRIX_ADMITTED_EXTERNAL_STRUCTURED_JSON_EXTRACTOR,
+        ))
+        .any(|spec| {
+            spec.extractor_ref == extractor_ref
+                && spec.kind == EvidenceExtractorKind::TextLegacy
+                && !spec.fallback
+                && spec
+                    .provided_evidence
+                    .iter()
+                    .any(|provided| *provided == field)
+        })
+}
+
 pub(super) fn explicit_evidence_extractor_spec(
     source_action_ref: &str,
     extractor_kind: &str,
