@@ -16,8 +16,6 @@ STRING_LITERAL_RE = re.compile(r'"(?P<value>[^"]*)"')
 CLASS_RE = re.compile(r"repair_class:\s*RepairBoundaryClass::(?P<value>\w+)")
 
 KNOWN_DELETION_GATES = {
-    "keep_schema_compat_boundary",
-    "keep_boundary_safety",
     "keep_loop_bounded_recovery",
     "keep_policy_boundary",
     "keep_lifecycle_recovery",
