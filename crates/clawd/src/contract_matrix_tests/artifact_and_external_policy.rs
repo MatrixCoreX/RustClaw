@@ -453,9 +453,15 @@ fn filesystem_mutation_result_allows_archive_pack_path_evidence() {
 
 #[test]
 fn archive_pack_contract_allows_pack_and_post_pack_list_but_not_cleanup_delete() {
-    for (capability_ref, skill, args, expected_action_key) in [
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ArchivePack,
+        requires_content_evidence: true,
+        delivery_required: true,
+        locator_kind: OutputLocatorKind::Path,
+        ..IntentOutputContract::default()
+    };
+    for (skill, args, expected_action_key) in [
         (
-            "capability_ref=archive.pack",
             "archive_basic",
             serde_json::json!({
                 "action": "pack",
@@ -466,7 +472,6 @@ fn archive_pack_contract_allows_pack_and_post_pack_list_but_not_cleanup_delete()
             "archive_basic.pack",
         ),
         (
-            "capability_ref=archive.list",
             "archive_basic",
             serde_json::json!({
                 "action": "list",
@@ -475,17 +480,16 @@ fn archive_pack_contract_allows_pack_and_post_pack_list_but_not_cleanup_delete()
             "archive_basic.list",
         ),
     ] {
-        let route = route_with_machine_capability_ref(capability_ref);
-        let policy = action_policy_for_route(Some(&route), skill, &args).expect("policy decision");
+        let policy = action_policy_for_output_contract(Some(&output_contract), skill, &args)
+            .expect("policy decision");
 
         assert!(policy.is_allowed(), "{policy:?}");
         assert_eq!(policy.action_key, expected_action_key);
-        assert_eq!(policy.contract_match, "capability_ref");
+        assert_eq!(policy.contract_match, "archive_pack");
     }
 
-    let cleanup_route = route_with_machine_capability_ref("capability_ref=archive.pack");
-    let cleanup_policy = action_policy_for_route(
-        Some(&cleanup_route),
+    let cleanup_policy = action_policy_for_output_contract(
+        Some(&output_contract),
         "fs_basic",
         &serde_json::json!({
             "action": "remove_path",
@@ -493,7 +497,8 @@ fn archive_pack_contract_allows_pack_and_post_pack_list_but_not_cleanup_delete()
             "target_kind": "file"
         }),
     );
-    assert!(cleanup_policy.is_none());
+    assert!(cleanup_policy
+        .is_some_and(|policy| { policy.decision == ActionPolicyDecision::RejectedNotAllowed }));
 }
 
 #[test]

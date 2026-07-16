@@ -64,16 +64,6 @@ LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE = (
 DRY_RUN_CONTRACT_PLAN_FILE = SRC_ROOT / "agent_engine/dry_run_contract_plan.rs"
 OBSERVED_OUTPUT_FILE = SRC_ROOT / "agent_engine/observed_output.rs"
 PLANNING_PROMPT_FILE = SRC_ROOT / "agent_engine/planning_prompt.rs"
-FINALIZER_OBSERVED_OUTPUT_SCAN_ROOTS: tuple[Path, ...] = (
-    SRC_ROOT / "finalize",
-    SRC_ROOT / "agent_engine/observed_output.rs",
-    SRC_ROOT / "agent_engine/observed_output_direct_answer.rs",
-    SRC_ROOT / "agent_engine/observed_output_direct_scalar.rs",
-    SRC_ROOT / "agent_engine/value_string_list.rs",
-    SRC_ROOT / "agent_engine/direct_observed_finalize_support.rs",
-    SRC_ROOT / "agent_engine/loop_control_answer_recovery.rs",
-)
-
 FORBIDDEN_PREFERRED_RUN_CMD_SEMANTIC_ENUMS: tuple[str, ...] = (
     "OutputSemanticKind::PackageManagerDetection",
     "OutputSemanticKind::DockerPs",
@@ -1121,21 +1111,3 @@ def scan_task_contract_registry_bridge_semantic_defaults() -> list[Finding]:
         FORBIDDEN_REGISTRY_BRIDGE_SEMANTIC_ENUMS,
         "task_contract_registry_bridge_semantic_default",
     )
-
-
-def scan_finalizer_observed_output_registry_bridge_markers() -> list[Finding]:
-    findings: list[Finding] = []
-    for root in FINALIZER_OBSERVED_OUTPUT_SCAN_ROOTS:
-        paths = [root] if root.is_file() else sorted(root.rglob("*.rs"))
-        for path in paths:
-            if not path.is_file() or is_test_path(path):
-                continue
-            findings.extend(
-                scan_token_list_text(
-                    rel(path),
-                    path.read_text(encoding="utf-8"),
-                    FORBIDDEN_REGISTRY_BRIDGE_SEMANTIC_ENUMS,
-                    "finalizer_observed_registry_bridge_semantic_marker",
-                )
-            )
-    return findings

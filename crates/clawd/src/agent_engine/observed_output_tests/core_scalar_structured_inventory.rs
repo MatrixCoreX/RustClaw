@@ -74,7 +74,7 @@ fn observed_outputs_exclude_synthesis_steps() {
 }
 
 #[test]
-fn market_quote_scalar_direct_answer_uses_registry_semantic_tag() {
+fn market_quote_scalar_direct_answer_uses_planner_contract_and_registry_semantic_tag() {
     let state = test_state_with_registry(
         r#"
         [[skills]]
@@ -86,8 +86,7 @@ fn market_quote_scalar_direct_answer_uses_registry_semantic_tag() {
         &["market_probe"],
     );
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.resolved_intent = "capability_ref=crypto.quote symbol=BTC".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::MarketQuote;
     let agent_run_context = AgentRunContext {
         route_result: Some(route),
         ..AgentRunContext::default()
@@ -569,34 +568,29 @@ fn scalar_path_observed_route_rejects_content_evidence_contract() {
 }
 
 #[test]
-fn observed_output_route_policy_accepts_contract_markers_without_semantic_enum() {
+fn observed_output_route_policy_uses_direct_output_contract() {
     let mut scalar_path_route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    scalar_path_route.route_reason = "contract:scalar_path_only".to_string();
+    scalar_path_route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     scalar_path_route.output_contract.requires_content_evidence = false;
-    assert_eq!(
-        scalar_path_route.output_contract.semantic_kind,
-        OutputSemanticKind::None
-    );
     assert!(route_requests_scalar_path_only(&scalar_path_route));
     assert!(route_allows_path_batch_scalar_path_observed_answer(
         &scalar_path_route
     ));
 
-    scalar_path_route.route_reason =
-        "contract:scalar_path_only; execution_required_read_file_extract_scalar".to_string();
+    scalar_path_route.output_contract.requires_content_evidence = true;
     assert!(!route_allows_path_batch_scalar_path_observed_answer(
         &scalar_path_route
     ));
 
     let mut file_names_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    file_names_route.route_reason = "contract:file_names".to_string();
+    file_names_route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     assert!(route_prefers_plain_fs_search_paths(&file_names_route));
     assert!(route_allows_raw_listing_direct_answer(Some(
         &file_names_route
     )));
 
     let mut failed_step_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    failed_step_route.route_reason = "contract:execution_failed_step".to_string();
+    failed_step_route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
     failed_step_route.output_contract.locator_kind = OutputLocatorKind::None;
     failed_step_route.output_contract.locator_hint.clear();
     assert!(route_disallows_direct_observation_passthrough(
@@ -604,7 +598,7 @@ fn observed_output_route_policy_accepts_contract_markers_without_semantic_enum()
     ));
 
     let mut quantity_route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    quantity_route.route_reason = "contract:quantity_comparison".to_string();
+    quantity_route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     quantity_route.output_contract.requires_content_evidence = true;
     assert!(route_quantity_comparison_requires_model_language_synthesis(
         &quantity_route

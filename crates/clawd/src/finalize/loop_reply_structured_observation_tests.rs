@@ -497,7 +497,7 @@ fn broad_structured_read_drops_separator_and_validates_file() {
 
     let mut route = free_route_result();
     route.route_reason = "capability_ref=config.validate".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
@@ -508,7 +508,7 @@ fn broad_structured_read_drops_separator_and_validates_file() {
         &loop_state,
         Some(&ctx),
     )
-    .expect("capability_ref structured validation fallback");
+    .expect("config validation contract fallback");
     assert!(
         answer.contains("format=toml") && answer.contains("validation_status=pass"),
         "answer: {answer}"

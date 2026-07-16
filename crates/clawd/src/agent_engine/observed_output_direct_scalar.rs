@@ -410,11 +410,9 @@ pub(super) fn market_quote_scalar_candidate(
 }
 
 fn route_is_market_quote(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["crypto", "stock"],
-        &["quote"],
-    )
+    route
+        .output_contract
+        .semantic_kind_is(crate::OutputSemanticKind::MarketQuote)
 }
 
 pub(super) fn market_quote_output_has_scalar_price(

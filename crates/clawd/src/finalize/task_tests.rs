@@ -1411,7 +1411,7 @@ fn config_validation_delivery_drops_existing_execution_summary_messages() {
     let mut route = route_result();
     route.route_reason = "capability_ref=config.validate".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
     let mut messages = vec![
         "**Execution**\n1. Called tool `config_basic`\n   Output: valid".to_string(),
         "pass".to_string(),

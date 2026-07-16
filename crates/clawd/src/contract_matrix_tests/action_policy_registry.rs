@@ -705,9 +705,13 @@ fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contrac
 
 #[test]
 fn action_policy_allows_runtime_equivalent_for_virtual_config_validation() {
-    let route = route_with_machine_capability_ref("capability_ref=config.validate");
-    let policy = action_policy_for_route(
-        Some(&route),
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ConfigValidation,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let policy = action_policy_for_output_contract(
+        Some(&output_contract),
         "system_basic",
         &serde_json::json!({
             "action": "validate_structured",
@@ -719,7 +723,7 @@ fn action_policy_allows_runtime_equivalent_for_virtual_config_validation() {
 
     assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "config_basic.validate");
-    assert_eq!(policy.contract_match, "capability_ref");
+    assert_eq!(policy.contract_match, "config_validation");
 }
 
 #[test]
@@ -846,9 +850,13 @@ fn command_output_summary_allows_task_control_get_observation() {
 
 #[test]
 fn action_policy_allows_runtime_equivalent_for_virtual_config_guard() {
-    let route = route_with_machine_capability_ref("capability_ref=config.guard_config");
-    let policy = action_policy_for_route(
-        Some(&route),
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ConfigValidation,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let policy = action_policy_for_output_contract(
+        Some(&output_contract),
         "config_edit",
         &serde_json::json!({
             "action": "guard_config",
@@ -860,22 +868,23 @@ fn action_policy_allows_runtime_equivalent_for_virtual_config_guard() {
 
     assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "config_basic.guard_rustclaw_config");
-    assert_eq!(policy.contract_match, "capability_ref");
+    assert_eq!(policy.contract_match, "config_validation");
 }
 
 #[test]
 fn config_mutation_contract_allows_plan_apply_validate_and_read_back() {
-    for (capability_ref, action) in [
-        ("capability_ref=config.plan_change", "plan_config_change"),
-        ("capability_ref=config.apply_change", "apply_config_change"),
-        (
-            "capability_ref=config.validate_after_change",
-            "validate_config",
-        ),
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ConfigMutation,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    for action in [
+        "plan_config_change",
+        "apply_config_change",
+        "validate_config",
     ] {
-        let route = route_with_machine_capability_ref(capability_ref);
-        let policy = action_policy_for_route(
-            Some(&route),
+        let policy = action_policy_for_output_contract(
+            Some(&output_contract),
             "config_edit",
             &serde_json::json!({
                 "action": action,
@@ -887,15 +896,19 @@ fn config_mutation_contract_allows_plan_apply_validate_and_read_back() {
         .expect("policy decision");
 
         assert_eq!(policy.decision, ActionPolicyDecision::Allowed, "{action}");
-        assert_eq!(policy.contract_match, "capability_ref");
+        assert_eq!(policy.contract_match, "config_mutation");
     }
 }
 
 #[test]
 fn config_risk_assessment_allows_preview_and_git_status_as_observations() {
-    let preview_route = route_with_machine_capability_ref("capability_ref=config.plan_change");
-    let preview_policy = action_policy_for_route(
-        Some(&preview_route),
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ConfigRiskAssessment,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let preview_policy = action_policy_for_output_contract(
+        Some(&output_contract),
         "config_edit",
         &serde_json::json!({
             "action": "plan_config_change",
@@ -907,11 +920,10 @@ fn config_risk_assessment_allows_preview_and_git_status_as_observations() {
     .expect("preview policy decision");
     assert_eq!(preview_policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(preview_policy.action_key, "config_edit.plan_config_change");
-    assert_eq!(preview_policy.contract_match, "capability_ref");
+    assert_eq!(preview_policy.contract_match, "config_risk_assessment");
 
-    let git_route = route_with_machine_capability_ref("capability_ref=git.status");
-    let git_policy = action_policy_for_route(
-        Some(&git_route),
+    let git_policy = action_policy_for_output_contract(
+        Some(&output_contract),
         "git_basic",
         &serde_json::json!({
             "action": "status",
@@ -921,7 +933,7 @@ fn config_risk_assessment_allows_preview_and_git_status_as_observations() {
     .expect("git policy decision");
     assert_eq!(git_policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(git_policy.action_key, "git_basic.status");
-    assert_eq!(git_policy.contract_match, "capability_ref");
+    assert_eq!(git_policy.contract_match, "config_risk_assessment");
 }
 
 #[test]
@@ -1173,35 +1185,6 @@ fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
             policy.decision
         );
         assert_eq!(policy.action_key, expected_action_key);
-    }
-}
-
-#[test]
-fn route_capability_refs_cover_config_virtual_tool_canonicalizations() {
-    for (capability_ref, skill, args, expected_action_key) in [
-        (
-            "capability_ref=config.validate",
-            "system_basic",
-            json!({"action":"validate_structured", "path":"configs/config.toml", "format":"toml"}),
-            "config_basic.validate",
-        ),
-        (
-            "capability_ref=config.guard",
-            "config_guard",
-            json!({"path":"configs/config.toml"}),
-            "config_edit.guard_config",
-        ),
-    ] {
-        let route = route_with_machine_capability_ref(capability_ref);
-        let policy = action_policy_for_route(Some(&route), skill, &args)
-            .unwrap_or_else(|| panic!("missing policy for {capability_ref}"));
-        assert!(
-            policy.is_allowed(),
-            "{capability_ref} should allow {skill} as {expected_action_key}, got {:?}",
-            policy.decision
-        );
-        assert_eq!(policy.action_key, expected_action_key);
-        assert_eq!(policy.contract_match, "capability_ref");
     }
 }
 

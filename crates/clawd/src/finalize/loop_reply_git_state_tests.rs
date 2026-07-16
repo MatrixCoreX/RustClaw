@@ -239,7 +239,7 @@ fn git_repository_state_strict_requested_machine_fields_drop_changed_list() {
 }
 
 #[test]
-fn git_status_capability_ref_strict_requested_machine_fields_without_semantic_kind() {
+fn git_status_contract_strict_requested_machine_fields() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -270,7 +270,7 @@ fn git_status_capability_ref_strict_requested_machine_fields_without_semantic_ki
     let mut route = free_route_result();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.route_reason = "capability_ref=git.status".to_string();
     route.resolved_intent = "field=branch field=worktree_state".to_string();

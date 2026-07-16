@@ -351,10 +351,6 @@ pub(crate) struct IntentOutputContract {
 }
 
 impl IntentOutputContract {
-    pub(crate) fn apply_output_contract_ref(&mut self, contract_ref: OutputContractRef) {
-        self.semantic_kind = contract_ref.semantic_kind();
-    }
-
     pub(crate) fn semantic_kind_is(&self, semantic_kind: OutputSemanticKind) -> bool {
         self.semantic_kind == semantic_kind
     }
@@ -368,29 +364,6 @@ impl IntentOutputContract {
 
     pub(crate) fn semantic_kind_is_unclassified(&self) -> bool {
         self.semantic_kind_is(OutputSemanticKind::None)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OutputContractRef {
-    semantic_kind: OutputSemanticKind,
-}
-
-impl OutputContractRef {
-    pub(crate) fn new(semantic_kind: OutputSemanticKind) -> Self {
-        Self { semantic_kind }
-    }
-
-    pub(crate) fn file_paths() -> Self {
-        Self::new(OutputSemanticKind::FilePaths)
-    }
-
-    pub(crate) fn workspace_project_summary() -> Self {
-        Self::new(OutputSemanticKind::WorkspaceProjectSummary)
-    }
-
-    pub(crate) fn semantic_kind(self) -> OutputSemanticKind {
-        self.semantic_kind
     }
 }
 
@@ -413,14 +386,6 @@ impl<'a> RouteReasonMarkers<'a> {
         })
     }
 
-    pub(crate) fn has_any_machine_marker(self, markers: &[&str]) -> bool {
-        markers.iter().any(|marker| self.has_machine_marker(marker))
-    }
-
-    pub(crate) fn any_part(self, mut predicate: impl FnMut(&str) -> bool) -> bool {
-        self.tokens().any(|part| predicate(part))
-    }
-
     pub(crate) fn machine_value(self, key: &str) -> Option<&'a str> {
         let key = key.trim();
         if key.is_empty() {
@@ -439,27 +404,6 @@ impl<'a> RouteReasonMarkers<'a> {
                 (!value.is_empty()).then_some(value)
             })
             .last()
-    }
-
-    pub(crate) fn explicit_output_contract_marker_kind(self) -> Option<OutputSemanticKind> {
-        self.tokens()
-            .filter_map(|part| {
-                let marker = part
-                    .strip_prefix("output_contract_kind=")
-                    .or_else(|| part.strip_prefix("contract:"))?
-                    .trim();
-                (!marker.is_empty()).then_some(marker)
-            })
-            .last()
-            .and_then(|marker| {
-                OutputSemanticKind::ALL
-                    .iter()
-                    .copied()
-                    .find(|semantic_kind| {
-                        *semantic_kind != OutputSemanticKind::None
-                            && semantic_kind.as_str() == marker
-                    })
-            })
     }
 
     fn tokens(self) -> impl Iterator<Item = &'a str> {
@@ -565,18 +509,8 @@ impl RouteResult {
         route
     }
 
-    pub(crate) fn has_route_reason_machine_marker(&self, marker: &str) -> bool {
-        RouteReasonMarkers::new(&self.route_reason).has_machine_marker(marker)
-    }
-
     pub(crate) fn output_contract_marker_is(&self, semantic_kind: OutputSemanticKind) -> bool {
-        if self.explicit_output_contract_marker_kind().is_some() {
-            return self.has_route_reason_machine_marker(semantic_kind.as_str())
-                && self.output_contract_marker_is_compatible(semantic_kind);
-        }
-        self.output_contract_marker_is_compatible(semantic_kind)
-            && (self.output_contract.semantic_kind == semantic_kind
-                || self.has_route_reason_machine_marker(semantic_kind.as_str()))
+        self.output_contract.semantic_kind_is(semantic_kind)
     }
 
     pub(crate) fn output_contract_marker_is_any(
@@ -589,82 +523,16 @@ impl RouteResult {
             .any(|semantic_kind| self.output_contract_marker_is(semantic_kind))
     }
 
-    #[cfg(test)]
-    pub(crate) fn has_any_output_contract_marker(&self) -> bool {
-        OutputSemanticKind::ALL
-            .iter()
-            .copied()
-            .filter(|semantic_kind| *semantic_kind != OutputSemanticKind::None)
-            .any(|semantic_kind| {
-                self.has_route_reason_machine_marker(semantic_kind.as_str())
-                    && self.output_contract_marker_is_compatible(semantic_kind)
-            })
-    }
-
-    pub(crate) fn output_contract_marker_kind(&self) -> Option<OutputSemanticKind> {
-        if let Some(semantic_kind) = self.explicit_output_contract_marker_kind() {
-            return self
-                .output_contract_marker_is_compatible(semantic_kind)
-                .then_some(semantic_kind);
-        }
-        if self.output_contract.semantic_kind != OutputSemanticKind::None
-            && self.output_contract_marker_is_compatible(self.output_contract.semantic_kind)
-        {
-            return Some(self.output_contract.semantic_kind);
-        }
-        OutputSemanticKind::ALL
-            .iter()
-            .copied()
-            .find(|semantic_kind| {
-                *semantic_kind != OutputSemanticKind::None
-                    && self.has_route_reason_machine_marker(semantic_kind.as_str())
-                    && self.output_contract_marker_is_compatible(*semantic_kind)
-            })
-    }
-
-    fn explicit_output_contract_marker_kind(&self) -> Option<OutputSemanticKind> {
-        RouteReasonMarkers::new(&self.route_reason).explicit_output_contract_marker_kind()
-    }
-
-    pub(crate) fn effective_output_contract_ref(&self) -> OutputContractRef {
-        OutputContractRef::new(
-            self.output_contract_marker_kind()
-                .unwrap_or(OutputSemanticKind::None),
-        )
-    }
-
     pub(crate) fn effective_output_contract_semantic_kind(&self) -> OutputSemanticKind {
-        self.effective_output_contract_ref().semantic_kind()
+        self.output_contract.semantic_kind
     }
 
     pub(crate) fn effective_output_contract(&self) -> IntentOutputContract {
-        let mut contract = self.output_contract.clone();
-        contract.semantic_kind = self.effective_output_contract_semantic_kind();
-        contract
+        self.output_contract.clone()
     }
 
     pub(crate) fn output_contract_is_unclassified(&self) -> bool {
-        self.output_contract_marker_kind().is_none()
-    }
-
-    fn output_contract_marker_is_compatible(&self, semantic_kind: OutputSemanticKind) -> bool {
-        match semantic_kind {
-            OutputSemanticKind::ScalarCount => {
-                matches!(
-                    self.output_contract.response_shape,
-                    OutputResponseShape::Scalar | OutputResponseShape::OneSentence
-                ) || (self.output_contract.response_shape == OutputResponseShape::Strict
-                    && self.output_contract.exact_sentence_count == Some(1))
-            }
-            OutputSemanticKind::ScalarPathOnly => {
-                !self.output_contract.delivery_required
-                    && self.output_contract.response_shape == OutputResponseShape::Scalar
-                    && (self.explicit_output_contract_marker_kind() == Some(semantic_kind)
-                        || !matches!(self.output_contract.locator_kind, OutputLocatorKind::None)
-                        || !self.output_contract.locator_hint.trim().is_empty())
-            }
-            _ => true,
-        }
+        self.output_contract.semantic_kind_is_unclassified()
     }
 
     pub(crate) fn is_clarify_gate(&self) -> bool {

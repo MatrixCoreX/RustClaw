@@ -7,7 +7,7 @@ async fn finalize_loop_reply_projects_weather_structured_fields() {
     let mut route = free_route_result();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::WeatherQuery;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.resolved_intent = "capability_ref=weather.current location=Beijing".to_string();

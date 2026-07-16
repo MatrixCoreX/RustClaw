@@ -54,7 +54,6 @@ mod intent;
 mod language_policy;
 mod llm_gateway;
 mod log_utils;
-mod machine_capability_ref;
 mod machine_kv_projection;
 mod media_artifact_paths;
 mod memory;

@@ -51,11 +51,11 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
 }
 
 #[test]
-fn schema_version_capability_shape_uses_observed_scalar_without_semantic_kind() {
+fn schema_version_contract_uses_observed_scalar() {
     let state = test_state();
     let mut route = free_route_result();
     route.route_reason = "capability_ref=database.schema_version".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteSchemaVersion;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -621,7 +621,7 @@ async fn finalize_loop_reply_replaces_wrapped_market_quote_scalar_delivery() {
     );
     let task = claimed_task("task-wrapped-market-quote-scalar");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::MarketQuote;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.resolved_intent = "capability_ref=crypto.quote symbol=BTCUSDT".to_string();
@@ -1189,7 +1189,7 @@ fn direct_scalar_finalize_uses_wrapped_count_inventory_total() {
 }
 
 #[test]
-fn scalar_locator_marker_projects_find_ext_count_from_machine_field() {
+fn scalar_count_contract_projects_find_ext_count_from_machine_field() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1200,7 +1200,7 @@ fn scalar_locator_marker_projects_find_ext_count_from_machine_field() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
     route.output_contract.requires_content_evidence = true;
-    route.route_reason = "scalar_locator_requires_evidence".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         original_user_request: Some(
@@ -1212,7 +1212,7 @@ fn scalar_locator_marker_projects_find_ext_count_from_machine_field() {
 
     let (answer, summary) =
         direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
-            .expect("scalar locator marker should project observed count");
+            .expect("scalar count contract should project observed count");
 
     assert_eq!(answer.trim(), "1");
     assert!(!answer.contains("test_bundle.zip"));

@@ -921,7 +921,7 @@ fn direct_answer_formats_process_basic_port_status_contract_without_llm() {
 }
 
 #[test]
-fn direct_answer_formats_process_basic_port_status_from_route_marker_without_semantic_enum() {
+fn direct_answer_formats_process_basic_port_status_from_output_contract() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -929,20 +929,16 @@ fn direct_answer_formats_process_basic_port_status_from_route_marker_without_sem
             "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787       0.0.0.0:*    users:((\"clawd\",pid=706551,fd=31))\nLISTEN 0      4096         0.0.0.0:22         0.0.0.0:*\n",
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.route_reason = "contract:service_status".to_string();
+    route_result.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route_result.output_contract.locator_kind = OutputLocatorKind::None;
     route_result.output_contract.locator_hint.clear();
-    assert_eq!(
-        route_result.output_contract.semantic_kind,
-        OutputSemanticKind::None
-    );
     let agent_run_context = AgentRunContext {
         route_result: Some(route_result),
         ..AgentRunContext::default()
     };
 
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("service_status marker should use process_basic port evidence directly");
+        .expect("service status contract should use process_basic port evidence directly");
 
     assert!(answer.contains("port.count=2"));
     assert!(answer.contains("port[0].number=8787"));

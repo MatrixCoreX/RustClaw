@@ -41,7 +41,7 @@ fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts(
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.delivery_required = false;
     route_result.output_contract.delivery_intent = OutputDeliveryIntent::None;
-    route_result.resolved_intent = "capability_ref=system.runtime_status".to_string();
+    route_result.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let agent_run_context = AgentRunContext {
         route_result: Some(route_result),
         ..AgentRunContext::default()
@@ -56,19 +56,19 @@ fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts(
 }
 
 #[test]
-fn observed_fallback_prompt_uses_compact_template_for_machine_capability_refs() {
+fn observed_fallback_prompt_uses_compact_template_for_structured_semantic_contracts() {
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.delivery_required = false;
     route_result.output_contract.delivery_intent = OutputDeliveryIntent::None;
-    for capability_ref in [
-        "database.list_tables",
-        "docker.version",
-        "docker.read_logs",
-        "package.detect_manager",
+    for semantic_kind in [
+        OutputSemanticKind::SqliteTableListing,
+        OutputSemanticKind::DockerPs,
+        OutputSemanticKind::DockerLogs,
+        OutputSemanticKind::PackageManagerDetection,
     ] {
-        route_result.resolved_intent = format!("capability_ref={capability_ref}");
+        route_result.output_contract.semantic_kind = semantic_kind;
         let agent_run_context = AgentRunContext {
             route_result: Some(route_result.clone()),
             ..AgentRunContext::default()
@@ -81,7 +81,7 @@ fn observed_fallback_prompt_uses_compact_template_for_machine_capability_refs() 
 
         assert_eq!(
             path, "prompts/observed_answer_fallback_compact_prompt.md",
-            "{capability_ref} should use compact finalizer"
+            "{semantic_kind:?} should use compact finalizer"
         );
     }
 }

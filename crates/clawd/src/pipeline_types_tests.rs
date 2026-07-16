@@ -1,6 +1,6 @@
 use super::{
-    plan_step_from_agent_action, AgentAction, IntentOutputContract, OutputContractRef, PlanStep,
-    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    plan_step_from_agent_action, AgentAction, IntentOutputContract, PlanStep, ResumeBehavior,
+    RiskCeiling, RouteResult, ScheduleKind,
 };
 use serde_json::json;
 
@@ -122,25 +122,21 @@ fn plan_step_round_trips_call_capability() {
 }
 
 #[test]
-fn route_result_output_contract_marker_methods_accept_route_reason_tokens() {
+fn route_result_output_contract_methods_use_direct_contract() {
     let mut route = route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route.route_reason = "contract:file_paths; contract:service_status".to_string();
 
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-    );
     assert!(route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths));
-    assert!(route.output_contract_marker_is_any(&[
+    assert!(!route.output_contract_marker_is_any(&[
         crate::OutputSemanticKind::DirectoryNames,
         crate::OutputSemanticKind::ServiceStatus,
     ]));
-    assert!(route.has_any_output_contract_marker());
     assert!(!route.output_contract_is_unclassified());
 }
 
 #[test]
-fn route_result_effective_output_contract_uses_route_reason_marker() {
+fn route_result_route_reason_does_not_supply_output_contract() {
     let mut route = route_result();
     route.route_reason = "contract:workspace_project_summary".to_string();
 
@@ -150,38 +146,14 @@ fn route_result_effective_output_contract_uses_route_reason_marker() {
     );
     assert_eq!(
         route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::WorkspaceProjectSummary
+        crate::OutputSemanticKind::None
     );
     assert_eq!(
         route.effective_output_contract().semantic_kind,
-        crate::OutputSemanticKind::WorkspaceProjectSummary
+        crate::OutputSemanticKind::None
     );
     assert!(!route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths));
-    assert!(route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary));
-}
-
-#[test]
-fn route_reason_marker_facade_parses_machine_tokens_without_call_site_splitting() {
-    let markers = crate::RouteReasonMarkers::new(
-        "boundary_hint; contract:scalar_count; capability_ref:filesystem.count_entries",
-    );
-
-    assert!(markers.has_machine_marker("filesystem.count_entries"));
-    assert!(markers.has_any_machine_marker(&["workspace_project_summary", "scalar_count",]));
-    assert_eq!(
-        markers.explicit_output_contract_marker_kind(),
-        Some(crate::OutputSemanticKind::ScalarCount)
-    );
-}
-
-#[test]
-fn route_reason_marker_facade_parses_explicit_output_contract_kind() {
-    let markers = crate::RouteReasonMarkers::new("output_contract_kind=scalar_count");
-
-    assert_eq!(
-        markers.explicit_output_contract_marker_kind(),
-        Some(crate::OutputSemanticKind::ScalarCount)
-    );
+    assert!(!route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary));
 }
 
 #[test]
@@ -198,43 +170,17 @@ fn route_reason_marker_facade_reads_machine_values_with_shared_tokenization() {
 }
 
 #[test]
-fn output_contract_ref_wraps_effective_contract_kind() {
-    let mut route = route_result();
-    route.route_reason = "contract:workspace_project_summary".to_string();
-    let contract_ref = route.effective_output_contract_ref();
-
-    assert_eq!(
-        contract_ref.semantic_kind(),
-        crate::OutputSemanticKind::WorkspaceProjectSummary
-    );
-}
-
-#[test]
-fn output_contract_ref_named_constructors_apply_to_contract() {
-    let mut contract = IntentOutputContract::default();
-
-    contract.apply_output_contract_ref(OutputContractRef::workspace_project_summary());
-    assert_eq!(
-        contract.semantic_kind,
-        crate::OutputSemanticKind::WorkspaceProjectSummary
-    );
-
-    contract.apply_output_contract_ref(OutputContractRef::file_paths());
-    assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::FilePaths);
-}
-
-#[test]
-fn route_result_explicit_contract_marker_overrides_legacy_raw_semantic() {
+fn route_result_route_reason_cannot_override_direct_semantic_kind() {
     let mut route = route_result();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route.route_reason = "contract:workspace_project_summary".to_string();
 
     assert_eq!(
         route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::WorkspaceProjectSummary
+        crate::OutputSemanticKind::FilePaths
     );
     assert_eq!(
         route.effective_output_contract().semantic_kind,
-        crate::OutputSemanticKind::WorkspaceProjectSummary
+        crate::OutputSemanticKind::FilePaths
     );
 }

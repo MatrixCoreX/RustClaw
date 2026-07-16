@@ -109,7 +109,7 @@ fn direct_answer_defers_http_basic_web_page_summary_to_observed_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Url,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
+            semantic_kind: OutputSemanticKind::WebPageSummary,
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
         },

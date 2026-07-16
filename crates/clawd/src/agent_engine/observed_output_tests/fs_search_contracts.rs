@@ -1275,12 +1275,11 @@ fn chat_wrapped_one_sentence_unclassified_contract_requires_synthesized_delivery
 }
 
 #[test]
-fn quantity_comparison_marker_embedded_in_reason_requires_synthesis() {
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+fn quantity_comparison_free_shape_requires_model_synthesis() {
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.route_reason = "file size comparison; extra explanation requested, so quantity_comparison_requires_model_language_synthesis applies".to_string();
 
     assert!(route_quantity_comparison_requires_model_language_synthesis(
         &route

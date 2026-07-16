@@ -25,11 +25,7 @@ fn config_guard_route_allows_failure_recovery(route_result: &crate::RouteResult)
     if route_result.output_contract.delivery_required {
         return false;
     }
-    crate::machine_capability_ref::route_has_capability_action(
-        route_result,
-        &["config"],
-        &["guard", "validate"],
-    ) || crate::finalize::route_matches_validation_verdict_output_contract(route_result)
+    crate::finalize::route_matches_validation_verdict_output_contract(route_result)
         || crate::finalize::route_matches_config_risk_output_contract(route_result)
 }
 

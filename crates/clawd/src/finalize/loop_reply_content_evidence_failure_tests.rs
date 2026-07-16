@@ -1,7 +1,7 @@
 use super::*;
 
 fn service_capability_route() -> crate::RouteResult {
-    crate::RouteResult {
+    let mut route = crate::RouteResult {
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -14,7 +14,9 @@ fn service_capability_route() -> crate::RouteResult {
         should_refresh_long_term_memory: false,
         agent_display_name_hint: String::new(),
         output_contract: crate::IntentOutputContract::default(),
-    }
+    };
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route
 }
 
 #[test]

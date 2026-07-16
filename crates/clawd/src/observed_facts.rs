@@ -264,18 +264,19 @@ pub(crate) fn route_allows_observed_bound_target(route_result: &crate::RouteResu
 
 fn route_uses_non_binding_workspace_evidence(route_result: &crate::RouteResult) -> bool {
     route_result.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
-        || route_result.has_route_reason_machine_marker("workspace_project_summary")
 }
 
 fn route_contract_can_publish_ordered_entries(route_result: &crate::RouteResult) -> bool {
     route_result.wants_file_delivery
         || route_result.output_contract.delivery_required
-        || route_result.has_route_reason_machine_marker("file_names")
-        || route_result.has_route_reason_machine_marker("directory_names")
-        || route_result.has_route_reason_machine_marker("directory_entry_groups")
-        || route_result.has_route_reason_machine_marker("file_paths")
-        || route_result.has_route_reason_machine_marker("sqlite_table_listing")
-        || route_result.has_route_reason_machine_marker("sqlite_table_names_only")
+        || route_result.output_contract_marker_is_any(&[
+            crate::OutputSemanticKind::FileNames,
+            crate::OutputSemanticKind::DirectoryNames,
+            crate::OutputSemanticKind::DirectoryEntryGroups,
+            crate::OutputSemanticKind::FilePaths,
+            crate::OutputSemanticKind::SqliteTableListing,
+            crate::OutputSemanticKind::SqliteTableNamesOnly,
+        ])
         || matches!(
             route_result.output_contract.delivery_intent,
             crate::OutputDeliveryIntent::DirectoryLookup
@@ -307,12 +308,12 @@ fn scalar_path_answer_bound_target(
     }
     normalize_scalar_path_bound_target(
         line,
-        route_result.has_route_reason_machine_marker("scalar_path_only"),
+        route_result.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly),
     )
 }
 
 fn scalar_path_contract_can_bind_target(route_result: &crate::RouteResult) -> bool {
-    route_result.has_route_reason_machine_marker("scalar_path_only")
+    route_result.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
         || (matches!(
             route_result.output_contract.response_shape,
             crate::OutputResponseShape::Scalar

@@ -241,7 +241,9 @@ fn candidate_has_observed_status_value(candidate: &str, observed: &str) -> bool 
 }
 
 fn route_is_weather_query(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_namespace(route, &["weather"])
+    route
+        .output_contract
+        .semantic_kind_is(crate::OutputSemanticKind::WeatherQuery)
 }
 
 pub(super) fn web_search_candidate_title_sources_from_output(

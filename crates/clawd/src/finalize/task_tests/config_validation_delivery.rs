@@ -1,10 +1,10 @@
 use super::{drop_execution_summaries_when_delivery_is_scalar, route_result};
 
 #[test]
-fn config_validation_capability_ref_drops_execution_summary_messages() {
+fn config_validation_contract_drops_execution_summary_messages() {
     let mut route = route_result();
     route.route_reason = "capability_ref=config.validate".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     let mut messages = vec![
         "**执行过程**\n1. 调用技能 `config_basic`\n   输出：ok".to_string(),

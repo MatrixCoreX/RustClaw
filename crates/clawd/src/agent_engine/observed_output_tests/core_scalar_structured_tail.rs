@@ -112,7 +112,7 @@ fn inventory_dir_file_names_contract_filters_names_by_kind() {
 }
 
 #[test]
-fn inventory_dir_file_names_contract_accepts_route_marker_without_semantic_enum() {
+fn inventory_dir_file_names_contract_uses_direct_semantic_kind() {
     let value = serde_json::json!({
         "action": "inventory_dir",
         "names_only": true,
@@ -125,11 +125,10 @@ fn inventory_dir_file_names_contract_accepts_route_marker_without_semantic_enum(
         "counts": {"files": 2, "dirs": 1, "total": 3}
     });
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.route_reason = "contract:file_names".to_string();
-    assert_eq!(route.output_contract.semantic_kind, OutputSemanticKind::None);
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
 
     let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
-        .expect("file names marker answer");
+        .expect("file names contract answer");
 
     assert!(answer.contains("release_checklist.md"));
     assert!(answer.contains("service_notes.md"));

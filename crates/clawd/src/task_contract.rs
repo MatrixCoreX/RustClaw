@@ -91,7 +91,6 @@ impl TaskDeliveryShape {
 pub(crate) enum TaskFailurePolicy {
     NoRetry,
     RetryWithAlternatives,
-    Clarify,
 }
 
 impl TaskFailurePolicy {
@@ -99,7 +98,6 @@ impl TaskFailurePolicy {
         match self {
             Self::NoRetry => "no_retry",
             Self::RetryWithAlternatives => "retry_with_alternatives",
-            Self::Clarify => "clarify",
         }
     }
 }
@@ -152,51 +150,60 @@ pub(crate) struct EvidencePolicyContract {
 
 #[cfg(test)]
 impl EvidencePolicyContract {
-    pub(crate) fn from_route_result(route: &RouteResult) -> Self {
-        let missing_parameters = missing_parameters_for_route(route);
-        let required_evidence_fields = required_evidence_fields_for_route(route);
-        let evidence_required = route.output_contract.requires_content_evidence
-            || route.output_contract.delivery_required
+    pub(crate) fn from_output_contract(output_contract: &crate::IntentOutputContract) -> Self {
+        let required_evidence_fields =
+            required_evidence_fields_for_output_contract(output_contract);
+        let evidence_required = output_contract.requires_content_evidence
+            || output_contract.delivery_required
             || !required_evidence_fields.is_empty();
         Self {
-            targets: targets_for_route(route),
-            target_object: target_object_for_route(route),
-            structured_field_selector: route
-                .output_contract
+            targets: targets_for_output_contract(output_contract),
+            target_object: target_object_for_output_contract(output_contract),
+            structured_field_selector: output_contract
                 .self_extension
                 .structured_field_selector
                 .clone(),
-            operation: operation_for_route(route),
+            operation: operation_for_output_contract(output_contract),
             evidence_required,
             required_evidence_fields,
-            delivery_shape: delivery_shape_for_route(route),
-            failure_policy: failure_policy_for_route(route, evidence_required, &missing_parameters),
-            missing_parameters,
+            delivery_shape: delivery_shape_for_output_contract(output_contract),
+            failure_policy: if evidence_required {
+                TaskFailurePolicy::RetryWithAlternatives
+            } else {
+                TaskFailurePolicy::NoRetry
+            },
+            missing_parameters: Vec::new(),
         }
     }
 }
 
-pub(crate) fn evidence_policy_context_prompt_line_for_route(route: &RouteResult) -> String {
-    let missing_parameters = missing_parameters_for_route(route);
-    let required_evidence_fields = required_evidence_fields_for_route(route);
-    let evidence_required = route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
+#[cfg(test)]
+pub(crate) fn evidence_policy_context_prompt_line_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> String {
+    let missing_parameters = Vec::new();
+    let required_evidence_fields = required_evidence_fields_for_output_contract(output_contract);
+    let evidence_required = output_contract.requires_content_evidence
+        || output_contract.delivery_required
         || !required_evidence_fields.is_empty();
     compact_prompt_line_with_fields(
         "evidence_policy_context",
-        &targets_for_route(route),
-        target_object_for_route(route),
-        route
-            .output_contract
+        &targets_for_output_contract(output_contract),
+        target_object_for_output_contract(output_contract),
+        output_contract
             .self_extension
             .structured_field_selector
             .as_deref(),
-        operation_for_route(route),
+        operation_for_output_contract(output_contract),
         evidence_required,
         &required_evidence_fields,
-        delivery_shape_for_route(route),
+        delivery_shape_for_output_contract(output_contract),
         &missing_parameters,
-        failure_policy_for_route(route, evidence_required, &missing_parameters),
+        if evidence_required {
+            TaskFailurePolicy::RetryWithAlternatives
+        } else {
+            TaskFailurePolicy::NoRetry
+        },
     )
 }
 
@@ -245,10 +252,13 @@ fn compact_prompt_line_with_fields(
     )
 }
 
-fn targets_for_route(route: &RouteResult) -> Vec<TargetContract> {
+#[cfg(test)]
+fn targets_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> Vec<TargetContract> {
     let mut targets = Vec::new();
-    let primary_kind = target_object_for_route(route);
-    let primary_locators = target_locators_for_route(route);
+    let primary_kind = target_object_for_output_contract(output_contract);
+    let primary_locators = target_locators_for_output_contract(output_contract);
     if primary_locators.is_empty() && primary_kind != TaskTargetObject::Unknown {
         targets.push(TargetContract {
             role: TaskTargetRole::Primary,
@@ -264,13 +274,10 @@ fn targets_for_route(route: &RouteResult) -> Vec<TargetContract> {
             });
         }
     }
-    if route.output_contract.delivery_required
-        && !matches!(
-            route.output_contract.delivery_intent,
-            OutputDeliveryIntent::None
-        )
+    if output_contract.delivery_required
+        && !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
     {
-        let locator = route.output_contract.locator_hint.trim();
+        let locator = output_contract.locator_hint.trim();
         if !locator.is_empty() {
             targets.push(TargetContract {
                 role: TaskTargetRole::Delivery,
@@ -282,8 +289,11 @@ fn targets_for_route(route: &RouteResult) -> Vec<TargetContract> {
     targets
 }
 
-pub(crate) fn target_locators_for_route(route: &RouteResult) -> Vec<String> {
-    split_locator_targets(&primary_locator_for_route(route))
+#[cfg(test)]
+pub(crate) fn target_locators_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> Vec<String> {
+    split_locator_targets(&primary_locator_for_output_contract(output_contract))
 }
 
 fn split_locator_targets(raw: &str) -> Vec<String> {
@@ -336,40 +346,16 @@ where
     out
 }
 
-fn primary_locator_for_route(route: &RouteResult) -> String {
-    let locator = route.output_contract.locator_hint.trim();
+#[cfg(test)]
+fn primary_locator_for_output_contract(output_contract: &crate::IntentOutputContract) -> String {
+    let locator = output_contract.locator_hint.trim();
     if !locator.is_empty() {
         return locator.to_string();
     }
-    match route.output_contract.locator_kind {
+    match output_contract.locator_kind {
         OutputLocatorKind::CurrentWorkspace => ".".to_string(),
         _ => String::new(),
     }
-}
-
-fn target_object_for_capability_ref(route: &RouteResult) -> Option<TaskTargetObject> {
-    let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
-    Some(match capability.namespace() {
-        "config" | "config_basic" | "config_edit" => TaskTargetObject::ConfigKey,
-        "service" | "service_control" => TaskTargetObject::Service,
-        "docker" | "process" => TaskTargetObject::Process,
-        "db" | "database" | "sqlite" => TaskTargetObject::Db,
-        "filesystem" | "fs_basic" | "file" | "archive" | "photo" => TaskTargetObject::Path,
-        "git" => TaskTargetObject::Directory,
-        "package" | "package_manager" | "module" | "system" | "system_basic" => {
-            TaskTargetObject::System
-        }
-        "browser" | "http" | "image_vision" | "rss" | "social" | "stock" | "crypto" | "weather"
-        | "web" | "x" => TaskTargetObject::Web,
-        _ => TaskTargetObject::Unknown,
-    })
-}
-
-pub(crate) fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
-    if let Some(target) = target_object_for_capability_ref(route) {
-        return target;
-    }
-    target_object_for_output_contract(&route.effective_output_contract())
 }
 
 pub(crate) fn target_object_for_output_contract(
@@ -400,63 +386,7 @@ fn target_object_for_locator_kind(locator_kind: OutputLocatorKind) -> TaskTarget
     }
 }
 
-fn operation_for_capability_ref(route: &RouteResult) -> Option<TaskOperation> {
-    let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
-    let action = capability.action();
-    Some(if action_has_any_segment(action, &["count"]) {
-        TaskOperation::Count
-    } else if action_has_any_segment(action, &["list", "find", "search", "candidates"]) {
-        TaskOperation::List
-    } else if action_has_any_segment(
-        action,
-        &[
-            "apply",
-            "delete",
-            "install",
-            "kill",
-            "publish",
-            "remove",
-            "restart",
-            "start",
-            "stop",
-            "uninstall",
-            "unpack",
-        ],
-    ) {
-        TaskOperation::Modify
-    } else if action_has_any_segment(
-        action,
-        &["append", "create", "generate", "make", "pack", "write"],
-    ) {
-        TaskOperation::Write
-    } else if action_has_any_segment(action, &["check", "compare", "guard", "validate", "verify"]) {
-        TaskOperation::Validate
-    } else if action_has_any_segment(
-        action,
-        &[
-            "analyze",
-            "current",
-            "describe",
-            "positions",
-            "quote",
-            "summary",
-            "summarize",
-        ],
-    ) {
-        TaskOperation::Summarize
-    } else if capability.namespace() == "system"
-        && action_has_any_segment(action, &["run", "cmd", "command"])
-    {
-        TaskOperation::Run
-    } else {
-        TaskOperation::Inspect
-    })
-}
-
 pub(crate) fn operation_for_route(route: &RouteResult) -> TaskOperation {
-    if let Some(operation) = operation_for_capability_ref(route) {
-        return operation;
-    }
     operation_for_output_contract(&route.effective_output_contract())
 }
 
@@ -519,21 +449,7 @@ fn operation_for_unclassified_output_contract(
     }
 }
 
-fn delivery_shape_for_capability_ref(route: &RouteResult) -> Option<TaskDeliveryShape> {
-    let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
-    if action_has_any_segment(
-        capability.action(),
-        &["candidates", "find", "list", "search"],
-    ) {
-        return Some(TaskDeliveryShape::List);
-    }
-    None
-}
-
 pub(crate) fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
-    if let Some(shape) = delivery_shape_for_capability_ref(route) {
-        return shape;
-    }
     delivery_shape_for_output_contract(&route.effective_output_contract())
 }
 
@@ -555,9 +471,6 @@ fn delivery_shape_for_response_shape(response_shape: OutputResponseShape) -> Tas
 }
 
 pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<String> {
-    if let Some(fields) = required_evidence_fields_for_capability_ref(route) {
-        return fields;
-    }
     let output_contract = route.effective_output_contract();
     required_evidence_fields_for_output_contract(&output_contract)
 }
@@ -612,75 +525,6 @@ fn task_delivery_shape_from_token(value: &str) -> Option<TaskDeliveryShape> {
         "summary" => Some(TaskDeliveryShape::Summary),
         _ => None,
     }
-}
-
-fn required_evidence_fields_for_capability_ref(route: &RouteResult) -> Option<Vec<String>> {
-    let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
-    let namespace = capability.namespace();
-    let action = capability.action();
-    let fields =
-        if namespace == "config" || namespace == "config_basic" || namespace == "config_edit" {
-            if action_has_any_segment(action, &["guard", "risk"]) {
-                &["candidates", "count"][..]
-            } else if action_has_any_segment(action, &["apply", "change", "mutate", "set", "write"])
-            {
-                &["field_value", "path", "valid"][..]
-            } else if action_has_any_segment(action, &["validate", "verify"]) {
-                &["valid"][..]
-            } else {
-                &["field_value"][..]
-            }
-        } else if namespace == "archive" {
-            if action_has_any_segment(action, &["list"]) {
-                &["candidates"][..]
-            } else if action_has_any_segment(action, &["read"]) {
-                &["content_excerpt"][..]
-            } else if action_has_any_segment(action, &["pack", "unpack"]) {
-                &["path"][..]
-            } else {
-                &["field_value"][..]
-            }
-        } else if action_has_any_segment(action, &["candidates", "find", "list", "search"]) {
-            &["candidates"][..]
-        } else if action_has_any_segment(
-            action,
-            &[
-                "analyze",
-                "describe",
-                "extract",
-                "quote",
-                "read",
-                "summary",
-                "summarize",
-            ],
-        ) {
-            &["content_excerpt"][..]
-        } else if namespace == "web"
-            || namespace == "browser"
-            || namespace == "rss"
-            || namespace == "weather"
-            || namespace == "image_vision"
-        {
-            &["content_excerpt"][..]
-        } else {
-            &["field_value"][..]
-        };
-    Some(fields.iter().map(|field| (*field).to_string()).collect())
-}
-
-fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
-    action
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
-        .any(|segment| {
-            let segment = segment.trim();
-            !segment.is_empty()
-                && needles.iter().any(|needle| {
-                    segment == *needle
-                        || segment.starts_with(&format!("{needle}_"))
-                        || segment.ends_with(&format!("_{needle}"))
-                        || segment.contains(&format!("_{needle}_"))
-                })
-        })
 }
 
 pub(crate) fn required_evidence_fields_for_output_contract(
@@ -813,45 +657,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
     fields.into_iter().map(str::to_string).collect()
 }
 
-pub(crate) fn missing_parameters_for_route(route: &RouteResult) -> Vec<String> {
-    if !route.needs_clarify {
-        return Vec::new();
-    }
-    let mut missing = BTreeSet::new();
-    if route.output_contract.locator_hint.trim().is_empty()
-        && !matches!(route.output_contract.locator_kind, OutputLocatorKind::None)
-    {
-        missing.insert("locator");
-    }
-    if route.output_contract.delivery_required
-        && route.output_contract.locator_hint.trim().is_empty()
-    {
-        missing.insert("delivery_target");
-    }
-    if missing.is_empty() {
-        missing.insert("required_detail");
-    }
-    missing.into_iter().map(str::to_string).collect()
-}
-
-fn failure_policy_for_route(
-    route: &RouteResult,
-    evidence_required: bool,
-    missing_parameters: &[String],
-) -> TaskFailurePolicy {
-    if route.needs_clarify || !missing_parameters.is_empty() {
-        TaskFailurePolicy::Clarify
-    } else if evidence_required {
-        TaskFailurePolicy::RetryWithAlternatives
-    } else {
-        TaskFailurePolicy::NoRetry
-    }
-}
-
 #[cfg(test)]
 #[path = "task_contract_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "task_contract_service_capability_tests.rs"]
-mod service_capability_tests;
