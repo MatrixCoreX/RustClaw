@@ -557,14 +557,6 @@ pub(super) fn default_command_intent_default_locale() -> String {
     "zh-CN".to_string()
 }
 
-pub(super) fn default_command_intent_rules_dir() -> String {
-    "configs/command_intent".to_string()
-}
-
-pub(super) fn default_command_intent_llm_fallback_enabled() -> bool {
-    true
-}
-
 pub(super) fn default_command_intent_verify_enforce_enabled() -> bool {
     false
 }

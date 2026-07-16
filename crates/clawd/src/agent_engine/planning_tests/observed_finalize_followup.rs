@@ -18,11 +18,7 @@ fn content_evidence_route_keeps_terminal_discussion_followup_for_planned_synthes
         },
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            true,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(true, OutputResponseShape::Free)),
         &loop_state,
         actions.clone(),
     );
@@ -55,11 +51,7 @@ fn content_evidence_route_keeps_terminal_synthesize_followup_for_planned_synthes
         },
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            true,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(true, OutputResponseShape::Free)),
         &loop_state,
         actions.clone(),
     );
@@ -76,7 +68,7 @@ fn content_evidence_route_keeps_terminal_synthesize_followup_for_planned_synthes
 }
 
 #[test]
-fn executable_contract_observe_prefix_strips_terminal_discussion_for_next_planner_round() {
+fn planner_terminal_discussion_is_preserved_after_observation_prefix() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
     let actions = vec![
@@ -103,17 +95,13 @@ fn executable_contract_observe_prefix_strips_terminal_discussion_for_next_planne
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    let mut route = route_result(true, OutputResponseShape::Strict);
+    route.route_reason = "".to_string();
 
     let stripped =
         strip_terminal_discussion_for_observed_finalize(Some(&route), &loop_state, actions);
 
-    assert_eq!(stripped.len(), 2);
+    assert_eq!(stripped.len(), 4);
     assert!(matches!(
         &stripped[0],
         AgentAction::CallTool { tool, args }
@@ -126,10 +114,12 @@ fn executable_contract_observe_prefix_strips_terminal_discussion_for_next_planne
             if tool == "fs_basic"
                 && args.get("action").and_then(Value::as_str) == Some("read_text_range")
     ));
+    assert!(matches!(&stripped[2], AgentAction::SynthesizeAnswer { .. }));
+    assert!(matches!(&stripped[3], AgentAction::Respond { .. }));
 }
 
 #[test]
-fn executable_contract_call_capability_observe_prefix_strips_terminal_discussion() {
+fn planner_terminal_discussion_is_preserved_after_capability_observation() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
     let actions = vec![
@@ -149,23 +139,21 @@ fn executable_contract_call_capability_observe_prefix_strips_terminal_discussion
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    let mut route = route_result(true, OutputResponseShape::Strict);
+    route.route_reason = "".to_string();
 
     let stripped =
         strip_terminal_discussion_for_observed_finalize(Some(&route), &loop_state, actions);
 
-    assert_eq!(stripped.len(), 1);
+    assert_eq!(stripped.len(), 3);
     assert!(matches!(
         &stripped[0],
         AgentAction::CallCapability { capability, args }
             if capability == "filesystem.list_file_names"
                 && args.get("files_only").and_then(Value::as_bool) == Some(true)
     ));
+    assert!(matches!(&stripped[1], AgentAction::SynthesizeAnswer { .. }));
+    assert!(matches!(&stripped[2], AgentAction::Respond { .. }));
 }
 
 #[test]
@@ -193,11 +181,7 @@ fn content_evidence_route_keeps_multi_evidence_synthesize_followup() {
         },
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            true,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(true, OutputResponseShape::Free)),
         &loop_state,
         actions.clone(),
     );
@@ -248,11 +232,7 @@ fn recent_scalar_pair_strips_terminal_synthesis_for_runtime_finalizer() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
 
     let stripped =

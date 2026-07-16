@@ -36,6 +36,7 @@ mod subagent_runtime;
 mod support;
 mod user_output_path;
 
+#[cfg(test)]
 pub(crate) fn explicit_command_segment_for_policy(request: &str) -> Option<String> {
     planning::explicit_machine_syntax_command_segment(request)
 }

@@ -6,11 +6,7 @@ fn scalar_count_listing_plan_preserves_dirs_only_dimension_for_count_inventory()
     fs::write(root.path.join("a.txt"), "a").expect("write a");
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -66,11 +62,7 @@ fn scalar_count_uses_active_listing_target_when_route_is_locatorless() {
     fs::write(root.path.join("release_checklist.md"), "release").expect("write release");
     fs::write(root.path.join("service_notes.md"), "service").expect("write service");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.route_reason = "active_listing_target_required".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -115,11 +107,7 @@ fn scalar_count_uses_current_workspace_scope_target_without_route_prebind() {
     fs::write(root.path.join("release_checklist.md"), "release").expect("write release");
     fs::write(root.path.join("service_notes.md"), "service").expect("write service");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.route_reason = "current_workspace_scope_from_current_request".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -168,11 +156,7 @@ fn scalar_count_planner_count_entries_inherits_dirs_filter_from_machine_contract
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.route_reason = "capability_ref=filesystem.count_entries".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -241,11 +225,7 @@ fn scalar_count_state_patch_filter_exposes_structured_dir_count_hint() {
     fs::create_dir_all(root.path.join("child")).expect("create child dir");
     fs::write(root.path.join("a.txt"), "a").expect("write file");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
@@ -300,11 +280,7 @@ fn scalar_count_strict_single_sentence_shape_exposes_structured_file_count_hint(
     fs::create_dir_all(root.path.join("child")).expect("create child dir");
     fs::write(root.path.join("a.txt"), "a").expect("write file");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.exact_sentence_count = Some(1);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -355,11 +331,7 @@ fn scalar_count_contract_filter_repairs_existing_count_entries_action() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
@@ -411,15 +383,13 @@ fn contract_rejected_find_wc_count_run_cmd_rewrites_to_count_entries() {
     fs::write(root.path.join("a.txt"), "a").expect("write file");
     fs::write(root.path.join("child/b.txt"), "b").expect("write nested file");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.route_reason =
-        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    route.route_reason = "scalar_locator_requires_evidence".to_string();
     let actions = vec![AgentAction::CallTool {
         tool: "run_cmd".to_string(),
         args: json!({
@@ -476,15 +446,13 @@ fn find_wc_count_run_cmd_rewrite_preserves_extension_filter() {
     fs::write(root.path.join("b.txt"), "b").expect("write txt");
     fs::write(root.path.join("child/c.MD"), "c").expect("write nested md");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.route_reason =
-        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    route.route_reason = "scalar_locator_requires_evidence".to_string();
     let actions = vec![AgentAction::CallTool {
         tool: "run_cmd".to_string(),
         args: json!({
@@ -533,15 +501,13 @@ fn find_wc_count_run_cmd_rewrite_keeps_non_extension_name_filter_literal() {
     let root = TempDirGuard::new("scalar_count_find_wc_literal_name");
     fs::write(root.path.join("README"), "a").expect("write readme");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.route_reason =
-        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    route.route_reason = "scalar_locator_requires_evidence".to_string();
     let actions = vec![AgentAction::CallTool {
         tool: "run_cmd".to_string(),
         args: json!({
@@ -575,11 +541,7 @@ fn scalar_count_listing_plan_preserves_files_kind_for_count_inventory() {
     fs::write(root.path.join("a.txt"), "a").expect("write a");
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -627,11 +589,7 @@ fn scalar_count_listing_plan_preserves_extension_filter_for_count_inventory() {
     fs::write(root.path.join("a.md"), "a").expect("write a");
     fs::write(root.path.join("b.txt"), "b").expect("write b");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -678,11 +636,7 @@ fn scalar_count_repair_preserves_explicit_count_path_over_auto_locator() {
     fs::create_dir_all(root.path.join("crates")).expect("create crates");
     let root_path = root.path.display().to_string();
     let git_path = root.path.join(".git").display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -743,11 +697,7 @@ fn scalar_count_unqualified_listing_plan_forces_structured_count_repair() {
     fs::write(root.path.join("a.txt"), "a").expect("write a");
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
@@ -807,11 +757,7 @@ fn scalar_count_missing_explicit_path_checks_that_path_not_auto_parent() {
     let parent_path = parent.display().to_string();
     let missing = root.path.join("configs/config_copy");
     let missing_path = missing.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = missing_path.clone();
@@ -875,11 +821,7 @@ fn observed_missing_read_file_reply_does_not_force_plan_repair() {
         started_at: 1,
         finished_at: 2,
     });
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent = format!("读取 {missing_path}；如果不存在，只回答“不存在”和这个路径");
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = missing_path.to_string();
@@ -901,11 +843,7 @@ fn scalar_count_pathlike_hint_in_current_workspace_does_not_use_parent_auto_loca
     let parent = root.path.join("configs");
     fs::create_dir_all(&parent).expect("create parent");
     let parent_path = parent.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "configs/config_copy".to_string();
@@ -958,11 +896,7 @@ fn hidden_entries_scalar_contract_uses_inventory_dir() {
     fs::write(root.path.join(".env"), "a").expect("write hidden");
     fs::write(root.path.join("visible.txt"), "b").expect("write visible");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
@@ -1019,11 +953,7 @@ fn hidden_entries_strict_contract_uses_hidden_inventory_dir() {
     fs::write(root.path.join(".env"), "a").expect("write hidden");
     fs::write(root.path.join("visible.txt"), "b").expect("write visible");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
@@ -1073,11 +1003,7 @@ fn hidden_entries_strict_contract_uses_hidden_inventory_dir() {
 
 #[test]
 fn hidden_entries_scalar_current_workspace_hint_falls_back_to_dot_inventory() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "current directory".to_string();
@@ -1123,11 +1049,7 @@ fn hidden_entries_scalar_current_workspace_hint_falls_back_to_dot_inventory() {
 
 #[test]
 fn service_status_contract_rewrites_pgrep_run_cmd_to_service_control_status() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -1160,11 +1082,7 @@ fn service_status_contract_rewrites_pgrep_run_cmd_to_service_control_status() {
 
 #[test]
 fn service_status_contract_rewrites_pgrep_script_without_trailing_shell_words() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -1190,11 +1108,7 @@ fn service_status_contract_rewrites_pgrep_script_without_trailing_shell_words() 
 
 #[test]
 fn service_status_contract_rewrites_systemctl_status_to_service_control_systemd() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -1226,11 +1140,7 @@ fn service_status_contract_rewrites_systemctl_status_to_service_control_systemd(
 fn normalize_service_status_capability_ref_keeps_planner_action_and_requests_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.route_reason = "capability_ref=service.status".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
@@ -1271,11 +1181,7 @@ fn normalize_service_status_capability_ref_keeps_planner_action_and_requests_rep
 fn normalize_prefers_registry_sqlite_rewrite_over_text_read_fallback() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
     route.output_contract.locator_hint = "data/db-basic-contract.sqlite".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1306,11 +1212,7 @@ fn normalize_prefers_registry_sqlite_rewrite_over_text_read_fallback() {
 fn normalize_prefers_registry_repair_from_docker_capability_ref() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::DockerPs;
     route.resolved_intent = "capability_ref=docker.list_containers".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1342,11 +1244,7 @@ fn normalize_prefers_registry_repair_from_docker_capability_ref() {
 fn legacy_docker_semantic_kind_without_capability_ref_does_not_select_registry_skill() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::DockerPs;
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
@@ -1371,11 +1269,7 @@ fn legacy_docker_semantic_kind_without_capability_ref_does_not_select_registry_s
 fn archive_unpack_semantic_kind_without_capability_ref_stays_non_actionable() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
     route.output_contract.locator_hint = "/tmp/source.tgz | /tmp/source-unpacked".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1404,13 +1298,9 @@ fn archive_unpack_semantic_kind_without_capability_ref_stays_non_actionable() {
 }
 
 #[test]
-fn explicit_service_command_is_preserved_as_run_cmd() {
+fn natural_language_service_command_does_not_override_planner_capability() {
     let state = test_state_with_enabled_skills(&["service_control", "run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let actions = vec![AgentAction::CallSkill {
         skill: "service_control".to_string(),
@@ -1432,11 +1322,8 @@ fn explicit_service_command_is_preserved_as_run_cmd() {
 
     match &normalized[0] {
         AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "run_cmd");
-            assert_eq!(
-                args.get("command").and_then(Value::as_str),
-                Some("systemctl status clawd --no-pager")
-            );
+            assert_eq!(skill, "service_control");
+            assert_eq!(args.get("action").and_then(Value::as_str), Some("status"));
         }
         other => panic!("expected preserved run_cmd action, got {other:?}"),
     }
@@ -1444,11 +1331,7 @@ fn explicit_service_command_is_preserved_as_run_cmd() {
 
 #[test]
 fn observed_judgment_mixed_placeholder_respond_uses_synthesize_after_listing() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "document".to_string();
@@ -1494,11 +1377,7 @@ fn scalar_count_preserves_planned_run_cmd_observation() {
     fs::write(root.path.join(".env"), "a").expect("write hidden");
     fs::write(root.path.join("visible.txt"), "b").expect("write visible");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
@@ -1553,11 +1432,7 @@ fn structured_keys_contract_rewrites_read_range_to_structured_keys() {
     let config_path = root.path.join("config.toml");
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -1609,11 +1484,7 @@ fn structured_keys_contract_rewrites_validate_to_structured_keys() {
     let config_path = root.path.join("config.toml");
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();

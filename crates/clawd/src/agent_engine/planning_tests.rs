@@ -72,7 +72,7 @@ use crate::agent_engine::{
     CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG, CLAWD_RUNTIME_ASYNC_JOB_START_ARG,
 };
 use crate::{
-    AgentAction, AgentRuntimeConfig, AppState, AskMode, ClaimedTask, IntentOutputContract,
+    AgentAction, AgentRuntimeConfig, AppState, ClaimedTask, IntentOutputContract,
     OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, PlanKind,
     ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
     DEFAULT_AGENT_ID,
@@ -372,7 +372,6 @@ fn test_task() -> ClaimedTask {
 
 fn base_route_result() -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -410,9 +409,7 @@ fn backend_identity_metadata_respond_rewrites_to_runtime_identity() {
     })];
     let loop_state = LoopState::new(1);
     let mut route = base_route_result();
-    route.route_reason =
-        "agent_display_name_hint_backend_metadata_removed; pure_chat_agent_loop_submode"
-            .to_string();
+    route.route_reason = "agent_display_name_hint_backend_metadata_removed".to_string();
     let actions = vec![AgentAction::Respond {
         content: "你好，我是 MiMo-v2.5-pro，由小米 MiMo 团队开发。".to_string(),
     }];
@@ -434,7 +431,7 @@ fn backend_identity_metadata_respond_rewrites_to_runtime_identity() {
     ));
 
     let mut route_without_marker = base_route_result();
-    route_without_marker.route_reason = "pure_chat_agent_loop_submode".to_string();
+    route_without_marker.route_reason.clear();
     let actions = vec![AgentAction::Respond {
         content: "MiMo-v2.5-pro".to_string(),
     }];
@@ -465,9 +462,7 @@ fn should_force_plan_repair(
 #[test]
 fn pre_loop_locator_candidate_plain_respond_does_not_force_plan_repair() {
     let mut route = base_route_result();
-    route.route_reason =
-        "resolved_directory_observation_clarify_repair; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    route.route_reason = "resolved_directory_observation_clarify_repair".to_string();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.requires_content_evidence = false;
@@ -505,12 +500,10 @@ fn loop_state_with_required_session_alias_targets(targets: &[&str]) -> LoopState
 }
 
 fn route_result(
-    ask_mode: AskMode,
     requires_content_evidence: bool,
     response_shape: OutputResponseShape,
 ) -> RouteResult {
     RouteResult {
-        ask_mode,
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -537,11 +530,7 @@ fn route_result(
 }
 
 fn delivery_route_result() -> RouteResult {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::FileToken,
-    );
+    let mut route = route_result(false, OutputResponseShape::FileToken);
     route.output_contract.delivery_required = true;
     route
 }

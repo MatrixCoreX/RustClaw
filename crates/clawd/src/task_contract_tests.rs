@@ -1,9 +1,8 @@
 use super::*;
-use crate::{AskMode, IntentOutputContract};
+use crate::IntentOutputContract;
 
-fn route_with_contract(ask_mode: AskMode, output_contract: IntentOutputContract) -> RouteResult {
+fn route_with_contract(output_contract: IntentOutputContract) -> RouteResult {
     RouteResult {
-        ask_mode,
         resolved_intent: "test intent".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -21,16 +20,13 @@ fn route_with_contract(ask_mode: AskMode, output_contract: IntentOutputContract)
 
 #[test]
 fn file_path_search_contract_is_list_with_candidate_evidence() {
-    let route = route_with_contract(
-        AskMode::act_plain(),
-        IntentOutputContract {
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            semantic_kind: OutputSemanticKind::FilePaths,
-            ..IntentOutputContract::default()
-        },
-    );
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        semantic_kind: OutputSemanticKind::FilePaths,
+        ..IntentOutputContract::default()
+    });
 
     let contract = EvidencePolicyContract::from_route_result(&route);
 
@@ -46,14 +42,11 @@ fn file_path_search_contract_is_list_with_candidate_evidence() {
 
 #[test]
 fn missing_locator_contract_prefers_clarify_policy() {
-    let mut route = route_with_contract(
-        AskMode::clarify_trace(),
-        IntentOutputContract {
-            locator_kind: OutputLocatorKind::Path,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        },
-    );
+    let mut route = route_with_contract(IntentOutputContract {
+        locator_kind: OutputLocatorKind::Path,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    });
     route.needs_clarify = true;
 
     let contract = EvidencePolicyContract::from_route_result(&route);
@@ -65,15 +58,12 @@ fn missing_locator_contract_prefers_clarify_policy() {
 
 #[test]
 fn evidence_policy_contract_includes_structured_workspace_target() {
-    let route = route_with_contract(
-        AskMode::act_plain(),
-        IntentOutputContract {
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        },
-    );
+    let route = route_with_contract(IntentOutputContract {
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    });
 
     let contract = EvidencePolicyContract::from_route_result(&route);
 
@@ -86,15 +76,12 @@ fn evidence_policy_contract_includes_structured_workspace_target() {
 
 #[test]
 fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
-    let route = route_with_contract(
-        AskMode::act_with_chat_finalizer(),
-        IntentOutputContract {
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        },
-    );
+    let route = route_with_contract(IntentOutputContract {
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    });
 
     let contract = EvidencePolicyContract::from_route_result(&route);
 
@@ -106,16 +93,13 @@ fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
 
 #[test]
 fn existence_contract_requires_structural_path_evidence() {
-    let route = route_with_contract(
-        AskMode::act_plain(),
-        IntentOutputContract {
-            locator_kind: OutputLocatorKind::Path,
-            locator_hint: "README.md".to_string(),
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        },
-    );
+    let route = route_with_contract(IntentOutputContract {
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "README.md".to_string(),
+        semantic_kind: OutputSemanticKind::ExistenceWithPath,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    });
 
     let contract = EvidencePolicyContract::from_route_result(&route);
 
@@ -130,16 +114,13 @@ fn existence_contract_requires_structural_path_evidence() {
 
 #[test]
 fn unclassified_evidence_contract_operation_does_not_depend_on_route_trace() {
-    let route = route_with_contract(
-        AskMode::respond_trace(),
-        IntentOutputContract {
-            locator_kind: OutputLocatorKind::Path,
-            locator_hint: "README.md".to_string(),
-            requires_content_evidence: true,
-            semantic_kind: OutputSemanticKind::None,
-            ..IntentOutputContract::default()
-        },
-    );
+    let route = route_with_contract(IntentOutputContract {
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "README.md".to_string(),
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    });
 
     let contract = EvidencePolicyContract::from_route_result(&route);
 
@@ -153,16 +134,13 @@ fn unclassified_evidence_contract_operation_does_not_depend_on_route_trace() {
 
 #[test]
 fn task_contract_failure_policy_does_not_depend_on_execute_gate_trace() {
-    let route = route_with_contract(
-        AskMode::act_plain(),
-        IntentOutputContract {
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: false,
-            locator_kind: OutputLocatorKind::None,
-            semantic_kind: OutputSemanticKind::None,
-            ..IntentOutputContract::default()
-        },
-    );
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: false,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    });
 
     let contract = EvidencePolicyContract::from_route_result(&route);
 
@@ -225,16 +203,13 @@ fn task_contract_uses_generic_capability_ref_machine_token_when_semantic_kind_is
             vec!["field_value"],
         ),
     ] {
-        let mut route = route_with_contract(
-            AskMode::act_plain(),
-            IntentOutputContract {
-                response_shape: OutputResponseShape::Strict,
-                requires_content_evidence: true,
-                locator_kind: OutputLocatorKind::None,
-                semantic_kind: OutputSemanticKind::None,
-                ..IntentOutputContract::default()
-            },
-        );
+        let mut route = route_with_contract(IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        });
         route.resolved_intent = marker.to_string();
 
         let contract = EvidencePolicyContract::from_route_result(&route);
@@ -280,16 +255,13 @@ fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
             vec!["path"],
         ),
     ] {
-        let mut route = route_with_contract(
-            AskMode::act_plain(),
-            IntentOutputContract {
-                response_shape: OutputResponseShape::Strict,
-                requires_content_evidence: true,
-                locator_kind: OutputLocatorKind::Path,
-                semantic_kind: OutputSemanticKind::None,
-                ..IntentOutputContract::default()
-            },
-        );
+        let mut route = route_with_contract(IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        });
         route.resolved_intent = marker.to_string();
 
         let contract = EvidencePolicyContract::from_route_result(&route);
@@ -302,16 +274,13 @@ fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
 
 #[test]
 fn task_contract_capability_ref_requires_exact_machine_token() {
-    let mut route = route_with_contract(
-        AskMode::act_plain(),
-        IntentOutputContract {
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::None,
-            semantic_kind: OutputSemanticKind::None,
-            ..IntentOutputContract::default()
-        },
-    );
+    let mut route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    });
     route.resolved_intent = "capability_ref=xpublish".to_string();
 
     let contract = EvidencePolicyContract::from_route_result(&route);
@@ -340,16 +309,13 @@ fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_
         OutputSemanticKind::ArchivePack,
         OutputSemanticKind::ArchiveUnpack,
     ] {
-        let route = route_with_contract(
-            AskMode::act_plain(),
-            IntentOutputContract {
-                response_shape: OutputResponseShape::Strict,
-                requires_content_evidence: true,
-                locator_kind: OutputLocatorKind::None,
-                semantic_kind,
-                ..IntentOutputContract::default()
-            },
-        );
+        let route = route_with_contract(IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            semantic_kind,
+            ..IntentOutputContract::default()
+        });
 
         let contract = EvidencePolicyContract::from_route_result(&route);
 
@@ -362,16 +328,13 @@ fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_
 
 #[test]
 fn task_contract_accepts_new_machine_capability_refs_without_static_whitelist() {
-    let mut route = route_with_contract(
-        AskMode::act_plain(),
-        IntentOutputContract {
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::None,
-            semantic_kind: OutputSemanticKind::None,
-            ..IntentOutputContract::default()
-        },
-    );
+    let mut route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    });
     route.resolved_intent = "capability_ref=social.publish_extra".to_string();
 
     let contract = EvidencePolicyContract::from_route_result(&route);
@@ -383,16 +346,13 @@ fn task_contract_accepts_new_machine_capability_refs_without_static_whitelist() 
 
 #[test]
 fn task_contract_splits_structured_multi_target_locator() {
-    let route = route_with_contract(
-        AskMode::act_plain(),
-        IntentOutputContract {
-            locator_kind: OutputLocatorKind::Filename,
-            locator_hint: "README.md | AGENTS.md".to_string(),
-            semantic_kind: OutputSemanticKind::QuantityComparison,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        },
-    );
+    let route = route_with_contract(IntentOutputContract {
+        locator_kind: OutputLocatorKind::Filename,
+        locator_hint: "README.md | AGENTS.md".to_string(),
+        semantic_kind: OutputSemanticKind::QuantityComparison,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    });
 
     let contract = EvidencePolicyContract::from_route_result(&route);
 
@@ -410,16 +370,13 @@ fn task_contract_splits_structured_multi_target_locator() {
 
 #[test]
 fn task_contract_splits_comma_multi_target_locator() {
-    let route = route_with_contract(
-        AskMode::act_plain(),
-        IntentOutputContract {
-            locator_kind: OutputLocatorKind::Filename,
-            locator_hint: "README.md, README.zh-CN.md, Cargo.toml".to_string(),
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        },
-    );
+    let route = route_with_contract(IntentOutputContract {
+        locator_kind: OutputLocatorKind::Filename,
+        locator_hint: "README.md, README.zh-CN.md, Cargo.toml".to_string(),
+        semantic_kind: OutputSemanticKind::ExistenceWithPath,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    });
 
     let contract = EvidencePolicyContract::from_route_result(&route);
 

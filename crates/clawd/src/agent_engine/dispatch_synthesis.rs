@@ -43,8 +43,7 @@ pub(super) fn synthesize_route_allows_direct_fallback(
     if crate::agent_engine::observed_output::route_disallows_direct_observation_passthrough(route) {
         return false;
     }
-    if route.ask_mode.is_plain_act()
-        && route.output_contract.requires_content_evidence
+    if route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && route.output_contract_is_unclassified()
     {

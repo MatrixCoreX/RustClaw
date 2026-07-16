@@ -9,11 +9,9 @@ use crate::AppState;
 mod execution_recipe_types;
 
 pub(crate) use execution_recipe_types::{
-    explicit_execution_recipe_spec, parse_execution_recipe_kind_text,
-    parse_execution_recipe_profile_text, parse_execution_recipe_target_scope_text,
-    profile_requires_specific_validation, ActionEffect, ExecutionRecipeKind, ExecutionRecipePhase,
-    ExecutionRecipePlanHint, ExecutionRecipeProfile, ExecutionRecipeRuntimeState,
-    ExecutionRecipeSpec, ExecutionRecipeTargetScope,
+    parse_execution_recipe_profile_text, profile_requires_specific_validation, ActionEffect,
+    ExecutionRecipeKind, ExecutionRecipePhase, ExecutionRecipePlanHint, ExecutionRecipeProfile,
+    ExecutionRecipeRuntimeState, ExecutionRecipeSpec, ExecutionRecipeTargetScope,
 };
 
 fn planner_capability_effect_to_action_effect(effect: PlannerCapabilityEffect) -> ActionEffect {
@@ -920,6 +918,10 @@ pub(crate) fn classify_skill_action_effect(
             ActionEffect::observe()
         }
         "write_file" | "remove_file" | "make_dir" | "install_module" => ActionEffect::mutate(),
+        "fs_basic" => match normalized_action_arg(args).as_str() {
+            "write_text" | "append_text" | "make_dir" | "remove_path" => ActionEffect::mutate(),
+            _ => ActionEffect::observe(),
+        },
         "package_manager" => {
             let action = normalized_action_arg(args);
             if contains_any(&action, &["install", "uninstall", "smart_install"]) {

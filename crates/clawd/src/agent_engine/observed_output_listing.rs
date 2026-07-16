@@ -345,7 +345,6 @@ pub(super) fn route_allows_raw_listing_direct_answer(route: Option<&crate::Route
                     route,
                     crate::OutputSemanticKind::ExistenceWithPath,
                 ))
-            && route.ask_mode.is_plain_act()
         {
             return true;
         }
@@ -364,8 +363,7 @@ pub(super) fn route_allows_raw_listing_direct_answer(route: Option<&crate::Route
 pub(super) fn route_allows_strict_plain_observation_passthrough(
     route: &crate::RouteResult,
 ) -> bool {
-    route.ask_mode.finalize_chat_wrapped()
-        && route.output_contract.requires_content_evidence
+    route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && super::output_route_policy::route_is_unclassified_contract(route)
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict

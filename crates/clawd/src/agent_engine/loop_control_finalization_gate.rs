@@ -71,20 +71,10 @@ pub(super) fn promote_publishable_strict_json_projection_for_verifier_candidate(
 
 pub(super) fn promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
     reply: &mut AskReply,
-    route_result: Option<&RouteResult>,
     user_text: &str,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route_result) = route_result else {
-        return false;
-    };
-    let local_code_route = route_result
-        .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-        || route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace;
-    if !local_code_route {
-        return false;
-    }
     let Some(answer) = crate::agent_engine::local_code_strict_json_projection_from_machine_evidence(
         user_text,
         loop_state,
@@ -148,23 +138,15 @@ pub(super) fn answer_verifier_retry_budget_available(
 
 pub(super) fn retry_verifier_accepts_rewritten_answer(
     verifier: &crate::answer_verifier::AnswerVerifierOut,
-    route_result: Option<&RouteResult>,
     retried_answer: &str,
 ) -> bool {
     verifier.pass
         && !verifier.high_confidence_gap()
-        && retry_rewritten_answer_is_publishable(route_result, retried_answer)
+        && retry_rewritten_answer_is_publishable(retried_answer)
 }
 
-pub(super) fn retry_rewritten_answer_is_publishable(
-    route_result: Option<&RouteResult>,
-    retried_answer: &str,
-) -> bool {
-    let local_code_route = route_result.is_some_and(|route| {
-        route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-            || route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-    });
-    if local_code_route && local_code_json_answer_has_unresolved_publication(retried_answer) {
+pub(super) fn retry_rewritten_answer_is_publishable(retried_answer: &str) -> bool {
+    if local_code_json_answer_has_unresolved_publication(retried_answer) {
         return false;
     }
     true

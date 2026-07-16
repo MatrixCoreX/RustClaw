@@ -82,7 +82,6 @@ fn observed_markdown_heading_scalar_replaces_repaired_strict_delivery() {
         r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.route_reason =
         "llm_semantic_contract_repair:malformed_contract_repairs_needed_but_conservative_route_valid"
             .to_string();
@@ -121,7 +120,6 @@ fn observed_markdown_heading_scalar_keeps_locatorless_strict_delivery() {
         r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -155,7 +153,6 @@ fn observed_markdown_heading_scalar_replaces_ungrounded_delivery() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.route_reason = "agent_loop_content_evidence; planner_loop_execute".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -192,7 +189,6 @@ fn observed_markdown_heading_scalar_replaces_one_sentence_locator_delivery() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -228,7 +224,6 @@ fn observed_markdown_heading_scalar_suppresses_summary_for_free_locator_delivery
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -264,7 +259,6 @@ fn observed_markdown_heading_scalar_reduces_strict_observed_markdown_body() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -301,7 +295,6 @@ fn observed_markdown_heading_scalar_reduces_scalar_wrapped_observed_markdown_bod
         r#"{"extra":{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.\n4|2. Confirm database migrations are applied.","path":"release_checklist.md","resolved_path":"/repo/release_checklist.md"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|# Release Checklist\\n2|\\n3|1. Verify configuration loads correctly.\\n4|2. Confirm database migrations are applied.\",\"path\":\"release_checklist.md\"}"}"#,
     ));
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -341,7 +334,6 @@ fn observed_markdown_heading_scalar_strips_heading_marker_for_title_selector() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -382,7 +374,6 @@ fn observed_markdown_heading_scalar_replaces_bounded_strict_wrapper_from_observe
         r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -420,7 +411,6 @@ fn observed_markdown_heading_scalar_keeps_heading_prefixed_summary_without_selec
         r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -462,7 +452,6 @@ fn direct_scalar_observed_answer_prefers_observed_heading_for_title_selector() {
         "자료A의 제목은 'Release Checklist'입니다.",
     ));
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -495,7 +484,6 @@ fn observed_markdown_heading_scalar_keeps_free_observed_markdown_body() {
         r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;

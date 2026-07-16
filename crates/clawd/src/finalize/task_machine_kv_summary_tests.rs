@@ -158,7 +158,6 @@ fn generic_route_restores_journal_requested_token_json_over_machine_summary() {
 
 fn generic_free_route(prompt: &str) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: prompt.to_string(),
         needs_clarify: false,
         route_reason: "agent_loop_default_entry".to_string(),
@@ -186,7 +185,6 @@ fn generic_free_route(prompt: &str) -> RouteResult {
 
 fn service_status_one_sentence_route() -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: ["check", "service", "status"].join(" "),
         needs_clarify: false,
         route_reason: String::new(),

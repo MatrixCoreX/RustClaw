@@ -4,7 +4,7 @@ use crate::agent_engine::planning::preferred_structured_action_for_contract_hint
 #[test]
 fn rustclaw_main_config_content_excerpt_direct_guard_prefers_config_basic_guard() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -37,7 +37,7 @@ fn rustclaw_main_config_content_excerpt_direct_guard_prefers_config_basic_guard(
 #[test]
 fn rustclaw_main_config_content_excerpt_tail_read_stays_bounded_read() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -69,11 +69,7 @@ fn rustclaw_main_config_content_excerpt_tail_read_stays_bounded_read() {
 #[test]
 fn schema_alias_normalization_uses_contract_field_selector_not_resolved_intent() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "package.json".to_string();
@@ -108,7 +104,7 @@ fn schema_alias_normalization_uses_contract_field_selector_not_resolved_intent()
 #[test]
 fn config_risk_assessment_rewrites_registry_head_read_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -157,11 +153,7 @@ fn scalar_structured_field_contract_rewrites_broad_read_to_read_field() {
     .expect("write workspace Cargo.toml");
     let state = test_state();
     let root_cargo = root_cargo.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_cargo.clone();
     let actions = vec![
@@ -208,11 +200,7 @@ fn unresolved_locator_marker_preserves_terminal_respond_plan() {
     fs::write(&release_checklist, "Release Checklist\n").expect("write release checklist");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::FileBasename;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.route_reason =
@@ -264,11 +252,7 @@ fn scalar_structured_field_contract_infers_single_field_from_structural_candidat
     let fixture_package_path = fixture_package.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "package.json".to_string();
     route.route_reason =
@@ -321,11 +305,7 @@ fn scalar_structured_field_contract_rewrites_key_listing_to_read_field() {
     let config_path = config.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
     route.resolved_intent = format!("Read app.port from {config_path} and output only the value.");
@@ -368,11 +348,7 @@ fn scalar_structured_keys_repair_marker_rewrites_key_listing_to_read_field() {
     let package_path = package.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "package.json".to_string();
@@ -424,11 +400,7 @@ db_path = "data/test_contract.sqlite"
     let config_path = config.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
     route.resolved_intent =
@@ -493,11 +465,7 @@ fn structured_multi_field_rewrite_ignores_background_filename_tokens() {
     let schema_path = schema.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = schema_path.clone();
     route.resolved_intent =
@@ -555,11 +523,7 @@ db_path = "data/test_contract.sqlite"
     let config_path = config.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
     route.resolved_intent = format!("Return paths.logs_dir and paths.db_path from {config_path}.");
@@ -614,11 +578,7 @@ planner_kind = "tool"
     let registry_path = registry.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = registry_path.clone();
     route.resolved_intent =
@@ -671,11 +631,7 @@ planner_kind = "tool"
     let registry_path = registry.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = registry_path.clone();
     route.route_reason = "structured_identifier_presence_requires_content_evidence".to_string();
@@ -723,11 +679,7 @@ planner_kind = "tool"
     let registry_path = registry.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = registry_path.clone();
     route.route_reason = "structured_identifier_presence_requires_content_evidence".to_string();
@@ -782,11 +734,7 @@ planner_kind = "tool"
     let registry_path = registry.display().to_string();
     let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -845,11 +793,7 @@ planner_kind = "tool"
     let registry_path = registry.display().to_string();
     let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -907,7 +851,7 @@ planner_kind = "tool"
     let registry_path = registry.display().to_string();
     let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -970,7 +914,7 @@ db_path = "data/test_contract.sqlite"
     let config_path = config.display().to_string();
     let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;

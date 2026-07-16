@@ -4,7 +4,6 @@ use super::*;
 fn git_status_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-git-state", "ask", "检查仓库状态");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -59,7 +58,6 @@ fn git_status_text_counts_as_field_value_evidence() {
 fn git_subject_plain_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-git-subject", "ask", "最近一次 git 提交标题");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -108,7 +106,6 @@ fn git_status_text_ignores_non_ascii_summary_without_panic() {
 fn config_validation_evidence_coverage_accepts_valid_flag() {
     let mut journal = TaskJournal::for_task("task-config-validation", "ask", "验证配置");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -235,7 +232,6 @@ fn config_mutation_apply_validated_flag_counts_as_valid_evidence() {
 fn sqlite_database_kind_uses_db_structure_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-sqlite-kind", "ask", "判断 sqlite 数据库类型");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -287,7 +283,6 @@ fn sqlite_database_kind_uses_db_structure_as_field_value_evidence() {
 fn quantity_comparison_size_bytes_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-quantity-comparison", "ask", "比较两个文件大小");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -409,7 +404,6 @@ fn quantity_comparison_text_size_bytes_counts_as_field_value_evidence() {
         "compare two file sizes",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -456,7 +450,6 @@ fn quantity_comparison_count_inventory_total_size_counts_as_size_evidence() {
         "check directory size",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -510,7 +503,6 @@ fn quantity_comparison_count_inventory_total_size_counts_as_size_evidence() {
 fn trace_json_reports_required_vs_observed_evidence_coverage() {
     let mut journal = TaskJournal::for_task("task-evidence-coverage", "ask", "列出文件名");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -604,7 +596,6 @@ fn trace_json_reports_required_vs_observed_evidence_coverage() {
 fn config_risk_evidence_coverage_accepts_guard_findings() {
     let mut journal = TaskJournal::for_task("task-config-risk-evidence", "ask", "检查配置风险");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -680,7 +671,6 @@ fn filesystem_mutation_result_accepts_kb_ingest_path_evidence() {
         "ingest README into demo_docs_nl",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -746,7 +736,6 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
         "summarize file content",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -839,7 +828,6 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
         "cat /definitely_missing_rustclaw_contract_case",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -923,7 +911,6 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
 fn summary_json_includes_machine_readable_task_outcome() {
     let mut journal = TaskJournal::for_task("task-outcome", "ask", "列出文件名");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -994,7 +981,6 @@ fn summary_json_includes_machine_readable_task_outcome() {
 fn trace_json_reports_missing_required_evidence() {
     let mut journal = TaskJournal::for_task("task-evidence-missing", "ask", "这个路径是否存在");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1049,7 +1035,6 @@ fn trace_json_reports_missing_required_evidence() {
 fn trace_json_uses_evidence_expression_for_confirmed_absence() {
     let mut journal = TaskJournal::for_task("task-evidence-absence", "ask", "这个路径是否存在");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1115,7 +1100,6 @@ fn trace_json_uses_evidence_expression_for_confirmed_absence() {
 fn trace_json_reports_missing_evidence_expression_alternative() {
     let mut journal = TaskJournal::for_task("task-evidence-missing-alt", "ask", "这个路径是否存在");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1160,7 +1144,6 @@ fn content_presence_accepts_excerpt_evidence_alternative() {
         "check whether the file mentions release",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1306,7 +1289,6 @@ fn non_content_route_ignores_doc_parse_observation_as_structured_evidence() {
 fn trace_json_counts_nested_builtin_tool_evidence() {
     let mut journal = TaskJournal::for_task("task-nested-evidence", "ask", "这个路径是否存在");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1369,7 +1351,6 @@ fn trace_json_counts_nested_builtin_tool_evidence() {
 fn trace_json_includes_task_level_evidence_policy_snapshot() {
     let mut journal = TaskJournal::for_task("task-contract-snapshot", "ask", "列出文件名");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1436,7 +1417,6 @@ fn trace_json_includes_task_level_evidence_policy_snapshot() {
 fn step_trace_includes_contract_and_action_policy_for_success() {
     let mut journal = TaskJournal::for_task("task-step-contract", "ask", "列出文件名");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1528,7 +1508,6 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1615,11 +1594,10 @@ fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
         "current working directory",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
-        route_reason: "executable_contract_preserved_for_agent_loop".to_string(),
+        route_reason: "".to_string(),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
         resume_behavior: crate::ResumeBehavior::None,

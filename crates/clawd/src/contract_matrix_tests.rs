@@ -18,7 +18,6 @@ fn load_workspace_matrix() -> ContractMatrix {
 
 fn route_with_machine_capability_ref(capability_ref: &str) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: capability_ref.to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -852,7 +851,6 @@ fn route_capability_ref_arg_policy_does_not_inherit_wrong_semantic_shape() {
 #[test]
 fn route_arg_policy_ignores_legacy_marker_without_capability_ref() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),

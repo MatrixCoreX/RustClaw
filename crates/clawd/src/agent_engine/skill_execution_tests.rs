@@ -738,7 +738,6 @@ fn evidence_policy_preflight_rejects_missing_bound_target_arg() {
     );
 
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -809,7 +808,6 @@ fn evidence_policy_preflight_allows_virtual_make_dir_for_filesystem_capability_r
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "capability_ref=filesystem.make_dir".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

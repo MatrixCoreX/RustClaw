@@ -198,8 +198,7 @@ pub(crate) fn route_requires_synthesized_delivery(route: &crate::RouteResult) ->
     let constrained_sentence_delivery = route.output_contract.response_shape
         == crate::OutputResponseShape::OneSentence
         || route.output_contract.exact_sentence_count.is_some();
-    route.ask_mode.finalize_chat_wrapped()
-        && route.output_contract.requires_content_evidence
+    route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && route_is_unclassified_contract(route)
         && constrained_sentence_delivery

@@ -2,31 +2,30 @@ use serde_json::Value;
 
 use crate::{agent_engine::LoopState, AgentAction, RouteResult};
 
-pub(super) fn executable_contract_observation_round_needs_planner(
+pub(in crate::agent_engine) fn observation_round_needs_planner(
     route_result: &RouteResult,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
     loop_state.round_no < loop_state.max_rounds
-        && executable_contract_observe_only_round_should_continue(route_result, loop_state, actions)
+        && observe_only_round_should_continue(route_result, loop_state, actions)
 }
 
-pub(super) fn executable_contract_read_observe_round_should_continue(
+pub(super) fn read_observe_round_should_continue(
     route_result: &RouteResult,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    executable_contract_observe_only_round_should_continue(route_result, loop_state, actions)
+    observe_only_round_should_continue(route_result, loop_state, actions)
         && actions.iter().any(action_reads_text_content)
 }
 
-pub(super) fn executable_contract_observe_only_round_should_continue(
+pub(in crate::agent_engine) fn observe_only_round_should_continue(
     route_result: &RouteResult,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    route_result.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-        && !super::has_discussion_followup_action(actions)
+    !super::has_discussion_followup_action(actions)
         && !super::has_authoritative_delivery(loop_state)
         && !bounded_read_observe_only_round_can_finalize(route_result, loop_state, actions)
         && actions_are_observe_only_machine_steps(actions)
@@ -72,18 +71,32 @@ fn action_is_bounded_read_observation(action: &AgentAction) -> bool {
                 .unwrap_or_default();
             matches!(tool, "fs_basic" | "system_basic")
                 && matches!(action.as_str(), "read_range" | "read_text_range")
+                && action_args_define_bounded_read(args)
         }
-        AgentAction::CallCapability { capability, .. } => matches!(
-            capability.trim().to_ascii_lowercase().as_str(),
-            "filesystem.read_range"
-                | "filesystem.read_text_range"
-                | "fs_basic.read_range"
-                | "fs_basic.read_text_range"
-        ),
+        AgentAction::CallCapability { capability, args } => {
+            matches!(
+                capability.trim().to_ascii_lowercase().as_str(),
+                "filesystem.read_range"
+                    | "filesystem.read_text_range"
+                    | "fs_basic.read_range"
+                    | "fs_basic.read_text_range"
+            ) && action_args_define_bounded_read(args)
+        }
         AgentAction::Think { .. }
         | AgentAction::SynthesizeAnswer { .. }
         | AgentAction::Respond { .. } => false,
     }
+}
+
+fn action_args_define_bounded_read(args: &Value) -> bool {
+    if matches!(
+        args.get("mode").and_then(Value::as_str),
+        Some("head" | "tail" | "range")
+    ) {
+        return true;
+    }
+    bounded_read_requested_lines(args)
+        .is_some_and(|requested_n| requested_n > 0 && requested_n <= 200)
 }
 
 fn action_reads_text_content(action: &AgentAction) -> bool {
@@ -147,18 +160,23 @@ fn value_is_bounded_read_range(value: &Value) -> bool {
 }
 
 fn flat_value_is_bounded_read_range(value: &Value) -> bool {
-    matches!(
+    if !matches!(
         value.get("action").and_then(Value::as_str),
         Some("read_range" | "read_text_range")
-    ) && matches!(
-        value.get("mode").and_then(Value::as_str),
-        Some("head" | "tail" | "range")
-    ) && bounded_read_requested_lines(value)
-        .is_some_and(|requested_n| requested_n > 0 && requested_n <= 100)
-        && value
-            .get("excerpt")
-            .and_then(Value::as_str)
-            .is_some_and(|excerpt| !excerpt.trim().is_empty())
+    ) {
+        return false;
+    }
+    let has_excerpt = value
+        .get("excerpt")
+        .and_then(Value::as_str)
+        .is_some_and(|excerpt| !excerpt.trim().is_empty());
+    has_excerpt
+        && (!value.get("mode").is_some()
+            || (matches!(
+                value.get("mode").and_then(Value::as_str),
+                Some("head" | "tail" | "range")
+            ) && bounded_read_requested_lines(value)
+                .is_some_and(|requested_n| requested_n > 0 && requested_n <= 200)))
 }
 
 fn bounded_read_requested_lines(value: &Value) -> Option<u64> {

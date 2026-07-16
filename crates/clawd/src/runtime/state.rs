@@ -256,7 +256,6 @@ impl PolicyConfig {
             allow_sudo: false,
             persona_prompt: Arc::new(RwLock::new(String::new())),
             command_intent: CommandIntentRuntime {
-                standalone_commands: Vec::new(),
                 default_locale: locale.to_string(),
                 verify_enforce_enabled: false,
             },
@@ -763,8 +762,7 @@ impl AppState {
             .expect("build tools policy from real config for fixture-replay test");
         let memory_runtime =
             crate::bootstrap::load_memory_runtime_config(&workspace_root, &config.memory);
-        let command_intent =
-            crate::bootstrap::load_command_intent_runtime(&workspace_root, &config.command_intent);
+        let command_intent = crate::bootstrap::load_command_intent_runtime(&config.command_intent);
         let schedule = crate::bootstrap::load_schedule_runtime(
             &workspace_root,
             &config.schedule,

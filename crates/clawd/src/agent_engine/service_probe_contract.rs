@@ -22,8 +22,7 @@ pub(crate) fn effective_service_probe_output_contract_for_plan_steps(
 }
 
 fn route_can_upgrade_service_probe(route: &RouteResult) -> bool {
-    route.is_execute_gate()
-        && !route.needs_clarify
+    !route.needs_clarify
         && !route.output_contract.delivery_required
         && !route.wants_file_delivery
         && route.output_contract.requires_content_evidence

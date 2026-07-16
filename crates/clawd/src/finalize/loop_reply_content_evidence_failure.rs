@@ -421,15 +421,14 @@ pub(super) async fn content_evidence_step_failure_answer(
         crate::skills::is_recoverable_skill_error(&failed_step.skill, raw_error);
     let observable_run_cmd_error =
         crate::skills::is_observable_run_cmd_error(&failed_step.skill, raw_error);
-    let error_observation = if crate::skills::parse_structured_skill_error(raw_error).is_some()
-        || recoverable_skill_error
-        || observable_run_cmd_error
-    {
-        crate::skills::skill_error_machine_observation(&failed_step.skill, raw_error)
-            .unwrap_or_else(|| raw_error.to_string())
-    } else {
-        raw_error.to_string()
-    };
+    let structured_error = crate::skills::parse_structured_skill_error(raw_error);
+    let error_observation =
+        if structured_error.is_some() || recoverable_skill_error || observable_run_cmd_error {
+            crate::skills::skill_error_machine_observation(&failed_step.skill, raw_error)
+                .unwrap_or_else(|| raw_error.to_string())
+        } else {
+            raw_error.to_string()
+        };
     let error = error_observation.as_str();
 
     if let Some(answer) =
@@ -531,12 +530,14 @@ pub(super) async fn content_evidence_step_failure_answer(
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let mut observed_facts = vec![
         format!("failed_skill: {}", failed_step.skill.trim()),
-        format!(
-            "error_observation: {}",
-            crate::truncate_for_agent_trace(error)
-        ),
         "content_evidence_observed: false".to_string(),
     ];
+    if structured_error.is_none() {
+        observed_facts.push(format!(
+            "error_observation: {}",
+            crate::truncate_for_agent_trace(error)
+        ));
+    }
     if let Some(locator) = locator.as_deref() {
         observed_facts.push(format!("locator: {locator}"));
     }

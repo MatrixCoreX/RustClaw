@@ -5,7 +5,6 @@ async fn finalize_loop_reply_accepts_terminal_machine_json_envelope() {
     let state = test_state();
     let task = claimed_task("task-machine-envelope-terminal");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -63,7 +62,6 @@ async fn finalize_loop_reply_promotes_machine_json_last_respond_to_delivery() {
     let state = test_state();
     let task = claimed_task("task-machine-envelope-last-respond");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -121,7 +119,6 @@ async fn finalize_loop_reply_promotes_machine_json_step_output_to_delivery() {
     let state = test_state();
     let task = claimed_task("task-machine-envelope-step-output");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
@@ -177,7 +174,6 @@ async fn finalize_loop_reply_prefers_subagent_machine_envelope_over_later_prose(
     let state = test_state();
     let task = claimed_task("task-machine-envelope-over-prose");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
@@ -233,7 +229,6 @@ async fn finalize_loop_reply_projects_subagent_child_model_result_from_runtime_e
     let state = test_state();
     let task = claimed_task("task-subagent-child-model-result-projection");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),

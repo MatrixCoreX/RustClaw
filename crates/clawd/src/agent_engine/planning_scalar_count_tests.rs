@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    AgentAction, AskMode, IntentOutputContract, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    AgentAction, IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
+    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -37,7 +37,6 @@ impl Drop for TempDirGuard {
 
 fn scalar_count_route(root_path: &str) -> RouteResult {
     RouteResult {
-        ask_mode: AskMode::act_plain(),
         resolved_intent: "count directories".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

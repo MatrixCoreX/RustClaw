@@ -7,7 +7,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
 ) -> Option<String> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let response_shape = route.map(|route| route.output_contract.response_shape);
-    let is_plain_act = route.is_some_and(|route| route.ask_mode.is_plain_act());
+    let has_route_contract = route.is_some();
     let locator_hint = route
         .map(|route| route.output_contract.locator_hint.as_str())
         .filter(|hint| !hint.trim().is_empty());
@@ -39,7 +39,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
     let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route)
         && !existence_with_path_should_use_llm_synthesis
         && !hidden_entries_should_use_llm_synthesis;
-    let health_check_prefers_raw_payload = is_plain_act
+    let health_check_prefers_raw_payload = has_route_contract
         && route.is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is(
                 route,
@@ -447,7 +447,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             route,
                             &value,
                             loop_state,
-                            is_plain_act,
+                            has_route_contract,
                             allow_raw_listing_direct_answer,
                         )
                     {
@@ -747,16 +747,7 @@ pub(super) fn route_allows_read_range_direct_passthrough(
     if !super::output_route_policy::route_is_unclassified_contract(route) {
         return false;
     }
-    if route.ask_mode.is_plain_act() {
-        return true;
-    }
-    route.ask_mode.finalize_chat_wrapped()
-        && route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
-        && matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
-        )
+    true
 }
 
 pub(super) fn route_allows_raw_read_range_direct_passthrough(
@@ -836,7 +827,7 @@ fn inventory_dir_can_use_direct_names(
     route: Option<&crate::RouteResult>,
     value: &serde_json::Value,
     loop_state: &LoopState,
-    is_plain_act: bool,
+    has_route_contract: bool,
     allow_raw_listing_direct_answer: bool,
 ) -> bool {
     let has_machine_names =
@@ -865,7 +856,7 @@ fn inventory_dir_can_use_direct_names(
     if has_machine_names && latest_plan_requests_observation_only_names_listing(loop_state) {
         return true;
     }
-    (is_plain_act
+    (has_route_contract
         || route.is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is(
                 route,

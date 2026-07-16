@@ -190,7 +190,6 @@ fn summary_json_prefers_evidence_status_and_merges_goal_commands() {
 fn summary_json_marks_missing_evidence_as_remaining_work() {
     let mut journal = TaskJournal::for_task("task-goal-missing", "ask", "list files");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),

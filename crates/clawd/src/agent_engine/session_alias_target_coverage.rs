@@ -339,22 +339,6 @@ pub(super) fn plan_repair_reason(
     if actions_use_ad_hoc_command_without_route_preferred_skill(state, route_result, actions) {
         return "preferred_skill_required_for_semantic_route";
     }
-    if no_content_evidence_execute_route_read_only_file_plan_requires_repair(
-        state,
-        Some(route_result),
-        loop_state,
-        actions,
-    ) {
-        return "execute_route_requires_non_readonly_file_plan";
-    }
-    if plain_act_filesystem_text_read_only_plan_requires_repair(
-        state,
-        Some(route_result),
-        loop_state,
-        actions,
-    ) {
-        return "plain_act_file_action_requires_non_readonly_plan";
-    }
     if content_evidence_plan_only_has_locator_observation(route_result, loop_state, actions) {
         return "content_evidence_requires_content_observation";
     }
@@ -393,7 +377,7 @@ pub(super) fn can_fallback_to_initial_plan_after_repair_failure(
         true
     };
     if fallback_shape_is_safe
-        && agent_loop_execution_plan_can_defer_to_verifier(state, route_result, loop_state, actions)
+        && executable_plan_can_defer_to_verifier(state, route_result, loop_state, actions)
     {
         return true;
     }
@@ -403,18 +387,6 @@ pub(super) fn can_fallback_to_initial_plan_after_repair_failure(
         && !session_alias_targets_missing_from_plan(state, loop_state, actions)
         && !structured_scalar_compare_missing_required_extracts_for_round(
             route_result,
-            loop_state,
-            actions,
-        )
-        && !no_content_evidence_execute_route_read_only_file_plan_requires_repair(
-            state,
-            Some(route_result),
-            loop_state,
-            actions,
-        )
-        && !plain_act_filesystem_text_read_only_plan_requires_repair(
-            state,
-            Some(route_result),
             loop_state,
             actions,
         )
@@ -439,7 +411,6 @@ pub(super) fn safe_observation_run_cmd_plan_can_fallback(
         return false;
     };
     if route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
     {
@@ -460,271 +431,6 @@ pub(super) fn safe_observation_run_cmd_plan_can_fallback(
         }
     }
     saw_run_cmd
-}
-
-pub(super) fn action_is_filesystem_text_read_observation(
-    state: &AppState,
-    action: &AgentAction,
-) -> bool {
-    let (skill, args) = match action {
-        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
-            (skill, args)
-        }
-        AgentAction::SynthesizeAnswer { .. }
-        | AgentAction::CallCapability { .. }
-        | AgentAction::Respond { .. }
-        | AgentAction::Think { .. } => {
-            return false;
-        }
-    };
-    let canonical = state.resolve_canonical_skill_name(skill);
-    match canonical.as_str() {
-        "read_file" => true,
-        "fs_basic" => args
-            .get("action")
-            .and_then(Value::as_str)
-            .map(|action| action.trim().eq_ignore_ascii_case("read_text_range"))
-            .unwrap_or(false),
-        "system_basic" => args
-            .get("action")
-            .and_then(Value::as_str)
-            .map(|action| action.trim().eq_ignore_ascii_case("read_range"))
-            .unwrap_or(false),
-        "doc_parse" => args
-            .get("path")
-            .and_then(Value::as_str)
-            .map(|path| !path.trim().is_empty())
-            .unwrap_or(false),
-        _ => false,
-    }
-}
-
-pub(super) fn no_content_evidence_execute_route_read_only_file_plan_requires_repair(
-    state: &AppState,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    actions: &[AgentAction],
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if route.needs_clarify
-        || loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
-        || route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || !(route_locator_hint_is_path_like(route) || actions.iter().any(action_has_path_like_arg))
-        || actions
-            .iter()
-            .any(|action| action_is_likely_mutating(state, action))
-    {
-        return false;
-    }
-    if active_anchor_detached_read_only_plan_can_execute(state, route, actions) {
-        return false;
-    }
-    if existing_observed_synthesis_read_only_plan_can_execute(state, route, actions) {
-        return false;
-    }
-    if direct_text_range_read_plan_has_terminal_answer(state, actions) {
-        return false;
-    }
-    let executable_actions = actions.iter().filter(|action| {
-        matches!(
-            action,
-            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
-        )
-    });
-    let mut saw_read = false;
-    for action in executable_actions {
-        if !action_is_filesystem_text_read_observation(state, action) {
-            return false;
-        }
-        saw_read = true;
-    }
-    saw_read
-}
-
-fn action_is_direct_text_range_read_observation(state: &AppState, action: &AgentAction) -> bool {
-    let (skill, args) = match action {
-        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
-            (skill, args)
-        }
-        AgentAction::SynthesizeAnswer { .. }
-        | AgentAction::CallCapability { .. }
-        | AgentAction::Respond { .. }
-        | AgentAction::Think { .. } => {
-            return false;
-        }
-    };
-    let canonical = state.resolve_canonical_skill_name(skill);
-    let action = args
-        .get("action")
-        .and_then(Value::as_str)
-        .map(|action| action.trim().to_ascii_lowercase());
-    match (canonical.as_str(), action.as_deref()) {
-        ("read_file", _) => true,
-        ("fs_basic", Some("read_text_range")) => true,
-        ("system_basic", Some("read_range")) => true,
-        _ => false,
-    }
-}
-
-fn direct_text_range_read_plan_has_terminal_answer(
-    state: &AppState,
-    actions: &[AgentAction],
-) -> bool {
-    let has_synthesis = actions
-        .iter()
-        .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }));
-    let has_respond = actions
-        .iter()
-        .any(|action| matches!(action, AgentAction::Respond { .. }));
-    if !has_synthesis || !has_respond {
-        return false;
-    }
-
-    let mut saw_read = false;
-    for action in actions {
-        match action {
-            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => {
-                if !action_is_direct_text_range_read_observation(state, action) {
-                    return false;
-                }
-                saw_read = true;
-            }
-            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => {}
-            AgentAction::CallCapability { .. } | AgentAction::Think { .. } => return false,
-        }
-    }
-    saw_read
-}
-
-fn existing_observed_synthesis_read_only_plan_can_execute(
-    state: &AppState,
-    route: &RouteResult,
-    actions: &[AgentAction],
-) -> bool {
-    if !route_reason_has_marker(route, "existing_observed_context_synthesis") {
-        return false;
-    }
-    let has_synthesis = actions
-        .iter()
-        .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }));
-    let has_respond = actions
-        .iter()
-        .any(|action| matches!(action, AgentAction::Respond { .. }));
-    if !has_synthesis || !has_respond {
-        return false;
-    }
-
-    let mut saw_read = false;
-    for action in actions {
-        match action {
-            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => {
-                if !action_is_filesystem_text_read_observation(state, action) {
-                    return false;
-                }
-                saw_read = true;
-            }
-            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => {}
-            AgentAction::CallCapability { .. } | AgentAction::Think { .. } => return false,
-        }
-    }
-    saw_read
-}
-
-fn active_anchor_detached_read_only_plan_can_execute(
-    state: &AppState,
-    route: &RouteResult,
-    actions: &[AgentAction],
-) -> bool {
-    if !route_reason_has_marker(
-        route,
-        "active_task_scope_refinement_detached_from_structured_anchor",
-    ) {
-        return false;
-    }
-    let mut saw_read = false;
-    for action in actions {
-        match action {
-            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => {
-                if !action_is_filesystem_text_read_observation(state, action) {
-                    return false;
-                }
-                saw_read = true;
-            }
-            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => {}
-            AgentAction::CallCapability { .. } | AgentAction::Think { .. } => return false,
-        }
-    }
-    saw_read
-}
-
-pub(super) fn plain_act_filesystem_text_read_only_plan_requires_repair(
-    state: &AppState,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    actions: &[AgentAction],
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if route.needs_clarify
-        || loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
-        || !route.ask_mode.is_plain_act()
-        || route.output_contract.delivery_required
-        || !route.output_contract_is_unclassified()
-        || matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        )
-        || !(route_locator_hint_is_path_like(route) || actions.iter().any(action_has_path_like_arg))
-        || actions
-            .iter()
-            .any(|action| action_is_likely_mutating(state, action))
-    {
-        return false;
-    }
-    if observation_only_plan_can_finalize_from_direct_output(state, Some(route), actions) {
-        return false;
-    }
-    let executable_actions = actions.iter().filter(|action| {
-        matches!(
-            action,
-            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
-        )
-    });
-    let mut saw_read = false;
-    for action in executable_actions {
-        if !action_is_filesystem_text_read_observation(state, action) {
-            return false;
-        }
-        saw_read = true;
-    }
-    saw_read
-}
-
-pub(super) fn action_has_path_like_arg(action: &AgentAction) -> bool {
-    let args = match action {
-        AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. } => args,
-        AgentAction::SynthesizeAnswer { .. }
-        | AgentAction::CallCapability { .. }
-        | AgentAction::Respond { .. }
-        | AgentAction::Think { .. } => {
-            return false;
-        }
-    };
-    action_path_arg(args).is_some_and(|path| {
-        let value = path.trim();
-        !value.is_empty()
-            && (Path::new(value).is_absolute()
-                || value.contains('/')
-                || value.contains('\\')
-                || value.starts_with('.')
-                || Path::new(value).extension().is_some())
-    })
 }
 
 pub(super) fn scalar_path_auto_locator_observation_plan(

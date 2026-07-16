@@ -29,11 +29,7 @@ fn file_paths_directory_locator_builds_structured_list_dir_plan() {
     let root = TempDirGuard::new("file_paths_directory_locator");
     fs::write(root.path.join("lib.rs"), "fn planner_loop_marker() {}\n").expect("write rust");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -89,11 +85,7 @@ fn file_paths_directory_locator_with_extension_token_uses_recursive_find_entries
     fs::write(root.path.join("Cargo.toml"), "[package]\nname='fixture'\n").expect("write toml");
     fs::write(root.path.join("Cargo.lock"), "# not toml").expect("write lock");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -143,11 +135,7 @@ fn scalar_path_auto_locator_does_not_use_deterministic_plan_for_directory_search
     let root = TempDirGuard::new("scalar_auto_locator_search_scope");
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write report");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -169,11 +157,7 @@ fn scalar_path_directory_locator_search_uses_structural_name_target() {
     let root = TempDirGuard::new("scalar_auto_locator_search_target");
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write report");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -216,11 +200,7 @@ fn scalar_path_directory_locator_search_resolves_unique_entry_token_without_phra
     let root = TempDirGuard::new("scalar_auto_locator_search_unique_token");
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write target");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -261,11 +241,7 @@ fn scalar_path_directory_locator_search_rejects_ambiguous_current_quoted_targets
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write first target");
     fs::write(root.path.join("WXYZ.txt"), "hello").expect("write second target");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -290,11 +266,7 @@ fn scalar_path_directory_locator_search_requires_scalar_path_contract() {
     let root = TempDirGuard::new("scalar_auto_locator_search_requires_contract");
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write target");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -312,11 +284,7 @@ fn scalar_path_directory_locator_search_requires_scalar_path_contract() {
 fn scalar_path_auto_locator_directory_builds_observation_plan() {
     let root = TempDirGuard::new("scalar_auto_locator_dir");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.delivery_required = false;
@@ -343,11 +311,7 @@ fn generic_directory_auto_locator_builds_inventory_synthesis_plan() {
     fs::write(root.path.join("small.log"), "x").expect("write small");
     fs::write(root.path.join("large.log"), "xxxxxx").expect("write large");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = String::new();
@@ -384,11 +348,7 @@ fn directory_entry_groups_auto_locator_uses_fs_basic_list_dir() {
     fs::create_dir_all(root.path.join("docs")).expect("create docs");
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -430,11 +390,7 @@ fn directory_entry_groups_auto_locator_preserves_bounded_names_shape() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     fs::write(root.path.join("Cargo.toml"), "hello").expect("write cargo");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -480,11 +436,7 @@ fn directory_entry_groups_auto_locator_preserves_name_desc_selector() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     fs::write(root.path.join("Cargo.toml"), "hello").expect("write cargo");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -530,11 +482,7 @@ fn generic_directory_auto_locator_uses_mtime_for_directory_entry_groups() {
     fs::create_dir_all(root.path.join("docs")).expect("create docs");
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -567,11 +515,7 @@ fn directory_entry_groups_auto_locator_uses_tree_summary_for_machine_action_toke
     let root = TempDirGuard::new("directory_entry_groups_tree_summary_token");
     fs::create_dir_all(root.path.join("docs")).expect("create docs");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -611,11 +555,7 @@ fn directory_names_contract_overrides_planner_hidden_inventory() {
     fs::create_dir_all(root.path.join(".cache")).expect("create hidden dir");
     fs::create_dir_all(root.path.join("docs")).expect("create docs dir");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
@@ -655,11 +595,7 @@ fn directory_tree_auto_locator_deterministic_plan_uses_system_basic_tree_summary
     fs::create_dir_all(root.path.join("archive")).expect("create archive dir");
     fs::write(root.path.join("archive").join("README.txt"), "archive").expect("write readme");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -702,11 +638,7 @@ fn workspace_summary_auto_locator_lists_structure_and_reads_readme() {
     )
     .expect("write README");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -799,11 +731,7 @@ fn directory_purpose_auto_locator_lists_directory_and_reads_text_candidates() {
     fs::write(root.path.join("docs").join("README.txt"), "docs").expect("write readme");
     fs::write(root.path.join("docs").join("image.png"), "not text").expect("write image");
     let docs_path = root.path.join("docs").display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = docs_path.clone();
@@ -893,11 +821,7 @@ fn directory_purpose_auto_locator_uses_inventory_for_many_text_candidates() {
         .expect("write note");
     }
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
@@ -963,11 +887,7 @@ fn directory_purpose_extension_locator_uses_recursive_find_entries_not_tree_summ
     fs::create_dir_all(root.path.join("configs")).expect("create configs");
     fs::write(root.path.join("configs/config.toml"), "[skills]\n").expect("write config");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "*.toml".to_string();
@@ -1078,11 +998,7 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
     fs::create_dir_all(root.path.join("nested")).expect("create nested");
     fs::write(root.path.join("nested/contract_repair.schema.json"), "{}").expect("write nested");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1184,11 +1100,7 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
 fn directory_purpose_extension_inventory_defers_explicit_extension_assess_gap() {
     let root = TempDirGuard::new("directory_purpose_extension_assess_gap_defers");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "*.csv".to_string();
@@ -1217,11 +1129,7 @@ fn directory_purpose_reads_representative_found_files_after_extension_inventory(
     fs::write(&config_path, "[skills]\n").expect("write config");
     fs::write(&channel_path, "[telegram]\n").expect("write channel");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "*.toml".to_string();
@@ -1298,11 +1206,7 @@ fn directory_purpose_reads_representative_found_files_from_wrapped_extra() {
     fs::write(&first_path, "{\"title\":\"intent\"}\n").expect("write first");
     fs::write(&second_path, "{\"title\":\"contract\"}\n").expect("write second");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1367,11 +1271,7 @@ fn directory_tree_auto_locator_does_not_override_exact_file_names_contract() {
     let root = TempDirGuard::new("directory_tree_auto_locator_file_names");
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1390,11 +1290,7 @@ fn directory_tree_auto_locator_does_not_override_raw_command_output_contract() {
     let root = TempDirGuard::new("directory_tree_auto_locator_raw_command");
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1415,11 +1311,7 @@ fn directory_tree_auto_locator_does_not_override_multi_directory_contract() {
     fs::create_dir_all(root.path.join("right")).expect("create right");
     let left_path = root.path.join("left").display().to_string();
     let right_path = root.path.join("right").display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = format!("{left_path} | {right_path}");
@@ -1439,11 +1331,7 @@ fn scalar_path_respond_only_uses_auto_locator_observation() {
     let report = root.path.join("Report.MD");
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1477,11 +1365,7 @@ fn content_excerpt_summary_inserts_auto_locator_read_before_synthesis() {
     let readme = root.path.join("README.md");
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1527,11 +1411,7 @@ fn content_excerpt_summary_inserts_auto_locator_read_before_synthesis() {
 
 #[test]
 fn workspace_synthesis_respond_only_with_generic_semantic_uses_default_evidence() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.delivery_required = false;
@@ -1575,11 +1455,7 @@ fn workspace_synthesis_respond_only_with_generic_semantic_uses_default_evidence(
 
 #[test]
 fn workspace_default_evidence_requires_content_evidence_contract() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.delivery_required = false;
@@ -1596,11 +1472,7 @@ fn workspace_default_evidence_requires_content_evidence_contract() {
 
 #[test]
 fn workspace_summary_default_text_evidence_uses_contract_without_execute_gate() {
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.delivery_required = false;
@@ -1643,11 +1515,7 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_lo
     let readme = root.path.join("README.md");
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1694,11 +1562,7 @@ fn content_excerpt_summary_auto_locator_reads_nested_file_without_workspace_inve
     let package_path = package_json.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;

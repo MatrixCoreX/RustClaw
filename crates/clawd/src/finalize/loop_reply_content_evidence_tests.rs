@@ -46,7 +46,8 @@ async fn content_evidence_step_failure_answer_reports_real_error() {
     .expect("content evidence failure should be publishable");
 
     assert!(answer.contains("`/etc/shadow`"));
-    assert!(answer.to_ascii_lowercase().contains("permission denied"));
+    assert!(answer.contains("permission_denied"));
+    assert!(!answer.contains("__RC_SKILL_ERROR__"));
     assert_eq!(summary.grounded_ok, Some(true));
     assert_eq!(summary.completion_ok, Some(true));
     assert_eq!(
@@ -119,9 +120,9 @@ async fn content_evidence_step_failure_answer_preserves_plan_path_without_locato
     .expect("content evidence failure should preserve structured plan target");
 
     assert!(answer.contains("`/etc/shadow`"));
-    assert!(answer.contains("permission denied"));
+    assert!(answer.contains("permission_denied"));
     assert!(answer.contains("locator=`/etc/shadow`"));
-    assert!(!answer.contains("`fs_basic` 步骤执行失败"));
+    assert!(!answer.contains("__RC_SKILL_ERROR__"));
     assert_eq!(summary.grounded_ok, Some(true));
     assert_eq!(summary.completion_ok, Some(true));
 }
@@ -272,7 +273,6 @@ async fn finalize_loop_reply_treats_wrapped_crypto_account_error_as_success() {
     let state = test_state();
     let task = claimed_task("task-finalize-wrapped-crypto-account-error");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::MarketQuote;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -383,8 +383,9 @@ async fn content_evidence_db_query_error_is_completion() {
     .await
     .expect("db query error should be publishable");
 
-    assert!(answer.contains("missing_table"));
-    assert!(answer.contains("no such table"));
+    assert!(answer.contains("sqlite_query_failed"));
+    assert!(answer.contains("db_basic"));
+    assert!(!answer.contains("__RC_SKILL_ERROR__"));
     assert_eq!(summary.completion_ok, Some(true));
     assert_eq!(
         summary.disposition,

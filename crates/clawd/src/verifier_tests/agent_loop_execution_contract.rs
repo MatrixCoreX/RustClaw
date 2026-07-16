@@ -5,9 +5,7 @@ fn agent_loop_execution_boundary_does_not_require_legacy_output_contract() {
     let state = test_state();
     let task = test_task();
     let mut route = route_result(false);
-    route.route_reason =
-        "inline_structured_payload_context_execute; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    route.route_reason = "inline_structured_payload_context_execute".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;

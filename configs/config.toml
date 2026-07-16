@@ -24,16 +24,12 @@
 # 不动本文件、直接用 demo 部署也能运行，但权限/超时面较大，请知悉。
 # =============================================================================
 
-# 用途/Purpose: 命令意图识别与规则目录配置.
-# 建议修改/Recommended change: 可按部署语言与规则目录调整.
-# 风险/Risk: locale 或 rules_dir 配错会导致意图识别退化.
+# 用途/Purpose: 默认回复语言与结构化 verifier 配置.
+# 建议修改/Recommended change: 可按部署语言调整.
+# 风险/Risk: locale 配错会影响无明确语言提示时的回复语言.
 [command_intent]
-# 默认语言 / Default locale for intent parsing.
+# 默认语言 / Default response locale.
 default_locale = "zh-CN"
-# 当主链路失败时是否启用 LLM 回退 / Enable LLM fallback when rule match fails.
-llm_fallback_enabled = true
-# 规则目录 / Rule files directory.
-rules_dir = "configs/command_intent"
 
 # 用途/Purpose: 数据库连接基础参数.
 # 建议修改/Recommended change: 可改（尤其是路径）.

@@ -10,7 +10,7 @@ fn test_state(locale: &str, schedule_locale: &str) -> AppState {
 }
 
 #[test]
-fn render_clarify_fallback_uses_i18n_resource_for_configured_locale() {
+fn render_clarify_fallback_ignores_legacy_schedule_i18n_for_explicit_locale() {
     let mut state = test_state("en-US", "en-US");
     state.policy.schedule.i18n_dict.insert(
         ClarifyFallbackSource::IntentUnresolved
@@ -25,7 +25,13 @@ fn render_clarify_fallback_uses_i18n_resource_for_configured_locale() {
         None,
         "en",
     );
-    assert_eq!(text, "RESOURCE EN intent unresolved");
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("machine payload json");
+    assert_eq!(
+        payload
+            .get("message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.fallback.intent_unresolved")
+    );
 
     let mut state = test_state("zh-CN", "zh-CN");
     state.policy.schedule.i18n_dict.insert(
@@ -41,7 +47,13 @@ fn render_clarify_fallback_uses_i18n_resource_for_configured_locale() {
         None,
         "zh-CN",
     );
-    assert_eq!(text, "RESOURCE ZH intent unresolved");
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("machine payload json");
+    assert_eq!(
+        payload
+            .get("reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("intent_unresolved")
+    );
 }
 
 #[test]
@@ -205,7 +217,7 @@ fn user_response_contract_carries_clarify_case_as_missing_slot() {
 }
 
 #[test]
-fn structured_clarify_default_uses_missing_read_target_i18n() {
+fn structured_clarify_default_returns_missing_read_target_machine_payload() {
     let mut state = test_state("zh-CN", "zh-CN");
     state.policy.schedule.i18n_dict.insert(
         "clawd.msg.clarify_missing_read_target".to_string(),
@@ -221,11 +233,21 @@ fn structured_clarify_default_uses_missing_read_target_i18n() {
 
     let text = structured_clarify_default_text(&state, &contract)
         .expect("specific missing read target default");
-    assert_eq!(text, "请提供具体要读取的文件名或路径。");
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("machine payload json");
+    assert_eq!(
+        payload
+            .get("message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.clarify_missing_read_target")
+    );
+    assert!(payload
+        .get("missing_slots")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|slots| slots.iter().any(|slot| slot == "missing_read_target")));
 }
 
 #[test]
-fn structured_clarify_default_uses_missing_search_locator_i18n() {
+fn structured_clarify_default_returns_missing_search_locator_machine_payload() {
     let mut state = test_state("zh-CN", "zh-CN");
     state.policy.schedule.i18n_dict.insert(
         "clawd.msg.clarify_missing_search_locator".to_string(),
@@ -241,7 +263,17 @@ fn structured_clarify_default_uses_missing_search_locator_i18n() {
 
     let text = structured_clarify_default_text(&state, &contract)
         .expect("specific missing search locator default");
-    assert_eq!(text, "请提供具体要查找的名称、目录或路径。");
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("machine payload json");
+    assert_eq!(
+        payload
+            .get("message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.clarify_missing_search_locator")
+    );
+    assert!(payload
+        .get("missing_slots")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|slots| slots.iter().any(|slot| slot == "missing_search_locator")));
 }
 
 #[test]

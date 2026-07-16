@@ -30,7 +30,6 @@ mod frontdoor_llm_metrics;
 
 fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -54,7 +53,6 @@ fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteR
 fn summary_json_includes_finalizer_and_task_metrics() {
     let mut journal = TaskJournal::for_task("task-1", "ask", "总结 README");
     journal.record_route_result(&crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "不要用现有技能，先规划一个新能力".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -248,21 +246,9 @@ fn summary_json_includes_finalizer_and_task_metrics() {
         .is_some_and(|signals| signals
             .iter()
             .any(|signal| signal.as_str() == Some("prompt_truncation_observed"))));
-    assert_eq!(
-        summary
-            .get("route_result")
-            .and_then(|v| v.get("boundary_mode"))
-            .and_then(Value::as_str),
-        Some("execute")
-    );
-    assert_eq!(
-        summary
-            .get("route_result")
-            .and_then(|v| v.get("route_trace_decision"))
-            .and_then(Value::as_str),
-        Some("act")
-    );
     for legacy_field in [
+        "boundary_mode",
+        "route_trace_decision",
         "route_gate_kind",
         "initial_gate_ref",
         "initial_hint_ref",
@@ -1532,7 +1518,6 @@ fn summary_json_does_not_mark_masked_run_cmd_validation_as_passed() {
 fn trace_json_compacts_plan_action_ref_to_contract_action() {
     let mut journal = TaskJournal::for_task("task-service", "ask", "check service");
     journal.record_route_result(&crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "check clawd service".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1734,7 +1719,7 @@ fn structured_listing_journal_compact_preserves_entry_size_metadata() {
 }
 
 #[test]
-fn structured_listing_journal_compact_unwraps_text_json_when_extra_is_missing() {
+fn structured_listing_journal_does_not_parse_text_as_machine_json() {
     let text = json!({
         "action": "inventory_dir",
         "counts": {"dirs": 1, "files": 1, "hidden": 0, "total": 2},
@@ -1750,16 +1735,10 @@ fn structured_listing_journal_compact_unwraps_text_json_when_extra_is_missing() 
     .to_string();
     let output = json!({ "text": text }).to_string();
 
-    let compact = super::compact_structured_listing_output_for_journal(&output)
-        .expect("text json should compact");
-    let value: Value = serde_json::from_str(&compact).expect("compact json");
     assert_eq!(
-        value
-            .pointer("/extra/names_by_kind/dirs/0")
-            .and_then(Value::as_str),
-        Some("crates")
+        super::compact_structured_listing_output_for_journal(&output),
+        None
     );
-    assert!(value.pointer("/extra/names").is_none());
 }
 
 #[test]

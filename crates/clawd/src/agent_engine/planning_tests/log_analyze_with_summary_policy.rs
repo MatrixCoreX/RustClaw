@@ -8,11 +8,7 @@ fn content_excerpt_with_summary_single_log_file_allows_log_analyze_evidence() {
     let log = logs_dir.join("clawd.run.log");
     fs::write(&log, "INFO ok\nWARN slow\nERROR old failure\n").expect("write log");
     let log_path = log.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -41,11 +37,7 @@ fn content_excerpt_with_summary_single_log_file_with_slice_allows_bounded_read_e
     let log = logs_dir.join("clawd.run.log");
     fs::write(&log, "INFO ok\nWARN slow\nERROR old failure\n").expect("write log");
     let log_path = log.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;

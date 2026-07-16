@@ -415,6 +415,7 @@ fn resolve_ordered_entry_target(frame: &FollowupFrame, entry: &str) -> String {
     join_root.join(trimmed).display().to_string()
 }
 
+#[cfg(test)]
 pub(crate) fn ordered_entry_target_at(frame: &FollowupFrame, index: usize) -> Option<String> {
     frame
         .ordered_entries
@@ -818,12 +819,9 @@ pub(crate) fn derive_code_workspace_bound_target_from_route_and_journal(
     route_result: &crate::RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<String> {
-    derive_code_workspace_bound_target_from_journal(journal).or_else(|| {
-        route_result
-            .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-            .then(|| derive_read_validated_code_workspace_bound_target_from_journal(journal))
-            .flatten()
-    })
+    let _ = route_result;
+    derive_code_workspace_bound_target_from_journal(journal)
+        .or_else(|| derive_read_validated_code_workspace_bound_target_from_journal(journal))
 }
 
 fn derive_read_validated_code_workspace_bound_target_from_journal(

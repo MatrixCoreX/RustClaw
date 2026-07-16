@@ -144,8 +144,6 @@ mod value_string_list;
 use action_route_locator_artifact::*;
 use concrete_respond_structural_observation::*;
 use config_guard_capability_repair::*;
-#[cfg(test)]
-pub(in crate::agent_engine) use configured_command_prefix::explicit_command_segment;
 pub(crate) use configured_command_prefix::explicit_machine_syntax_command_segment;
 use configured_command_prefix::*;
 use direct_observed_finalize_support::*;
@@ -741,32 +739,6 @@ async fn try_compact_abort_recovery_plan(
         return Ok(None);
     }
     Ok(Some((actions, raw)))
-}
-
-#[cfg(test)]
-fn explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
-    command_runtime: &crate::CommandIntentRuntime,
-    original_user_text: &str,
-    route_result: Option<&RouteResult>,
-) -> bool {
-    explicit_command_request_present(command_runtime, original_user_text, route_result)
-        && route_result.is_some_and(|route| {
-            let scalar_path_contract =
-                route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly);
-            let route_preserves_explicit_command = route_reason_has_structural_marker(
-                route,
-                "explicit_command_preserves_structured_observation_contract",
-            );
-            let current_workspace_path =
-                route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace;
-            let auto_locator_path_conflict = route.output_contract.locator_kind
-                == crate::OutputLocatorKind::Path
-                && !route.output_contract.locator_hint.trim().is_empty()
-                && route_preserves_explicit_command;
-            scalar_path_contract
-                && (current_workspace_path || auto_locator_path_conflict)
-                && route_preserves_explicit_command
-        })
 }
 
 #[cfg(test)]

@@ -1195,7 +1195,6 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
         r#"{"action":"path_batch_facts","facts":[{"path":".","resolved_path":"/home/guagua/rustclaw","exists":true}]}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "current workspace path".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1249,7 +1248,6 @@ fn contract_matrix_synthesis_prefers_observed_answer_over_step_status() {
         finished_at: 0,
     });
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "把 test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果"
             .to_string(),
         needs_clarify: false,
@@ -1304,7 +1302,6 @@ fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
         r#"{"extra":{"action":"count_inventory","path":"logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}},"text":"{\"action\":\"count_inventory\",\"path\":\"logs\",\"recursive\":false,\"counts\":{\"total\":2,\"files\":2,\"dirs\":0,\"total_size_bytes\":2698}}"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "count two directory child totals and compare them".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1356,7 +1353,6 @@ fn synthesize_direct_fallback_defers_multi_count_quantity_comparison_to_model() 
         r#"{"extra":{"action":"count_inventory","path":"logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}},"text":"{\"action\":\"count_inventory\",\"path\":\"logs\",\"recursive\":false,\"counts\":{\"total\":2,\"files\":2,\"dirs\":0,\"total_size_bytes\":2698}}"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "count two directory child totals and compare them".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1403,7 +1399,6 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
         r#"{"extra":{"action":"extract_field","exists":true,"field_path":"name","path":"/repo/UI/package.json","resolved_path":"/repo/UI/package.json","value":"react-example","value_text":"react-example","value_type":"string"},"text":"{\"action\":\"extract_field\",\"exists\":true,\"field_path\":\"name\",\"path\":\"/repo/UI/package.json\",\"resolved_path\":\"/repo/UI/package.json\",\"value\":\"react-example\",\"value_text\":\"react-example\",\"value_type\":\"string\"}"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent:
             "summarize repository layout and UI role from directory listing and package name"
                 .to_string(),
@@ -1453,7 +1448,6 @@ fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model()
         r#"{"action":"read_range","excerpt":"7|{\"status\":\"ok\",\"response\":\"path resolved\"}\n8|{\"status\":\"ok\",\"response\":\"db inspected\"}\n9|{\"status\":\"ok\",\"response\":\"log tailed\"}\n10|{\"status\":\"ok\",\"response\":\"binding remembered\"}","path":"/tmp/model_io.log"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent:
             "read the last four log lines and summarize the observed phenomenon in one sentence"
                 .to_string(),
@@ -1504,7 +1498,6 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Run commands and summarize the observed outputs.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1555,7 +1548,6 @@ fn deterministic_scalar_markdown_heading_uses_structural_read_evidence() {
         r##"{"action":"read_range","excerpt":"1|# Release Checklist","path":"/tmp/release_checklist.md"}"##,
     ));
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "extract one scalar from a markdown file".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1606,7 +1598,6 @@ fn deterministic_scalar_markdown_heading_defers_when_read_evidence_has_body() {
         r##"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"/tmp/release_checklist.md"}"##,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "extract one scalar from a markdown file".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1641,7 +1632,6 @@ fn deterministic_scalar_markdown_heading_defers_when_read_evidence_has_body() {
 #[test]
 fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "读 README.md 前 2 行".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1676,7 +1666,6 @@ fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
 #[test]
 fn synthesize_route_blocks_direct_fallback_for_failed_step_language_contract() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Run an ordered command sequence and report only the failed step."
             .to_string(),
         needs_clarify: false,
@@ -1715,7 +1704,6 @@ fn synthesize_route_blocks_direct_fallback_for_failed_step_language_contract() {
 #[test]
 fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "List files from a known directory.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1750,7 +1738,6 @@ fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
 #[test]
 fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Validate config syntax from structured parser evidence.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1798,9 +1785,8 @@ fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
 }
 
 #[test]
-fn synthesize_route_uses_llm_for_chat_wrapped_unclassified_delivery() {
+fn synthesize_route_allows_observed_fallback_for_unclassified_delivery() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Run a command, then produce a short final reply based on the result."
             .to_string(),
         needs_clarify: false,
@@ -1830,13 +1816,12 @@ fn synthesize_route_uses_llm_for_chat_wrapped_unclassified_delivery() {
         ..AgentRunContext::default()
     };
 
-    assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
+    assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
 }
 
 #[test]
 fn synthesize_route_allows_direct_fallback_for_strict_plain_observation() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Return an already formatted observed result.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1871,7 +1856,6 @@ fn synthesize_route_allows_direct_fallback_for_strict_plain_observation() {
 #[test]
 fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Run a command and return its raw output.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1913,7 +1897,6 @@ fn strict_raw_tail_read_uses_direct_observed_fallback_before_composer() {
         r#"{"action":"read_range","mode":"tail","requested_n":2,"excerpt":"98|WARN provider failed: http 401: Please carry the API secret key\n99|WARN memory preference fallback failed: http 401","path":"/tmp/clawd-dev.log"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read the last two lines of the selected log file.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

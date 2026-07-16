@@ -1,12 +1,11 @@
 use super::{
-    plan_step_from_agent_action, AgentAction, AskMode, IntentOutputContract, OutputContractRef,
-    PlanStep, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    plan_step_from_agent_action, AgentAction, IntentOutputContract, OutputContractRef, PlanStep,
+    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
 };
 use serde_json::json;
 
-fn route_result_with_mode(ask_mode: AskMode) -> RouteResult {
+fn route_result() -> RouteResult {
     RouteResult {
-        ask_mode,
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -123,37 +122,8 @@ fn plan_step_round_trips_call_capability() {
 }
 
 #[test]
-fn route_result_gate_kind_uses_ask_mode() {
-    let route = route_result_with_mode(crate::AskMode::respond_trace());
-
-    assert_eq!(route.gate_kind(), crate::RouteGateKind::Chat);
-    assert!(route.is_chat_gate());
-    assert!(!route.is_execute_gate());
-}
-
-#[test]
-fn route_result_exposes_chat_wrapped_planner_mode_as_structured_state() {
-    let route = route_result_with_mode(crate::AskMode::act_with_chat_finalizer());
-
-    assert!(route.is_execute_gate());
-    assert!(route.uses_chat_finalizer());
-    assert!(route.uses_pure_chat_agent_loop_submode());
-    assert_eq!(route.route_trace_label_for_log(), "act_chat_finalizer");
-}
-
-#[test]
-fn route_result_legacy_pure_chat_marker_is_exact_machine_token_fallback() {
-    let mut route = route_result_with_mode(crate::AskMode::act_plain());
-
-    route.route_reason = "some_reason; mode:pure_chat_agent_loop_submode".to_string();
-
-    assert!(route.has_route_reason_machine_marker("pure_chat_agent_loop_submode"));
-    assert!(route.uses_pure_chat_agent_loop_submode());
-}
-
-#[test]
 fn route_result_output_contract_marker_methods_accept_route_reason_tokens() {
-    let mut route = route_result_with_mode(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.route_reason = "contract:file_paths; contract:service_status".to_string();
 
     assert_eq!(
@@ -171,7 +141,7 @@ fn route_result_output_contract_marker_methods_accept_route_reason_tokens() {
 
 #[test]
 fn route_result_effective_output_contract_uses_route_reason_marker() {
-    let mut route = route_result_with_mode(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.route_reason = "contract:workspace_project_summary".to_string();
 
     assert_eq!(
@@ -193,10 +163,10 @@ fn route_result_effective_output_contract_uses_route_reason_marker() {
 #[test]
 fn route_reason_marker_facade_parses_machine_tokens_without_call_site_splitting() {
     let markers = crate::RouteReasonMarkers::new(
-        "normalizer_hint; contract:scalar_count; mode:pure_chat_agent_loop_submode",
+        "boundary_hint; contract:scalar_count; capability_ref:filesystem.count_entries",
     );
 
-    assert!(markers.has_machine_marker("pure_chat_agent_loop_submode"));
+    assert!(markers.has_machine_marker("filesystem.count_entries"));
     assert!(markers.has_any_machine_marker(&["workspace_project_summary", "scalar_count",]));
     assert_eq!(
         markers.explicit_output_contract_marker_kind(),
@@ -229,7 +199,7 @@ fn route_reason_marker_facade_reads_machine_values_with_shared_tokenization() {
 
 #[test]
 fn output_contract_ref_wraps_effective_contract_kind() {
-    let mut route = route_result_with_mode(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.route_reason = "contract:workspace_project_summary".to_string();
     let contract_ref = route.effective_output_contract_ref();
 
@@ -255,7 +225,7 @@ fn output_contract_ref_named_constructors_apply_to_contract() {
 
 #[test]
 fn route_result_explicit_contract_marker_overrides_legacy_raw_semantic() {
-    let mut route = route_result_with_mode(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route.route_reason = "contract:workspace_project_summary".to_string();
 

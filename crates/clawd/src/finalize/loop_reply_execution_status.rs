@@ -51,9 +51,8 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    let agent_loop_rich_content = route
-        .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-        && route.output_contract.response_shape == crate::OutputResponseShape::Free
+    let agent_loop_rich_content = route.output_contract.response_shape
+        == crate::OutputResponseShape::Free
         && !route.output_contract.delivery_required
         && successful_content_observation_count(loop_state) >= 2;
     if !route.output_contract.requires_content_evidence && !agent_loop_rich_content {

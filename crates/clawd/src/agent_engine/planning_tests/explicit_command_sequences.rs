@@ -84,13 +84,8 @@ fn assert_empty_planner_actions_stay_empty(
 
 #[test]
 fn execution_failed_step_prefixed_bare_sequence_gets_multi_run_cmd_plan() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
@@ -132,21 +127,13 @@ fn execution_failed_step_prefixed_bare_sequence_gets_multi_run_cmd_plan() {
 #[test]
 fn natural_language_command_sequence_does_not_bypass_planner() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
     let request = "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_67890，再执行 echo AFTER_BREAK_67890";
 
-    assert!(!super::super::explicit_command_request_present(
-        &state.policy.command_intent,
-        request,
-        Some(&route)
-    ));
+    assert!(super::super::explicit_machine_syntax_command_segment(request).is_none());
     let normalized = normalize_explicit_planner_actions(
         &state,
         &route,
@@ -195,11 +182,7 @@ fn natural_language_command_sequence_does_not_bypass_planner() {
 #[test]
 fn conditional_step_update_limits_current_explicit_command_plan_to_pre_update_steps() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
@@ -268,11 +251,7 @@ fn conditional_step_update_limits_current_explicit_command_plan_to_pre_update_st
 
 #[test]
 fn multi_explicit_run_cmd_plan_marks_literal_commands_without_continue_on_error() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
@@ -314,16 +293,14 @@ fn multi_explicit_run_cmd_plan_marks_literal_commands_without_continue_on_error(
 #[test]
 fn natural_language_command_with_followup_does_not_enter_explicit_fast_path() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
     let request =
         "Run pwd, then run definitely_missing_command_rustclaw_english_67890, then summarize.";
 
-    assert!(
-        super::super::explicit_command_segment(&state.policy.command_intent, request).is_none()
-    );
+    assert!(super::super::explicit_machine_syntax_command_segment(request).is_none());
     assert_empty_planner_actions_stay_empty(
         &state,
         &route,
@@ -334,37 +311,14 @@ fn natural_language_command_with_followup_does_not_enter_explicit_fast_path() {
 }
 
 #[test]
-fn prefixed_path_command_with_structural_args_before_freeform_tail_is_detected() {
-    let root = TempDirGuard::new("prefixed_path_command_tail");
-    fs::write(root.path.join("uname"), "").expect("write command marker");
-
-    assert_eq!(
-        super::super::path_command_segment_before_freeform_tail_with_path_env(
-            "uname -a and tell me the result",
-            Some(root.path.as_os_str()),
-        ),
-        Some("uname -a")
-    );
-    assert!(
-        super::super::path_command_segment_before_freeform_tail_with_path_env(
-            "uname and tell me the result",
-            Some(root.path.as_os_str()),
-        )
-        .is_none()
-    );
-}
-
-#[test]
 fn code_span_path_command_with_structural_args_is_preserved() {
     let path_env = std::env::var_os("PATH");
     if !super::super::command_token_resolves_in_path("uname", path_env.as_deref()) {
         return;
     }
-    let state = test_state_with_enabled_skills(&["run_cmd"]);
 
     assert_eq!(
-        super::super::explicit_command_segment(
-            &state.policy.command_intent,
+        super::super::explicit_machine_syntax_command_segment(
             "please run `uname -a` and tell me the result",
         )
         .as_deref(),
@@ -375,11 +329,7 @@ fn code_span_path_command_with_structural_args_is_preserved() {
 #[test]
 fn explicit_configured_command_without_followup_keeps_single_step_fast_path() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
@@ -401,19 +351,13 @@ fn explicit_configured_command_without_followup_keeps_single_step_fast_path() {
 #[test]
 fn natural_language_command_inside_clause_is_left_to_planner() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
     let request = "先别管方案，请执行 pwd，只输出命令结果。";
 
-    assert!(
-        super::super::explicit_command_segment(&state.policy.command_intent, request).is_none()
-    );
+    assert!(super::super::explicit_machine_syntax_command_segment(request).is_none());
     let normalized = normalize_explicit_planner_actions(
         &state,
         &route,
@@ -428,23 +372,15 @@ fn natural_language_command_inside_clause_is_left_to_planner() {
 }
 
 #[test]
-fn embedded_standalone_command_with_structural_args_keeps_single_step_fast_path() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+fn natural_language_command_keeps_planner_selected_structured_action() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
     let request = "运行 pwd -P，只返回物理工作目录路径";
 
-    assert_eq!(
-        super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
-        Some("pwd -P")
-    );
+    assert!(super::super::explicit_machine_syntax_command_segment(request).is_none());
     let normalized = normalize_explicit_planner_actions(
         &state,
         &route,
@@ -459,23 +395,15 @@ fn embedded_standalone_command_with_structural_args_keeps_single_step_fast_path(
 }
 
 #[test]
-fn embedded_standalone_command_sequence_uses_configured_command_tokens() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+fn natural_language_command_sequence_keeps_planner_selected_actions() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
     let request = "请依次执行 pwd 和 whoami，直接输出两个命令结果，每个结果一行，不要总结";
 
-    assert_eq!(
-        super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
-        Some("pwd; whoami")
-    );
+    assert!(super::super::explicit_machine_syntax_command_segment(request).is_none());
     let normalized = normalize_explicit_planner_actions(
         &state,
         &route,
@@ -496,12 +424,8 @@ fn embedded_standalone_command_sequence_uses_configured_command_tokens() {
 #[test]
 fn executionless_route_preserves_planner_selected_literal_command_sequence() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Free,
-    );
-    route.route_reason = "boundary_only; executionless_finalize_trace_plain".to_string();
+    let mut route = route_result(false, OutputResponseShape::Free);
+    route.route_reason = "boundary_only".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -509,7 +433,7 @@ fn executionless_route_preserves_planner_selected_literal_command_sequence() {
     let request = "pwd whoami hostname 三个结果每个一行 不要总结";
 
     assert_eq!(
-        super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
+        super::super::explicit_machine_syntax_command_segment(request).as_deref(),
         Some("pwd; whoami; hostname")
     );
     let normalized = normalize_explicit_planner_actions(
@@ -538,56 +462,15 @@ fn executionless_route_preserves_planner_selected_literal_command_sequence() {
 }
 
 #[test]
-fn prefixed_single_command_with_format_tail_is_single_step_safe() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
-
-    assert_eq!(
-        super::super::explicit_command_single_step_segment(
-            &state.policy.command_intent,
-            "执行 pwd，只输出当前工作目录的绝对路径"
-        )
-        .as_deref(),
-        Some("pwd")
-    );
-}
-
-#[test]
-fn prefixed_single_command_with_second_command_tail_is_not_single_step_safe() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
-
-    assert_eq!(
-        super::super::explicit_command_single_step_segment(
-            &state.policy.command_intent,
-            "执行 pwd，再执行 whoami，然后输出结果"
-        ),
-        None
-    );
-}
-
-#[test]
-fn command_output_summary_explicit_command_plan_synthesizes_configured_sequence() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+fn command_output_summary_plan_synthesizes_planner_selected_sequence() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
     let request = "先执行 whoami，再执行 pwd，然后把结果用一句自嘲签名回复我";
 
-    assert_eq!(
-        super::super::configured_distinct_standalone_command_sequence_from_text(
-            &state.policy.command_intent,
-            request
-        )
-        .as_deref(),
-        Some("whoami; pwd")
-    );
+    assert!(super::super::explicit_machine_syntax_command_segment(request).is_none());
     let normalized = normalize_explicit_planner_actions(
         &state,
         &route,
@@ -617,25 +500,15 @@ fn command_output_summary_explicit_command_plan_synthesizes_configured_sequence(
 
 #[test]
 fn command_output_summary_embedded_code_span_after_run_prefix_uses_literal_command() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
     let request = "Run the explicit shell command `pwd`, then inspect local listening ports or processes related to clawd; answer with the working directory and whether a clawd-related process or port is visible.";
 
     assert_eq!(
-        super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
-        Some("pwd")
-    );
-    assert_eq!(
-        super::super::explicit_command_single_step_segment(&state.policy.command_intent, request)
-            .as_deref(),
+        super::super::explicit_machine_syntax_command_segment(request).as_deref(),
         Some("pwd")
     );
     let normalized = normalize_explicit_planner_actions(
@@ -663,13 +536,8 @@ fn command_output_summary_embedded_code_span_after_run_prefix_uses_literal_comma
 
 #[test]
 fn command_output_summary_prefixed_unknown_second_command_gets_multi_step_plan() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
@@ -736,11 +604,7 @@ fn leading_shellish_command_sequence_gets_deterministic_run_cmd_plan() {
         return;
     }
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
@@ -798,11 +662,7 @@ fn leading_shellish_command_sequence_rejects_command_with_argument_shape() {
 #[test]
 fn explicit_prefixed_shellish_code_span_keeps_single_step_fast_path() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
@@ -828,11 +688,7 @@ fn explicit_prefixed_shellish_code_span_keeps_single_step_fast_path() {
 
 #[test]
 fn existence_with_path_filename_deterministic_plan_uses_name_search() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "start-all-bin.sh".to_string();
@@ -874,11 +730,7 @@ fn existence_with_path_directory_locator_uses_child_selector_search() {
     fs::write(locator.join("x_abcd_log.txt"), "").expect("write log");
     let locator_path = locator.display().to_string();
 
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.resolved_intent =
         "在目录 locator_smart/fuzzy_top3 中查找名称为 abcd 的文件或目录".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
@@ -912,11 +764,7 @@ fn existence_with_path_directory_locator_uses_child_selector_search() {
 
 #[test]
 fn existence_with_path_multi_file_targets_deterministic_plan_uses_path_batch_facts() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent =
         "检查 README.md、AGENTS.md、Cargo.toml 是否都存在，只用一行回答每个文件的存在状态"
             .to_string();
@@ -951,11 +799,7 @@ fn existence_with_path_multi_file_targets_deterministic_plan_uses_path_batch_fac
 
 #[test]
 fn existence_with_path_multi_file_targets_preserve_relative_path_segments() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent = "Check existence and type of two fixture paths".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -995,11 +839,7 @@ fn existence_with_path_multi_file_targets_preserve_relative_path_segments() {
 
 #[test]
 fn existence_with_path_current_workspace_single_file_target_uses_path_batch_facts() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent =
         "Check if README.md exists in the current directory and answer with the path".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
@@ -1030,11 +870,7 @@ fn existence_with_path_current_workspace_single_file_target_uses_path_batch_fact
 
 #[test]
 fn missing_existing_file_delivery_uses_find_name_probe() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::FileToken,
-    );
+    let mut route = route_result(true, OutputResponseShape::FileToken);
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint =
@@ -1071,11 +907,7 @@ fn missing_existing_file_delivery_uses_find_name_probe() {
 
 #[test]
 fn generated_file_delivery_without_state_patch_uses_existing_file_probe() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::FileToken,
-    );
+    let mut route = route_result(true, OutputResponseShape::FileToken);
     route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint =
@@ -1110,11 +942,7 @@ fn generated_file_delivery_without_state_patch_uses_existing_file_probe() {
 
 #[test]
 fn existence_with_path_current_workspace_service_file_target_uses_path_batch_facts() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent =
         "Check whether rustclaw.service exists in the current repository and include the path"
             .to_string();
@@ -1146,11 +974,7 @@ fn existence_with_path_current_workspace_service_file_target_uses_path_batch_fac
 
 #[test]
 fn existence_with_path_path_deterministic_plan_uses_path_facts() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "Cargo.lock".to_string();
@@ -1179,11 +1003,7 @@ fn existence_with_path_path_deterministic_plan_uses_path_facts() {
 
 #[test]
 fn existence_with_path_retry_read_text_range_is_preserved_when_verifier_requests_excerpt() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "README.md".to_string();
@@ -1230,11 +1050,7 @@ fn existence_with_path_retry_read_text_range_is_preserved_when_verifier_requests
 fn archive_entry_existence_uses_archive_list_instead_of_archive_stat() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent =
         format!("Check whether archive member nested/config.ini is present in {archive}.");
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
@@ -1275,11 +1091,7 @@ fn archive_entry_existence_uses_archive_list_instead_of_archive_stat() {
 fn archive_entry_existence_scalar_shape_uses_archive_list() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.resolved_intent =
         format!("Check whether archive member notes.txt is present in {archive}.");
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
@@ -1319,11 +1131,7 @@ fn archive_entry_existence_scalar_shape_uses_archive_list() {
 #[test]
 fn archive_file_existence_without_member_target_still_stats_archive() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent = format!("Check whether {archive} exists.");
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1357,11 +1165,7 @@ fn existence_with_path_directory_locator_with_file_target_uses_find_path() {
     fs::create_dir_all(root.path.join("case_only")).expect("mkdir");
     let directory = root.path.join("case_only");
     let directory_path = directory.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent =
         "Locate report.md within the specified directory and output only its full path."
             .to_string();
@@ -1409,11 +1213,7 @@ fn existence_with_path_directory_auto_locator_does_not_parse_history_entries_as_
     let root = TempDirGuard::new("existence_dir_locator_history_entries");
     fs::create_dir_all(root.path.join("configs")).expect("mkdir configs");
     let directory_path = root.path.join("configs").display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent = "Current task:\n先列出 configs 目录下前 5 个条目名称\n\nMost recent generated output:\nagent_guard.toml\naudio.toml\nbrowser_web_wait_map.json\nchannel_commands.toml\nchannels\n\nNew user instruction:\n看最后一个的基本信息，只回答路径和类型".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1438,11 +1238,7 @@ fn file_paths_current_workspace_deterministic_plan_uses_name_search() {
     let script = root.path.join("start-all-bin.sh");
     fs::write(&script, "#!/usr/bin/env bash\n").expect("write script");
     let script_path = script.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "start-all-bin.sh".to_string();
@@ -1479,11 +1275,7 @@ fn file_paths_current_workspace_deterministic_plan_uses_name_search() {
 
 #[test]
 fn file_paths_path_like_locator_hint_uses_parent_search_scope() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "case_only/report.md".to_string();

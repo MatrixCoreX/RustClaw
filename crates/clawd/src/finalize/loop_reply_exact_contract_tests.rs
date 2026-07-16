@@ -74,7 +74,6 @@ fn exact_contract_keeps_latest_terminal_table_over_short_observed_projection() {
     loop_state.last_publishable_synthesis_output = Some(table.to_string());
     let mut delivery_messages = vec![table.to_string()];
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "multi target readonly inspection".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
@@ -268,7 +267,6 @@ fn exact_contract_keeps_model_language_verdict_over_observed_scalar() {
     loop_state.last_user_visible_respond = Some(planned.clone());
     let mut delivery_messages = vec![planned.clone()];
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent =
         "Check if /tmp/rustclaw-missing-ja.txt exists; if not, respond briefly in Japanese"
             .to_string();
@@ -316,7 +314,6 @@ fn archive_pack_exact_contract_prefers_observed_archive_path_over_exit_code_resp
     loop_state.last_user_visible_respond = Some("0".to_string());
     let mut delivery_messages = vec!["0".to_string()];
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
@@ -365,7 +362,6 @@ fn archive_pack_capability_ref_prefers_observed_archive_path_without_semantic_ki
     loop_state.last_user_visible_respond = Some("0".to_string());
     let mut delivery_messages = vec!["0".to_string()];
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -417,7 +413,6 @@ fn archive_pack_exact_contract_keeps_later_terminal_respond() {
     loop_state.last_user_visible_respond = Some("needs_user_confirmation".to_string());
     let mut delivery_messages = vec!["needs_user_confirmation".to_string()];
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
@@ -460,7 +455,6 @@ fn exact_contract_keeps_planned_subset_over_raw_observed_file_paths() {
     loop_state.last_user_visible_respond = Some(planned.clone());
     let mut delivery_messages = vec![planned.clone()];
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
@@ -509,7 +503,6 @@ fn exact_contract_keeps_explicit_json_delivery_over_observed_phrase() {
     let mut delivery_messages =
         vec![r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#.to_string()];
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_hint = "README.md".to_string();

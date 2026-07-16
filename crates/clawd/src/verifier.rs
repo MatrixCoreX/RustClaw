@@ -649,23 +649,12 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
 fn route_requires_contract(route_result: Option<&crate::RouteResult>) -> bool {
     route_result
         .map(|route| {
-            if route_uses_agent_loop_execution_boundary(route) {
-                return false;
-            }
             let contract = route.effective_output_contract();
             !route.output_contract_is_unclassified()
                 || contract.requires_content_evidence
                 || contract.delivery_required
         })
         .unwrap_or(false)
-}
-
-fn route_uses_agent_loop_execution_boundary(route: &crate::RouteResult) -> bool {
-    !route.needs_clarify
-        && !route.output_contract.delivery_required
-        && !route.wants_file_delivery
-        && matches!(route.schedule_kind, crate::ScheduleKind::None)
-        && route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
 }
 
 fn verify_execution_recipe(

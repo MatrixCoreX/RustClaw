@@ -4,7 +4,6 @@ use super::*;
 fn archive_read_capability_ref_allows_planner_supplied_member_args() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "capability_ref=archive.read".to_string();
     route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
@@ -31,7 +30,6 @@ fn archive_read_capability_ref_allows_planner_supplied_member_args() {
 fn archive_read_capability_ref_uses_policy_not_archive_read_semantic_kind() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "capability_ref=archive.read".to_string();
     route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
@@ -58,7 +56,6 @@ fn archive_read_capability_ref_uses_policy_not_archive_read_semantic_kind() {
 fn archive_read_semantic_kind_without_capability_ref_does_not_expose_action_refs() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
@@ -76,7 +73,6 @@ fn archive_read_semantic_kind_without_capability_ref_does_not_expose_action_refs
 fn archive_read_structural_member_target_waits_for_planner_capability_ref() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         format!("Read the notes.txt content from archive {archive} and output only it");
     route.output_contract.requires_content_evidence = true;
@@ -104,7 +100,6 @@ fn archive_database_aggregate_capability_refs_allow_structured_observation_actio
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "capability_ref=archive.list capability_ref=archive.read capability_ref=database.list_tables"
             .to_string();
@@ -151,7 +146,6 @@ fn archive_database_aggregate_without_capability_refs_does_not_expose_action_ref
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "llm_failed_existing_path_observation_fallback; explicit_existing_path_observation"
             .to_string();
@@ -421,11 +415,7 @@ fn extract_field_rewrites_bare_manifest_to_shallow_candidate_with_field() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     let root_package = root.path.join("package.json");
     let actions = vec![AgentAction::CallSkill {
@@ -481,11 +471,7 @@ name = "clawd"
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     let root_cargo = root.path.join("Cargo.toml");
     let actions = vec![AgentAction::CallSkill {
@@ -558,11 +544,7 @@ name = "clawd"
 
     let mut state = test_state_with_enabled_skills(&["system_basic", "config_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint.clear();
@@ -654,11 +636,7 @@ reqwest = { version = "0.12" }
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     let root_cargo = root.path.join("Cargo.toml");
@@ -706,11 +684,7 @@ version = "0.1.7"
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     let root_cargo = root.path.join("Cargo.toml");
@@ -750,11 +724,7 @@ fn active_clarify_scalar_field_followup_rewrites_text_read_to_read_field() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.resolved_intent =
         "Continue the previous request that was waiting for clarification: 读一下那个文件里的名字字段，只输出值\n[RESOLVED_INTENT]\n读取指定文件中的名字字段（name），仅输出该字段的值\nUser now provides the missing target or content: package.json"
             .to_string();
@@ -801,11 +771,7 @@ fn active_clarify_scalar_candidate_respond_rewrites_to_read_field_evidence() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.route_reason =
         "active_clarify_locator_reply_fast_path; active_clarify_fast_path_scalar_field_value_contract_repair"
             .to_string();
@@ -846,11 +812,7 @@ fn active_clarify_scalar_candidate_respond_keeps_ambiguous_value() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.route_reason =
         "active_clarify_locator_reply_fast_path; active_clarify_fast_path_scalar_field_value_contract_repair"
             .to_string();

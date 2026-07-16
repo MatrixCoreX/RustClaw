@@ -762,28 +762,6 @@ pub(crate) fn build_last_turn_full_context(
     )
 }
 
-pub(crate) fn latest_terminal_assistant_reply_for_chat(
-    state: &AppState,
-    user_key: Option<&str>,
-    user_id: i64,
-    chat_id: i64,
-) -> Option<String> {
-    let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.core.db.get().ok()?;
-    let (_, assistant_text) =
-        query_recent_terminal_ask_turn_for_chat(state, &db, user_id, chat_id, &user_key)
-            .ok()
-            .flatten()?;
-    let trimmed = assistant_text.trim();
-    if trimmed.is_empty()
-        || trimmed == provider_unavailable_assistant_placeholder()
-        || trimmed == clarify_assistant_placeholder()
-    {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
 pub(crate) fn build_recent_assistant_replies_context(
     state: &AppState,
     user_key: Option<&str>,

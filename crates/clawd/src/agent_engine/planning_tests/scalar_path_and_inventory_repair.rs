@@ -27,11 +27,7 @@ fn recent_scalar_pair_normalization_strips_terminal_synthesis_for_runtime_finali
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.resolved_intent =
         "读取 UI/package.json 里的 name，再读取 crates/clawd/Cargo.toml 里的 package.name"
@@ -75,11 +71,7 @@ fn recent_scalar_pair_observation_only_normalization_does_not_append_synthesis()
             }),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.resolved_intent =
         "读取 UI/package.json 里的 name，再读取 crates/clawd/Cargo.toml 里的 package.name"
@@ -105,11 +97,7 @@ fn recent_scalar_pair_observation_only_normalization_does_not_append_synthesis()
 #[test]
 fn scalar_path_observation_strips_guessed_terminal_respond() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.delivery_required = false;
     let actions = vec![
@@ -139,11 +127,7 @@ fn scalar_path_observation_strips_guessed_terminal_respond() {
 fn scalar_path_observation_does_not_strip_after_tool_output_started() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.delivery_required = false;
     let actions = vec![
@@ -554,7 +538,6 @@ fn scalar_path_auto_locator_file_builds_observation_plan() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let route = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "只输出匹配文件路径".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -604,11 +587,7 @@ fn scalar_path_locator_hint_file_builds_observation_plan_before_auto_locator() {
     fs::write(&other, "other").expect("write other");
     let selected_path = selected.display().to_string();
     let other_path = other.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = selected_path.clone();
@@ -626,11 +605,7 @@ fn scalar_path_auto_locator_requires_scalar_path_contract() {
     let selected = root.path.join("selected.md");
     fs::write(&selected, "selected").expect("write selected");
     let selected_path = selected.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = selected_path;
@@ -644,11 +619,7 @@ fn scalar_path_auto_locator_preserves_planner_structural_locator_action() {
     let report = root.path.join("my_abcd.txt");
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "my_abcd.txt".to_string();
@@ -683,11 +654,7 @@ fn file_basename_auto_locator_preserves_planner_stat_paths_action() {
     let report = root.path.join("release_checklist.md");
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::FileBasename;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = report_path.clone();
@@ -722,11 +689,7 @@ fn scalar_path_current_workspace_preserves_planner_workspace_contract_action() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let workspace_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.requires_content_evidence = true;
@@ -760,7 +723,6 @@ async fn plan_round_scalar_path_current_workspace_reaches_planner_without_pre_ll
     let root = TempDirGuard::new("scalar_current_workspace_plan_round");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let prompt = "???? 帮我看看 pwd 是哪儿 :) thx!!!";
     let task = ClaimedTask {
         task_id: "scalar-current-workspace-plan-round".to_string(),
@@ -773,11 +735,7 @@ async fn plan_round_scalar_path_current_workspace_reaches_planner_without_pre_ll
         kind: "ask".to_string(),
         payload_json: json!({ "text": prompt }).to_string(),
     };
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.requires_content_evidence = true;
@@ -817,7 +775,6 @@ async fn explicit_command_scalar_path_current_workspace_reaches_planner_path() {
     let root = TempDirGuard::new("explicit_command_scalar_current_workspace_plan_round");
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let prompt = "执行 pwd，只输出当前工作目录的绝对路径";
     let task = ClaimedTask {
         task_id: "explicit-command-scalar-current-workspace-plan-round".to_string(),
@@ -830,11 +787,7 @@ async fn explicit_command_scalar_path_current_workspace_reaches_planner_path() {
         kind: "ask".to_string(),
         payload_json: json!({ "text": prompt }).to_string(),
     };
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.requires_content_evidence = true;
@@ -845,18 +798,7 @@ async fn explicit_command_scalar_path_current_workspace_reaches_planner_path() {
             .to_string();
     let loop_state = LoopState::new(1);
     let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
-    assert!(super::super::explicit_command_request_present(
-        &state.policy.command_intent,
-        prompt,
-        Some(&route)
-    ));
-    assert!(
-        super::super::explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
-            &state.policy.command_intent,
-            prompt,
-            Some(&route)
-        )
-    );
+    assert!(super::super::explicit_machine_syntax_command_segment(prompt).is_none());
 
     let err = super::super::plan_round_actions(
         &state,
@@ -888,7 +830,6 @@ async fn explicit_command_scalar_path_auto_locator_conflict_reaches_planner_path
     let root = TempDirGuard::new("explicit_command_scalar_auto_locator_conflict");
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let prompt = "Run pwd and output only the raw result.";
     let task = ClaimedTask {
         task_id: "explicit-command-scalar-auto-locator-conflict-plan-round".to_string(),
@@ -901,11 +842,7 @@ async fn explicit_command_scalar_path_auto_locator_conflict_reaches_planner_path
         kind: "ask".to_string(),
         payload_json: json!({ "text": prompt }).to_string(),
     };
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root.path.join("run").display().to_string();
@@ -920,18 +857,7 @@ async fn explicit_command_scalar_path_auto_locator_conflict_reaches_planner_path
         "Run pwd command and output the raw current working directory.".to_string();
     let loop_state = LoopState::new(1);
     let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
-    assert!(super::super::explicit_command_request_present(
-        &state.policy.command_intent,
-        prompt,
-        Some(&route)
-    ));
-    assert!(
-        super::super::explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
-            &state.policy.command_intent,
-            prompt,
-            Some(&route)
-        )
-    );
+    assert!(super::super::explicit_machine_syntax_command_segment(prompt).is_none());
 
     let err = super::super::plan_round_actions(
         &state,
@@ -964,11 +890,7 @@ fn file_facts_auto_locator_builds_stat_paths_synthesis_plan() {
     let report = root.path.join("README.md");
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = report_path.clone();
@@ -1005,11 +927,7 @@ fn file_facts_auto_locator_does_not_override_content_semantic() {
     let report = root.path.join("README.md");
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = report_path.clone();
@@ -1023,11 +941,7 @@ fn file_facts_auto_locator_accepts_single_file_metadata_mislabeled_as_quantity_c
     let report = root.path.join("README.md");
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = report_path.clone();
@@ -1056,11 +970,7 @@ fn file_facts_auto_locator_uses_route_locator_hint_without_auto_locator_path() {
     let report = root.path.join("README.md");
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = report_path.clone();
@@ -1082,11 +992,7 @@ fn file_facts_auto_locator_accepts_single_directory_metadata_quantity_comparison
     let target = root.path.join("target");
     fs::create_dir_all(&target).expect("create target dir");
     let target_path = target.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = target_path.clone();
@@ -1126,11 +1032,7 @@ fn strict_quantity_directory_target_uses_ranked_size_inventory() {
     fs::write(target.join("small.log"), "a").expect("write small");
     fs::write(target.join("large.log"), "abcdef").expect("write large");
     let target_path = target.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = target_path.clone();
@@ -1167,11 +1069,7 @@ fn strict_quantity_directory_without_selector_uses_path_metadata_plan() {
     let target = root.path.join("target");
     fs::create_dir_all(&target).expect("create target dir");
     let target_path = target.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = target_path.clone();
@@ -1212,11 +1110,7 @@ fn free_quantity_directory_target_uses_broader_ranked_inventory() {
     fs::write(target.join("small.json"), "{}").expect("write small");
     fs::write(target.join("large.json"), "{\"title\":\"larger\"}").expect("write large");
     let target_path = target.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.resolved_intent =
         "List the selected directory's JSON files and describe the largest one.".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
@@ -1248,11 +1142,7 @@ fn file_facts_auto_locator_preserves_planner_current_workspace_quantity_target()
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "target".to_string();
@@ -1287,11 +1177,7 @@ fn quantity_compare_pair_locator_preserves_planner_compare_paths_action() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "Cargo.lock | Cargo.toml".to_string();
@@ -1336,11 +1222,7 @@ fn quantity_compare_pair_locator_preserves_planner_count_entries_for_directory_p
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "crates | crates/skills".to_string();
@@ -1426,11 +1308,7 @@ fn quantity_compare_pair_locator_recovers_pair_from_original_request_over_parent
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
@@ -1505,11 +1383,7 @@ fn quantity_compare_pair_locator_recovers_pair_from_original_request_over_parent
 
 #[test]
 fn quantity_directory_inventory_injects_structural_extension_filter() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent =
         "[CONTRACT_TEST_HINT]\nselector_extension=json\n[/CONTRACT_TEST_HINT]".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
@@ -1539,11 +1413,7 @@ fn quantity_directory_inventory_injects_structural_extension_filter() {
 
 #[test]
 fn directory_entry_groups_inventory_injects_extension_from_machine_token() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent =
         "[CONTRACT_TEST_HINT]\nselector_extension=toml\n[/CONTRACT_TEST_HINT]".to_string();
     route.route_reason.clear();
@@ -1570,11 +1440,7 @@ fn directory_entry_groups_inventory_injects_extension_from_machine_token() {
 
 #[test]
 fn directory_entry_groups_inventory_ignores_non_extension_user_words() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent.clear();
     route.route_reason.clear();
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
@@ -1604,11 +1470,7 @@ fn directory_entry_groups_inventory_ignores_non_extension_user_words() {
 
 #[test]
 fn single_path_metadata_facts_do_not_satisfy_multi_target_quantity_comparison() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
@@ -1640,11 +1502,7 @@ fn single_path_metadata_facts_do_not_satisfy_multi_target_quantity_comparison() 
 #[test]
 fn explicit_command_planner_action_preserves_pipeline_literal() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
@@ -1680,11 +1538,7 @@ fn explicit_command_planner_action_preserves_pipeline_literal() {
 #[test]
 fn execution_failed_step_code_span_sequence_preserves_planner_multi_run_cmd_actions() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);

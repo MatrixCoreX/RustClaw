@@ -99,7 +99,7 @@ fn backend_identity_metadata_guard_rejects_provider_identity_leak() {
 #[test]
 fn backend_identity_metadata_guard_requires_route_marker() {
     let state = state_with_mimo_provider();
-    let route = route_with_mode(crate::AskMode::act_plain());
+    let route = route_with_mode();
 
     assert!(
         backend_identity_metadata_answer_verifier_guard(&state, &route, "MiMo-v2.5-pro",).is_none()
@@ -204,7 +204,7 @@ fn answer_verifier_prompt_preserves_compound_deliverables_on_retry() {
 
 #[test]
 fn answer_verifier_output_contract_exposes_evidence_profile() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.requires_content_evidence = true;
@@ -417,7 +417,7 @@ fn execution_evidence_prompt_includes_error_step_observed_evidence() {
 
 #[test]
 fn execution_failed_step_answer_uses_failed_machine_tokens_not_success_stdout() {
-    let mut route = route_with_mode(crate::AskMode::act_with_chat_finalizer());
+    let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
     route.output_contract.requires_content_evidence = true;
 

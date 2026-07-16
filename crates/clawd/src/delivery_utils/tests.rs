@@ -13,7 +13,6 @@ use super::directory_lookup::{
 use super::file_delivery::{
     build_batch_directory_delivery_response, find_file_in_directory_non_recursive,
     format_batch_delivery_tokens, list_current_level_files_for_delivery,
-    scan_filename_matches_with_limit,
 };
 use super::locator::{
     directory_lookup_input_from_hint, extract_explicit_file_path_candidates,
@@ -1934,7 +1933,8 @@ fn chinese_filename_matches_project_root_scan() {
     let target = root.path().join("项目资料/日报.md");
     write_text_file(&target);
 
-    let out = scan_filename_matches_with_limit(root.path(), "日报.md", 3, 100);
+    let out =
+        super::file_delivery::scan_filename_matches_with_limit(root.path(), "日报.md", 3, 100);
     assert_eq!(
         out,
         FilenameScanResult::Found(target.canonicalize().expect("canonical target"))
@@ -1947,7 +1947,8 @@ fn chinese_filename_supports_normalized_contains_match_project_scan() {
     let target = root.path().join("项目资料/日报_最终版.txt");
     write_text_file(&target);
 
-    let out = scan_filename_matches_with_limit(root.path(), "最终版.txt", 3, 100);
+    let out =
+        super::file_delivery::scan_filename_matches_with_limit(root.path(), "最终版.txt", 3, 100);
     assert_eq!(
         out,
         FilenameScanResult::Candidates(vec![target.canonicalize().expect("canonical target")])

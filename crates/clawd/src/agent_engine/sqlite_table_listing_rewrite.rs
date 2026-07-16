@@ -819,7 +819,6 @@ pub(super) fn rewrite_archive_unpack_run_cmd_to_archive_basic(
 
 pub(super) fn archive_pack_pair_for_route(route: &RouteResult) -> Option<(String, String)> {
     if !route_has_archive_capability_action(route, "pack")
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
     {
         return None;

@@ -4,9 +4,9 @@ use super::{
     answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_budget_available,
     answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
     commit_answer_verifier_retry_answer, commit_local_code_strict_json_projection_after_readback,
-    evaluate_round_outcome, executable_contract_observe_only_round_should_continue,
-    forced_boundary_observation_clarify_intent, initial_execution_recipe_spec,
-    machine_status_visible_output_format_gap, mark_reply_failed_after_answer_verifier_exhausted,
+    evaluate_round_outcome, forced_boundary_observation_clarify_intent,
+    initial_execution_recipe_spec, machine_status_visible_output_format_gap,
+    mark_reply_failed_after_answer_verifier_exhausted, observe_only_round_should_continue,
     parse_log_analyze_finding, post_write_content_evidence_readback_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
@@ -68,7 +68,6 @@ fn success_marker_matching_requires_exact_line() {
 
 fn route_result(shape: OutputResponseShape) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

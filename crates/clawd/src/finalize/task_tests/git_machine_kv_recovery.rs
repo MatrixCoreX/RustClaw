@@ -5,7 +5,7 @@ use serde_json::json;
 #[test]
 fn requested_machine_kv_summary_failure_recovery_replaces_publishable_git_prose() {
     let prompt = "检查当前 git 状态，只返回 branch、worktree_state、changed_count。";
-    let route = route_result(crate::AskMode::act_plain());
+    let route = route_result();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-git-status-machine-kv", "ask", prompt);
     journal
@@ -56,7 +56,7 @@ fn requested_machine_kv_summary_failure_recovery_replaces_publishable_git_prose(
 #[test]
 fn requested_machine_kv_summary_verifier_gap_recovery_projects_git_remotes() {
     let prompt = "Return only branch and remotes.";
-    let route = route_result(crate::AskMode::act_plain());
+    let route = route_result();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-git-remotes-machine-kv", "ask", prompt);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {

@@ -43,7 +43,6 @@ pub(super) async fn prepare_planner_owned_ask_routing(
             crate::skills::task_allows_sudo(state, Some(task)),
         );
     let route_result = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: planner_user_request.clone(),
         needs_clarify: false,
         clarify_question: String::new(),

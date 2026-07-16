@@ -787,7 +787,6 @@ async fn finalize_loop_reply_returns_file_token_from_path_batch_after_read_rejec
     std::fs::write(&file, "release checklist").expect("write temp file");
 
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.wants_file_delivery = false;
     route.output_contract.response_shape = OutputResponseShape::FileToken;
     route.output_contract.delivery_required = true;

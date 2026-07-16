@@ -7,7 +7,6 @@ fn direct_answer_defers_http_basic_one_sentence_summary_to_llm() {
         "status=200\n{\"ok\":true}\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果"
             .to_string(),
         needs_clarify: false,
@@ -50,7 +49,6 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
         .executed_step_results
         .push(ok_step("step_1", "http_basic", body));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "请求接口并返回原始结果".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -93,7 +91,6 @@ fn direct_answer_defers_http_basic_web_page_summary_to_observed_synthesis() {
         .executed_step_results
         .push(ok_step("step_1", "http_basic", body));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "capability_ref=browser.open_extract".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -140,7 +137,6 @@ fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
         .executed_step_results
         .push(ok_step("step_1", "http_basic", body));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "service_status".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -188,7 +184,6 @@ fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
             r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=stopped","post_state":"telegramd=stopped","verified":true,"key_evidence":["telegramd process_count=0 memory_rss_bytes=Some(0)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=stopped"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "帮我检查 telegramd 现在是不是在运行，顺手简短解释状态".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -231,7 +226,6 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
             r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"key_evidence":["telegramd process_count=1 memory_rss_bytes=Some(1024)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=running"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent:
             "check whether telegramd is running right now and briefly explain the status"
                 .to_string(),
@@ -276,7 +270,6 @@ fn direct_answer_keeps_service_control_scalar_status_as_machine_value() {
             r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"summary":"Status: telegramd=running"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "check telegramd status".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

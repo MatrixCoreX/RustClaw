@@ -17,7 +17,6 @@ mod types;
 
 use self::directory_lookup::try_handle_directory_lookup_request;
 use self::file_delivery::enforce_file_delivery_locator_contract;
-pub(crate) use self::file_delivery::scan_filename_matches_with_limit;
 pub(crate) use self::locator::extract_filename_candidates;
 pub(crate) use self::message_media::{
     collect_recent_image_candidates, extract_file_path_from_delivery_token,
@@ -27,7 +26,6 @@ pub(super) use self::output_contract::response_has_same_file_token;
 use self::output_contract::{enforce_output_contract, looks_like_delivery_locator_literal};
 pub(crate) use self::path_helpers::{
     dedup_and_sort_paths, resolve_existing_dir_under_root, resolve_existing_file_under_root,
-    resolve_existing_path_under_root_case_insensitive,
 };
 #[cfg(test)]
 use self::types::localize_delivery_message_for_request;

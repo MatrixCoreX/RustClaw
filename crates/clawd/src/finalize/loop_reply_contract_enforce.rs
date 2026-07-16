@@ -346,8 +346,7 @@ pub(super) fn route_accepts_filesystem_mutation_synthesis(
     }
     let route_accepts_lifecycle = route
         .output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
-        || (route.is_execute_gate()
-            && !route.output_contract.delivery_required
+        || (!route.output_contract.delivery_required
             && !route.wants_file_delivery
             && (route.output_contract.requires_content_evidence
                 || matches!(

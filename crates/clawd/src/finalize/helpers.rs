@@ -632,9 +632,6 @@ pub(crate) fn observed_read_path_matches_request(
 mod tests {
     fn route_with_capability_ref(capability_ref: &str) -> crate::RouteResult {
         crate::RouteResult {
-            ask_mode: crate::AskMode::Act {
-                finalize: crate::ActFinalizeStyle::Plain,
-            },
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),

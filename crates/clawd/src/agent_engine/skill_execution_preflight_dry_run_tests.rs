@@ -45,7 +45,6 @@ planner_capabilities = [
 fn evidence_policy_preflight_rejects_async_start_for_dry_run_contract() {
     let state = test_state();
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "async_job_protocol=version:1 mode=dry_run adapter_result_key=async_poll_adapter_result"
                 .to_string(),

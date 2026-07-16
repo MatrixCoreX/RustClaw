@@ -51,10 +51,6 @@ impl<'a> CapabilityRef<'a> {
     }
 }
 
-pub(crate) fn is_valid_capability_ref_value(token: &str) -> bool {
-    CapabilityRef::parse_value(token).is_some()
-}
-
 pub(crate) fn route_has_capability_namespace(
     route: &crate::RouteResult,
     namespaces: &[&str],

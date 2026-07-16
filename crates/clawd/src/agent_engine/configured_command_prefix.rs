@@ -26,20 +26,6 @@ pub(super) fn trim_leading_command_delimiters(mut text: &str) -> &str {
     }
 }
 
-pub(super) fn trim_leading_command_separators_preserve_quotes(mut text: &str) -> &str {
-    loop {
-        text = text.trim_start();
-        let Some(ch) = text.chars().next() else {
-            return text;
-        };
-        if matches!(ch, ':' | '：' | '-' | '—' | '–' | ' ') {
-            text = &text[ch.len_utf8()..];
-            continue;
-        }
-        return text;
-    }
-}
-
 pub(super) fn looks_like_concrete_command_tail(tail: &str) -> bool {
     let tail = trim_leading_command_delimiters(tail);
     let first_token = tail
@@ -55,328 +41,6 @@ pub(super) fn looks_like_concrete_command_tail(tail: &str) -> bool {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .count()
         >= 2
-}
-
-pub(super) fn explicit_command_segment_before_followup(tail: &str) -> Option<&str> {
-    let tail = trim_leading_command_separators_preserve_quotes(tail);
-    let boundary = tail.char_indices().find_map(|(idx, ch)| {
-        (idx > 0 && matches!(ch, ',' | '，' | ';' | '；' | '。' | '\n')).then_some(idx)
-    })?;
-    Some(&tail[..boundary])
-}
-
-pub(super) fn explicit_command_followup_tail(tail: &str) -> Option<&str> {
-    let tail = trim_leading_command_separators_preserve_quotes(tail);
-    let boundary = tail.char_indices().find_map(|(idx, ch)| {
-        (idx > 0 && matches!(ch, ',' | '，' | ';' | '；' | '。' | '\n')).then_some(idx)
-    })?;
-    let delimiter_len = tail[boundary..]
-        .chars()
-        .next()
-        .map(char::len_utf8)
-        .unwrap_or(0);
-    Some(tail[boundary + delimiter_len..].trim())
-}
-
-pub(super) fn structural_command_argument_token(token: &str) -> bool {
-    let token = token.trim_matches(|ch: char| {
-        ch.is_ascii_punctuation() && !matches!(ch, '-' | '_' | '.' | '/' | '\\' | '~' | '=')
-    });
-    if token.is_empty() {
-        return false;
-    }
-    let quoted = (token.starts_with('"') && token.ends_with('"'))
-        || (token.starts_with('\'') && token.ends_with('\''));
-    let flag = token.starts_with('-') && token.chars().any(|ch| ch.is_ascii_alphanumeric());
-    let path_like = token.starts_with('/')
-        || token.starts_with("./")
-        || token.starts_with("../")
-        || token.starts_with("~/")
-        || token.contains('/')
-        || token.contains('\\')
-        || token.contains('.');
-    let assignment = token
-        .split_once('=')
-        .is_some_and(|(name, value)| !name.is_empty() && !value.is_empty());
-    let machine_literal = token.is_ascii()
-        && token
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-        && (token.contains('_') || token.chars().any(|ch| ch.is_ascii_digit()));
-    quoted || flag || path_like || assignment || machine_literal
-}
-
-pub(super) fn configured_standalone_command_token_value<'a>(
-    runtime: &'a crate::CommandIntentRuntime,
-    token: &str,
-) -> Option<&'a str> {
-    runtime.standalone_commands.iter().find_map(|candidate| {
-        if candidate.is_ascii() && token.is_ascii() {
-            candidate
-                .eq_ignore_ascii_case(token)
-                .then_some(candidate.as_str())
-        } else {
-            (candidate == token).then_some(candidate.as_str())
-        }
-    })
-}
-
-pub(super) fn configured_standalone_command_token(
-    runtime: &crate::CommandIntentRuntime,
-    token: &str,
-) -> bool {
-    configured_standalone_command_token_value(runtime, token).is_some()
-}
-
-pub(super) fn command_candidate_end_boundary(text: &str, end_idx: usize) -> bool {
-    if end_idx >= text.len() {
-        return true;
-    }
-    let Some(next) = text[end_idx..].chars().next() else {
-        return true;
-    };
-    !next.is_ascii_alphanumeric() && !matches!(next, '_' | '-' | '/' | '\\' | '~' | '`')
-}
-
-pub(super) fn configured_standalone_command_sequence_from_segment(
-    runtime: &crate::CommandIntentRuntime,
-    segment: &str,
-) -> Option<String> {
-    let segment = trim_leading_command_separators_preserve_quotes(segment).trim();
-    if segment.is_empty()
-        || segment.contains('\n')
-        || segment.contains('`')
-        || segment
-            .chars()
-            .any(|ch| matches!(ch, '|' | ';' | '&' | '>' | '<'))
-    {
-        return None;
-    }
-
-    let mut commands = Vec::new();
-    for (idx, ch) in segment.char_indices() {
-        if !ch.is_ascii_alphabetic() || !command_candidate_start_boundary(segment, idx) {
-            continue;
-        }
-        let mut end = idx;
-        for (offset, candidate) in segment[idx..].char_indices() {
-            if candidate.is_ascii_alphanumeric() || matches!(candidate, '_' | '-') {
-                end = idx + offset + candidate.len_utf8();
-                continue;
-            }
-            break;
-        }
-        if end <= idx || !command_candidate_end_boundary(segment, end) {
-            continue;
-        }
-        let token = &segment[idx..end];
-        if !simple_bare_command_token(token) {
-            continue;
-        }
-        if let Some(canonical) = configured_standalone_command_token_value(runtime, token) {
-            commands.push(canonical.to_string());
-        }
-    }
-
-    (commands.len() >= 2).then(|| commands.join("; "))
-}
-
-#[cfg(test)]
-pub(super) fn configured_distinct_standalone_command_sequence_from_text(
-    runtime: &crate::CommandIntentRuntime,
-    text: &str,
-) -> Option<String> {
-    let command = configured_standalone_command_sequence_from_segment(runtime, text)?;
-    let commands = command
-        .split(';')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    let distinct = commands
-        .iter()
-        .map(|command| command.to_ascii_lowercase())
-        .collect::<HashSet<_>>();
-    (distinct.len() >= 2).then_some(command)
-}
-
-pub(super) fn standalone_command_segment_before_freeform_tail<'a>(
-    runtime: &crate::CommandIntentRuntime,
-    tail: &'a str,
-) -> Option<&'a str> {
-    let tail = trim_leading_command_separators_preserve_quotes(tail).trim();
-    if tail.is_empty() || tail.contains('\n') {
-        return None;
-    }
-
-    let mut tokens = tail.split_whitespace();
-    let first = tokens.next()?;
-    let first_start = tail.find(first)?;
-    let first_end = first_start + first.len();
-    let first_token =
-        first.trim_matches(|ch: char| ch.is_ascii_punctuation() && !matches!(ch, '_' | '-' | '.'));
-    if !simple_bare_command_token(first_token)
-        || !configured_standalone_command_token(runtime, first_token)
-    {
-        return None;
-    }
-    let mut end = first_end;
-    let mut search_from = first_end;
-
-    for raw_token in tokens {
-        let token_start = tail[search_from..].find(raw_token)? + search_from;
-        let token_end = token_start + raw_token.len();
-        if structural_command_argument_token(raw_token) {
-            end = token_end;
-            search_from = token_end;
-            continue;
-        }
-        return Some(tail[..end].trim());
-    }
-
-    None
-}
-
-#[cfg(test)]
-pub(super) fn path_command_segment_before_freeform_tail_with_path_env<'a>(
-    tail: &'a str,
-    path_env: Option<&std::ffi::OsStr>,
-) -> Option<&'a str> {
-    let tail = trim_leading_command_separators_preserve_quotes(tail).trim();
-    if tail.is_empty() || tail.contains('\n') {
-        return None;
-    }
-
-    let mut tokens = tail.split_whitespace();
-    let first = tokens.next()?;
-    let first_start = tail.find(first)?;
-    let first_end = first_start + first.len();
-    let first_token =
-        first.trim_matches(|ch: char| ch.is_ascii_punctuation() && !matches!(ch, '_' | '-' | '.'));
-    if !simple_bare_command_token(first_token)
-        || !command_token_resolves_in_path(first_token, path_env)
-    {
-        return None;
-    }
-
-    let mut end = first_end;
-    let mut search_from = first_end;
-    let mut saw_structural_arg = false;
-    for raw_token in tokens {
-        let token_start = tail[search_from..].find(raw_token)? + search_from;
-        let token_end = token_start + raw_token.len();
-        if structural_command_argument_token(raw_token) {
-            saw_structural_arg = true;
-            end = token_end;
-            search_from = token_end;
-            continue;
-        }
-        return saw_structural_arg.then(|| tail[..end].trim());
-    }
-
-    saw_structural_arg.then(|| tail[..end].trim())
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ExplicitCommandCandidate {
-    command: String,
-    single_step_safe: bool,
-}
-
-pub(super) fn standalone_structural_command_from_segment(
-    runtime: &crate::CommandIntentRuntime,
-    segment: &str,
-) -> Option<String> {
-    let segment = trim_leading_command_separators_preserve_quotes(segment).trim();
-    if segment.is_empty() || segment.contains('\n') || segment.contains('`') {
-        return None;
-    }
-    let mut tokens = segment.split_whitespace();
-    let first = tokens.next()?;
-    let first_token =
-        first.trim_matches(|ch: char| ch.is_ascii_punctuation() && !matches!(ch, '_' | '-' | '.'));
-    if !simple_bare_command_token(first_token)
-        || !configured_standalone_command_token(runtime, first_token)
-    {
-        return None;
-    }
-    if !tokens.all(structural_command_argument_token) {
-        return None;
-    }
-    let command = crate::bootstrap::config_loaders::trim_command_text(segment.to_string());
-    (!command.is_empty()).then_some(command)
-}
-
-pub(super) fn followup_tail_has_structured_command_payload(
-    runtime: &crate::CommandIntentRuntime,
-    followup: &str,
-) -> bool {
-    let followup = followup.trim();
-    !followup.is_empty()
-        && (embedded_standalone_command_candidate(runtime, followup).is_some()
-            || shellish_literal_command_segment(followup).is_some()
-            || leading_shellish_command_sequence_segment(followup).is_some())
-}
-
-pub(super) fn standalone_command_candidate_from_tail(
-    runtime: &crate::CommandIntentRuntime,
-    tail: &str,
-) -> Option<ExplicitCommandCandidate> {
-    let tail = trim_leading_command_separators_preserve_quotes(tail).trim();
-    if tail.is_empty() || tail.contains('\n') {
-        return None;
-    }
-
-    if let Some(segment) = explicit_command_segment_before_followup(tail) {
-        let command = configured_standalone_command_sequence_from_segment(runtime, segment)
-            .or_else(|| standalone_structural_command_from_segment(runtime, segment))?;
-        let followup = explicit_command_followup_tail(tail).unwrap_or("");
-        return Some(ExplicitCommandCandidate {
-            command,
-            single_step_safe: !followup_tail_has_structured_command_payload(runtime, followup),
-        });
-    }
-
-    if let Some(segment) = standalone_command_segment_before_freeform_tail(runtime, tail) {
-        let command = standalone_structural_command_from_segment(runtime, segment)?;
-        let followup = tail.get(segment.len()..).unwrap_or_default();
-        return Some(ExplicitCommandCandidate {
-            command,
-            single_step_safe: !followup_tail_has_structured_command_payload(runtime, followup),
-        });
-    }
-
-    let command = standalone_structural_command_from_segment(runtime, tail)?;
-    Some(ExplicitCommandCandidate {
-        command,
-        single_step_safe: true,
-    })
-}
-
-pub(super) fn command_candidate_start_boundary(text: &str, idx: usize) -> bool {
-    if idx == 0 {
-        return true;
-    }
-    let Some(prev) = text[..idx].chars().next_back() else {
-        return true;
-    };
-    !prev.is_ascii_alphanumeric() && !matches!(prev, '_' | '-' | '.' | '/' | '\\' | '~' | '`')
-}
-
-pub(super) fn embedded_standalone_command_candidate(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-) -> Option<ExplicitCommandCandidate> {
-    let request = request.trim();
-    if request.is_empty() {
-        return None;
-    }
-    request
-        .char_indices()
-        .filter(|(idx, ch)| {
-            ch.is_ascii_alphabetic() && command_candidate_start_boundary(request, *idx)
-        })
-        .filter_map(|(idx, _)| standalone_command_candidate_from_tail(runtime, &request[idx..]))
-        .next()
 }
 
 pub(super) fn contains_angle_placeholder_token(text: &str) -> bool {
@@ -521,45 +185,26 @@ pub(super) fn leading_shellish_command_sequence_segment(request: &str) -> Option
     leading_shellish_command_sequence_segment_with_path_env(request, path_env.as_deref())
 }
 
-pub(in crate::agent_engine) fn explicit_command_segment(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-) -> Option<String> {
-    leading_shellish_command_sequence_segment(request)
-        .or_else(|| {
-            embedded_standalone_command_candidate(runtime, request)
-                .map(|candidate| candidate.command)
-        })
-        .or_else(|| shellish_literal_command_segment(request))
-}
-
 pub(crate) fn explicit_machine_syntax_command_segment(request: &str) -> Option<String> {
     leading_shellish_command_sequence_segment(request)
         .or_else(|| shellish_literal_command_segment(request))
-}
-
-#[cfg(test)]
-pub(super) fn explicit_command_single_step_segment(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-) -> Option<String> {
-    if let Some(command) = leading_shellish_command_sequence_segment(request) {
-        return Some(command);
-    }
-    if let Some(candidate) = embedded_standalone_command_candidate(runtime, request) {
-        return candidate.single_step_safe.then_some(candidate.command);
-    }
-    shellish_literal_command_segment(request)
-        .or_else(|| leading_shellish_command_sequence_segment(request))
 }
 
 pub(super) fn route_allows_explicit_command_preservation(
     route_result: Option<&RouteResult>,
 ) -> bool {
     route_result.is_some_and(|route| {
-        route.is_execute_gate()
-            && (route.output_contract.requires_content_evidence
-                || route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput))
+        route.output_contract.requires_content_evidence
+            || route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+    })
+}
+
+fn route_allows_machine_syntax_command(route_result: Option<&RouteResult>) -> bool {
+    route_result.is_some_and(|route| {
+        !route.needs_clarify
+            && !route.output_contract.delivery_required
+            && !route.wants_file_delivery
+            && route.output_contract.response_shape != crate::OutputResponseShape::FileToken
     })
 }
 
@@ -591,8 +236,7 @@ pub(super) fn action_is_run_cmd(state: &AppState, action: &AgentAction) -> bool 
 
 pub(super) fn literal_command_failure_can_replan(route_result: Option<&RouteResult>) -> bool {
     route_result.is_some_and(|route| {
-        route.is_execute_gate()
-            && !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+        !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
             && !route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
     })
 }
@@ -601,8 +245,7 @@ pub(super) fn route_contract_defers_literal_command_to_planner(
     route_result: Option<&RouteResult>,
 ) -> bool {
     route_result.is_some_and(|route| {
-        route.is_execute_gate()
-            && route.output_contract.requires_content_evidence
+        route.output_contract.requires_content_evidence
             && !route.output_contract.delivery_required
             && ([
                 crate::OutputSemanticKind::StructuredKeys,
@@ -641,8 +284,7 @@ fn scalar_path_contract_has_structural_locator(route: &RouteResult) -> bool {
 
 pub(super) fn missing_target_failure_can_replan(route_result: Option<&RouteResult>) -> bool {
     route_result.is_some_and(|route| {
-        route.is_execute_gate()
-            && route.output_contract.requires_content_evidence
+        route.output_contract.requires_content_evidence
             && [
                 crate::OutputSemanticKind::FilePaths,
                 crate::OutputSemanticKind::FileNames,
@@ -843,9 +485,9 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
     if planner_has_allowed_capability_ref_action(route_result, &actions) {
         return actions;
     }
-    let exact_command = explicit_command_segment(&state.policy.command_intent, original_user_text);
+    let exact_command = explicit_machine_syntax_command_segment(original_user_text);
     if !route_allows_explicit_command_preservation(route_result)
-        && !executionless_route_can_preserve_explicit_command(route_result, exact_command.as_ref())
+        && !(exact_command.is_some() && route_allows_machine_syntax_command(route_result))
     {
         return actions;
     }
@@ -899,20 +541,6 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
     };
     info!("plan_rewrite_explicit_command_substitute_to_run_cmd");
     rewritten
-}
-
-fn executionless_route_can_preserve_explicit_command(
-    route_result: Option<&RouteResult>,
-    exact_command: Option<&String>,
-) -> bool {
-    exact_command.is_some_and(|command| !command.trim().is_empty())
-        && route_result.is_some_and(|route| {
-            route.is_execute_gate()
-                && route.has_route_reason_machine_marker("executionless_finalize_trace_plain")
-                && !route.output_contract.delivery_required
-                && !route.wants_file_delivery
-                && route.output_contract.locator_kind == crate::OutputLocatorKind::None
-        })
 }
 
 fn planner_has_allowed_capability_ref_action(
@@ -1075,10 +703,11 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
         ensure_run_cmd_async_start_for_runtime_async_job_contract(state, route_result, actions);
     let actions =
         apply_scalar_count_contract_filter_to_count_entries_actions(route_result, actions);
-    let explicit_command_request = route_allows_explicit_command_preservation(route_result)
-        && original_user_text.or(Some(user_text)).is_some_and(|text| {
-            explicit_command_segment(&state.policy.command_intent, text).is_some()
-        });
+    let explicit_command_request = original_user_text.or(Some(user_text)).is_some_and(|text| {
+        explicit_machine_syntax_command_segment(text).is_some()
+            && (route_allows_explicit_command_preservation(route_result)
+                || route_allows_machine_syntax_command(route_result))
+    });
     let defer_legacy_semantic_rewrites = !explicit_command_request
         && route_result.is_some_and(|route| {
             actions_use_ad_hoc_command_without_route_preferred_skill(state, route, &actions)

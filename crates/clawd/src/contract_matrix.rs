@@ -22,8 +22,8 @@ use runtime::{
     validate_contract_runtime_fields, validate_observation_extractors,
 };
 pub(crate) use runtime::{
-    action_matches_policy_tokens, action_trace_for_route, allowed_action_refs_for_output_contract,
-    arg_policy_decision_for_route, bundled_contract_matrix, capability_ref_action_policy_for_route,
+    action_matches_policy_tokens, action_trace_for_route, arg_policy_decision_for_route,
+    bundled_contract_matrix, capability_ref_action_policy_for_route,
     capability_ref_action_refs_for_route, capability_ref_replacement_action_policy_for_route,
     compact_prompt_line_for_route, contract_trace_action_key_for_route,
     final_answer_shape_for_output_contract, final_answer_shape_for_route, fnv1a_hex,

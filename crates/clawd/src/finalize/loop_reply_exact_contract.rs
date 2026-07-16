@@ -778,7 +778,7 @@ fn exact_fallback_candidate_is_machine_grounded(
             .filter(|line| !line.is_empty());
         return lines.next().is_some() && lines.next().is_none();
     }
-    if route_path_locator_plain_act_allows_observed_listing(route) {
+    if route_path_locator_allows_observed_listing(route) {
         return candidate.lines().any(|line| !line.trim().is_empty());
     }
     matches!(
@@ -906,7 +906,7 @@ pub(super) fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool 
     if route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput) {
         return true;
     }
-    if route_path_locator_plain_act_allows_observed_listing(route) {
+    if route_path_locator_allows_observed_listing(route) {
         return true;
     }
     let required_evidence_fields =
@@ -937,16 +937,15 @@ pub(super) fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool 
     }
 }
 
-fn route_path_locator_plain_act_allows_observed_listing(route: &crate::RouteResult) -> bool {
+fn route_path_locator_allows_observed_listing(route: &crate::RouteResult) -> bool {
     !route.output_contract.delivery_required
         && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
         && (route.output_contract_is_unclassified()
             || route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath))
-        && route.ask_mode.is_plain_act()
 }
 
 fn route_allows_prior_step_error_observed_replacement(route: &crate::RouteResult) -> bool {
-    if route_path_locator_plain_act_allows_observed_listing(route) {
+    if route_path_locator_allows_observed_listing(route) {
         return true;
     }
     if route.output_contract.response_shape == crate::OutputResponseShape::Scalar {
@@ -1026,15 +1025,7 @@ pub(super) fn should_keep_planned_delivery_over_observed_answer(
     if !output_contract_requests_exact_delivery(route) {
         return true;
     }
-    route.ask_mode.finalize_chat_wrapped()
-        && !matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-        )
-        && matches!(
-            route.effective_output_contract_semantic_kind(),
-            crate::OutputSemanticKind::RawCommandOutput
-        )
+    false
 }
 
 fn delivery_is_structurally_richer_than_observed_projection(

@@ -24,7 +24,6 @@ fn route_result_with_contract(
     delivery_required: bool,
 ) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "local code strict json".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -705,8 +704,7 @@ fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
     let mut executable_file_token_route =
         route_result_with_contract(OutputResponseShape::FileToken, true);
     executable_file_token_route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    executable_file_token_route.route_reason =
-        "executable_contract_preserved_for_agent_loop".to_string();
+    executable_file_token_route.route_reason = "".to_string();
     let executable_file_token_context = agent_context_for_route(executable_file_token_route);
     let answer = local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 created_files、test_command、test_status。",
@@ -745,7 +743,7 @@ fn local_code_task_projection_uses_current_request_fields_before_context_blocks(
     ));
     let mut route = route_result_with_contract(OutputResponseShape::FileToken, true);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.route_reason = "".to_string();
     let context = agent_context_for_route(route);
     let augmented_user_text = "读取刚才项目的 calc_core.py 和 test_calc_core.py，确认当前有哪些函数、safe_div 的除零错误码是什么，并重新运行 python3 test_calc_core.py。最后只输出 JSON，包含 project_dir、functions、error_codes、test_status、evidence_files。\n\n### ACTIVE_TASK_CONTEXT\nlast_primary_task_output:\n{\"changed_files\":[\"/workspace/project/calc_core.py\"],\"test_command\":\"python3 test_calc_core.py\",\"test_status\":\"passed\"}";
 

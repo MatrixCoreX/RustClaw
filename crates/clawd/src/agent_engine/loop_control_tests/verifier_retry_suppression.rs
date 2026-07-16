@@ -495,7 +495,7 @@ fn post_write_readback_projection_replaces_stale_terminal_json() {
 fn publishable_strict_json_projection_replaces_stale_verifier_candidate() {
     let answer = r#"{"changed_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"test_command":["python3 test_calc_core.py","python3 - <<'PY'\nfrom calc_core import safe_div\nprint(safe_div(1,0))\nPY"],"test_status":"passed","functions":["add","sub","mul","safe_div"],"error_codes":["division_by_zero"]}"#;
     let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.route_reason = "".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -572,10 +572,6 @@ fn publishable_strict_json_projection_replaces_stale_verifier_candidate() {
 fn local_code_machine_projection_replaces_stale_verifier_candidate_before_verifier() {
     let user_text =
         "最后只输出 JSON，包含 changed_files、test_command、test_status、functions、error_codes。";
-    let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
     let mut loop_state = LoopState::new(2);
     loop_state.output_vars.insert(
         "agent_loop.run_cmd_commands".to_string(),
@@ -622,7 +618,6 @@ fn local_code_machine_projection_replaces_stale_verifier_candidate_before_verifi
     assert!(
         promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
             &mut reply,
-            Some(&route),
             user_text,
             &loop_state,
             None,
@@ -887,22 +882,15 @@ fn retry_verifier_pass_accepts_rewritten_answer() {
 
     assert!(retry_verifier_accepts_rewritten_answer(
         &accepted,
-        None,
         "grounded rewritten answer"
     ));
     assert!(!retry_verifier_accepts_rewritten_answer(
         &rejected,
-        None,
         "grounded rewritten answer"
     ));
 
-    let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason =
-        "structured_locator_contract_repair; executable_contract_preserved_for_agent_loop"
-            .to_string();
     assert!(!retry_verifier_accepts_rewritten_answer(
         &accepted,
-        Some(&route),
         r#"{"changed_files":["calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"not_observed"}"#
     ));
 }

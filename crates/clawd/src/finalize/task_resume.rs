@@ -226,17 +226,17 @@ pub(super) fn answer_verifier_retry_applicable(
     if !verifier.high_confidence_gap() || !verifier.should_retry {
         return false;
     }
-    let pure_chat_agent_loop = route_result.uses_pure_chat_agent_loop_submode()
-        && !route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
-        && !route_result.wants_file_delivery
-        && journal.step_results.is_empty();
+    let direct_answer_without_tool_observation =
+        !route_result.output_contract.requires_content_evidence
+            && !route_result.output_contract.delivery_required
+            && !route_result.wants_file_delivery
+            && journal.step_results.is_empty();
     let observed_tool_evidence = !route_result.needs_clarify
         && !route_result.wants_file_delivery
         && !route_result.output_contract.delivery_required
         && journal_has_successful_non_terminal_step(journal)
         && !journal_has_failed_non_terminal_step(journal);
-    pure_chat_agent_loop || observed_tool_evidence
+    direct_answer_without_tool_observation || observed_tool_evidence
 }
 
 pub(crate) fn answer_verifier_retry_answer_has_required_machine_evidence(

@@ -7,8 +7,7 @@ use crate::{AgentAction, AppState, IntentOutputContract, PlanStep, RouteResult};
 use super::LoopState;
 
 pub(crate) fn route_can_upgrade_scratch_filesystem_lifecycle(route: &RouteResult) -> bool {
-    route.is_execute_gate()
-        && !route.needs_clarify
+    !route.needs_clarify
         && !route.output_contract.delivery_required
         && route.output_contract.requires_content_evidence
         && matches!(

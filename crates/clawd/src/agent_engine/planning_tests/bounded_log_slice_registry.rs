@@ -11,11 +11,7 @@ fn log_content_summary_allows_bounded_slice_with_listing_evidence() {
     fs::write(&log_path, "INFO boot\nINFO ready\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
     let logs_path = logs_dir.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.clone();
@@ -71,11 +67,7 @@ fn concrete_log_file_slice_contract_allows_listing_and_read_evidence() {
     let log_path = logs_dir.join("clawd.run.log");
     fs::write(&log_path, "INFO boot\nINFO ready\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.clone();

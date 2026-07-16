@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Guard the ask front door from regaining ordinary semantic routing.
 
-The front-door worker may submit pure schedule requests, resume an existing
-discussion, or enter the agent loop. It must not decide ordinary direct answer
-vs clarification vs execution before the planner.
+The post-migration front door may materialize attachments, bind machine-owned
+context, and construct a safety/budget envelope. Every ordinary ask must then
+enter the same planner loop; direct answer, clarification, and capability
+selection are not front-door decisions.
 """
 
 from __future__ import annotations
@@ -15,30 +16,42 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ASK_PIPELINE = ROOT / "crates" / "clawd" / "src" / "worker" / "ask_pipeline.rs"
-ASK_MODE = ROOT / "crates" / "clawd" / "src" / "runtime" / "ask_mode.rs"
+ASK_RUNTIME = ROOT / "crates" / "clawd" / "src" / "worker" / "ask_runtime.rs"
+ASK_FRONTDOOR = (
+    ROOT / "crates" / "clawd" / "src" / "worker" / "ask_planner_frontdoor.rs"
+)
+DELETED_FRONTDOOR_FILES = (
+    ROOT / "crates" / "clawd" / "src" / "worker" / "ask_pipeline.rs",
+    ROOT / "crates" / "clawd" / "src" / "runtime" / "ask_mode.rs",
+)
 
-FORBIDDEN_DISPATCH_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("chat_gate_dispatch", re.compile(r"\bis_chat_gate\s*\(")),
     ("clarify_gate_dispatch", re.compile(r"\bis_clarify_gate\s*\(")),
     ("clarify_only_dispatch", re.compile(r"\bis_clarify_only\s*\(")),
     ("respond_trace_dispatch", re.compile(r"\bis_respond_trace\s*\(")),
     ("first_layer_decision_dispatch", re.compile(r"\bFirstLayerDecision\b")),
     ("direct_answer_mode_dispatch", re.compile(r"\bdirect_answer\s*\(")),
-    ("clarify_mode_dispatch", re.compile(r"\bAskMode::clarify\s*\(")),
-    ("respond_trace_variant", re.compile(r"\bRespondTrace\b")),
-    ("clarify_trace_variant", re.compile(r"\bClarifyTrace\b")),
+    ("ask_mode_dispatch", re.compile(r"\bAskMode\b")),
+    ("route_gate_dispatch", re.compile(r"\broute_gate_kind\b")),
+    ("route_trace_dispatch", re.compile(r"\broute_trace_decision\b")),
+    ("legacy_pipeline_call", re.compile(r"\bprepare_ask_pipeline\s*\(")),
 )
 
-REQUIRED_DISPATCH_TOKENS: tuple[str, ...] = (
-    "should_route_schedule_direct",
-    "agent_loop_default_context",
+REQUIRED_DISPATCH_TOKENS = (
+    "build_agent_run_context_from_prepared_flow",
     "run_agent_with_tools",
+    "agent_loop_default_entry",
 )
-REQUIRED_PREPARE_TOKENS: tuple[str, ...] = (
-    "should_route_schedule_direct",
-    "is_resume_discussion()",
-    "resume_execution()",
+REQUIRED_PREPARE_TOKENS = (
+    "prepare_planner_owned_ask_routing",
+    "prepare_ask_execution_context",
+    "load_active_session_snapshot",
+)
+REQUIRED_FRONTDOOR_TOKENS = (
+    "TurnBoundaryEnvelope::from_claimed_task",
+    "explicit_machine_syntax_command_segment",
+    "agent_loop_semantic_authority",
 )
 
 
@@ -73,63 +86,69 @@ def function_body(path: Path, name: str) -> tuple[int, str]:
     raise RuntimeError(f"{name} body not closed in {rel(path)}")
 
 
-def cfg_test_line_indices(lines: list[str]) -> set[int]:
-    return {idx for idx, line in enumerate(lines) if line.strip() == "#[cfg(test)]"}
-
-
-def has_cfg_test_near(lines: list[str], index: int) -> bool:
-    cfg_lines = cfg_test_line_indices(lines)
-    return any(candidate in cfg_lines for candidate in range(max(0, index - 8), index))
-
-
-def scan_dispatch_body() -> list[str]:
-    start_line, body = function_body(ASK_PIPELINE, "execute_ask_dispatch")
+def scan_body(
+    label: str,
+    start_line: int,
+    body: str,
+    required_tokens: tuple[str, ...],
+) -> list[str]:
     findings: list[str] = []
-    for token in REQUIRED_DISPATCH_TOKENS:
+    for token in required_tokens:
         if token not in body:
-            findings.append(f"{rel(ASK_PIPELINE)}:{start_line}: missing_dispatch_token:{token}")
-    for offset, line in enumerate(body.splitlines(), start=0):
-        stripped = line.strip()
-        if stripped.startswith("//"):
+            findings.append(f"{label}:{start_line}: missing_required_token:{token}")
+    for offset, line in enumerate(body.splitlines()):
+        if line.strip().startswith("//"):
             continue
-        for code, pattern in FORBIDDEN_DISPATCH_PATTERNS:
+        for code, pattern in FORBIDDEN_PATTERNS:
             if pattern.search(line):
-                findings.append(f"{rel(ASK_PIPELINE)}:{start_line + offset}: {code}")
+                findings.append(f"{label}:{start_line + offset}: {code}")
     return findings
 
 
-def scan_prepare_body() -> list[str]:
-    start_line, body = function_body(ASK_PIPELINE, "prepare_ask_flow")
-    findings: list[str] = []
-    for token in REQUIRED_PREPARE_TOKENS:
-        if token not in body:
-            findings.append(f"{rel(ASK_PIPELINE)}:{start_line}: missing_prepare_token:{token}")
-    return findings
+def scan_function(path: Path, name: str, required_tokens: tuple[str, ...]) -> list[str]:
+    if not path.is_file():
+        return [f"{rel(path)}:0: required_file_missing"]
+    try:
+        start_line, body = function_body(path, name)
+    except RuntimeError as err:
+        return [str(err)]
+    return scan_body(rel(path), start_line, body, required_tokens)
 
 
-def scan_ask_mode_trace_variants() -> list[str]:
-    lines = read(ASK_MODE).splitlines()
-    findings: list[str] = []
-    for index, line in enumerate(lines):
-        if "RespondTrace" not in line and "ClarifyTrace" not in line:
-            continue
-        if has_cfg_test_near(lines, index):
-            continue
-        stripped = line.strip()
-        if stripped.startswith("//!") or stripped.startswith("///"):
-            continue
-        findings.append(f"{rel(ASK_MODE)}:{index + 1}: trace_variant_not_cfg_test")
-    return findings
+def scan_deleted_files() -> list[str]:
+    return [f"{rel(path)}:0: deleted_frontdoor_file_returned" for path in DELETED_FRONTDOOR_FILES if path.exists()]
 
 
 def scan_repo() -> list[str]:
-    return scan_dispatch_body() + scan_prepare_body() + scan_ask_mode_trace_variants()
+    return (
+        scan_deleted_files()
+        + scan_function(
+            ASK_RUNTIME,
+            "execute_ask_dispatch",
+            REQUIRED_DISPATCH_TOKENS,
+        )
+        + scan_function(ASK_RUNTIME, "prepare_ask_flow", REQUIRED_PREPARE_TOKENS)
+        + scan_function(
+            ASK_FRONTDOOR,
+            "prepare_planner_owned_ask_routing",
+            REQUIRED_FRONTDOOR_TOKENS,
+        )
+    )
 
 
 def run_self_test() -> int:
-    assert FORBIDDEN_DISPATCH_PATTERNS[0][1].search("ask_mode.is_chat_gate()")
-    assert FORBIDDEN_DISPATCH_PATTERNS[3][1].search("ask_mode.is_respond_trace()")
-    assert "run_agent_with_tools" in REQUIRED_DISPATCH_TOKENS
+    valid = " ".join(REQUIRED_DISPATCH_TOKENS)
+    assert scan_body("fixture.rs", 1, valid, REQUIRED_DISPATCH_TOKENS) == []
+    missing = scan_body("fixture.rs", 1, "run_agent_with_tools", REQUIRED_DISPATCH_TOKENS)
+    assert any("missing_required_token" in finding for finding in missing)
+    forbidden = scan_body(
+        "fixture.rs",
+        1,
+        f"{valid}\nask_mode.is_chat_gate();",
+        REQUIRED_DISPATCH_TOKENS,
+    )
+    assert any("chat_gate_dispatch" in finding for finding in forbidden)
+    assert any(path.name == "ask_pipeline.rs" for path in DELETED_FRONTDOOR_FILES)
     print("SELF_TEST_OK")
     return 0
 

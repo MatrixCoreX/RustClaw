@@ -4,7 +4,7 @@ use super::*;
 fn requested_machine_kv_summary_final_guard_preserves_terminal_scalar_respond() {
     let prompt =
         "Count entries under scripts/nl_tests/fixtures/device_local and return only the digit.";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.resolved_intent =
         "Count top-level directories under scripts/nl_tests/fixtures/device_local.".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -44,7 +44,7 @@ fn requested_machine_kv_summary_final_guard_preserves_terminal_scalar_respond() 
 #[test]
 fn requested_machine_kv_summary_final_guard_replaces_scalar_path_when_explicit_pair_is_observed() {
     let prompt = "只读定位 AGENTS.md 中包含 check_no_nl_hardmatch.py 的规则行或邻近行，最终只保留机器字段 no_hardmatch_guard=check_no_nl_hardmatch.py；不要修改文件。";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "AGENTS.md".to_string();
@@ -76,7 +76,7 @@ fn requested_machine_kv_summary_final_guard_replaces_scalar_path_when_explicit_p
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_observed_empty_string_scalar() {
     let prompt = "Read ./Cargo.toml workspace.package.repository and output only the value.";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.resolved_intent =
         "Read ./Cargo.toml workspace.package.repository and output only the value.".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -111,7 +111,7 @@ fn requested_machine_kv_summary_final_guard_preserves_observed_empty_string_scal
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_transform_markdown_table() {
     let prompt = r#"Sort [{"name":"alpha","score":7},{"name":"beta","score":12}] by score and return a markdown table."#;
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -148,7 +148,7 @@ fn requested_machine_kv_summary_final_guard_preserves_transform_markdown_table()
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_transform_json_array() {
     let prompt = r#"Filter records [{"name":"a","ok":true},{"name":"b","ok":false},{"name":"c","ok":true}] where ok=true and return JSON array."#;
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -185,7 +185,7 @@ fn requested_machine_kv_summary_final_guard_preserves_transform_json_array() {
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_web_search_listing() {
     let prompt = "Search the web for Rust async tutorial top_k=3 and return titles only.";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -222,7 +222,7 @@ fn requested_machine_kv_summary_final_guard_preserves_web_search_listing() {
 fn requested_machine_kv_summary_final_guard_restores_web_search_candidates_over_scalar_summary() {
     let prompt =
         "Search the web for Rust async tutorial top_k=3 and return titles plus source domains.";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -262,7 +262,7 @@ fn requested_machine_kv_summary_final_guard_restores_web_search_candidates_over_
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_workspace_grounded_summary() {
     let prompt = "List clawd related log files, read clawd.run.log tail, then summarize status.";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -304,7 +304,7 @@ fn requested_machine_kv_summary_final_guard_preserves_workspace_grounded_summary
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_verified_config_summary() {
     let prompt = "只预览把 configs/config.toml 里的 llm.selected_vendor 改成 minimax，不要写入；然后读取当前 llm.selected_vendor，并运行配置风险检查；回答预览是否会改变、当前值和是否有明显风险。";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
@@ -355,7 +355,7 @@ fn requested_machine_kv_summary_final_guard_preserves_verified_config_summary() 
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_delivery_file_token() {
     let prompt = "Create a text file in tmp/notes.txt, write content, and send the file.";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -402,7 +402,7 @@ fn requested_machine_kv_summary_final_guard_preserves_delivery_file_token() {
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_weather_query_fields() {
     let prompt = "查询北京当前天气，只返回 location、temperature、weather_code。";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -438,7 +438,7 @@ fn requested_machine_kv_summary_final_guard_preserves_weather_query_fields() {
 #[test]
 fn requested_machine_kv_summary_restores_search_path_listing_over_query_marker() {
     let prompt = "read missing plan file, then search plan for execution_intent md files and return only paths";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -485,7 +485,7 @@ fn requested_machine_kv_summary_restores_search_path_listing_over_query_marker()
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_publishable_command_summary() {
     let prompt = "Run pwd, inspect the local port, and answer with the working directory and whether a port is visible.";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -527,7 +527,7 @@ fn requested_machine_kv_summary_final_guard_preserves_publishable_command_summar
 fn requested_machine_kv_summary_does_not_recover_required_content_gap() {
     let prompt =
         "给 calc_core.py 增加 mul(a,b)，更新测试后只输出 changed_files、test_command、test_status、functions。";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
@@ -589,7 +589,7 @@ fn requested_machine_kv_summary_does_not_recover_required_content_gap() {
 #[test]
 fn requested_machine_kv_summary_force_patches_archive_db_json_instead_of_scalar_replace() {
     let prompt = "Return required machine field user_version.";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -679,7 +679,7 @@ fn requested_machine_kv_summary_force_patches_archive_db_json_instead_of_scalar_
 #[test]
 fn requested_machine_kv_summary_final_guard_restores_path_fact_over_filename_marker() {
     let prompt = "rustclaw.service";
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_hint = "rustclaw.service".to_string();

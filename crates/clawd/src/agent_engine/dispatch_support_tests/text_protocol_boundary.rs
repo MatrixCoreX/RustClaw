@@ -36,7 +36,6 @@ fn multiline_read_range_passthrough_guard_ignores_visible_text_json_payload() {
     ));
     let ctx = AgentRunContext {
         route_result: Some(crate::RouteResult {
-            ask_mode: crate::AskMode::act_plain(),
             resolved_intent: "summarize the selected file".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

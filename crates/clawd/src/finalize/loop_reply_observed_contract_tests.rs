@@ -109,7 +109,6 @@ fn exact_path_observed_answer_replaces_step_status_after_fallback_success() {
 fn path_locator_observed_answer_replaces_step_status_after_fallback_success() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -162,7 +161,6 @@ fn path_locator_observed_answer_replaces_step_status_after_fallback_success() {
 fn strict_existence_path_observed_answer_replaces_step_status_after_fallback_success() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
@@ -212,7 +210,6 @@ fn strict_existence_path_observed_answer_replaces_step_status_after_fallback_suc
 fn scalar_path_observed_answer_replaces_step_status_after_broad_fallback_search() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
@@ -263,7 +260,6 @@ fn scalar_path_observed_answer_replaces_step_status_after_broad_fallback_search(
 fn scalar_observed_answer_replaces_run_cmd_step_status_after_fallback_success() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -318,7 +314,6 @@ fn scalar_observed_answer_replaces_run_cmd_step_status_after_fallback_success() 
 fn scalar_raw_command_keeps_written_file_path_synthesis() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
@@ -368,7 +363,6 @@ fn scalar_raw_command_keeps_written_file_path_synthesis() {
 fn generated_file_path_report_keeps_plain_written_path_synthesis() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
@@ -422,7 +416,6 @@ fn generated_file_path_report_keeps_plain_written_path_synthesis() {
 fn generated_file_path_report_replaces_write_status_with_written_path() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
@@ -486,7 +479,6 @@ fn generated_file_path_report_replaces_write_status_with_written_path() {
 fn generated_file_path_report_projects_media_dry_run_payload() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
@@ -550,7 +542,6 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
     assert!(matrix_summary.contract_ok);
 
     let mut delivery_route = free_route_result();
-    delivery_route.ask_mode = crate::AskMode::act_plain();
     delivery_route.output_contract.requires_content_evidence = true;
     delivery_route.output_contract.response_shape = OutputResponseShape::FileToken;
     delivery_route.output_contract.delivery_required = true;
@@ -585,7 +576,6 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
     assert!(matrix_delivery_summary.contract_ok);
 
     let mut free_route = free_route_result();
-    free_route.ask_mode = crate::AskMode::act_plain();
     free_route.output_contract.requires_content_evidence = false;
     free_route.output_contract.response_shape = OutputResponseShape::Free;
     free_route.output_contract.delivery_required = false;
@@ -601,7 +591,6 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
     assert!(free_summary.contract_ok);
 
     let mut scalar_route = free_route_result();
-    scalar_route.ask_mode = crate::AskMode::act_plain();
     scalar_route.output_contract.requires_content_evidence = true;
     scalar_route.output_contract.response_shape = OutputResponseShape::Scalar;
     scalar_route.output_contract.delivery_required = false;
@@ -695,7 +684,6 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
 fn generated_file_path_report_prefers_latest_path_synthesis_over_run_cmd_status() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;

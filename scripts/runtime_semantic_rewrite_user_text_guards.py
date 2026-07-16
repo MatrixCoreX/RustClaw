@@ -363,7 +363,13 @@ def scan_async_job_start_user_text_command_text(rel_path: str, text: str) -> lis
     findings: list[Finding] = []
     block_start, block_text = block
     for offset, line in enumerate(block_text.splitlines(), start=0):
-        if "explicit_command_segment(" not in line:
+        if not any(
+            token in line
+            for token in (
+                "explicit_command_segment(",
+                "explicit_machine_syntax_command_segment(",
+            )
+        ):
             continue
         findings.append(
             Finding(

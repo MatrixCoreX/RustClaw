@@ -430,14 +430,14 @@ fn should_use_answer_route_result(
     let answer_is_clarify = answer_journal.final_status.is_some_and(|status| {
         matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
     });
-    if answer_is_clarify && !initial.needs_clarify {
+    if answer_is_clarify && answer_route.needs_clarify && !initial.needs_clarify {
         return true;
     }
     let answer_has_execution_trace = !answer_journal.rounds.is_empty()
         || !answer_journal.step_results.is_empty()
         || answer_journal.plan_result.is_some()
         || answer_journal.verify_result.is_some();
-    answer_has_execution_trace && answer_route.is_execute_gate() && !initial.is_execute_gate()
+    answer_has_execution_trace
 }
 
 fn answer_verifier_recovery_already_terminal(journal: &crate::task_journal::TaskJournal) -> bool {
@@ -526,16 +526,12 @@ pub(crate) async fn finalize_ask_result(
 ) -> Result<()> {
     // §3.1: ask 状态机 — 进入 finalize。
     // from = None 因为 dispatch 内部各分支态没向调用面回传"上一次状态"；
-    // reason 携带 ask_mode 信息以便日志检索。
     let finalize_entry_transition = crate::log_ask_transition(
         state,
         &task.task_id,
         None,
         crate::AskState::Finalizing,
-        &format!(
-            "finalize_ask_result_entry mode={}",
-            route_result.ask_mode.as_str()
-        ),
+        "finalize_ask_result_entry",
         None,
     );
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt);
@@ -547,7 +543,7 @@ pub(crate) async fn finalize_ask_result(
     journal.record_context_bundle_summary(format!(
         "{} needs_clarify={} resolved_prompt={}",
         context_bundle_summary,
-        route_result.ask_mode.is_clarify_only(),
+        route_result.is_clarify_gate(),
         crate::truncate_for_log(resolved_prompt_for_execution)
     ));
     if let Some(memory_trace) = memory_trace {
@@ -579,7 +575,7 @@ pub(crate) async fn finalize_ask_result(
                 }
             }
             let route_result = &effective_route_result;
-            let mut semantic_clarify = route_result.ask_mode.is_clarify_only()
+            let mut semantic_clarify = route_result.is_clarify_gate()
                 || answer
                     .task_journal
                     .as_ref()
@@ -591,7 +587,7 @@ pub(crate) async fn finalize_ask_result(
             let missing_file_delivery_reply =
                 missing_file_delivery_reply_text(state, task, prompt, route_result, &answer).await;
             let (mut answer_text, mut answer_messages) = if failure_reply
-                || route_result.ask_mode.is_clarify_only()
+                || route_result.is_clarify_gate()
             {
                 (
                     crate::intercept_response_text_for_delivery(&answer.text),

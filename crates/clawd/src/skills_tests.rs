@@ -70,7 +70,6 @@ fn test_state(locale: &str) -> AppState {
         },
         policy: crate::PolicyConfig {
             command_intent: CommandIntentRuntime {
-                standalone_commands: Vec::new(),
                 default_locale: locale.to_string(),
                 verify_enforce_enabled: false,
             },
