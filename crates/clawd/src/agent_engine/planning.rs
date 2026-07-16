@@ -19,7 +19,6 @@ use super::planning_prompt::{
     build_incremental_plan_prompt, build_lightweight_skill_playbooks_text,
     build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
     classify_planning_prompt_class, compact_lightweight_incremental_goal_context,
-    contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
     ensure_required_contract_block_present, incremental_prompt_spec_for_class,
     round1_prompt_spec_for_class, runtime_os_label, runtime_shell_label, PlanningPromptClass,
 };
@@ -72,11 +71,7 @@ impl<'a> PlannerToolLibrary<'a> {
         route_result: Option<&'a RouteResult>,
         auto_locator_path: Option<&'a str>,
     ) -> Self {
-        let skill_scope = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-            contract_scoped_planner_skill_scope(route_result)
-        } else {
-            contract_scoped_lightweight_planner_skill_scope(route_result)
-        };
+        let skill_scope = planner_visible_skill_scope(planning_class, route_result);
         Self {
             state,
             task,
@@ -143,6 +138,15 @@ impl<'a> PlannerToolLibrary<'a> {
     }
 }
 
+fn planner_visible_skill_scope(
+    _planning_class: PlanningPromptClass,
+    _route_result: Option<&RouteResult>,
+) -> Option<BTreeSet<String>> {
+    // The planner owns ordinary capability selection. Boundary hints may
+    // influence context, but they must never hide otherwise available skills.
+    None
+}
+
 #[path = "planning_scalar_count_filter.rs"]
 mod scalar_count_filter;
 #[cfg(test)]
@@ -204,7 +208,7 @@ use concrete_respond_structural_observation::*;
 use config_guard_capability_repair::*;
 #[cfg(test)]
 pub(in crate::agent_engine) use configured_command_prefix::explicit_command_segment;
-pub(in crate::agent_engine) use configured_command_prefix::explicit_machine_syntax_command_segment;
+pub(crate) use configured_command_prefix::explicit_machine_syntax_command_segment;
 use configured_command_prefix::*;
 use direct_observed_finalize_support::*;
 use directory_entry_group_locator::executed_step_is_successful_text_read;
@@ -237,8 +241,8 @@ pub(super) async fn plan_round_actions(
     user_text: &str,
     policy: &AgentLoopGuardPolicy,
     loop_state: &LoopState,
-    turn_analysis_for_prompt: Option<&crate::intent_router::TurnAnalysis>,
-    boundary_envelope_for_prompt: Option<&crate::intent_router::BoundaryEnvelope>,
+    turn_analysis_for_prompt: Option<&crate::turn_context::TurnAnalysis>,
+    boundary_envelope_for_prompt: Option<&crate::turn_boundary_envelope::TurnBoundaryEnvelope>,
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
 ) -> Result<PlanResult, String> {

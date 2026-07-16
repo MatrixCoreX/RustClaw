@@ -627,7 +627,7 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
                 map.insert(
                     "boundary_envelope".to_string(),
                     json!({
-                        "schema_version": crate::intent_router::BOUNDARY_ENVELOPE_SCHEMA_VERSION,
+                        "schema_version": crate::turn_boundary_envelope::TURN_BOUNDARY_ENVELOPE_SCHEMA_VERSION,
                         "raw_chars": 0,
                         "language_hint": null,
                         "schedule_intent": null,

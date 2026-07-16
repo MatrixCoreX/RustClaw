@@ -298,12 +298,12 @@ pub(super) fn route_result_json(route: &crate::RouteResult) -> Value {
     })
 }
 
-pub(super) fn turn_analysis_json(analysis: &crate::intent_router::TurnAnalysis) -> Value {
+pub(super) fn turn_analysis_json(analysis: &crate::turn_context::TurnAnalysis) -> Value {
     json!({
-        "turn_type": analysis.turn_type.map(crate::intent_router::TurnType::as_str),
+        "turn_type": analysis.turn_type.map(crate::turn_context::TurnType::as_str),
         "target_task_policy": analysis
             .target_task_policy
-            .map(crate::intent_router::TargetTaskPolicy::as_str),
+            .map(crate::turn_context::TargetTaskPolicy::as_str),
         "should_interrupt_active_run": analysis.should_interrupt_active_run,
         "has_state_patch": analysis.state_patch.is_some(),
         "attachment_processing_required": analysis.attachment_processing_required,

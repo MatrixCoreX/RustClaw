@@ -72,7 +72,7 @@ pub(super) fn contract_hint_bool_from_request(
     request_text: Option<&str>,
     key: &str,
 ) -> Option<bool> {
-    let value = crate::intent_router::contract_test_hint_value(request_text?, key)?;
+    let value = crate::contract_test_hints::value(request_text?, key)?;
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
@@ -81,7 +81,7 @@ pub(super) fn contract_hint_bool_from_request(
 }
 
 pub(super) fn content_presence_query_from_request(request_text: Option<&str>) -> Option<String> {
-    crate::intent_router::contract_test_hint_value(request_text?, "selector_query")
+    crate::contract_test_hints::value(request_text?, "selector_query")
         .map(|value| value.replace(['\r', '\n'], " "))
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty() && value.len() <= 160)

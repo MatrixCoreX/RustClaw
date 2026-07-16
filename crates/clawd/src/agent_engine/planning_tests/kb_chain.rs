@@ -100,24 +100,7 @@ fn direct_answer_kb_machine_chain_exposes_kb_capability_actions_from_contract() 
 }
 
 #[test]
-fn kb_live_cycle_boundary_keeps_scope_open_and_registry_capability_visible() {
-    let mut route = base_route_result();
-    route.route_reason =
-        "structured_locator_contract_repair; executable_contract_preserved_for_agent_loop"
-            .to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string();
-
-    assert_eq!(
-        contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-        None,
-        "generic executable agent-loop boundaries must not hide registry skills such as kb"
-    );
-
+fn registry_capability_keeps_kb_visible_to_planner() {
     let state = test_state_with_registry();
     let registry = state.get_skills_registry().expect("registry loaded");
     *state

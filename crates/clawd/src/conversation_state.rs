@@ -90,7 +90,7 @@ fn normalized_locale_hint(payload: Option<&Value>) -> Option<String> {
 fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     journal: &crate::task_journal::TaskJournal,
     prompt: &str,
     resolved_prompt_for_execution: &str,
@@ -146,11 +146,11 @@ fn next_last_primary_task_prompt(
         return prior_prompt;
     }
     match turn_type {
-        crate::intent_router::TurnType::TaskRequest => Some(current_prompt.to_string()),
-        crate::intent_router::TurnType::TaskReplace => Some(current_prompt.to_string()),
-        crate::intent_router::TurnType::TaskAppend
-        | crate::intent_router::TurnType::TaskCorrect
-        | crate::intent_router::TurnType::TaskScopeUpdate => Some(merge_primary_task_prompt(
+        crate::turn_context::TurnType::TaskRequest => Some(current_prompt.to_string()),
+        crate::turn_context::TurnType::TaskReplace => Some(current_prompt.to_string()),
+        crate::turn_context::TurnType::TaskAppend
+        | crate::turn_context::TurnType::TaskCorrect
+        | crate::turn_context::TurnType::TaskScopeUpdate => Some(merge_primary_task_prompt(
             prior_prompt.as_deref(),
             current_prompt,
             turn_type,
@@ -163,7 +163,7 @@ fn next_last_primary_task_prompt(
 fn merge_primary_task_prompt(
     prior_prompt: Option<&str>,
     current_prompt: &str,
-    turn_type: crate::intent_router::TurnType,
+    turn_type: crate::turn_context::TurnType,
     state_patch: Option<&Value>,
 ) -> String {
     let prior = prior_prompt
@@ -176,8 +176,8 @@ fn merge_primary_task_prompt(
         return prior.to_string();
     }
     let label = match turn_type {
-        crate::intent_router::TurnType::TaskCorrect => "Correction",
-        crate::intent_router::TurnType::TaskScopeUpdate => "Scope update",
+        crate::turn_context::TurnType::TaskCorrect => "Correction",
+        crate::turn_context::TurnType::TaskScopeUpdate => "Scope update",
         _ => "Additional instruction",
     };
     let patch = state_patch
@@ -204,19 +204,19 @@ fn render_primary_task_state_patch(state_patch: &Value) -> Option<String> {
     }
 }
 
-fn is_primary_task_turn_type(turn_type: crate::intent_router::TurnType) -> bool {
+fn is_primary_task_turn_type(turn_type: crate::turn_context::TurnType) -> bool {
     matches!(
         turn_type,
-        crate::intent_router::TurnType::TaskRequest
-            | crate::intent_router::TurnType::TaskAppend
-            | crate::intent_router::TurnType::TaskReplace
-            | crate::intent_router::TurnType::TaskCorrect
-            | crate::intent_router::TurnType::TaskScopeUpdate
+        crate::turn_context::TurnType::TaskRequest
+            | crate::turn_context::TurnType::TaskAppend
+            | crate::turn_context::TurnType::TaskReplace
+            | crate::turn_context::TurnType::TaskCorrect
+            | crate::turn_context::TurnType::TaskScopeUpdate
     )
 }
 
 fn should_track_primary_task_output(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     let Some(turn_type) = turn_analysis.and_then(|analysis| analysis.turn_type) else {
         return false;
@@ -224,9 +224,7 @@ fn should_track_primary_task_output(
     is_primary_task_turn_type(turn_type)
 }
 
-fn active_primary_followup_turn(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) -> bool {
+fn active_primary_followup_turn(turn_analysis: Option<&crate::turn_context::TurnAnalysis>) -> bool {
     matches!(
         (
             turn_analysis.and_then(|analysis| analysis.turn_type),
@@ -234,21 +232,21 @@ fn active_primary_followup_turn(
         ),
         (
             Some(
-                crate::intent_router::TurnType::TaskAppend
-                    | crate::intent_router::TurnType::TaskCorrect
-                    | crate::intent_router::TurnType::TaskReplace
-                    | crate::intent_router::TurnType::TaskScopeUpdate
+                crate::turn_context::TurnType::TaskAppend
+                    | crate::turn_context::TurnType::TaskCorrect
+                    | crate::turn_context::TurnType::TaskReplace
+                    | crate::turn_context::TurnType::TaskScopeUpdate
             ),
             Some(
-                crate::intent_router::TargetTaskPolicy::ReuseActive
-                    | crate::intent_router::TargetTaskPolicy::ReplaceActive
+                crate::turn_context::TargetTaskPolicy::ReuseActive
+                    | crate::turn_context::TargetTaskPolicy::ReplaceActive
             )
         )
     )
 }
 
 fn active_primary_non_success_preserves_prior(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     active_primary_followup_turn(turn_analysis)
@@ -284,7 +282,7 @@ fn prior_last_primary_task_output(prior_state: Option<&ConversationState>) -> Op
 
 fn standalone_contextual_chat_result_starts_primary_task(
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     let allowed_turn = turn_analysis.is_none()
         || matches!(
@@ -293,8 +291,8 @@ fn standalone_contextual_chat_result_starts_primary_task(
                 turn_analysis.and_then(|analysis| analysis.target_task_policy),
             ),
             (
-                Some(crate::intent_router::TurnType::TaskRequest),
-                Some(crate::intent_router::TargetTaskPolicy::Standalone)
+                Some(crate::turn_context::TurnType::TaskRequest),
+                Some(crate::turn_context::TargetTaskPolicy::Standalone)
             )
         );
     if !allowed_turn
@@ -337,7 +335,7 @@ fn has_prior_primary_task(prior_state: Option<&ConversationState>) -> bool {
 
 fn unannotated_evidence_backed_deliverable_starts_primary_task(
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     if turn_analysis.is_some()
         || route_result.needs_clarify
@@ -356,7 +354,7 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task(
 
 fn unannotated_structured_listing_starts_primary_task(
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     turn_analysis.is_none()
@@ -366,16 +364,16 @@ fn unannotated_structured_listing_starts_primary_task(
 
 fn standalone_preference_or_memory_turn_clears_primary_task(
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     matches!(
         turn_analysis.and_then(|analysis| analysis.turn_type),
-        Some(crate::intent_router::TurnType::PreferenceOrMemory)
+        Some(crate::turn_context::TurnType::PreferenceOrMemory)
     ) && !matches!(
         turn_analysis.and_then(|analysis| analysis.target_task_policy),
         Some(
-            crate::intent_router::TargetTaskPolicy::ReuseActive
-                | crate::intent_router::TargetTaskPolicy::ReplaceActive
+            crate::turn_context::TargetTaskPolicy::ReuseActive
+                | crate::turn_context::TargetTaskPolicy::ReplaceActive
         )
     ) && route_result.is_resume_discussion_mode()
         && !route_result.output_contract.requires_content_evidence
@@ -387,7 +385,7 @@ fn standalone_preference_or_memory_turn_clears_primary_task(
 }
 
 fn state_patch_requests_primary_task_replacement(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     let Some(patch) = turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()) else {
         return false;
@@ -406,7 +404,7 @@ fn state_patch_requests_primary_task_replacement(
 fn standalone_task_request_preserves_prior_primary(
     prior_primary_task_prompt: Option<&str>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
         return false;
@@ -419,11 +417,11 @@ fn standalone_task_request_preserves_prior_primary(
         .is_some_and(|prompt| !prompt.is_empty())
         && matches!(
             turn_analysis.and_then(|analysis| analysis.turn_type),
-            Some(crate::intent_router::TurnType::TaskRequest)
+            Some(crate::turn_context::TurnType::TaskRequest)
         )
         && matches!(
             turn_analysis.and_then(|analysis| analysis.target_task_policy),
-            Some(crate::intent_router::TargetTaskPolicy::Standalone)
+            Some(crate::turn_context::TargetTaskPolicy::Standalone)
         )
         && route_allows_standalone_scalar_non_promotion(route_result)
         && !route_result.output_contract.requires_content_evidence
@@ -437,15 +435,15 @@ fn standalone_task_request_preserves_prior_primary(
 fn standalone_scalar_result_should_not_promote(
     _prior_primary_task_prompt: Option<&str>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     let is_standalone_task_request =
         matches!(
             turn_analysis.and_then(|analysis| analysis.turn_type),
-            Some(crate::intent_router::TurnType::TaskRequest)
+            Some(crate::turn_context::TurnType::TaskRequest)
         ) && matches!(
             turn_analysis.and_then(|analysis| analysis.target_task_policy),
-            Some(crate::intent_router::TargetTaskPolicy::Standalone)
+            Some(crate::turn_context::TargetTaskPolicy::Standalone)
         ) && route_allows_standalone_scalar_non_promotion(route_result);
     if !is_standalone_task_request
         || route_result.output_contract.requires_content_evidence
@@ -491,7 +489,7 @@ fn route_allows_standalone_scalar_non_promotion(route_result: &crate::RouteResul
 fn standalone_scalar_output_should_not_promote(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     _resolved_prompt_for_execution: &str,
 ) -> bool {
     standalone_scalar_result_should_not_promote(
@@ -589,7 +587,7 @@ fn compact_sentence_deliverable(
 fn unannotated_chat_output_starts_primary_task(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
@@ -641,7 +639,7 @@ fn current_turn_primary_task_prompt(
 fn unannotated_chat_primary_prompt_for_output(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     prompt: &str,
     resolved_prompt_for_execution: &str,
     answer_text: &str,
@@ -661,7 +659,7 @@ fn unannotated_chat_primary_prompt_for_output(
 fn standalone_chat_deliverable_starts_primary_task(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     if has_prior_primary_task(prior_state)
         && !state_patch_requests_primary_task_replacement(turn_analysis)
@@ -674,8 +672,8 @@ fn standalone_chat_deliverable_starts_primary_task(
             turn_analysis.and_then(|analysis| analysis.target_task_policy),
         ),
         (
-            Some(crate::intent_router::TurnType::TaskRequest),
-            Some(crate::intent_router::TargetTaskPolicy::Standalone)
+            Some(crate::turn_context::TurnType::TaskRequest),
+            Some(crate::turn_context::TargetTaskPolicy::Standalone)
         )
     ) && route_result.is_resume_discussion_mode()
         && !route_result.needs_clarify
@@ -694,7 +692,7 @@ fn standalone_chat_deliverable_starts_primary_task(
 fn next_last_primary_task_output(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     journal: &crate::task_journal::TaskJournal,
     resolved_prompt_for_execution: &str,
     answer_text: &str,
@@ -890,7 +888,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
     payload: Option<&Value>,
     prompt: &str,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     resolved_prompt_for_execution: &str,
     answer_text: &str,
     answer_messages: &[String],
@@ -930,7 +928,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
             task.task_id,
             turn_analysis
                 .and_then(|analysis| analysis.turn_type)
-                .map(crate::intent_router::TurnType::as_str)
+                .map(crate::turn_context::TurnType::as_str)
                 .unwrap_or("unknown")
         );
     }
@@ -1073,18 +1071,18 @@ pub(crate) fn update_active_session_from_ask_outcome(
 }
 
 fn should_preserve_active_session_pointers(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     let Some(turn_type) = turn_analysis.and_then(|analysis| analysis.turn_type) else {
         return false;
     };
     matches!(
         turn_type,
-        crate::intent_router::TurnType::RunControl
-            | crate::intent_router::TurnType::ApprovalDecision
-            | crate::intent_router::TurnType::StatusQuery
-            | crate::intent_router::TurnType::FeedbackOrError
-            | crate::intent_router::TurnType::PreferenceOrMemory
+        crate::turn_context::TurnType::RunControl
+            | crate::turn_context::TurnType::ApprovalDecision
+            | crate::turn_context::TurnType::StatusQuery
+            | crate::turn_context::TurnType::FeedbackOrError
+            | crate::turn_context::TurnType::PreferenceOrMemory
     )
 }
 

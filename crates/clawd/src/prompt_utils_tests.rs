@@ -29,7 +29,7 @@ fn validate_against_schema_drops_legacy_intent_decision_extra() {
             .value
             .pointer("/boundary_envelope/schema_version")
             .and_then(|value| value.as_u64()),
-        Some(crate::intent_router::BOUNDARY_ENVELOPE_SCHEMA_VERSION as u64)
+        Some(crate::turn_boundary_envelope::TURN_BOUNDARY_ENVELOPE_SCHEMA_VERSION as u64)
     );
     assert_eq!(
         validated
@@ -57,7 +57,7 @@ fn validate_against_schema_inserts_neutral_boundary_envelope_for_compat_output()
             .value
             .pointer("/boundary_envelope/schema_version")
             .and_then(|value| value.as_u64()),
-        Some(crate::intent_router::BOUNDARY_ENVELOPE_SCHEMA_VERSION as u64)
+        Some(crate::turn_boundary_envelope::TURN_BOUNDARY_ENVELOPE_SCHEMA_VERSION as u64)
     );
     assert_eq!(
         validated

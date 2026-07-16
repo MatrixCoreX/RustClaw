@@ -5,8 +5,10 @@ use anyhow::anyhow;
 use serde_json::{json, Value};
 use tracing::{debug, error, info, info_span, warn, Instrument};
 
-mod ask_pipeline;
-mod ask_prepare;
+mod ask_execution_context;
+mod ask_input;
+mod ask_planner_frontdoor;
+mod ask_runtime;
 mod async_poll_executor;
 mod channels;
 mod locator;
@@ -16,17 +18,16 @@ mod runtime_support;
 
 // Phase 3.3 Stage 2.2：ask_finalize.rs 已物理搬移到 `crate::finalize::task`，
 // 调用面统一通过 `crate::finalize::*` facade 访问。
-use ask_prepare::{maybe_finalize_schedule_direct_text_success, prepare_run_skill_input};
-use ask_prepare::{prepare_ask_execution_context, prepare_ask_input, prepare_ask_routing};
+use ask_execution_context::prepare_ask_execution_context;
+use ask_input::{
+    maybe_finalize_schedule_direct_text_success, prepare_ask_input, prepare_run_skill_input,
+};
+use ask_planner_frontdoor::prepare_planner_owned_ask_routing;
 pub(crate) use channels::{
     runtime_channel_from_payload, send_task_channel_message, task_external_chat_id,
     task_payload_value, task_runtime_channel,
 };
-pub(super) use locator::{
-    has_concrete_locator_hint, has_explicit_path_or_url_locator_hint,
-    has_multiple_distinct_explicit_local_path_locators, try_resolve_implicit_locator_path,
-    try_resolve_workspace_child_locator_from_text, LocatorAutoResolution,
-};
+pub(super) use locator::{has_concrete_locator_hint, has_explicit_path_or_url_locator_hint};
 pub(super) use run_skill_finalize::finalize_run_skill_result;
 pub(crate) use runtime_support::spawn_long_term_summary_refresh;
 pub(crate) use runtime_support::{
@@ -398,30 +399,8 @@ pub(crate) async fn process_ask_task(
         None,
     );
     let prepared_flow =
-        ask_pipeline::prepare_ask_flow(state, task, payload, &prompt, &source).await?;
-    let agent_run_context = Some(ask_pipeline::build_agent_run_context_from_prepared_flow(
-        &prompt,
-        &prepared_flow,
-    ));
-
-    let Some(result) = ask_pipeline::execute_ask_dispatch(
-        state,
-        task,
-        payload,
-        &prompt,
-        &prepared_flow.resolved_prompt_for_execution,
-        &prepared_flow.prompt_with_memory_for_execution,
-        &prepared_flow.route_result,
-        &prepared_flow.ask_mode,
-        prepared_flow.should_route_schedule_direct,
-        agent_run_context,
-        prepared_flow.turn_analysis.as_ref(),
-        prepared_flow.boundary_envelope.as_ref(),
-    )
-    .await?
-    else {
-        return Ok(());
-    };
+        ask_runtime::prepare_ask_flow(state, task, payload, &prompt, &source).await?;
+    let result = ask_runtime::execute_ask_dispatch(state, task, &prepared_flow).await?;
 
     crate::finalize::finalize_ask_result(
         state,
@@ -432,9 +411,9 @@ pub(crate) async fn process_ask_task(
         prepared_flow.memory_trace.as_ref(),
         &prepared_flow.resolved_prompt_for_execution,
         &prepared_flow.route_result,
-        prepared_flow.turn_analysis.as_ref(),
-        &prepared_flow.fuzzy_locator_suggestions,
-        prepared_flow.clarify_fallback_source,
+        None,
+        &[],
+        None,
         result,
     )
     .await

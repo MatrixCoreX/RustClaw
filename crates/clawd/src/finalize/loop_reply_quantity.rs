@@ -22,7 +22,7 @@ fn size_comparison_answer_style(
     route: &crate::RouteResult,
     user_text: &str,
 ) -> SizeComparisonAnswerStyle {
-    if crate::intent_router::contract_test_hint_value(user_text, "selector_answer_style")
+    if crate::contract_test_hints::value(user_text, "selector_answer_style")
         .as_deref()
         .is_some_and(|value| {
             matches!(
@@ -33,7 +33,7 @@ fn size_comparison_answer_style(
     {
         return SizeComparisonAnswerStyle::ExplainRatio;
     }
-    if crate::intent_router::contract_test_hint_value(user_text, "selector_answer_style")
+    if crate::contract_test_hints::value(user_text, "selector_answer_style")
         .as_deref()
         .is_some_and(|value| matches!(value.trim(), "delta_only" | "size_delta"))
     {
@@ -774,8 +774,7 @@ fn strict_quantity_comparison_json_fallback_allowed(
     style: SizeComparisonAnswerStyle,
 ) -> bool {
     style != SizeComparisonAnswerStyle::DeltaOnly
-        && crate::intent_router::contract_test_hint_value(user_text, "selector_answer_style")
-            .is_none()
+        && crate::contract_test_hints::value(user_text, "selector_answer_style").is_none()
 }
 
 fn compare_paths_existence_verdict_answer(

@@ -430,7 +430,7 @@ pub(crate) async fn try_finalize_schedule_direct_success(
     _resolved_prompt_for_execution: &str,
     route_result: &crate::RouteResult,
 ) -> Result<bool> {
-    if let Ok(Some(schedule_reply)) = crate::intent_router::try_handle_schedule_request(
+    if let Ok(Some(schedule_reply)) = crate::schedule_service::try_handle_schedule_request(
         state,
         task,
         prompt,
@@ -484,7 +484,7 @@ fn answer_verifier_recovery_already_terminal(journal: &crate::task_journal::Task
 }
 
 fn turn_analysis_requires_machine_summary(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     let Some(state_patch) = turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()) else {
         return false;
@@ -552,7 +552,7 @@ pub(crate) async fn finalize_ask_result(
     memory_trace: Option<&Value>,
     resolved_prompt_for_execution: &str,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     fuzzy_locator_suggestions: &[String],
     clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     result: Result<crate::AskReply, String>,

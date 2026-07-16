@@ -1,14 +1,11 @@
-use crate::intent::surface_signals::PromptSurfaceSignals;
 use crate::memory::retrieval::{MemoryContextMode, StructuredMemoryContext};
-use crate::task_context_builder::{ExecutionContextBudgetTier, RouteContextBudgetTier};
+use crate::task_context_builder::ExecutionContextBudgetTier;
 use crate::AppState;
 use claw_core::skill_registry::{SkillMemoryPolicyConfig, SkillMemoryPolicyProfile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MemoryUseProfile {
     Disabled,
-    RouteMinimal,
-    RouteFollowup,
     PlannerScoped,
     ChatScoped,
     SkillScoped,
@@ -31,8 +28,6 @@ impl MemoryUseProfile {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Disabled => "disabled",
-            Self::RouteMinimal => "route_minimal",
-            Self::RouteFollowup => "route_followup",
             Self::PlannerScoped => "planner_scoped",
             Self::ChatScoped => "chat_scoped",
             Self::SkillScoped => "skill_scoped",
@@ -72,42 +67,6 @@ impl MemoryUseDecision {
             include_knowledge_docs: false,
             include_recent_snippets: false,
             max_chars: 0,
-            reason: reason.into(),
-        }
-    }
-
-    fn route_minimal(max_chars: usize, reason: impl Into<String>) -> Self {
-        Self {
-            profile: MemoryUseProfile::RouteMinimal,
-            mode: MemoryContextMode::Route,
-            include_preferences: true,
-            include_long_term_summary: false,
-            include_recent_related_events: false,
-            include_assistant_results: false,
-            include_similar_triggers: false,
-            include_unfinished_goals: false,
-            include_relevant_facts: false,
-            include_knowledge_docs: false,
-            include_recent_snippets: false,
-            max_chars,
-            reason: reason.into(),
-        }
-    }
-
-    fn route_followup(max_chars: usize, reason: impl Into<String>) -> Self {
-        Self {
-            profile: MemoryUseProfile::RouteFollowup,
-            mode: MemoryContextMode::Route,
-            include_preferences: true,
-            include_long_term_summary: false,
-            include_recent_related_events: true,
-            include_assistant_results: true,
-            include_similar_triggers: true,
-            include_unfinished_goals: true,
-            include_relevant_facts: true,
-            include_knowledge_docs: true,
-            include_recent_snippets: true,
-            max_chars,
             reason: reason.into(),
         }
     }
@@ -215,64 +174,6 @@ impl MemoryUseDecision {
             self.reason.trim()
         )
     }
-}
-
-pub(crate) fn decide_route_memory_use_policy(
-    state: &AppState,
-    route_budget: RouteContextBudgetTier,
-    surface: &PromptSurfaceSignals,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) -> MemoryUseDecision {
-    if !state.policy.memory.route_memory_enabled
-        || matches!(route_budget, RouteContextBudgetTier::None)
-    {
-        return MemoryUseDecision::disabled(
-            MemoryContextMode::Route,
-            "route_memory_disabled_or_context_budget_none",
-        );
-    }
-
-    let full_max = state
-        .policy
-        .memory
-        .route_trigger_budget_chars
-        .max(384)
-        .min(state.policy.memory.route_memory_max_chars.max(384));
-    let anchor_max = state
-        .policy
-        .memory
-        .route_trigger_budget_chars
-        .max(384)
-        .min(640)
-        .min(state.policy.memory.route_memory_max_chars.max(384));
-    let has_active_followup_state = session_snapshot.active_followup_frame.is_some()
-        || session_snapshot.active_clarify_state.is_some()
-        || session_snapshot
-            .active_observed_facts
-            .as_ref()
-            .is_some_and(|facts| !facts.is_empty());
-
-    if has_active_followup_state {
-        return MemoryUseDecision::route_followup(
-            full_max,
-            "active_session_state_requires_recent_memory",
-        );
-    }
-
-    let structural_locator_request = surface.has_explicit_path_or_url()
-        || surface.is_structural_locator_only_reply()
-        || surface.has_single_filename_candidate()
-        || surface.locator_target_pair.is_some()
-        || surface.has_structured_target_refinement();
-
-    if matches!(route_budget, RouteContextBudgetTier::AnchorOnly) || structural_locator_request {
-        return MemoryUseDecision::route_minimal(
-            anchor_max,
-            "current_turn_structured_locator_or_anchor_budget",
-        );
-    }
-
-    MemoryUseDecision::route_minimal(full_max, "new_route_task_uses_preferences_only")
 }
 
 pub(crate) fn decide_planner_memory_use_policy(

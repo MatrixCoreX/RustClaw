@@ -724,7 +724,7 @@ fn action_matches_contract_test_preferred_ref(
     args: &Value,
 ) -> bool {
     let Some(raw_preferred) =
-        crate::intent_router::contract_test_hint_value(original_user_text, "preferred_action_ref")
+        crate::contract_test_hints::value(original_user_text, "preferred_action_ref")
     else {
         return false;
     };

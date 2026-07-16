@@ -35,6 +35,8 @@ OWNER_CATEGORIES = {
 RETAINED_BOUNDARY_OWNER_CATEGORIES = {
     "attachment_boundary",
     "context_boundary",
+    "explicit_machine_command_boundary",
+    "explicit_schedule_boundary",
     "lifecycle_boundary",
     "safety_boundary",
     "session_boundary",
@@ -46,16 +48,13 @@ DISPOSITIONS = {
     "retain_boundary",
 }
 REQUIRED_DECISION_IDS = {
-    "intent_normalizer_model",
-    "explicit_machine_command_contract_repair",
-    "normalizer_route_projection",
-    "post_normalizer_contract_repairs",
-    "locator_and_context_preflight",
-    "post_route_policy",
-    "schedule_direct_exit",
-    "self_extension_direct_exit",
-    "alias_ack_direct_exit",
-    "session_binding_value_direct_exit",
+    "attachment_audio_materialization",
+    "ui_attachment_projection",
+    "explicit_machine_command_projection",
+    "turn_boundary_envelope",
+    "execution_context_materialization",
+    "explicit_schedule_direct_text_boundary",
+    "neutral_agent_loop_frontdoor",
     "agent_loop_semantic_entry",
 }
 
@@ -65,7 +64,12 @@ REMOVED_FILES = (
     "crates/clawd/src/ask_flow_gate_policy.rs",
     "crates/clawd/src/ask_flow_gate_contract.rs",
     "crates/clawd/src/ask_flow_chat_helpers.rs",
+    "crates/clawd/src/worker/ask_prepare.rs",
+    "crates/clawd/src/worker/ask_pipeline.rs",
+    "crates/clawd/src/intent_router.rs",
 )
+
+REMOVED_FILE_PREFIXES = ("intent_router_", "ask_prepare_", "ask_pipeline_")
 
 FORBIDDEN_PRODUCTION_TOKENS = (
     "PRE_PLANNER_EXIT_INVENTORY",
@@ -75,6 +79,8 @@ FORBIDDEN_PRODUCTION_TOKENS = (
     "direct_answer_gate_boundary_class",
     "direct_answer_gate_ownership_class",
     "direct_answer_gate_boundary_class_is_boundary_owned",
+    "run_intent_normalizer(",
+    "maybe_handle_ask_self_extension(",
 )
 
 DOC_FORBIDDEN_STALE_TOKENS = {
@@ -206,6 +212,9 @@ def scan_repo() -> list[str]:
         if path.exists():
             findings.append(f"{removed}: removed_pre_planner_file_returned")
     for path in production_rust_files():
+        if Path(rel(path)).name.startswith(REMOVED_FILE_PREFIXES):
+            findings.append(f"{rel(path)}: removed_pre_planner_file_prefix_returned")
+    for path in production_rust_files():
         raw = path.read_text(encoding="utf-8")
         for token in FORBIDDEN_PRODUCTION_TOKENS:
             if token in raw:
@@ -227,7 +236,8 @@ def scan_repo() -> list[str]:
 
 def run_self_test() -> int:
     assert "direct_answer_gate_boundary_class" in FORBIDDEN_PRODUCTION_TOKENS
-    assert "crates/clawd/src/ask_flow_pre_planner_exit.rs" in REMOVED_FILES
+    assert "crates/clawd/src/worker/ask_pipeline.rs" in REMOVED_FILES
+    assert "run_intent_normalizer(" in FORBIDDEN_PRODUCTION_TOKENS
     assert "semantic_authority" not in RETAINED_BOUNDARY_OWNER_CATEGORIES
     assert "Can answer before tool loop" in DOC_FORBIDDEN_STALE_TOKENS[
         "docs/legacy_semantic_route_inventory.md"
@@ -240,7 +250,7 @@ def run_self_test() -> int:
         "decisions": [
             {
                 "id": "invalid_semantic_owner",
-                "path": "crates/clawd/src/worker/ask_pipeline.rs",
+                "path": "crates/clawd/src/worker/ask_runtime.rs",
                 "symbols": ["run_agent_with_tools"],
                 "owner_category": "semantic_authority",
                 "input_fields": ["prompt"],

@@ -12,8 +12,8 @@ pub(crate) use execution_recipe_types::{
     explicit_execution_recipe_spec, parse_execution_recipe_kind_text,
     parse_execution_recipe_profile_text, parse_execution_recipe_target_scope_text,
     profile_requires_specific_validation, ActionEffect, ExecutionRecipeKind, ExecutionRecipePhase,
-    ExecutionRecipeProfile, ExecutionRecipeRuntimeState, ExecutionRecipeSpec,
-    ExecutionRecipeTargetScope,
+    ExecutionRecipePlanHint, ExecutionRecipeProfile, ExecutionRecipeRuntimeState,
+    ExecutionRecipeSpec, ExecutionRecipeTargetScope,
 };
 
 fn planner_capability_effect_to_action_effect(effect: PlannerCapabilityEffect) -> ActionEffect {

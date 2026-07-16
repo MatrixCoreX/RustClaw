@@ -491,7 +491,7 @@ pub(crate) struct TaskJournal {
     pub(crate) task_goal_spec: Option<Value>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) memory_trace: Option<Value>,
-    pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
+    pub(crate) turn_analysis: Option<crate::turn_context::TurnAnalysis>,
     pub(crate) route_result: Option<crate::RouteResult>,
     pub(crate) plan_result: Option<crate::PlanResult>,
     pub(crate) verify_result: Option<TaskJournalVerifySummary>,
@@ -599,7 +599,7 @@ impl TaskJournal {
 
     pub(crate) fn record_turn_analysis(
         &mut self,
-        turn_analysis: &crate::intent_router::TurnAnalysis,
+        turn_analysis: &crate::turn_context::TurnAnalysis,
     ) {
         self.turn_analysis = Some(turn_analysis.clone());
     }

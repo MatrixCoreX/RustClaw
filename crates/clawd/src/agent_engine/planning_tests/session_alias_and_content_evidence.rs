@@ -657,9 +657,9 @@ async fn active_task_append_current_locator_reaches_planner_path() {
     );
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskAppend),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+    let analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskAppend),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::ReuseActive),
         should_interrupt_active_run: false,
         attachment_processing_required: false,
         state_patch: Some(json!({

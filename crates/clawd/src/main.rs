@@ -36,6 +36,7 @@ mod child_task_contract;
 mod clarify_followup;
 mod clarify_state;
 mod contract_matrix;
+mod contract_test_hints;
 mod conversation_state;
 mod db_init;
 mod delivery_utils;
@@ -51,7 +52,6 @@ mod fixture_replay_e2e;
 mod followup_frame;
 mod http;
 mod intent;
-mod intent_router;
 mod language_policy;
 mod llm_gateway;
 mod log_utils;
@@ -66,7 +66,6 @@ mod output_paths;
 mod package_commands;
 mod pipeline_types;
 mod policy_decision;
-mod post_route_policy;
 mod prompt_utils;
 mod providers;
 mod repair_boundary_inventory;
@@ -76,7 +75,6 @@ mod routing_context;
 mod runtime;
 mod schedule_service;
 mod scheduled_run_contract;
-mod self_extension;
 mod semantic_judge;
 mod skill_availability;
 mod skills;
@@ -86,6 +84,8 @@ mod task_context_builder;
 mod task_contract;
 mod task_journal;
 mod task_lifecycle;
+mod turn_boundary_envelope;
+mod turn_context;
 mod ui_attachments;
 mod verifier;
 mod virtual_tools;
@@ -163,8 +163,6 @@ pub(crate) use repo::{
     TaskAdminTarget, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
-#[cfg(test)]
-pub(crate) use runtime::types::FirstLayerDecision;
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
     ActFinalizeStyle, AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState,

@@ -250,9 +250,9 @@ fn scalar_count_state_patch_filter_exposes_structured_dir_count_hint() {
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.delivery_required = false;
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: Some(json!({
             "scalar_count_filter": {

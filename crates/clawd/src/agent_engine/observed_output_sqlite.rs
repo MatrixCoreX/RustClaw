@@ -131,14 +131,8 @@ impl SqliteDatabaseKindSource {
 fn sqlite_database_kind_from_contract_selector(
     request_text: Option<&str>,
 ) -> Option<SqliteDatabaseKindClass> {
-    let value =
-        crate::intent_router::contract_test_hint_value(request_text?, "selector_database_kind")
-            .or_else(|| {
-                crate::intent_router::contract_test_hint_value(
-                    request_text?,
-                    "selector_expected_kind",
-                )
-            })?;
+    let value = crate::contract_test_hints::value(request_text?, "selector_database_kind")
+        .or_else(|| crate::contract_test_hints::value(request_text?, "selector_expected_kind"))?;
     match value.trim().to_ascii_lowercase().as_str() {
         "business" | "business_database" | "prod" | "production" | "production_database" => {
             Some(SqliteDatabaseKindClass::Business)

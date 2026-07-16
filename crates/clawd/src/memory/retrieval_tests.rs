@@ -78,21 +78,21 @@ fn planner_memory_context_is_strictly_scoped() {
 }
 
 #[test]
-fn route_memory_context_keeps_assistant_results_and_unfinished_goals() {
+fn chat_memory_context_keeps_assistant_results_and_unfinished_goals() {
     let ctx = StructuredMemoryContext {
         assistant_results: vec![item("assistant result")],
         unfinished_goals: vec![item("unfinished goal")],
         ..Default::default()
     };
 
-    let block = build_structured_memory_context_block(&ctx, MemoryContextMode::Route, 2000);
+    let block = build_structured_memory_context_block(&ctx, MemoryContextMode::Chat, 2000);
 
     assert!(block.contains("RECENT_ASSISTANT_RESULTS"));
     assert!(block.contains("RECENT_UNFINISHED_GOALS"));
 }
 
 #[test]
-fn route_memory_context_includes_knowledge_base_section() {
+fn chat_memory_context_includes_knowledge_base_section() {
     let ctx = StructuredMemoryContext {
         knowledge_docs: vec![RetrievedMemoryItem {
             role: None,
@@ -103,7 +103,7 @@ fn route_memory_context_includes_knowledge_base_section() {
         ..Default::default()
     };
 
-    let block = build_structured_memory_context_block(&ctx, MemoryContextMode::Route, 2000);
+    let block = build_structured_memory_context_block(&ctx, MemoryContextMode::Chat, 2000);
 
     assert!(block.contains("KNOWLEDGE_BASE_CONTEXT"));
     assert!(block.contains("[docs:README.md]"));
@@ -252,8 +252,8 @@ fn knowledge_fact_rows_recall_into_relevant_facts() {
         relevant_facts: recall.relevant_facts.clone(),
         ..Default::default()
     };
-    let block = build_structured_memory_context_block(&ctx, MemoryContextMode::Route, 2000);
-    println!("route memory block:\n{block}");
+    let block = build_structured_memory_context_block(&ctx, MemoryContextMode::Chat, 2000);
+    println!("chat memory block:\n{block}");
 
     assert_eq!(recall.relevant_facts.len(), 1);
     assert!(recall.relevant_facts[0].text.contains("默认用中文回复"));

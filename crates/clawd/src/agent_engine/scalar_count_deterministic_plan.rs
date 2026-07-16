@@ -76,7 +76,7 @@ pub(super) fn explicit_command_request_present(
 
 pub(super) fn execution_failed_step_literal_command_segments(
     request: &str,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> Vec<String> {
     let quoted = shellish_literal_command_segments(request, true);
     if quoted.len() >= 2 {
@@ -87,7 +87,7 @@ pub(super) fn execution_failed_step_literal_command_segments(
 
 pub(super) fn apply_conditional_step_update_execution_window(
     commands: Vec<String>,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> Vec<String> {
     let Some(limit) = conditional_step_update_immediate_command_count(turn_analysis) else {
         return commands;
@@ -96,7 +96,7 @@ pub(super) fn apply_conditional_step_update_execution_window(
 }
 
 pub(super) fn conditional_step_update_immediate_command_count(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> Option<usize> {
     let update = turn_analysis?
         .state_patch
@@ -281,7 +281,7 @@ pub(super) fn route_prefers_text_excerpt_action_for_contract_hint(route: &RouteR
 }
 
 pub(super) fn contract_hint_selector_value(original_user_text: &str, key: &str) -> Option<String> {
-    crate::intent_router::contract_test_hint_value(original_user_text, key)
+    crate::contract_test_hints::value(original_user_text, key)
         .or_else(|| inline_selector_machine_token_value(original_user_text, key))
         .or_else(|| json_selector_machine_token_value(original_user_text, key))
         .map(|value| value.trim().to_string())

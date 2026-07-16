@@ -577,9 +577,9 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
     route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: Some(serde_json::json!({
                 "required_machine_fields": [

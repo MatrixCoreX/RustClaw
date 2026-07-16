@@ -22,7 +22,6 @@ fn summary_emits_transcript_compaction_record_for_light_execution_budget() {
     let bundle = TaskContextBundle {
         raw_sources: TaskContextRawSources::default(),
         planner_view: PlannerContextView::default(),
-        route_view: None,
         execution_view: Some(ExecutionContextView {
             budget_tier: ExecutionContextBudgetTier::Light,
             memory_ctx: empty_prompt_memory_context(),
@@ -79,7 +78,6 @@ fn summary_marks_long_session_context_compaction_trigger() {
     let bundle = TaskContextBundle {
         raw_sources: TaskContextRawSources::default(),
         planner_view: PlannerContextView::default(),
-        route_view: None,
         execution_view: Some(ExecutionContextView {
             budget_tier: ExecutionContextBudgetTier::Full,
             memory_ctx: empty_prompt_memory_context(),
