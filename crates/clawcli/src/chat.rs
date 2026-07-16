@@ -14,6 +14,8 @@ pub(super) enum ChatControl<'a> {
     Detach,
     Cancel,
     Status,
+    Approve,
+    Deny,
     Attach(&'a str),
     Unknown(&'a str),
 }
@@ -62,6 +64,18 @@ pub(crate) fn run_chat(
                     } else {
                         println!("error_code=chat_task_missing");
                     }
+                }
+                ChatControl::Approve => {
+                    decide_current_task_approval(
+                        base_url,
+                        key,
+                        &mut thread,
+                        "approve_once",
+                        jsonl_output,
+                    )?;
+                }
+                ChatControl::Deny => {
+                    decide_current_task_approval(base_url, key, &mut thread, "deny", jsonl_output)?;
                 }
                 ChatControl::Attach(task_id) => {
                     commands::record_chat_task(&mut thread, task_id)?;
@@ -165,6 +179,43 @@ fn finish_chat_detach(
     Ok(())
 }
 
+fn decide_current_task_approval(
+    base_url: &str,
+    key: &str,
+    thread: &mut commands::ChatThreadState,
+    decision: &str,
+    jsonl_output: bool,
+) -> Result<()> {
+    let Some(task_id) = thread.current_task_id.clone() else {
+        println!("error_code=chat_task_missing");
+        return Ok(());
+    };
+    let status = task::get_task_status(base_url, key, &task_id)?;
+    let Some(request_id) = status.pending_approval_request_id() else {
+        println!("error_code=chat_approval_request_missing");
+        return Ok(());
+    };
+    let body = task::resume_task_by_id(
+        base_url,
+        key,
+        &task_id,
+        task::TaskResumeRequest {
+            approval_request_id: Some(request_id),
+            approval_decision: Some(decision),
+            ..Default::default()
+        },
+    )?;
+    output::print_json_pretty(&body);
+    if decision == "approve_once" {
+        crate::interrupt::reset();
+        follow_and_render_task(base_url, key, thread, jsonl_output)
+    } else {
+        let status = task::get_task_status(base_url, key, &task_id)?;
+        output::print_task_status(&status, false, &events::EventFilters::default());
+        Ok(())
+    }
+}
+
 fn wait_with_poll_fallback(base_url: &str, key: &str, task_id: &str) -> Result<bool> {
     loop {
         if crate::interrupt::requested() {
@@ -194,6 +245,8 @@ pub(super) fn chat_control(input: &str) -> Option<ChatControl<'_>> {
         ("/detach", None) => ChatControl::Detach,
         ("/cancel", None) => ChatControl::Cancel,
         ("/status", None) => ChatControl::Status,
+        ("/approve", None) => ChatControl::Approve,
+        ("/deny", None) => ChatControl::Deny,
         ("/attach", Some(task_id)) => ChatControl::Attach(task_id),
         _ => ChatControl::Unknown(command),
     })

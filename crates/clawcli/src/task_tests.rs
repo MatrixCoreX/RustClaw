@@ -109,6 +109,32 @@ fn needs_user_is_a_background_wait_state() {
 }
 
 #[test]
+fn pending_approval_request_id_uses_only_the_machine_resume_contract() {
+    let mut view = TaskStatusView {
+        task_id: "task-approval".to_string(),
+        status: "failed".to_string(),
+        raw_data: serde_json::json!({
+            "result_json": {
+                "resume_context": {
+                    "approval_request": {
+                        "status": "pending",
+                        "request_id": " approval-1 "
+                    }
+                }
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    assert_eq!(view.pending_approval_request_id(), Some("approval-1"));
+    view.raw_data["result_json"]["resume_context"]["approval_request"]["status"] =
+        serde_json::json!("denied");
+    assert_eq!(view.pending_approval_request_id(), None);
+}
+
+#[test]
 fn async_final_result_value_extracts_terminal_output() {
     let result_json = serde_json::json!({
         "task_lifecycle": {
