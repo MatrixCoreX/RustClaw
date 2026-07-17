@@ -539,6 +539,43 @@ export interface McpProbeOutcome {
   latency_ms: number;
 }
 
+export interface HookAdminHandler {
+  id: string;
+  stage: string;
+  kind: string;
+  enabled: boolean;
+  blocking: boolean;
+  trusted: boolean;
+  trust_status: string;
+  content_hash_configured: boolean;
+  status: string;
+  error_code?: string | null;
+  redacted_config: Record<string, unknown>;
+}
+
+export interface HookAdminStatus {
+  schema_version: number;
+  config_path: string;
+  setup_state: string;
+  default_safe: boolean;
+  fail_closed: boolean;
+  enabled: boolean;
+  handler_count: number;
+  enabled_handler_count: number;
+  valid_handler_count: number;
+  invalid_handler_count: number;
+  config_error_code?: string | null;
+  supported_stages: string[];
+  setup: {
+    mode: string;
+    ui_enable_supported: boolean;
+    trust_required: boolean;
+    content_hash_required_for_command: boolean;
+    raw_config_redacted: boolean;
+  };
+  handlers: HookAdminHandler[];
+}
+
 export interface NniDeviceMeta {
   slot?: number | null;
   i2c_bus?: number | null;

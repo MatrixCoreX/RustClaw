@@ -9,7 +9,9 @@ mod runtime;
 mod shared;
 #[cfg(test)]
 use command::{execute_command_handler, validate_command_handler};
-pub(crate) use runtime::{lifecycle_stage_outcome_for_state, pre_tool_use_outcome_for_state};
+pub(crate) use runtime::{
+    hook_admin_status_for_state, lifecycle_stage_outcome_for_state, pre_tool_use_outcome_for_state,
+};
 #[cfg(test)]
 use shared::{lifecycle_hook_event, parse_handler_output, pre_tool_hook_event, HookHandlerConfig};
 

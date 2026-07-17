@@ -226,6 +226,8 @@ flowchart TD
     GD --> O
 ```
 
+可信生命周期 Hook 配置在 `configs/agent_guard.toml`，默认保持关闭。管理员可通过 `GET /v1/admin/hooks/status` 或浏览器“模型”页面查看安全状态投影。该机器合同展示 setup state、启用/有效/无效数量、信任与 hash 就绪状态，以及全部支持的 stage；不会回传 handler 参数、endpoint URL、环境变量引用或凭据。浏览器只提供刷新，并把 `redacted_config` 放在手动展开的第二层详情中。启用或信任 Hook 仍必须经过受审查的仓库配置，UI 不能把未审查脚本直接变成执行边界。
+
 ## 自然语言契约边界
 
 RustClaw 的原则是：自然语言理解交给 LLM，运行时只消费结构化契约。意图归一化器和规划器可以阅读用户表达、示例、技能文档和多语言提示词，但进入 Rust 运行时前，语义必须已经落到稳定字段里。

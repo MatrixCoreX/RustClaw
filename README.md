@@ -674,6 +674,8 @@ flowchart TD
     GD --> O
 ```
 
+Trusted lifecycle hooks are configured in `configs/agent_guard.toml` and remain disabled by default. Administrators can inspect the safe status projection at `GET /v1/admin/hooks/status` or in the browser Models page. The status contract reports setup state, enabled/valid/invalid counts, trust/hash readiness, and all supported stages; handler arguments, endpoint URLs, environment references, and credentials are not returned. The browser exposes only refresh and progressively disclosed `redacted_config`. Enabling or trusting a hook still requires reviewed repository configuration, so the UI cannot turn an unreviewed script into an execution boundary.
+
 Skill registry and runner protocol flow:
 
 ```mermaid

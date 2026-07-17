@@ -5,6 +5,7 @@ import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
 import { ConsoleLayout } from "./components/ConsoleLayout";
 import { DashboardPage } from "./components/DashboardPage";
 import { FactoryResetModal } from "./components/FactoryResetModal";
+import { HookAdminSection } from "./components/HookAdminSection";
 import { LogsPage } from "./components/LogsPage";
 import { MemoryPage } from "./components/MemoryPage";
 import { McpConfigSection } from "./components/McpConfigSection";
@@ -39,6 +40,7 @@ import {
 import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
 import { useLogsRuntime } from "./hooks/useLogsRuntime";
 import { useFactoryResetRuntime } from "./hooks/useFactoryResetRuntime";
+import { useHookAdminRuntime } from "./hooks/useHookAdminRuntime";
 import { useModelConfigRuntime } from "./hooks/useModelConfigRuntime";
 import { useMcpRuntime } from "./hooks/useMcpRuntime";
 import { useSkillsRuntime } from "./hooks/useSkillsRuntime";
@@ -454,6 +456,12 @@ export default function App() {
     addMcpServer,
     removeMcpServer,
   } = useMcpRuntime({ apiFetch, t });
+  const {
+    hookStatus,
+    hookStatusLoading,
+    hookStatusError,
+    refreshHookStatus,
+  } = useHookAdminRuntime(apiFetch);
   const {
     skillImportSource,
     setSkillImportSource,
@@ -1219,6 +1227,7 @@ export default function App() {
   useEffect(() => {
     if (!uiAuthReady || !isAdminIdentity || currentPage !== "models") return;
     void refreshMcp();
+    void refreshHookStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, apiBase, uiAuthReady, isAdminIdentity]);
 
@@ -1627,6 +1636,17 @@ export default function App() {
               onServerChange={updateMcpServer}
               onAddServer={addMcpServer}
               onRemoveServer={removeMcpServer}
+            />
+          ) : null}
+
+          {currentPage === "models" ? (
+            <HookAdminSection
+              t={t}
+              canManage={isAdminIdentity}
+              status={hookStatus}
+              loading={hookStatusLoading}
+              error={hookStatusError}
+              onRefresh={refreshHookStatus}
             />
           ) : null}
 

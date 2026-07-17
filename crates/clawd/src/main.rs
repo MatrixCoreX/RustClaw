@@ -50,6 +50,7 @@ mod finalize;
 #[cfg(test)]
 mod fixture_replay_e2e;
 mod followup_frame;
+mod hook_admin_routes;
 mod http;
 mod intent;
 mod language_policy;
@@ -118,6 +119,7 @@ pub(crate) use delivery_utils::{
     collect_recent_image_candidates, extract_delivery_file_tokens,
     intercept_response_payload_for_delivery, intercept_response_text_for_delivery,
 };
+use hook_admin_routes::get_hook_status;
 pub(crate) use log_utils::{
     append_act_plan_log, append_subtask_result, highlight_tag, truncate_for_agent_trace,
     truncate_for_log,
@@ -828,6 +830,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/tasks/pause-by-task-id", post(pause_task_by_id))
         .route("/tasks/goal-by-task-id", post(goal_by_task_id))
         .route("/admin/reload-skills", post(reload_skills_handler))
+        .route("/admin/hooks/status", get(get_hook_status))
         .route(
             "/admin/mcp/config",
             get(get_mcp_config).post(update_mcp_config),
