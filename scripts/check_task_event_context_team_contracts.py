@@ -193,6 +193,18 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "artifacts_removed",
         "remove_child_patch_artifact",
     ),
+    "crates/clawd/src/bootstrap/skill_runner.rs": (
+        "RUSTCLAW_SKILL_RUNNER_PATH",
+        "resolve_skill_runner_path",
+        "current_exe",
+        'parent.join("skill-runner")',
+        'workspace_root.join("target/release/skill-runner")',
+    ),
+    "crates/clawd/src/bootstrap/skill_runner_tests.rs": (
+        "installed_companion_is_independent_of_user_workspace",
+        "explicit_path_supports_absolute_and_workspace_relative_values",
+        "missing_companion_falls_back_to_workspace_release_runner",
+    ),
     "crates/clawd/src/execution_isolation_patch.rs": (
         "build_child_worktree_patch_artifact",
         "load_validated_child_worktree_patch_artifact",
