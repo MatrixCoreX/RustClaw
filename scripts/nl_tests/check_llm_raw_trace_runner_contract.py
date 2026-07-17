@@ -140,6 +140,15 @@ def check_runner(root: Path, contract: RunnerContract) -> list[str]:
             contract.path,
         )
     )
+    if contract.path == "scripts/nl_tests/run_multi_turn_suite.sh":
+        if 'line.split("|", turn_count)' in source:
+            failures.append(
+                f"{contract.path}: case parser must reject extra turns instead of merging them"
+            )
+        if 'line.split("|")' not in source:
+            failures.append(
+                f"{contract.path}: case parser must split all declared turn fields"
+            )
     return failures
 
 
@@ -160,6 +169,26 @@ def check_helper(root: Path) -> list[str]:
         ],
         "scripts/nl_tests/print_llm_raw_trace.py",
     )
+
+
+def check_shared_lib(root: Path) -> list[str]:
+    path = root / "scripts/lib.sh"
+    if not path.exists():
+        return ["scripts/lib.sh: missing shared shell library"]
+    source = read_text(path)
+    failures = require_substrings(
+        source,
+        [
+            'RUSTCLAW_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'source "${RUSTCLAW_SCRIPTS_DIR}/shell_compat.sh"',
+        ],
+        "scripts/lib.sh",
+    )
+    if re.search(r"^SCRIPT_DIR=", source, re.MULTILINE):
+        failures.append(
+            "scripts/lib.sh: must not overwrite a sourcing runner's SCRIPT_DIR"
+        )
+    return failures
 
 
 def run_self_test() -> int:
@@ -205,6 +234,7 @@ def main(argv: list[str]) -> int:
         return run_self_test()
 
     failures = check_helper(ROOT)
+    failures.extend(check_shared_lib(ROOT))
     for contract in RUNNERS:
         failures.extend(check_runner(ROOT, contract))
 

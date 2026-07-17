@@ -426,7 +426,7 @@ for raw in path.read_text(encoding="utf-8").splitlines():
     line = raw.strip()
     if not line or line.startswith("#"):
         continue
-    parts = [part.strip() for part in line.split("|", turn_count)]
+    parts = [part.strip() for part in line.split("|")]
     if len(parts) != expected_parts or not all(parts):
         raise SystemExit(f"invalid case line: {raw}")
     print("\t".join(parts))
