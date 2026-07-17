@@ -80,6 +80,7 @@ fn summary_json_includes_finalizer_and_task_metrics() {
             prompt_bytes_budget_min: Some(125_200),
             prompt_bytes_after_max: Some(125_180),
             prompt_truncated_bytes_total: 31_857,
+            ..Default::default()
         },
     );
     journal.record_llm_by_prompt(by_prompt);

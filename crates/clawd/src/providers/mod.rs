@@ -12,7 +12,7 @@ pub(crate) mod usage;
 #[path = "pricing_tests.rs"]
 mod pricing_tests;
 
-pub(crate) use circuit::{AttemptDecision, CircuitBreaker};
+pub(crate) use circuit::{AttemptDecision, CircuitBreaker, CircuitBreakerSnapshot};
 pub(crate) use client::{
     build_llm_http_client, call_provider_with_retry, call_provider_with_retry_with_hints,
     ChatRequestHints,
