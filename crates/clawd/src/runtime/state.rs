@@ -292,21 +292,55 @@ pub(crate) struct WorkerConfig {
     pub(crate) worker_running_recovery_check_interval_seconds: u64,
     pub(crate) last_running_recovery_check_ts: Arc<Mutex<u64>>,
     pub(crate) active_running_task_ids: Arc<Mutex<HashSet<String>>>,
+    pub(crate) task_cancellation_tokens:
+        Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
     pub(crate) database_busy_timeout_ms: u64,
     pub(crate) database_sqlite_path: PathBuf,
 }
 
 impl WorkerConfig {
-    pub(crate) fn register_active_task(&self, task_id: &str) {
+    pub(crate) fn register_active_task(
+        &self,
+        task_id: &str,
+    ) -> tokio_util::sync::CancellationToken {
+        let token = tokio_util::sync::CancellationToken::new();
         if let Ok(mut active) = self.active_running_task_ids.lock() {
             active.insert(task_id.to_string());
         }
+        if let Ok(mut tokens) = self.task_cancellation_tokens.lock() {
+            tokens.insert(task_id.to_string(), token.clone());
+        }
+        token
     }
 
     pub(crate) fn unregister_active_task(&self, task_id: &str) {
         if let Ok(mut active) = self.active_running_task_ids.lock() {
             active.remove(task_id);
         }
+        if let Ok(mut tokens) = self.task_cancellation_tokens.lock() {
+            tokens.remove(task_id);
+        }
+    }
+
+    pub(crate) fn cancel_active_task(&self, task_id: &str) -> bool {
+        self.task_cancellation_tokens
+            .lock()
+            .ok()
+            .and_then(|tokens| tokens.get(task_id).cloned())
+            .is_some_and(|token| {
+                token.cancel();
+                true
+            })
+    }
+
+    pub(crate) fn task_cancellation_token(
+        &self,
+        task_id: &str,
+    ) -> Option<tokio_util::sync::CancellationToken> {
+        self.task_cancellation_tokens
+            .lock()
+            .ok()
+            .and_then(|tokens| tokens.get(task_id).cloned())
     }
 
     pub(crate) fn is_task_active(&self, task_id: &str) -> bool {
@@ -329,6 +363,7 @@ impl WorkerConfig {
             worker_running_recovery_check_interval_seconds: 30,
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
             active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
+            task_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
             database_busy_timeout_ms: 5_000,
             database_sqlite_path: PathBuf::new(),
         }

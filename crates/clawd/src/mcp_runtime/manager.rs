@@ -187,6 +187,7 @@ impl McpRuntime {
         &self,
         capability: &str,
         args: Value,
+        cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<McpCallOutcome, McpRuntimeError> {
         let descriptor = self
             .tool(capability)
@@ -212,7 +213,9 @@ impl McpRuntime {
             );
             return Err(McpRuntimeError::new("mcp_transport_closed"));
         }
-        let result = client.call_tool(&descriptor.tool_name, args).await?;
+        let result = client
+            .call_tool(&descriptor.tool_name, args, cancellation)
+            .await?;
         let max_output_bytes = self
             .config
             .servers

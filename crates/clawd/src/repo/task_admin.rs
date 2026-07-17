@@ -78,7 +78,7 @@ pub(crate) fn cancel_tasks_for_user_chat(
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    cancel_task_records(&db, records, &now)
+    cancel_task_records(state, &db, records, &now)
 }
 
 pub(crate) fn cancel_one_task_for_user_chat(
@@ -109,7 +109,7 @@ pub(crate) fn cancel_one_task_for_user_chat(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    cancel_task_records(&db, records, &now)
+    cancel_task_records(state, &db, records, &now)
 }
 
 pub(crate) fn get_task_admin_target(
@@ -163,7 +163,7 @@ pub(crate) fn cancel_task_by_id(state: &AppState, task_id: &str) -> anyhow::Resu
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    cancel_task_records(&db, records, &now)
+    cancel_task_records(state, &db, records, &now)
 }
 
 pub(crate) fn resume_task_with_input(
@@ -199,6 +199,7 @@ pub(crate) fn pause_task_by_id(
 }
 
 fn cancel_task_records(
+    state: &AppState,
     db: &Connection,
     records: Vec<CancelTaskRecord>,
     now: &str,
@@ -206,6 +207,7 @@ fn cancel_task_records(
     let mut visited = HashSet::new();
     let reason = crate::task_lifecycle::TerminalFailureReason::UserCancelled.status_code();
     cancel_task_records_with_reason(
+        state,
         db,
         records,
         now,
@@ -216,6 +218,7 @@ fn cancel_task_records(
 }
 
 fn cancel_task_records_with_reason(
+    state: &AppState,
     db: &Connection,
     records: Vec<CancelTaskRecord>,
     now: &str,
@@ -251,10 +254,14 @@ fn cancel_task_records_with_reason(
             params![reason, result_json.to_string(), now, record.task_id],
         )?;
         affected += count as i64;
+        if count > 0 {
+            state.worker.cancel_active_task(&record.task_id);
+        }
     }
     let child_records = cancellable_child_task_records(db, &child_task_ids, visited)?;
     if !child_records.is_empty() {
         affected += cancel_task_records_with_reason(
+            state,
             db,
             child_records,
             now,
