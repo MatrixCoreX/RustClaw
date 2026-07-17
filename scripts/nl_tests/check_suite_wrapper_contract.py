@@ -85,11 +85,18 @@ RUN_MULTI_TURN_REQUIRED_SNIPPETS = {
     "multi_turn_path_ref_run_dir_ref": 'print("run_dir" if str(rel) == "." else f"run_dir/{rel.as_posix()}")',
     "multi_turn_run_dir_ref_printed": 'echo "  run_dir_ref: $(path_ref "$RUN_DIR" "$RUN_DIR")"',
     "multi_turn_run_log_ref_printed": 'echo "  run_log_ref: $(path_ref "$RUN_DIR" "$RUN_LOG")"',
+    "multi_turn_provider_failure_uses_machine_codes": "provider_machine_failure = any(",
+    "multi_turn_provider_failure_uses_metrics": 'metrics.get("provider_final_error_count")',
+    "multi_turn_terminal_failure_marks_suite_failed": "failed|canceled|timeout)",
+    "multi_turn_terminal_failure_sets_suite_failed": "suite_failed=1",
 }
 
 RUN_MULTI_TURN_FORBIDDEN_SNIPPETS = {
     "multi_turn_run_dir_absolute_print": 'echo "  run_dir:    ${RUN_DIR}"',
     "multi_turn_run_log_absolute_print": 'echo "  run_log:    ${RUN_LOG}"',
+    "multi_turn_provider_reply_blob_matcher": "provider_like_blob",
+    "multi_turn_provider_final_reply_matcher": "provider_like_final_text",
+    "multi_turn_provider_reply_marker_list": "strong_markers =",
 }
 
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {

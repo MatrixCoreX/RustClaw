@@ -213,6 +213,8 @@ fn deterministic_fallback_preserves_stable_machine_references() {
                 "decision:canary_before_rollout fact:build_green",
                 "artifact:README.md window:2026_07_20_0200Z",
                 "owner: release_team",
+                "owner: owner:release_team",
+                "owner:owner:owner:invalid",
                 "risk:stale next:stale open:stale",
                 "constraint: read_only",
                 "自然语言不参与机器引用选择",
@@ -269,6 +271,15 @@ fn deterministic_fallback_preserves_stable_machine_references() {
             "{transient_ref} leaked into stable continuity refs"
         );
     }
+    assert_eq!(
+        continuity_values
+            .iter()
+            .filter(|machine_ref| **machine_ref == "owner:release_team")
+            .count(),
+        1
+    );
+    assert!(!continuity_values.contains(&"owner:owner:release_team"));
+    assert!(!continuity_values.contains(&"owner:invalid"));
     assert!(!continuity_values.contains(&"constraint:read_only"));
     assert_eq!(
         record["current_state_refs"],

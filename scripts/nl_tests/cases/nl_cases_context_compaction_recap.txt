@@ -1,3 +1,3 @@
 # One-turn continuation probe for an existing long context-chain chat.
 # The caller supplies expected machine references through --require-final-ref.
-context_compaction_recap_probe|继续此前的 Atlas 台账，不调用工具或外部服务。请依靠长对话历史和压缩后的连续性证据，重建最终完整九行快照；constraints、decisions、facts 都必须完整保留，artifact 和 owner 也不得改名。随后简短说明发布窗口如何关闭，并用当前用户语言给出结论。不要猜测不存在的引用。
+context_compaction_recap_probe|继续此前的 Atlas 台账，不调用工具或外部服务。请依靠长对话历史和压缩后的连续性证据，重建最终完整九行快照；constraints、decisions、facts 都必须完整保留，artifact 和 owner 也不得改名。随后只根据历史说明 open:release_window 如何转为 fact:release_window_selected，并给出历史中的 window 值；不要推断发布操作、观察流程、新状态或不存在的引用。请用当前用户语言回答。
