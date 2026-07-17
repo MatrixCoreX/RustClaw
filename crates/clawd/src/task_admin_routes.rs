@@ -414,6 +414,7 @@ pub(super) async fn resume_task_by_id(
     let resume_input = crate::repo::TaskResumeControlInput {
         task_id: target.task_id.clone(),
         checkpoint_id: req.checkpoint_id,
+        resume_trigger: crate::task_lifecycle::ResumeTrigger::UserFollowup,
         resume_reason: req.resume_reason,
         user_message: req.user_message,
         new_constraints: req.new_constraints,

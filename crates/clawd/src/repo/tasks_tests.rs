@@ -1197,6 +1197,7 @@ fn resume_task_with_input_marks_checkpoint_due_without_restart() {
         TaskResumeControlInput {
             task_id: task_id.clone(),
             checkpoint_id: Some(checkpoint_id.to_string()),
+            resume_trigger: crate::task_lifecycle::ResumeTrigger::UserFollowup,
             resume_reason: None,
             user_message: None,
             new_constraints: None,

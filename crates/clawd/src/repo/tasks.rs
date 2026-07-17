@@ -25,6 +25,7 @@ pub(crate) struct DuePausedCheckpointTask {
     pub(crate) checkpoint_id: String,
     pub(crate) task_checkpoint: crate::task_lifecycle::TaskCheckpoint,
     pub(crate) resume_entrypoint: String,
+    pub(crate) resume_trigger: crate::task_lifecycle::ResumeTrigger,
     pub(crate) resume_wait_seconds: i64,
     pub(crate) completed_side_effect_count: usize,
     pub(crate) requires_idempotency_guard: bool,
@@ -643,12 +644,15 @@ pub(crate) fn list_due_paused_checkpoint_tasks_internal(
         else {
             continue;
         };
+        let resume_trigger =
+            crate::task_lifecycle::checkpoint_resume_trigger(&result_json, &resume_entrypoint);
         out.push(DuePausedCheckpointTask {
             task_id,
             lifecycle_state: state,
             checkpoint_id,
             task_checkpoint,
             resume_entrypoint: resume_entrypoint_token(resume_entrypoint).to_string(),
+            resume_trigger,
             resume_wait_seconds: 0,
             completed_side_effect_count,
             requires_idempotency_guard,
@@ -725,6 +729,8 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
     let checkpoint_resume_directive =
         crate::task_lifecycle::checkpoint_resume_directive(&result_json, now_ts);
     let resume_directive = checkpoint_resume_directive.status_code().to_string();
+    let resume_trigger =
+        crate::task_lifecycle::checkpoint_resume_trigger(&result_json, &resume_entrypoint);
 
     let mut lifecycle =
         crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&result_json), None);
@@ -793,6 +799,7 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
         checkpoint_id: ready_checkpoint_id,
         task_checkpoint,
         resume_entrypoint: resume_entrypoint_token(resume_entrypoint).to_string(),
+        resume_trigger,
         resume_wait_seconds: 0,
         completed_side_effect_count,
         requires_idempotency_guard,

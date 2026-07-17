@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
+use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tracing::{error, info, warn};
@@ -144,8 +145,6 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-
     for job in due_jobs {
         let next_run = schedule_service::compute_next_run_for_schedule(
             &job.schedule_type,
@@ -155,6 +154,18 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
             &job.timezone,
             now,
         );
+
+        if coalesce_active_scheduled_thread_wakeup(state, &job, now)? {
+            let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+            advance_scheduled_job(
+                &db,
+                &job,
+                next_run,
+                now,
+                job.last_thread_task_id.as_deref().unwrap_or_default(),
+            )?;
+            continue;
+        }
 
         let mut payload =
             serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
@@ -189,7 +200,9 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
                 map.insert(k, v);
             }
         }
-        db.execute(
+        let mut db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+        let tx = db.transaction()?;
+        tx.execute(
             "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, 'queued', NULL, NULL, ?10, ?10)",
             rusqlite::params![
@@ -206,7 +219,7 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
             ],
         )?;
         crate::scheduled_run_contract::insert_scheduled_run_enqueued(
-            &db,
+            &tx,
             &crate::scheduled_run_contract::ScheduledRunEnqueued {
                 run_id: &run_id,
                 job_id: &job.job_id,
@@ -215,28 +228,95 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
                 started_at: &now_text,
             },
         )?;
-
-        match next_run {
-            Some(ts) => {
-                db.execute(
-                    "UPDATE scheduled_jobs
-                     SET last_run_at = ?2, next_run_at = ?3, last_thread_task_id = ?5, updated_at = ?2
-                     WHERE job_id = ?1 AND next_run_at = ?4",
-                    rusqlite::params![job.job_id, now.to_string(), ts, job.next_run_at, task_id],
-                )?;
-            }
-            None => {
-                db.execute(
-                    "UPDATE scheduled_jobs
-                     SET enabled = 0, last_run_at = ?2, next_run_at = NULL, last_thread_task_id = ?4, updated_at = ?2
-                     WHERE job_id = ?1 AND next_run_at = ?3",
-                    rusqlite::params![job.job_id, now.to_string(), job.next_run_at, task_id],
-                )?;
-            }
+        if !advance_scheduled_job(&tx, &job, next_run, now, &task_id)? {
+            continue;
         }
+        tx.commit()?;
     }
 
     Ok(())
+}
+
+fn coalesce_active_scheduled_thread_wakeup(
+    state: &AppState,
+    job: &ScheduledJobDue,
+    now_ts: i64,
+) -> anyhow::Result<bool> {
+    if !job.thread_resume_enabled {
+        return Ok(false);
+    }
+    let Some(task_id) = job
+        .last_thread_task_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(false);
+    };
+    let status = {
+        let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+        db.query_row(
+            "SELECT status FROM tasks WHERE task_id = ?1 LIMIT 1",
+            rusqlite::params![task_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    };
+    let Some(status) = status else {
+        return Ok(false);
+    };
+    if !matches!(status.as_str(), "queued" | "running") {
+        return Ok(false);
+    }
+    if status == "running" {
+        let resume_trigger = crate::task_lifecycle::ResumeTrigger::ScheduledWakeup;
+        let _ = repo::resume_task_with_input(
+            state,
+            repo::TaskResumeControlInput {
+                task_id: task_id.to_string(),
+                checkpoint_id: None,
+                resume_trigger,
+                resume_reason: Some(resume_trigger.status_code().to_string()),
+                user_message: None,
+                new_constraints: Some(json!({
+                    "schedule_job_id": job.job_id,
+                    "thread_ref": crate::scheduled_run_contract::scheduled_run_thread_ref(&job.job_id),
+                    "wake_requested_at": now_ts,
+                })),
+            },
+        )?;
+    }
+    Ok(true)
+}
+
+fn advance_scheduled_job(
+    db: &rusqlite::Connection,
+    job: &ScheduledJobDue,
+    next_run: Option<i64>,
+    now_ts: i64,
+    task_id: &str,
+) -> anyhow::Result<bool> {
+    let changed = match next_run {
+        Some(next_run_at) => db.execute(
+            "UPDATE scheduled_jobs
+             SET last_run_at = ?2, next_run_at = ?3, last_thread_task_id = ?5, updated_at = ?2
+             WHERE job_id = ?1 AND next_run_at = ?4",
+            rusqlite::params![
+                job.job_id,
+                now_ts.to_string(),
+                next_run_at,
+                job.next_run_at,
+                task_id
+            ],
+        )?,
+        None => db.execute(
+            "UPDATE scheduled_jobs
+             SET enabled = 0, last_run_at = ?2, next_run_at = NULL, last_thread_task_id = ?4, updated_at = ?2
+             WHERE job_id = ?1 AND next_run_at = ?3",
+            rusqlite::params![job.job_id, now_ts.to_string(), job.next_run_at, task_id],
+        )?,
+    };
+    Ok(changed > 0)
 }
 
 fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
@@ -345,3 +425,7 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "background_workers_tests.rs"]
+mod tests;

@@ -67,6 +67,30 @@ impl ResumeTrigger {
             Self::AsyncJobPoll => "async_job_poll",
         }
     }
+
+    pub(crate) fn from_status_code(value: &str) -> Option<Self> {
+        match value.trim() {
+            "user_followup" => Some(Self::UserFollowup),
+            "scheduled_wakeup" => Some(Self::ScheduledWakeup),
+            "worker_recovery" => Some(Self::WorkerRecovery),
+            "async_job_poll" => Some(Self::AsyncJobPoll),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) fn checkpoint_resume_trigger(
+    result_json: &Value,
+    resume_entrypoint: &ResumeEntrypoint,
+) -> ResumeTrigger {
+    result_json
+        .pointer("/task_lifecycle/resume_input/resume_trigger")
+        .and_then(Value::as_str)
+        .and_then(ResumeTrigger::from_status_code)
+        .unwrap_or(match resume_entrypoint {
+            ResumeEntrypoint::PollAsyncJob => ResumeTrigger::AsyncJobPoll,
+            _ => ResumeTrigger::WorkerRecovery,
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

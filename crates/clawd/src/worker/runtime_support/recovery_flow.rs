@@ -103,7 +103,7 @@ fn prepare_due_paused_checkpoint_resume_work(
                     let work_item = build_paused_checkpoint_resume_work_item(
                         &claimed,
                         lease_seconds,
-                        crate::task_lifecycle::ResumeTrigger::WorkerRecovery,
+                        claimed.resume_trigger,
                         seed_report,
                     );
                     let work_item_payload = work_item.to_machine_json();

@@ -11,7 +11,7 @@ const TASK_CANCELLED_SOURCE: &str = "task_admin_cancel";
 const TASK_CANCELLED_MESSAGE_KEY: &str = "clawd.task.cancelled";
 const CHILD_TASK_PARENT_CANCELLED_REASON: &str = "parent_cancelled";
 const CHILD_TASK_PARENT_CANCELLED_MESSAGE_KEY: &str = "clawd.task.parent_cancelled";
-const TASK_CONTROL_SOURCE: &str = "task_admin_control";
+const TASK_CONTROL_SOURCE: &str = "task_control";
 const TASK_CONTROL_KIND_PAUSE: &str = "pause";
 const TASK_CONTROL_KIND_RESUME: &str = "resume";
 const TASK_CONTROL_STATUS_PENDING: &str = "pending";
@@ -44,6 +44,7 @@ pub(crate) struct TaskControlUpdate {
 pub(crate) struct TaskResumeControlInput {
     pub(crate) task_id: String,
     pub(crate) checkpoint_id: Option<String>,
+    pub(crate) resume_trigger: crate::task_lifecycle::ResumeTrigger,
     pub(crate) resume_reason: Option<String>,
     pub(crate) user_message: Option<String>,
     pub(crate) new_constraints: Option<Value>,
@@ -753,18 +754,22 @@ fn update_paused_checkpoint_schedule(
         json!(next_check_after.saturating_sub(now_ts).max(0)),
     );
     obj.insert("message_key".to_string(), json!(message_key));
-    obj.insert("manual_control_requested_at".to_string(), json!(now_ts));
     obj.insert(
-        "manual_control_kind".to_string(),
-        json!(if resume_input.is_some() {
-            TASK_CONTROL_KIND_RESUME
-        } else {
-            TASK_CONTROL_KIND_PAUSE
+        "control_request".to_string(),
+        json!({
+            "schema_version": 1,
+            "kind": if resume_input.is_some() {
+                TASK_CONTROL_KIND_RESUME
+            } else {
+                TASK_CONTROL_KIND_PAUSE
+            },
+            "status": TASK_CONTROL_STATUS_PENDING,
+            "requested_at": now_ts,
+            "trigger": resume_input
+                .map(|input| input.resume_trigger.status_code())
+                .unwrap_or(crate::task_lifecycle::ResumeTrigger::UserFollowup.status_code()),
+            "checkpoint_id": checkpoint_id,
         }),
-    );
-    obj.insert(
-        "manual_control_status".to_string(),
-        json!(TASK_CONTROL_STATUS_PENDING),
     );
     if let Some(resume_input) = resume_input {
         obj.insert(
@@ -807,13 +812,14 @@ fn pending_manual_resume_request_without_claim(result: &Value, checkpoint_id: &s
         .and_then(Value::as_str)
         .map(str::trim)
         == Some(checkpoint_id);
-    let pending_resume = lifecycle
-        .get("manual_control_kind")
+    let control_request = lifecycle.get("control_request").and_then(Value::as_object);
+    let pending_resume = control_request
+        .and_then(|request| request.get("kind"))
         .and_then(Value::as_str)
         .map(str::trim)
         == Some(TASK_CONTROL_KIND_RESUME)
-        && lifecycle
-            .get("manual_control_status")
+        && control_request
+            .and_then(|request| request.get("status"))
             .and_then(Value::as_str)
             .map(str::trim)
             == Some(TASK_CONTROL_STATUS_PENDING);
@@ -835,7 +841,7 @@ fn task_resume_control_input_json(input: &TaskResumeControlInput, checkpoint_id:
         "schema_version": 1,
         "task_id": input.task_id.trim(),
         "checkpoint_id": checkpoint_id,
-        "resume_trigger": "user_followup",
+        "resume_trigger": input.resume_trigger.status_code(),
         "user_message_present": input
             .user_message
             .as_deref()
