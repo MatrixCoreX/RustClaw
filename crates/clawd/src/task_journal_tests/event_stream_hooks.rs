@@ -930,8 +930,18 @@ fn trace_json_projects_agent_hook_observations_as_hook_events() {
         "stage": "pre_tool_use",
         "decision": "allow",
         "reason_code": "pre_tool_use_allowed",
+        "status_code": "pre_tool_use_allowed",
         "action_ref": "fs_basic.list_dir",
-        "tool_or_skill": "fs_basic"
+        "tool_or_skill": "fs_basic",
+        "handler_id": "workspace_policy_guard",
+        "handler_kind": "command",
+        "blocking": true,
+        "failure_policy": "deny",
+        "trust_status": "trusted",
+        "content_sha256": "sha256:fixture",
+        "duration_ms": 12,
+        "attempts": 1,
+        "output_truncated": false
     }));
 
     let trace = journal.to_trace_json();
@@ -955,6 +965,22 @@ fn trace_json_projects_agent_hook_observations_as_hook_events() {
     assert_eq!(
         event.pointer("/payload/action_ref").and_then(Value::as_str),
         Some("fs_basic.list_dir")
+    );
+    assert_eq!(
+        event.pointer("/payload/handler_id").and_then(Value::as_str),
+        Some("workspace_policy_guard")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/trust_status")
+            .and_then(Value::as_str),
+        Some("trusted")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/duration_ms")
+            .and_then(Value::as_u64),
+        Some(12)
     );
 }
 
