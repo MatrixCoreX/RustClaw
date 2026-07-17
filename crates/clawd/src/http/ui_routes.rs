@@ -192,6 +192,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
         .route("/debug/usage-records", get(usage_records))
         .route("/debug/usage-records/:record_id", get(usage_record_detail))
+        .route("/observability/slo", get(observability_slo_metrics))
         .route("/wechat/login-status", get(wechat_login_status))
         .route("/wechat/login-qr/start", post(wechat_login_qr_start))
         .route("/wechat/login-qr/wait", post(wechat_login_qr_wait))
@@ -315,6 +316,7 @@ include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");
 include!("ui_routes/task_debug_trace.rs");
 include!("ui_routes/logs_usage_debug.rs");
+include!("ui_routes/slo_metrics.rs");
 include!("ui_routes/service_control.rs");
 include!("ui_routes/workspace_update.rs");
 include!("ui_routes/health_skills_import.rs");
@@ -326,3 +328,7 @@ include!("ui_routes/messaging_login.rs");
 #[cfg(test)]
 #[path = "ui_routes_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ui_routes/slo_metrics_tests.rs"]
+mod slo_metrics_tests;
