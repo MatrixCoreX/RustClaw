@@ -973,6 +973,116 @@ pub(super) fn publish_agent_loop_user_input_checkpoint_progress(
     }
 }
 
+pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut super::LoopState,
+    action_ref: &str,
+    fingerprint_hash: &str,
+    ledger_status: &str,
+) {
+    let now_ts = crate::now_ts_u64() as i64;
+    let budget = checkpoint_budget_counters(
+        loop_state,
+        state.task_llm_call_count(&task.task_id),
+        state.task_llm_elapsed_ms(&task.task_id),
+    );
+    let checkpoint_id =
+        agent_loop_checkpoint_id(task, loop_state, "mutation_reconciliation_required");
+    let pending_action = json!({
+        "schema_version": 1,
+        "kind": "mutation_reconciliation",
+        "action_ref": action_ref,
+        "fingerprint_hash": fingerprint_hash,
+        "ledger_status": ledger_status,
+        "resume_expected": "verified_effect_outcome",
+    });
+    let checkpoint = TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: checkpoint_id.clone(),
+        boundary_context: json!({
+            "schema_version": 1,
+            "source": "task_mutation_ledger",
+            "task_id": task.task_id,
+            "reason_code": "mutation_outcome_unknown",
+            "message_key": "clawd.task.mutation_outcome_unknown",
+            "action_ref": action_ref,
+            "fingerprint_hash": fingerprint_hash,
+            "ledger_status": ledger_status,
+            "requires_reconciliation": true,
+        }),
+        last_successful_round: (loop_state.round_no > 0)
+            .then_some(saturating_u32(loop_state.round_no)),
+        last_successful_step: loop_state
+            .executed_step_results
+            .iter()
+            .rev()
+            .find(|step| step.is_ok())
+            .map(|step| step.step_id.clone()),
+        pending_action: Some(pending_action),
+        observations: checkpoint_step_observations(loop_state),
+        evidence_refs: loop_state
+            .executed_step_results
+            .iter()
+            .filter(|step| step.is_ok())
+            .map(|step| step.step_id.clone())
+            .collect(),
+        artifact_refs: checkpoint_artifact_refs(loop_state),
+        completed_side_effect_refs: completed_side_effect_refs(loop_state),
+        budget: budget.clone(),
+        attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
+        pending_async_job: None,
+        repair_signal: None,
+        resume_entrypoint: ResumeEntrypoint::AwaitUserInput,
+    };
+    let lifecycle = json!({
+        "schema_version": 1,
+        "state": TaskLifecycleState::NeedsUser,
+        "source": "task_mutation_ledger",
+        "resume_reason": "mutation_reconciliation_required",
+        "pause_reason_code": "mutation_outcome_unknown",
+        "next_action": "verify_mutation_outcome",
+        "checkpoint_id": checkpoint_id,
+        "can_poll": false,
+        "can_cancel": true,
+        "last_heartbeat_ts": now_ts,
+        "message_key": "clawd.task.mutation_outcome_unknown",
+        "action_ref": action_ref,
+        "fingerprint_hash": fingerprint_hash,
+        "ledger_status": ledger_status,
+        "requires_reconciliation": true,
+        "budget": budget,
+    });
+    let payload = json!({
+        "progress_messages": loop_state.progress_messages,
+        "task_lifecycle": lifecycle,
+        "task_checkpoint": checkpoint.to_machine_json(),
+    });
+    loop_state.task_lifecycle = payload.get("task_lifecycle").cloned();
+    loop_state.task_checkpoint = payload.get("task_checkpoint").cloned();
+    loop_state.output_vars.insert(
+        "agent_loop.resume_reason".to_string(),
+        "mutation_reconciliation_required".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.mutation_reconciliation_required".to_string(),
+        "true".to_string(),
+    );
+    if let Err(error) =
+        repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
+    {
+        warn!(
+            "run_agent_with_tools: task_id={} publish mutation reconciliation checkpoint failed: {}",
+            task.task_id, error
+        );
+    } else {
+        debug!(
+            "mutation reconciliation checkpoint published task_id={} action_ref={}",
+            task.task_id, action_ref
+        );
+    }
+}
+
 /// Max length for args summary in progress hint. Longer summaries are truncated with "...".
 pub(super) const PROGRESS_ARGS_SUMMARY_MAX_LEN: usize = 160;
 
@@ -1314,7 +1424,9 @@ pub(super) fn action_fingerprint_for_policy(
     if !policy.registry_idempotency_guard_enabled() {
         return action_fingerprint(state, action);
     }
-    let Some((skill_name, args)) = action_skill_and_args(action) else {
+    let resolved_action = resolved_registry_action_for_policy(state, action);
+    let policy_action = resolved_action.as_ref().unwrap_or(action);
+    let Some((skill_name, args)) = action_skill_and_args(policy_action) else {
         return action_fingerprint(state, action);
     };
     let normalized_skill = state
@@ -1331,7 +1443,7 @@ pub(super) fn action_fingerprint_for_policy(
             action_token.as_deref(),
             args,
         ) {
-            return action_fingerprint(state, action);
+            return action_fingerprint(state, policy_action);
         }
         return format!(
             "skill:{}:action:{}",
@@ -1339,7 +1451,7 @@ pub(super) fn action_fingerprint_for_policy(
             action_token.unwrap_or_else(|| "_default".to_string())
         );
     }
-    action_fingerprint(state, action)
+    action_fingerprint(state, policy_action)
 }
 
 pub(super) fn registry_idempotency_guard_attribution(
@@ -1354,7 +1466,9 @@ pub(super) fn registry_idempotency_guard_attribution(
     if !policy.registry_idempotency_guard_enabled() {
         return None;
     }
-    let (skill_name, args) = action_skill_and_args(action)?;
+    let resolved_action = resolved_registry_action_for_policy(state, action);
+    let policy_action = resolved_action.as_ref().unwrap_or(action);
+    let (skill_name, args) = action_skill_and_args(policy_action)?;
     let normalized_skill = state
         .resolve_canonical_skill_name(skill_name)
         .to_ascii_lowercase();
@@ -1379,6 +1493,18 @@ pub(super) fn registry_idempotency_guard_attribution(
             limit,
         ),
     )
+}
+
+fn resolved_registry_action_for_policy(
+    state: &AppState,
+    action: &AgentAction,
+) -> Option<AgentAction> {
+    if !matches!(action, AgentAction::CallCapability { .. }) {
+        return None;
+    }
+    let resolved =
+        crate::capability_resolver::resolve_agent_action_for_state(state, action.clone());
+    (!matches!(resolved, AgentAction::CallCapability { .. })).then_some(resolved)
 }
 
 fn action_skill_and_args(action: &AgentAction) -> Option<(&str, &Value)> {

@@ -17,6 +17,7 @@ pub(crate) mod loop_control;
 mod loop_state_contract_evidence;
 mod loop_state_seed;
 mod media_artifact_plan;
+mod mutation_ledger;
 pub(crate) mod observed_output;
 mod planner_skill_context;
 mod planning;

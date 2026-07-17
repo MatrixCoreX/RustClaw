@@ -141,3 +141,19 @@ CREATE TABLE IF NOT EXISTS task_event_artifacts (
     created_at_ms INTEGER NOT NULL,
     PRIMARY KEY (task_id, artifact_id)
 );
+
+CREATE TABLE IF NOT EXISTS task_mutation_ledger (
+    task_id            TEXT NOT NULL,
+    fingerprint_hash   TEXT NOT NULL,
+    action_ref         TEXT NOT NULL,
+    status             TEXT NOT NULL CHECK (status IN ('started', 'completed', 'uncertain')),
+    execution_token    TEXT NOT NULL,
+    outcome_hash       TEXT,
+    outcome_json       TEXT,
+    started_at         INTEGER NOT NULL,
+    updated_at         INTEGER NOT NULL,
+    completed_at       INTEGER,
+    PRIMARY KEY (task_id, fingerprint_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_task_mutation_ledger_status_updated
+    ON task_mutation_ledger(status, updated_at);

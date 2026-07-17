@@ -12,6 +12,9 @@ const TASK_CANCELLED_MESSAGE_KEY: &str = "clawd.task.cancelled";
 const CHILD_TASK_PARENT_CANCELLED_REASON: &str = "parent_cancelled";
 const CHILD_TASK_PARENT_CANCELLED_MESSAGE_KEY: &str = "clawd.task.parent_cancelled";
 const TASK_CONTROL_SOURCE: &str = "task_admin_control";
+const TASK_CONTROL_KIND_PAUSE: &str = "pause";
+const TASK_CONTROL_KIND_RESUME: &str = "resume";
+const TASK_CONTROL_STATUS_PENDING: &str = "pending";
 const TASK_PAUSED_MESSAGE_KEY: &str = "clawd.task.pause_requested";
 const TASK_RESUMED_MESSAGE_KEY: &str = "clawd.task.resume_requested";
 
@@ -729,6 +732,11 @@ fn update_paused_checkpoint_schedule(
             return Ok(None);
         }
     }
+    if resume_input.is_some()
+        && pending_manual_resume_request_without_claim(&result_json, &checkpoint_id)
+    {
+        return Ok(None);
+    }
     let mut lifecycle =
         crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&result_json), None);
     let Some(obj) = lifecycle.as_object_mut() else {
@@ -746,6 +754,18 @@ fn update_paused_checkpoint_schedule(
     );
     obj.insert("message_key".to_string(), json!(message_key));
     obj.insert("manual_control_requested_at".to_string(), json!(now_ts));
+    obj.insert(
+        "manual_control_kind".to_string(),
+        json!(if resume_input.is_some() {
+            TASK_CONTROL_KIND_RESUME
+        } else {
+            TASK_CONTROL_KIND_PAUSE
+        }),
+    );
+    obj.insert(
+        "manual_control_status".to_string(),
+        json!(TASK_CONTROL_STATUS_PENDING),
+    );
     if let Some(resume_input) = resume_input {
         obj.insert(
             "resume_input".to_string(),
@@ -776,6 +796,38 @@ fn update_paused_checkpoint_schedule(
         checkpoint_id,
         lifecycle,
     }))
+}
+
+fn pending_manual_resume_request_without_claim(result: &Value, checkpoint_id: &str) -> bool {
+    let Some(lifecycle) = result.get("task_lifecycle").and_then(Value::as_object) else {
+        return false;
+    };
+    let same_checkpoint = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        == Some(checkpoint_id);
+    let pending_resume = lifecycle
+        .get("manual_control_kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        == Some(TASK_CONTROL_KIND_RESUME)
+        && lifecycle
+            .get("manual_control_status")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some(TASK_CONTROL_STATUS_PENDING);
+    let claim_exists = lifecycle
+        .get("resume_claim")
+        .and_then(Value::as_object)
+        .is_some_and(|claim| {
+            claim
+                .get("checkpoint_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                == Some(checkpoint_id)
+        });
+    same_checkpoint && pending_resume && !claim_exists
 }
 
 fn task_resume_control_input_json(input: &TaskResumeControlInput, checkpoint_id: &str) -> Value {

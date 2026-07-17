@@ -112,9 +112,12 @@ pub(crate) fn list_planned_paused_checkpoint_resume_executions_internal(
         else {
             continue;
         };
-        if let Some(planned) =
-            planned_paused_checkpoint_resume_execution_from_result_json(task, &result_json, now_ts)
-        {
+        if let Some(planned) = planned_paused_checkpoint_resume_execution_from_result_json(
+            task,
+            &result_json,
+            &state.worker.worker_id,
+            now_ts,
+        ) {
             out.push(planned);
             if out.len() >= limit {
                 break;
@@ -168,9 +171,12 @@ pub(crate) fn list_handoff_paused_checkpoint_resume_executions_internal(
         else {
             continue;
         };
-        if let Some(handoff) =
-            handoff_paused_checkpoint_resume_execution_from_result_json(task, &result_json, now_ts)
-        {
+        if let Some(handoff) = handoff_paused_checkpoint_resume_execution_from_result_json(
+            task,
+            &result_json,
+            &state.worker.worker_id,
+            now_ts,
+        ) {
             out.push(handoff);
             if out.len() >= limit {
                 break;
@@ -275,6 +281,7 @@ pub(crate) fn record_planned_paused_checkpoint_resume_handoff_internal(
             payload_json: String::new(),
         },
         &result_json,
+        &state.worker.worker_id,
         now_ts,
     )
     .filter(|planned| {
@@ -401,6 +408,7 @@ pub(crate) fn claim_handoff_paused_checkpoint_resume_execution_internal(
     let Some(handoff) = handoff_paused_checkpoint_resume_execution_from_result_json(
         task.clone(),
         &result_json,
+        &state.worker.worker_id,
         now_ts,
     ) else {
         return Ok(None);
@@ -685,6 +693,7 @@ pub(crate) fn record_claimed_handoff_paused_checkpoint_resume_dispatch_internal(
 fn planned_paused_checkpoint_resume_execution_from_result_json(
     task: ClaimedTask,
     result_json: &Value,
+    expected_worker_id: &str,
     now_ts: i64,
 ) -> Option<PlannedPausedCheckpointResumeExecution> {
     let lifecycle =
@@ -705,6 +714,9 @@ fn planned_paused_checkpoint_resume_execution_from_result_json(
         .filter(|value| !value.is_empty())?;
     let task_checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(result_json)?;
     if task_checkpoint.checkpoint_id != checkpoint_id {
+        return None;
+    }
+    if !active_resume_claim_owner(lifecycle_obj, checkpoint_id, expected_worker_id, now_ts) {
         return None;
     }
     let claim = lifecycle_obj.get("resume_executor_claim")?;
@@ -812,6 +824,7 @@ fn planned_paused_checkpoint_resume_execution_from_result_json(
 fn handoff_paused_checkpoint_resume_execution_from_result_json(
     task: ClaimedTask,
     result_json: &Value,
+    expected_worker_id: &str,
     now_ts: i64,
 ) -> Option<HandoffPausedCheckpointResumeExecution> {
     let lifecycle =
@@ -832,6 +845,9 @@ fn handoff_paused_checkpoint_resume_execution_from_result_json(
         .filter(|value| !value.is_empty())?;
     let task_checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(result_json)?;
     if task_checkpoint.checkpoint_id != checkpoint_id {
+        return None;
+    }
+    if !active_resume_claim_owner(lifecycle_obj, checkpoint_id, expected_worker_id, now_ts) {
         return None;
     }
     let claim = lifecycle_obj.get("resume_executor_claim")?;
@@ -938,6 +954,29 @@ fn handoff_paused_checkpoint_resume_execution_from_result_json(
         handoff_payload: handoff_payload.clone(),
         task_checkpoint,
     })
+}
+
+pub(super) fn active_resume_claim_owner(
+    lifecycle: &serde_json::Map<String, Value>,
+    checkpoint_id: &str,
+    expected_worker_id: &str,
+    now_ts: i64,
+) -> bool {
+    let Some(claim) = lifecycle
+        .get("resume_claim")
+        .filter(|value| value.is_object())
+    else {
+        return false;
+    };
+    claim.get("text").is_none()
+        && claim.get("error_text").is_none()
+        && claim
+            .get("checkpoint_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some(checkpoint_id)
+        && claim.get("owner").and_then(Value::as_str).map(str::trim) == Some(expected_worker_id)
+        && claim.get("expires_at").and_then(Value::as_i64).unwrap_or(0) > now_ts
 }
 
 fn matching_resume_executor_handoff<'a>(
