@@ -917,6 +917,8 @@ pub struct LlmConfig {
     #[serde(default)]
     pub pricing: Vec<LlmModelPricingConfig>,
     #[serde(default)]
+    pub cost_governance: LlmCostGovernanceConfig,
+    #[serde(default)]
     pub openai: Option<LlmVendorConfig>,
     #[serde(default)]
     pub google: Option<LlmVendorConfig>,
@@ -937,6 +939,39 @@ pub struct LlmConfig {
     // Legacy flat provider list, kept for backward compatibility.
     #[serde(default)]
     pub providers: Vec<LlmProviderConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LlmCostGovernanceConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub soft_task_usd: Option<f64>,
+    #[serde(default)]
+    pub soft_user_24h_usd: Option<f64>,
+    #[serde(default)]
+    pub soft_provider_24h_usd: Option<f64>,
+    #[serde(default)]
+    pub hard_task_usd: Option<f64>,
+    #[serde(default = "default_llm_cost_checkpoint_retry_after_seconds")]
+    pub checkpoint_retry_after_seconds: u64,
+}
+
+impl Default for LlmCostGovernanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            soft_task_usd: None,
+            soft_user_24h_usd: None,
+            soft_provider_24h_usd: None,
+            hard_task_usd: None,
+            checkpoint_retry_after_seconds: default_llm_cost_checkpoint_retry_after_seconds(),
+        }
+    }
+}
+
+fn default_llm_cost_checkpoint_retry_after_seconds() -> u64 {
+    3_600
 }
 
 #[derive(Debug, Clone, Deserialize)]

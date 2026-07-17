@@ -226,6 +226,7 @@ pub(crate) struct PolicyConfig {
     pub(crate) memory: MemoryConfig,
     pub(crate) routing: RoutingConfig,
     pub(crate) self_extension: SelfExtensionConfig,
+    pub(crate) llm_cost_governance: claw_core::config::LlmCostGovernanceConfig,
     pub(crate) rate_limiter: Arc<Mutex<RateLimiter>>,
     pub(crate) allow_path_outside_workspace: bool,
     pub(crate) allow_sudo: bool,
@@ -260,6 +261,7 @@ impl PolicyConfig {
             memory: MemoryConfig::default(),
             routing: RoutingConfig::default(),
             self_extension: SelfExtensionConfig::default(),
+            llm_cost_governance: claw_core::config::LlmCostGovernanceConfig::default(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
             allow_path_outside_workspace: false,
             allow_sudo: false,
@@ -406,6 +408,9 @@ pub(crate) struct TaskMetricsRegistry {
     pub(crate) llm_call_sequence_per_task: Arc<Mutex<HashMap<String, Vec<LlmCallSequenceEntry>>>>,
     pub(crate) llm_cost_records_per_task:
         Arc<Mutex<HashMap<String, Vec<crate::providers::LlmCallCostRecord>>>>,
+    pub(crate) llm_cost_budget_per_task:
+        Arc<Mutex<HashMap<String, crate::runtime::LlmCostBudgetSnapshot>>>,
+    pub(crate) cost_blocker_per_task: Arc<Mutex<HashMap<String, TaskCostBlocker>>>,
     /// Final machine-classified provider blocker for the current task attempt. This is only set
     /// after the complete fallback set is exhausted and is consumed by finalization to create a
     /// resumable waiting checkpoint.
@@ -422,6 +427,30 @@ pub(crate) struct TaskProviderBlocker {
     pub(crate) retry_after_seconds: u64,
     pub(crate) external_provider_blocked: bool,
     pub(crate) message_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskCostBlocker {
+    pub(crate) status_code: String,
+    pub(crate) scope: String,
+    pub(crate) observed_cost_usd_nanos: u64,
+    pub(crate) limit_cost_usd_nanos: u64,
+    pub(crate) retry_after_seconds: u64,
+    pub(crate) message_key: String,
+}
+
+impl TaskCostBlocker {
+    pub(crate) fn to_machine_json(&self) -> Value {
+        serde_json::json!({
+            "status_code": self.status_code,
+            "policy_block_class": self.status_code,
+            "scope": self.scope,
+            "observed_cost_usd_nanos": self.observed_cost_usd_nanos,
+            "limit_cost_usd_nanos": self.limit_cost_usd_nanos,
+            "retry_after_seconds": self.retry_after_seconds.max(1),
+            "message_key": self.message_key,
+        })
+    }
 }
 
 impl TaskProviderBlocker {
@@ -893,6 +922,7 @@ impl AppState {
             memory: memory_runtime,
             routing: config.routing.clone(),
             self_extension: config.self_extension.clone(),
+            llm_cost_governance: config.llm.cost_governance.clone(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
                 config.limits.global_rpm,
                 config.limits.user_rpm,
@@ -1324,6 +1354,8 @@ impl AppState {
             .unwrap()
             .remove(task_id);
         self.clear_task_llm_cost_records(task_id);
+        self.clear_task_llm_cost_budget(task_id);
+        self.clear_task_cost_blocker(task_id);
         self.clear_task_provider_blocker(task_id);
     }
 
