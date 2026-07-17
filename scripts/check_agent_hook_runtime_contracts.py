@@ -55,6 +55,11 @@ REQUIRED_FILE_TOKENS = {
     ),
     "crates/clawd/src/agent_hooks/runtime.rs": (
         "load_hook_configuration",
+        "hook_admin_status_for_state",
+        "build_hook_admin_status",
+        "redacted_handler_config",
+        '"ui_enable_supported": false',
+        '"raw_config_redacted": true',
         "lifecycle_stage_outcome_for_state",
         "evaluate_loaded_handlers",
         "lifecycle_reason_code",
@@ -63,6 +68,24 @@ REQUIRED_FILE_TOKENS = {
         "run_mcp_handler",
         "record_validation_failure",
         "merge_hook_decision",
+    ),
+    "crates/clawd/src/agent_hooks/runtime_admin_tests.rs": (
+        "admin_status_defaults_safe_and_redacts_handler_values",
+        "admin_status_reports_enabled_validation_and_config_errors",
+        '"must-not-reach-api"',
+        '"secret.example.invalid"',
+        '"HOOK_TOKEN_ENV"',
+        '"configuration_error"',
+    ),
+    "crates/clawd/src/hook_admin_routes.rs": (
+        "require_hook_admin",
+        "hook_admin_required",
+        "get_hook_status",
+        "hook_admin_status_for_state",
+    ),
+    "crates/clawd/src/main.rs": (
+        '"/admin/hooks/status"',
+        "get_hook_status",
     ),
     "crates/clawd/src/agent_hooks/command.rs": (
         "validate_command_handler",
@@ -196,6 +219,27 @@ REQUIRED_FILE_TOKENS = {
     ),
     "UI/src/lib/task-result.test.ts": (
         "projects agent hook execution fields for teaching traces",
+    ),
+    "UI/src/hooks/useHookAdminRuntime.ts": (
+        '"/v1/admin/hooks/status"',
+        "HookAdminStatus",
+        "hookStatusLoading",
+        "hookStatusError",
+        "refreshHookStatus",
+    ),
+    "UI/src/components/HookAdminSection.tsx": (
+        "Lifecycle extensions",
+        "ui_enable_supported",
+        "redacted_config",
+        "View redacted machine config",
+        "This page reads and validates status only",
+    ),
+    "UI/src/types/api.ts": (
+        "HookAdminHandler",
+        "HookAdminStatus",
+        "redacted_config",
+        "setup_state",
+        "raw_config_redacted",
     ),
     "configs/agent_guard.toml": (
         "[[agent.hooks.handlers]]",

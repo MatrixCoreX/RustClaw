@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::shared::{
     handler_observation, lifecycle_hook_event, pre_tool_hook_event, safe_handler_id, ExecutedHook,
@@ -57,6 +57,131 @@ pub(crate) async fn lifecycle_stage_outcome_for_state(
         load_hook_configuration(state),
     )
     .await
+}
+
+pub(crate) fn hook_admin_status_for_state(state: &AppState) -> Value {
+    build_hook_admin_status(load_hook_configuration(state), |handler| {
+        let validation = match handler.kind.trim() {
+            "command" => {
+                command::validate_command_handler(&state.skill_rt.workspace_root, handler.clone())
+                    .map(|_| ())
+            }
+            "http" => http::validate_http_handler(handler.clone()).map(|_| ()),
+            "mcp" => {
+                mcp::validate_mcp_handler(&state.core.mcp_runtime, handler.clone()).map(|_| ())
+            }
+            _ => Err((
+                safe_handler_id(&handler.id),
+                "hook_handler_kind_unsupported",
+            )),
+        };
+        validation.map_err(|(_, error_code)| error_code)
+    })
+}
+
+fn build_hook_admin_status(
+    loaded: LoadedHookConfiguration,
+    mut validate: impl FnMut(&HookHandlerConfig) -> Result<(), &'static str>,
+) -> Value {
+    let config_error_code = loaded.error_code;
+    let mut enabled_count = 0usize;
+    let mut valid_count = 0usize;
+    let mut invalid_count = 0usize;
+    let handlers = loaded
+        .handlers
+        .iter()
+        .map(|handler| {
+            let (status, error_code) = if !handler.enabled {
+                ("disabled", None)
+            } else {
+                enabled_count += 1;
+                match validate(handler) {
+                    Ok(()) => {
+                        valid_count += 1;
+                        ("ready", None)
+                    }
+                    Err(error_code) => {
+                        invalid_count += 1;
+                        ("invalid", Some(error_code))
+                    }
+                }
+            };
+            json!({
+                "id": safe_handler_id(&handler.id),
+                "stage": normalize_machine_token(&handler.stage),
+                "kind": normalize_machine_token(&handler.kind),
+                "enabled": handler.enabled,
+                "blocking": handler.blocking,
+                "trusted": handler.trusted,
+                "trust_status": if handler.trusted { "trusted" } else { "untrusted" },
+                "content_hash_configured": !handler.content_sha256.trim().is_empty(),
+                "status": status,
+                "error_code": error_code,
+                "redacted_config": redacted_handler_config(handler),
+            })
+        })
+        .collect::<Vec<_>>();
+    let setup_state = if config_error_code.is_some() {
+        "configuration_error"
+    } else if enabled_count > 0 && invalid_count > 0 {
+        "configured_invalid"
+    } else if enabled_count > 0 {
+        "active"
+    } else if handlers.is_empty() {
+        "disabled_baseline"
+    } else {
+        "configured_disabled"
+    };
+    json!({
+        "schema_version": 1,
+        "config_path": "configs/agent_guard.toml",
+        "setup_state": setup_state,
+        "default_safe": true,
+        "fail_closed": config_error_code.is_some() || invalid_count > 0,
+        "enabled": enabled_count > 0,
+        "handler_count": handlers.len(),
+        "enabled_handler_count": enabled_count,
+        "valid_handler_count": valid_count,
+        "invalid_handler_count": invalid_count,
+        "config_error_code": config_error_code,
+        "supported_stages": HookStage::all()
+            .iter()
+            .map(|stage| stage.as_token())
+            .collect::<Vec<_>>(),
+        "setup": {
+            "mode": "reviewed_config_only",
+            "ui_enable_supported": false,
+            "trust_required": true,
+            "content_hash_required_for_command": true,
+            "raw_config_redacted": true,
+        },
+        "handlers": handlers,
+    })
+}
+
+fn redacted_handler_config(handler: &HookHandlerConfig) -> Value {
+    json!({
+        "id": safe_handler_id(&handler.id),
+        "stage": normalize_machine_token(&handler.stage),
+        "kind": normalize_machine_token(&handler.kind),
+        "enabled": handler.enabled,
+        "trusted": handler.trusted,
+        "blocking": handler.blocking,
+        "path": handler.path,
+        "argument_count": handler.args.len(),
+        "arguments_redacted": !handler.args.is_empty(),
+        "content_sha256": handler.content_sha256,
+        "url_configured": !handler.url.trim().is_empty(),
+        "auth_token_env_configured": handler.auth_token_env.is_some(),
+        "allow_insecure_loopback": handler.allow_insecure_loopback,
+        "capability": normalize_machine_token(&handler.capability),
+        "event_argument": normalize_machine_token(&handler.event_argument),
+        "timeout_ms": handler.timeout_ms,
+        "max_input_bytes": handler.max_input_bytes,
+        "max_output_bytes": handler.max_output_bytes,
+        "max_attempts": handler.max_attempts,
+        "failure_policy": normalize_machine_token(&handler.failure_policy),
+    })
 }
 
 fn lifecycle_reason_code(stage: HookStage, metadata: &Value) -> String {
@@ -304,3 +429,7 @@ fn load_hook_configuration(state: &AppState) -> LoadedHookConfiguration {
         error_code: None,
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_admin_tests.rs"]
+mod admin_tests;
