@@ -71,4 +71,14 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
         .context_bundle
         .summary()
         .contains("deterministic_context_budget"));
+    assert_ne!(
+        record["model_status_code"],
+        "context_compaction_model_completed"
+    );
+    assert!(record["model_status_code"]
+        .as_str()
+        .unwrap()
+        .starts_with("context_compaction_"));
+    assert_eq!(record["compaction_source"], "deterministic_fallback");
+    assert_eq!(record["model_summary_attached"], false);
 }

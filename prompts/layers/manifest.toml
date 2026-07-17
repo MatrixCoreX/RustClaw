@@ -88,6 +88,12 @@ overlay = ["prompts/layers/overlays/long_term_summary_prompt.md"]
 vendor_patch = "summary/common.md"
 
 [[prompts]]
+logical_path = "prompts/context_compaction_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/context_compaction_prompt.md"]
+vendor_patch = "summary/common.md"
+
+[[prompts]]
 logical_path = "prompts/schedule_intent_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",

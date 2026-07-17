@@ -47,6 +47,14 @@ pub(super) async fn prepare_ask_execution_context(
         .await;
         initial_task_observations
             .extend(pre_compact.machine_observations("agent_loop.context_compaction"));
+        let (model_summary, model_status_code) =
+            crate::agent_engine::run_model_assisted_context_compaction(
+                state,
+                task,
+                &context_bundle,
+                &compaction_plan,
+            )
+            .await;
         let compaction_record = crate::task_context_builder::apply_agent_loop_context_compaction(
             state,
             task,
@@ -54,6 +62,8 @@ pub(super) async fn prepare_ask_execution_context(
             chat_memory_budget_chars,
             &mut context_bundle,
             &compaction_plan,
+            model_summary,
+            model_status_code,
         );
         let post_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
             state,
@@ -66,6 +76,8 @@ pub(super) async fn prepare_ask_execution_context(
                 "compaction_id": compaction_record.get("compaction_id"),
                 "before_char_count": compaction_record.get("before_char_count"),
                 "after_char_count": compaction_record.get("after_char_count"),
+                "model_status_code": compaction_record.get("model_status_code"),
+                "model_summary_attached": compaction_record.get("model_summary_attached"),
                 "source_ref_count": compaction_record
                     .get("source_refs")
                     .and_then(Value::as_array)

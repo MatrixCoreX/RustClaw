@@ -81,6 +81,7 @@ pub(crate) fn local_code_strict_json_projection_should_defer_finalizer_fallback(
         agent_run_context,
     )
 }
+pub(crate) use self::context_compaction::run_model_assisted_context_compaction;
 use self::execution_loop::execute_actions_once;
 pub(crate) use self::filesystem_lifecycle_contract::{
     enrich_scratch_filesystem_cleanup_runtime_args,

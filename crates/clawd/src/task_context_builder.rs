@@ -11,7 +11,7 @@ mod compaction;
 mod summary;
 
 pub(crate) use compaction::{
-    apply_agent_loop_context_compaction, plan_agent_loop_context_compaction,
+    apply_agent_loop_context_compaction, plan_agent_loop_context_compaction, ContextCompactionPlan,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -37,6 +37,7 @@ pub(crate) struct ExecutionContextView {
     pub(crate) last_turn_full: String,
     pub(crate) recent_execution_anchor: String,
     pub(crate) recent_execution_context: String,
+    pub(crate) compacted_history_context: String,
     pub(crate) image_context: Option<String>,
 }
 
@@ -81,7 +82,7 @@ fn context_slot_present(value: &str) -> bool {
 
 const LONG_SESSION_CONTEXT_CHARS: usize = 4096;
 
-fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 11] {
+fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 12] {
     [
         (
             "prompt_memory_context",
@@ -104,6 +105,10 @@ fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 1
         (
             "recent_execution_context",
             view.recent_execution_context.as_str(),
+        ),
+        (
+            "compacted_history_context",
+            view.compacted_history_context.as_str(),
         ),
         (
             "image_context",
@@ -178,6 +183,7 @@ fn context_input_inventory_json(view: &ExecutionContextView) -> Value {
             &["recent_execution_context"],
             &slots,
         ),
+        context_input_inventory_item("compacted_history", &["compacted_history_context"], &slots),
         context_input_inventory_item("llm_trace_debug_data", &[], &slots),
         context_input_inventory_item(
             "coding_evidence",
@@ -559,6 +565,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         recent_execution_context: crate::routing_context::build_recent_execution_context(
             state, task, 8,
         ),
+        compacted_history_context: "<none>".to_string(),
         image_context: None,
     };
     TaskContextBundle {
@@ -643,6 +650,12 @@ pub(crate) fn apply_execution_context_to_prompts(
 Use this block only as supporting evidence for genuinely short follow-up requests. Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this block override a needed clarification, and do not treat an artifact-type noun alone as a concrete target.\n",
         );
         prompt_with_memory_for_execution.push_str(prompt_execution_context);
+    }
+    if execution_view.compacted_history_context != "<none>" {
+        resolved_prompt_for_execution.push_str("\n\n");
+        resolved_prompt_for_execution.push_str(&execution_view.compacted_history_context);
+        prompt_with_memory_for_execution.push_str("\n\n");
+        prompt_with_memory_for_execution.push_str(&execution_view.compacted_history_context);
     }
     if let Some(image_context) = execution_view
         .image_context

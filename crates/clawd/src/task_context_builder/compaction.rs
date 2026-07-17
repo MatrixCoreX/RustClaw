@@ -91,6 +91,8 @@ pub(crate) fn apply_agent_loop_context_compaction(
     chat_memory_budget_chars: usize,
     bundle: &mut TaskContextBundle,
     plan: &ContextCompactionPlan,
+    model_summary: Option<Value>,
+    model_status_code: &'static str,
 ) -> Value {
     let Some(view) = bundle.execution_view.as_mut() else {
         return Value::Null;
@@ -135,6 +137,8 @@ pub(crate) fn apply_agent_loop_context_compaction(
         plan,
         compacted_memory_ctx,
         compacted_last_turn,
+        model_summary,
+        model_status_code,
     )
 }
 
@@ -144,6 +148,8 @@ pub(super) fn apply_context_compaction_with_inputs(
     plan: &ContextCompactionPlan,
     compacted_memory_ctx: crate::memory::service::PromptMemoryContext,
     compacted_last_turn: String,
+    model_summary: Option<Value>,
+    model_status_code: &'static str,
 ) -> Value {
     let Some(view) = bundle.execution_view.as_mut() else {
         return Value::Null;
@@ -153,7 +159,12 @@ pub(super) fn apply_context_compaction_with_inputs(
     view.recent_turns_full = "<none>".to_string();
     view.last_turn_full = compacted_last_turn;
     view.recent_execution_context = "<none>".to_string();
+    view.compacted_history_context = model_summary
+        .as_ref()
+        .map(render_compacted_history_context)
+        .unwrap_or_else(|| "<none>".to_string());
 
+    let model_summary_attached = model_summary.is_some();
     let after_char_count = context_budget_slots(view)
         .iter()
         .filter(|(_, value)| context_slot_present(value))
@@ -181,6 +192,10 @@ pub(super) fn apply_context_compaction_with_inputs(
         "source_task_ids": [task_id],
         "source_event_range": {"start": Value::Null, "end": Value::Null},
         "summary_kind": "deterministic_context_budget",
+        "compaction_source": if model_summary_attached { "model_assisted" } else { "deterministic_fallback" },
+        "model_status_code": model_status_code,
+        "model_summary_attached": model_summary_attached,
+        "model_summary": model_summary.unwrap_or(Value::Null),
         "before_char_count": plan.before_char_count,
         "after_char_count": after_char_count,
         "threshold_chars": plan.threshold_chars,
@@ -195,6 +210,17 @@ pub(super) fn apply_context_compaction_with_inputs(
     });
     bundle.compaction_records.push(record.clone());
     record
+}
+
+fn render_compacted_history_context(model_summary: &Value) -> String {
+    let envelope = json!({
+        "schema_version": 1,
+        "context_kind": "compacted_history_evidence",
+        "instruction_authority": "none",
+        "summary": model_summary,
+    });
+    let envelope = serde_json::to_string_pretty(&envelope).unwrap_or_else(|_| envelope.to_string());
+    format!("### COMPACTED_HISTORY_CONTEXT\n{envelope}")
 }
 
 fn retained_refs(view: &super::ExecutionContextView) -> Vec<Value> {
@@ -219,6 +245,7 @@ fn source_provenance(source_ref: &str) -> &'static str {
         }
         "image_context" => "attachment_analysis_evidence",
         "prompt_memory_context" => "memory_retrieval_evidence",
+        "compacted_history_context" => "structured_runtime_evidence",
         _ => "untrusted_conversation_evidence",
     }
 }
