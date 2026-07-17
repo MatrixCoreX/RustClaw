@@ -4,6 +4,7 @@ use serde_json::Value;
 use crate::{AppState, ClaimedTask};
 
 mod dispatch_claim;
+mod resume_lease;
 
 pub(crate) use dispatch_claim::record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal;
 pub(crate) use dispatch_claim::{
@@ -13,6 +14,10 @@ pub(crate) use dispatch_claim::{
     list_recorded_paused_checkpoint_resume_dispatch_results_internal,
     record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal,
     ClaimedDispatchedPausedCheckpointResumeExecution, ClaimedPausedCheckpointResumeDispatchResult,
+};
+pub(crate) use resume_lease::{
+    merge_progress_with_active_resume_coordination,
+    renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_internal,
 };
 
 #[derive(Debug, Clone, PartialEq)]

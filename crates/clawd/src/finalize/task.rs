@@ -169,32 +169,9 @@ async fn finalize_ask_success(
 fn journal_has_checkpointed_nonterminal_lifecycle(
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    let Some(lifecycle) = journal.task_lifecycle.as_ref() else {
-        return false;
-    };
-    let state = lifecycle
-        .get("state")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default();
-    if !matches!(state, "waiting" | "background" | "needs_user") {
-        return false;
-    }
-    let lifecycle_checkpoint_id = lifecycle
-        .get("checkpoint_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let checkpoint_checkpoint_id = journal
-        .task_checkpoint
-        .as_ref()
-        .and_then(|checkpoint| checkpoint.get("checkpoint_id"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    matches!(
-        (lifecycle_checkpoint_id, checkpoint_checkpoint_id),
-        (Some(lifecycle_id), Some(checkpoint_id)) if lifecycle_id == checkpoint_id
+    crate::task_lifecycle::has_matching_nonterminal_checkpoint(
+        journal.task_lifecycle.as_ref(),
+        journal.task_checkpoint.as_ref(),
     )
 }
 

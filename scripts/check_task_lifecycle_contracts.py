@@ -104,6 +104,35 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "AND lease_expires_at <= ?1",
         "if task_lease_expires_at > now_ts",
         "AND lease_expires_at <= ?3",
+        "merge_progress_with_active_resume_coordination",
+        "task_progress_cas_exhausted",
+    ),
+    "crates/clawd/src/repo/task_resume_execution/resume_lease.rs": (
+        "merge_progress_with_active_resume_coordination",
+        "resume_execution_progress",
+        "renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_internal",
+        "active_claim_chain_matches",
+        "resume_executor_dispatch_claim",
+        "lease_expires_at > ?3",
+    ),
+    "crates/clawd/src/worker/runtime_support/resume_execution_lease.rs": (
+        "run_with_renewable_resume_execution_lease",
+        "RenewableResumeExecution::LeaseLost",
+        "lease_seconds / 3",
+        "renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_internal",
+    ),
+    "crates/clawd/src/repo/task_resume_execution/result_projection.rs": (
+        "deferred_seeded_loop_checkpoint_result",
+        "rescheduled_checkpoint",
+        "previous_checkpoint_id",
+        "lease_owner = NULL",
+        "lease_expires_at = 0",
+    ),
+    "crates/clawd/src/worker/runtime_support/dispatch_result.rs": (
+        "journal_has_matching_nonterminal_checkpoint",
+        "seeded_loop_deferred",
+        "deferred_checkpoint_id",
+        "deferred_lifecycle_state",
     ),
     "crates/clawd/src/repo/tasks_tests.rs": (
         "due_checkpoint_waits_for_frontend_worker_lease_and_claim_rechecks_it",
@@ -116,6 +145,14 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "checkpointed_ask_finalization_overrides_failure_metric",
         "lease_owner.is_none()",
         "assert_eq!(lease_expires_at, 0)",
+    ),
+    "crates/clawd/src/repo/task_resume_execution_tests/resume_lease.rs": (
+        "active_resume_dispatch_lease_renews_the_complete_claim_chain",
+        "resumed_agent_progress_cannot_erase_dispatch_coordination",
+        "deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease",
+    ),
+    "crates/clawd/src/worker/runtime_support/dispatch_result_tests.rs": (
+        "seeded_agent_loop_with_new_checkpoint_is_deferred_not_terminal",
     ),
     "crates/clawd/src/worker/runtime_support.rs": (
         "build_paused_checkpoint_resume_work_item",

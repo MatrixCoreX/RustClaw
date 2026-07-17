@@ -683,6 +683,37 @@ pub(crate) fn task_checkpoint_from_result_json(result_json: &Value) -> Option<Ta
         .and_then(|payload| serde_json::from_value::<TaskCheckpoint>(payload).ok())
 }
 
+pub(crate) fn has_matching_nonterminal_checkpoint(
+    lifecycle: Option<&Value>,
+    checkpoint: Option<&Value>,
+) -> bool {
+    let Some(lifecycle) = lifecycle else {
+        return false;
+    };
+    let state = lifecycle
+        .get("state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(state, "waiting" | "background" | "needs_user") {
+        return false;
+    }
+    let lifecycle_checkpoint_id = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let checkpoint_id = checkpoint
+        .and_then(|value| value.get("checkpoint_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    matches!(
+        (lifecycle_checkpoint_id, checkpoint_id),
+        (Some(lifecycle_id), Some(checkpoint_id)) if lifecycle_id == checkpoint_id
+    )
+}
+
 fn fallback_task_lifecycle_payload(db_status: &str) -> Value {
     let state = lifecycle_state_from_db_status(db_status);
     let mut payload = json!({

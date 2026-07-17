@@ -183,11 +183,16 @@ pub(crate) fn paused_checkpoint_resume_reschedule_projection_payload(
     {
         return None;
     }
-    if claimed
+    let has_deferred_checkpoint = claimed
         .execution_result_payload
-        .get("next_check_after")
-        .and_then(Value::as_i64)
-        .is_none()
+        .get("final_result_json")
+        .is_some_and(result_has_matching_nonterminal_checkpoint);
+    if !has_deferred_checkpoint
+        && claimed
+            .execution_result_payload
+            .get("next_check_after")
+            .and_then(Value::as_i64)
+            .is_none()
         && claimed
             .execution_result_payload
             .get("retry_after_seconds")
@@ -681,12 +686,42 @@ pub(crate) fn seeded_agent_loop_terminal_dispatch_result_payload(
                 .is_some_and(|value| !value.trim().is_empty()),
         )),
         Ok(answer) => {
-            let mut payload = seeded_agent_loop_base_payload(claimed, "seeded_loop_completed");
+            let deferred = answer
+                .task_journal
+                .as_ref()
+                .is_some_and(journal_has_matching_nonterminal_checkpoint);
+            let final_result_json = ask_reply_final_result_json(answer);
+            let result_status = if deferred {
+                "seeded_loop_deferred"
+            } else {
+                "seeded_loop_completed"
+            };
+            let mut payload = seeded_agent_loop_base_payload(claimed, result_status);
             let obj = payload.as_object_mut()?;
-            obj.insert(
-                "final_result_json".to_string(),
-                ask_reply_final_result_json(answer),
-            );
+            if deferred {
+                let lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
+                    "running",
+                    Some(&final_result_json),
+                    None,
+                );
+                obj.insert(
+                    "deferred_checkpoint_id".to_string(),
+                    lifecycle
+                        .get("checkpoint_id")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                );
+                obj.insert(
+                    "deferred_lifecycle_state".to_string(),
+                    lifecycle.get("state").cloned().unwrap_or(Value::Null),
+                );
+                if let Some(next_check_after) =
+                    lifecycle.get("next_check_after").and_then(Value::as_i64)
+                {
+                    obj.insert("next_check_after".to_string(), json!(next_check_after));
+                }
+            }
+            obj.insert("final_result_json".to_string(), final_result_json);
             Some(payload)
         }
         Err(_) => Some(seeded_agent_loop_failure_payload(
@@ -775,4 +810,22 @@ fn ask_reply_final_result_json(mut answer: crate::AskReply) -> Value {
         Some(journal) => journal.attach_to_result(result),
         None => result,
     }
+}
+
+fn journal_has_matching_nonterminal_checkpoint(journal: &crate::task_journal::TaskJournal) -> bool {
+    crate::task_lifecycle::has_matching_nonterminal_checkpoint(
+        journal.task_lifecycle.as_ref(),
+        journal.task_checkpoint.as_ref(),
+    )
+}
+
+fn result_has_matching_nonterminal_checkpoint(result: &Value) -> bool {
+    let lifecycle =
+        crate::task_lifecycle::task_query_lifecycle_projection("running", Some(result), None);
+    let checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(result)
+        .map(|checkpoint| checkpoint.to_machine_json());
+    crate::task_lifecycle::has_matching_nonterminal_checkpoint(
+        Some(&lifecycle),
+        checkpoint.as_ref(),
+    )
 }

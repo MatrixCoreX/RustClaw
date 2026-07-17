@@ -11,7 +11,8 @@ use super::{
     plan_claimed_paused_checkpoint_resume_execution,
     planned_paused_checkpoint_resume_executor_handoff, prepare_paused_checkpoint_resume_execution,
     record_concrete_paused_checkpoint_resume_dispatch_result,
-    record_paused_checkpoint_resume_dispatch_result, PausedCheckpointDispatchResultRecord,
+    record_paused_checkpoint_resume_dispatch_result, run_with_renewable_resume_execution_lease,
+    PausedCheckpointDispatchResultRecord, RenewableResumeExecution,
 };
 
 pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
@@ -561,44 +562,74 @@ async fn execute_dispatched_paused_checkpoint_resume_executions(
                     claimed.dispatch_payload.to_string().len()
                 );
                 let dispatch_result = if claimed.executor_action == "run_seeded_agent_loop" {
-                    match super::super::resume_replay_executor::execute_seeded_agent_loop_dispatch_result(
+                    let execution = run_with_renewable_resume_execution_lease(
                         state,
                         &claimed,
+                        lease_seconds,
+                        super::super::resume_replay_executor::execute_seeded_agent_loop_dispatch_result(
+                            state,
+                            &claimed,
+                        ),
                     )
-                    .await?
-                    {
+                    .await?;
+                    let RenewableResumeExecution::Completed(execution) = execution else {
+                        warn!(
+                            "runtime paused-checkpoint seeded loop lease lost: task_id={} checkpoint_id={} executor_action={}",
+                            claimed.task_id,
+                            claimed.checkpoint_id,
+                            claimed.executor_action
+                        );
+                        continue;
+                    };
+                    let completed_at = now_ts_u64() as i64;
+                    match execution? {
                         Some(result_payload) => record_concrete_paused_checkpoint_resume_dispatch_result(
                             state,
                             &claimed,
                             &result_payload,
-                            now as i64,
+                            completed_at,
                         )?,
                         None => record_paused_checkpoint_resume_dispatch_result(
                             state,
                             &claimed,
-                            now as i64,
+                            completed_at,
                             lease_seconds,
                         )?,
                     }
                 } else if claimed.executor_action == "poll_async_job" {
-                    match super::super::async_poll_executor::execute_async_poll_dispatch_result_with_state(
+                    let execution = run_with_renewable_resume_execution_lease(
                         state,
                         &claimed,
-                        now as i64,
                         lease_seconds,
+                        super::super::async_poll_executor::execute_async_poll_dispatch_result_with_state(
+                            state,
+                            &claimed,
+                            now as i64,
+                            lease_seconds,
+                        ),
                     )
-                    .await
-                    {
+                    .await?;
+                    let RenewableResumeExecution::Completed(execution) = execution else {
+                        warn!(
+                            "runtime paused-checkpoint async poll lease lost: task_id={} checkpoint_id={} executor_action={}",
+                            claimed.task_id,
+                            claimed.checkpoint_id,
+                            claimed.executor_action
+                        );
+                        continue;
+                    };
+                    let completed_at = now_ts_u64() as i64;
+                    match execution {
                         Some(result_payload) => record_concrete_paused_checkpoint_resume_dispatch_result(
                             state,
                             &claimed,
                             &result_payload,
-                            now as i64,
+                            completed_at,
                         )?,
                         None => record_paused_checkpoint_resume_dispatch_result(
                             state,
                             &claimed,
-                            now as i64,
+                            completed_at,
                             lease_seconds,
                         )?,
                     }

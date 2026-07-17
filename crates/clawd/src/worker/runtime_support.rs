@@ -27,6 +27,12 @@ pub(super) use resume_plan::{
     ClaimedPausedCheckpointResumeHandoffDispatch, PlannedPausedCheckpointResumeExecutorHandoff,
 };
 
+#[path = "runtime_support/resume_execution_lease.rs"]
+mod resume_execution_lease;
+pub(super) use resume_execution_lease::{
+    run_with_renewable_resume_execution_lease, RenewableResumeExecution,
+};
+
 #[path = "runtime_support/stale_recovery.rs"]
 mod stale_recovery;
 pub(crate) use stale_recovery::recover_stale_running_tasks_on_startup;

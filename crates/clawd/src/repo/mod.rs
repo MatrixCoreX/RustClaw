@@ -51,6 +51,7 @@ pub(crate) use task_resume_execution::{
     record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal,
     record_claimed_handoff_paused_checkpoint_resume_dispatch_internal,
     record_planned_paused_checkpoint_resume_handoff_internal,
+    renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_internal,
     ClaimedDispatchedPausedCheckpointResumeExecution,
     ClaimedHandoffPausedCheckpointResumeExecution, ClaimedPausedCheckpointResumeDispatchResult,
 };
