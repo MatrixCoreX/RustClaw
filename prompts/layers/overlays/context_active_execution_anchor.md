@@ -1,8 +1,8 @@
 <!--
 Purpose: project the latest structured execution anchor into continuation context.
 Component: clawd `task_context_builder`
-Placeholders: __ACTIVE_EXECUTION_ANCHOR__
-Version: 2026-07-17.1
+Input slot: ACTIVE_EXECUTION_ANCHOR
+Version: 2026-07-17.2
 -->
 
 __ACTIVE_EXECUTION_ANCHOR__

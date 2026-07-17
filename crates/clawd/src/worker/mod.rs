@@ -125,8 +125,15 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         );
         info!("{}", crate::LOG_CALL_WRAP);
 
-        let mut payload = serde_json::from_str::<Value>(&task.payload_json)
-            .map_err(|err| anyhow!("invalid payload_json for task {}: {err}", task.task_id))?;
+        let mut payload = match serde_json::from_str::<Value>(&task.payload_json) {
+            Ok(payload) => payload,
+            Err(error) => {
+                let error = anyhow!("invalid payload_json for task {}: {error}", task.task_id);
+                finalize_worker_runtime_error(state, &task, None, &error)?;
+                crate::task_event_transport::publish_task_status_projection(state, &task.task_id);
+                return Ok(());
+            }
+        };
 
         let task_kind_for_timeout_log = task.kind.clone();
         let worker_timeout_secs = state.worker.worker_task_timeout_seconds.max(1);
@@ -141,7 +148,10 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         state.worker.unregister_active_task(&task.task_id);
 
         match task_result {
-            Ok(inner) => inner?,
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                finalize_worker_runtime_error(state, &task, Some(&payload), &error)?;
+            }
             Err(_) => {
                 finalize_worker_timeout(
                     state,
@@ -158,6 +168,39 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
     }
     .instrument(call_span)
     .await
+}
+
+fn finalize_worker_runtime_error(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    payload: Option<&Value>,
+    error: &anyhow::Error,
+) -> anyhow::Result<()> {
+    let error_text = error.to_string();
+    error!(
+        "worker_once runtime error: worker_id={} task_id={} kind={} error={}",
+        state.worker.worker_id,
+        task.task_id,
+        task.kind,
+        crate::truncate_for_log(&error_text)
+    );
+    repo::update_task_failure(state, &task.task_id, &error_text)?;
+    if payload.is_some_and(repo::child_tasks::is_child_subagent_payload) {
+        repo::child_tasks::record_child_task_terminal_projection(
+            state,
+            &task.task_id,
+            payload.expect("checked child payload"),
+        )?;
+    }
+    info!("{}", crate::LOG_CALL_WRAP);
+    info!(
+        "task_call_end task_id={} kind={} status=failed error={}",
+        task.task_id,
+        task.kind,
+        crate::truncate_for_log(&error_text)
+    );
+    info!("{}", crate::LOG_CALL_WRAP);
+    Ok(())
 }
 
 async fn process_claimed_task_by_kind(
@@ -199,6 +242,10 @@ async fn process_claimed_task_by_kind(
     crate::task_event_transport::publish_persisted_task_events(state, &task.task_id);
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "worker_error_finalization_tests.rs"]
+mod worker_error_finalization_tests;
 
 async fn finalize_worker_timeout(
     state: &AppState,

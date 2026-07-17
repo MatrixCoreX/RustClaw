@@ -1,8 +1,8 @@
 <!--
 Purpose: project bounded recent execution evidence for short follow-ups.
 Component: clawd `task_context_builder`
-Placeholders: __RECENT_EXECUTION_CONTEXT__
-Version: 2026-07-17.1
+Input slot: RECENT_EXECUTION_CONTEXT
+Version: 2026-07-17.2
 -->
 
 ### RECENT_EXECUTION_CONTEXT
