@@ -170,6 +170,17 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
             .get("owner_layer")
             .and_then(Value::as_str)
             .map(str::trim)
+            == Some("mcp_runtime")
+        {
+            let mut payload = observation.clone();
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("index".to_string(), json!(index));
+            }
+            events.push(task_event_json(&mut seq, "mcp_tool_call", payload));
+        } else if observation
+            .get("owner_layer")
+            .and_then(Value::as_str)
+            .map(str::trim)
             == Some("subagent_runtime")
         {
             let mut payload = observation.clone();

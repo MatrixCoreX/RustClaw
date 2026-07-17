@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::{
@@ -36,7 +37,8 @@ use skill_execution_evidence::{
     structured_extra_evidence_output,
 };
 use skill_execution_observations::{
-    log_step_journal_summary, record_hook_outcome_observation, record_post_tool_use_observation,
+    log_step_journal_summary, record_hook_outcome_observation,
+    record_mcp_tool_execution_observation, record_post_tool_use_observation,
 };
 use skill_execution_preflight::{
     capability_isolation_artifact_refs, capability_isolation_policy_error,
@@ -77,27 +79,6 @@ async fn run_mcp_tool_observation(
         })
         .to_string()
     })?;
-    let audit_detail = json!({
-        "task_id": task.task_id,
-        "adapter_kind": "mcp_tool",
-        "capability": outcome.capability,
-        "server_id": outcome.server_id,
-        "tool_name": outcome.tool_name,
-        "status": outcome.status,
-        "output_bytes": outcome.output_bytes,
-        "truncated": outcome.truncated,
-        "error_code": outcome.error_code,
-    })
-    .to_string();
-    if let Err(error) = crate::repo::insert_audit_log(
-        state,
-        Some(task.user_id),
-        "mcp.tool_call",
-        Some(&audit_detail),
-        None,
-    ) {
-        warn!(error = %error, "mcp_tool_call_audit_failed");
-    }
     let raw = serde_json::to_string(&outcome).map_err(|_| {
         json!({
             "error_code": "mcp_result_serialize_failed",
@@ -907,13 +888,16 @@ pub(super) async fn execute_prepared_skill_action(
     let structured_validation_slot = Arc::clone(&structured_validation);
     let structured_extra_slot = Arc::clone(&structured_extra);
     let exec_args_for_run = exec_args.clone();
+    let mcp_descriptor = state.mcp_tool(normalized_skill);
+    let is_mcp_tool = mcp_descriptor.is_some();
+    let mcp_started_at = is_mcp_tool.then(Instant::now);
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || {
             let structured_validation_slot = Arc::clone(&structured_validation_slot);
             let structured_extra_slot = Arc::clone(&structured_extra_slot);
             let exec_args_for_run = exec_args_for_run.clone();
             async move {
-                if state.mcp_tool(normalized_skill).is_some() {
+                if is_mcp_tool {
                     let (raw, extra) =
                         run_mcp_tool_observation(state, task, normalized_skill, exec_args_for_run)
                             .await?;
@@ -940,6 +924,17 @@ pub(super) async fn execute_prepared_skill_action(
         .ok()
         .and_then(|slot| slot.clone());
     let structured_extra = structured_extra.lock().ok().and_then(|slot| slot.clone());
+    if let (Some(descriptor), Some(started_at)) = (mcp_descriptor.as_ref(), mcp_started_at) {
+        record_mcp_tool_execution_observation(
+            state,
+            task,
+            loop_state,
+            descriptor,
+            &step_execution,
+            structured_extra.as_ref(),
+            started_at.elapsed(),
+        );
+    }
     record_post_tool_use_observation(
         loop_state,
         normalized_skill,

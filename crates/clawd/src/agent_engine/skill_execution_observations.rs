@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::time::Duration;
 use tracing::info;
 
 use super::{ClaimedTask, LoopState};
@@ -76,6 +77,89 @@ pub(super) fn record_post_tool_use_observation(
         }
     }
     loop_state.task_observations.push(payload);
+}
+
+pub(super) fn record_mcp_tool_execution_observation(
+    state: &crate::AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    descriptor: &crate::mcp_runtime::McpToolDescriptor,
+    step_execution: &crate::executor::StepExecutionResult,
+    structured_extra: Option<&Value>,
+    elapsed: Duration,
+) {
+    let mcp_result = structured_extra.and_then(|value| value.get("mcp_result"));
+    let status = mcp_result
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| step_execution.status.as_str());
+    let error_code = mcp_result
+        .and_then(|value| value.get("error_code"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| mcp_transport_error_code(step_execution));
+    let lifecycle_state = state
+        .mcp_lifecycle_snapshots()
+        .into_iter()
+        .find(|snapshot| snapshot.server_id == descriptor.server_id)
+        .map(|snapshot| snapshot.state.as_token());
+    let latency_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+    let payload = json!({
+        "schema_version": 1,
+        "owner_layer": "mcp_runtime",
+        "stage": "tool_call",
+        "adapter_kind": "mcp_tool",
+        "capability": descriptor.capability,
+        "server_id": descriptor.server_id,
+        "tool_name": descriptor.tool_name,
+        "lifecycle_state": lifecycle_state,
+        "policy_decision": crate::policy_decision::PolicyDecision::Allow.as_token(),
+        "effect": descriptor.policy.effect,
+        "risk_level": descriptor.policy.risk_level,
+        "idempotent": descriptor.policy.idempotent,
+        "status": status,
+        "latency_ms": latency_ms,
+        "output_bytes": mcp_result
+            .and_then(|value| value.get("output_bytes"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        "truncated": mcp_result
+            .and_then(|value| value.get("truncated"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "error_code": error_code,
+    });
+    loop_state.task_observations.push(payload.clone());
+
+    let mut audit_payload = payload;
+    if let Some(object) = audit_payload.as_object_mut() {
+        object.insert("task_id".to_string(), json!(task.task_id));
+    }
+    let audit_detail = audit_payload.to_string();
+    if let Err(error) = crate::repo::insert_audit_log(
+        state,
+        Some(task.user_id),
+        "mcp.tool_call",
+        Some(&audit_detail),
+        None,
+    ) {
+        tracing::warn!(error = %error, "mcp_tool_call_audit_failed");
+    }
+}
+
+fn mcp_transport_error_code(
+    step_execution: &crate::executor::StepExecutionResult,
+) -> Option<String> {
+    step_execution
+        .error
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|value| {
+            value
+                .get("error_code")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
 }
 
 fn safe_post_tool_observation_args(normalized_skill: &str, action_args: &Value) -> Option<Value> {
