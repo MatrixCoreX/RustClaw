@@ -112,10 +112,13 @@ REQUIRED_FILE_TOKENS = {
         '.push("test")',
     ),
     "crates/clawd/src/mcp_runtime/tests.rs": (
-        "stdio_runtime_discovers_calls_bounds_and_stops",
+        "stdio_runtime_discovers_paginated_tools_calls_bounds_and_stops",
         "streamable_http_runtime_initializes_discovers_and_calls",
         "large_catalog_uses_bounded_search_then_discloses_matching_schema",
         "health_tick_reconnects_closed_transport_without_replaying_a_tool",
+        "duplicate_namespaces_fail_closed_before_connecting",
+        "duplicate_tool_failure_cleans_up_stdio_process",
+        "mutating_mcp_tool_requires_shared_permission_confirmation",
     ),
     "crates/clawd/src/agent_engine/skill_execution_mcp_tests.rs": (
         "mcp_execution_records_auditable_teaching_observation",
