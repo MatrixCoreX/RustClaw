@@ -22,6 +22,7 @@ RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-/home/guagua/runtime_env_filled.sh}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 LOG_DIR="${LOG_DIR:-}"
 PRINT_LLM_TRACE_VALUE="${PRINT_LLM_TRACE:-1}"
+SELF_TEST_TRANSPORT=0
 
 TEMP_WORKSPACE=""
 CLAWD_PID=""
@@ -80,6 +81,7 @@ Options:
   --clawd-bin PATH         clawd binary path
   --runtime-env-file PATH  Shell file with provider env vars
   --auto-build             Build missing binaries automatically
+  --self-test-transport    Validate large task payload transport without starting clawd
   -h, --help               Show this help
 
 Stages:
@@ -147,6 +149,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --auto-build)
       AUTO_BUILD=1
+      shift 1
+      ;;
+    --self-test-transport)
+      SELF_TEST_TRANSPORT=1
       shift 1
       ;;
     -h|--help)
@@ -437,12 +443,12 @@ prime_broken_http_repair_demo_server() {
 }
 
 result_provider_unavailable() {
-  python3 - "$1" <<'PY'
+  python3 /dev/fd/3 3<<'PY' <<<"$1"
 import json
 import re
 import sys
 
-obj = json.loads(sys.argv[1])
+obj = json.load(sys.stdin)
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
 messages = result.get("messages") or []
@@ -482,11 +488,11 @@ PY
 }
 
 extract_visible_text() {
-  python3 - "$1" <<'PY'
+  python3 /dev/fd/3 3<<'PY' <<<"$1"
 import json
 import sys
 
-obj = json.loads(sys.argv[1])
+obj = json.load(sys.stdin)
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
 messages = result.get("messages") or []
@@ -506,11 +512,11 @@ PY
 }
 
 missing_substrings() {
-  python3 - "$1" "$2" <<'PY'
+  python3 /dev/fd/3 "$2" 3<<'PY' <<<"$1"
 import sys
 
-text = sys.argv[1]
-expected = [part for part in sys.argv[2].split(";;") if part]
+text = sys.stdin.read()
+expected = [part for part in sys.argv[1].split(";;") if part]
 missing = []
 for needle in expected:
     alternatives = [alt.strip() for alt in needle.split("__OR__") if alt.strip()]
@@ -551,12 +557,12 @@ PY
 }
 
 ops_http_repair_summary() {
-  python3 - "$1" "$2" <<'PY'
+  python3 /dev/fd/3 "$2" 3<<'PY' <<<"$1"
 import json
 import sys
 
-obj = json.loads(sys.argv[1])
-expected = sys.argv[2]
+obj = json.load(sys.stdin)
+expected = sys.argv[1]
 expected_parts = [part.strip() for part in expected.split(";;") if part.strip()]
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
@@ -722,12 +728,12 @@ PY
 }
 
 ops_http_validation_summary() {
-  python3 - "$1" "$2" <<'PY'
+  python3 /dev/fd/3 "$2" 3<<'PY' <<<"$1"
 import json
 import sys
 
-obj = json.loads(sys.argv[1])
-expected_parts = [part.strip() for part in sys.argv[2].split(";;") if part.strip()]
+obj = json.load(sys.stdin)
+expected_parts = [part.strip() for part in sys.argv[1].split(";;") if part.strip()]
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
 trace = ((result.get("task_journal") or {}).get("trace") or {})
@@ -793,12 +799,12 @@ PY
 }
 
 health_check_structured_summary() {
-  python3 - "$1" "$2" <<'PY'
+  python3 /dev/fd/3 "$2" 3<<'PY' <<<"$1"
 import json
 import sys
 
-obj = json.loads(sys.argv[1])
-expected_paths = [part.strip() for part in sys.argv[2].split(";;") if part.strip()]
+obj = json.load(sys.stdin)
+expected_paths = [part.strip() for part in sys.argv[1].split(";;") if part.strip()]
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
 trace = ((result.get("task_journal") or {}).get("trace") or {})
@@ -1060,6 +1066,32 @@ run_nl_case() {
   esac
 }
 
+run_transport_self_test() {
+  local payload
+  local visible
+  payload="$(
+    python3 - <<'PY'
+import json
+
+print(json.dumps({
+    "data": {
+        "status": "failed",
+        "error_text": "rate limit",
+        "result_json": {
+            "text": "X" * 300_000,
+            "messages": [],
+        },
+    },
+}))
+PY
+  )"
+  visible="$(extract_visible_text "$payload")"
+  [[ "${#visible}" -gt 300000 ]]
+  result_provider_unavailable "$payload"
+  missing_substrings "$visible" "rate limit;;$(printf 'X%.0s' {1..128})"
+  echo "LONG_TAIL_RUNNER_TRANSPORT_SELF_TEST ok payload_bytes=${#payload}"
+}
+
 cleanup() {
   local exit_code=$?
   if [[ -n "${HTTP_PORT:-}" ]]; then
@@ -1081,6 +1113,12 @@ cleanup() {
   fi
   exit "$exit_code"
 }
+
+if [[ "$SELF_TEST_TRANSPORT" == "1" ]]; then
+  run_transport_self_test
+  exit 0
+fi
+
 trap cleanup EXIT
 
 ensure_binaries

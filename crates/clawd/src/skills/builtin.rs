@@ -16,16 +16,16 @@ mod builtin_workspace_mutation;
 mod builtin_workspace_patch;
 use builtin_child_task_patch::execute_child_task_patch;
 #[cfg(test)]
+use builtin_run_cmd::parse_run_cmd_suggestion_payload;
+#[cfg(test)]
 pub(crate) use builtin_run_cmd::run_safe_command;
 pub(crate) use builtin_run_cmd::run_safe_command_with_sandbox;
 use builtin_run_cmd::{
-    command_has_shell_background_operator, run_cmd_checkpoint_claim_markers,
-    run_cmd_claims_runtime_checkpoint_without_async_start, run_safe_command_detailed,
-    start_async_command, suggest_command_for_run_cmd, suggested_command_from_args,
-    RunSafeCommandError,
+    command_has_shell_background_operator, looks_detached_background_command,
+    run_cmd_checkpoint_claim_markers, run_cmd_claims_runtime_checkpoint_without_async_start,
+    run_safe_command_detailed, start_async_command, suggest_command_for_run_cmd,
+    suggested_command_from_args, RunSafeCommandError,
 };
-#[cfg(test)]
-use builtin_run_cmd::{looks_detached_background_command, parse_run_cmd_suggestion_payload};
 use builtin_schedule::execute_schedule_workflow_for_task;
 use builtin_workspace_mutation::run_checkpointed_workspace_mutation;
 use builtin_workspace_patch::execute_workspace_patch;
@@ -520,9 +520,11 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 .get("async_start")
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false);
-            if !async_start
-                && run_cmd_claims_runtime_checkpoint_without_async_start(&sanitized_command)
-            {
+            let unmanaged_detached_background =
+                looks_detached_background_command(&sanitized_command);
+            let faked_runtime_checkpoint =
+                run_cmd_claims_runtime_checkpoint_without_async_start(&sanitized_command);
+            if !async_start && (unmanaged_detached_background || faked_runtime_checkpoint) {
                 return Err(builtin_error(
                     "run_cmd",
                     "async_start_required",
@@ -537,7 +539,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
                             "expires_in_seconds"
                         ],
                         "detected_machine_fields": run_cmd_checkpoint_claim_markers(&sanitized_command),
-                        "has_background_operator": command_has_shell_background_operator(&sanitized_command)
+                        "has_background_operator": command_has_shell_background_operator(&sanitized_command),
+                        "unmanaged_detached_background": unmanaged_detached_background,
+                        "faked_runtime_checkpoint": faked_runtime_checkpoint
                     })),
                 ));
             }

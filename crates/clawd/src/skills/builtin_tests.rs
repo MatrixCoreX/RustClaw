@@ -843,6 +843,73 @@ async fn run_cmd_rejects_shell_faked_runtime_checkpoint_without_async_start() {
 }
 
 #[tokio::test]
+async fn run_cmd_rejects_unmanaged_terminal_background_process() {
+    let root = TempDirGuard::new("run_cmd_unmanaged_background");
+    let state = test_state(root.path.clone());
+
+    let err = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "nohup sleep 30 >/dev/null 2>&1 & disown"
+        }),
+    )
+    .await
+    .expect_err("unmanaged background process should be rejected");
+
+    assert!(
+        err.contains("\"error_kind\":\"async_start_required\""),
+        "{err}"
+    );
+    assert!(
+        err.contains("\"unmanaged_detached_background\":true"),
+        "{err}"
+    );
+    assert!(err.contains("\"faked_runtime_checkpoint\":false"), "{err}");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn bounded_local_service_validation_runs_in_one_workspace_sandbox() {
+    if !std::path::Path::new("/usr/bin/bwrap").is_file()
+        && !std::path::Path::new("/bin/bwrap").is_file()
+    {
+        return;
+    }
+    let root = TempDirGuard::new("run_cmd_bounded_local_service");
+    fs::write(root.path.join("index.html"), "bounded-service-ok\n").expect("write index");
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind temp port");
+    let port = listener.local_addr().expect("port").port();
+    drop(listener);
+    let command = format!(
+        "python3 -m http.server {port} --bind 127.0.0.1 >/dev/null 2>&1 & \
+         pid=$!; trap 'kill \"$pid\" >/dev/null 2>&1 || true' EXIT; \
+         ready=0; for _ in $(seq 1 30); do \
+           if curl -fsS http://127.0.0.1:{port}/ > response.txt 2>/dev/null; then ready=1; break; fi; \
+           sleep 0.1; \
+         done; \
+         test \"$ready\" = 1; grep -q bounded-service-ok response.txt; \
+         printf VALIDATION_PASSED"
+    );
+
+    let output = super::run_safe_command_with_sandbox(
+        &root.path,
+        &command,
+        4096,
+        10,
+        10,
+        8000,
+        false,
+        claw_core::config::ToolSandboxMode::WorkspaceWrite,
+        &root.path,
+    )
+    .await
+    .expect("bounded service validation");
+
+    assert_eq!(output, "VALIDATION_PASSED");
+}
+
+#[tokio::test]
 async fn run_safe_command_detaches_background_http_server() {
     let root = TempDirGuard::new("run_cmd_detach_http_server");
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind temp port");
