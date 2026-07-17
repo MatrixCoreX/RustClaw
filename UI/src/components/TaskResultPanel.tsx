@@ -20,6 +20,7 @@ import {
   type TaskOutcomeView,
   type TaskPermissionView,
 } from "../lib/task-result";
+import { buildTaskCostGovernance, formatUsdNanos } from "../lib/task-cost";
 import type { TaskApprovalDecision, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 
@@ -94,6 +95,7 @@ export function TaskResultPanel({
   const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
   const taskPollingView = taskResult ? buildTaskPollingView(taskResult.lifecycle, lang) : null;
   const taskPermissionView = taskResult ? buildTaskPermissionView(taskResult, lang) : null;
+  const taskCostView = taskResult ? buildTaskCostGovernance(taskResult) : null;
   const taskEvents = taskResult ? taskTraceEvents(taskResult) : [];
   const artifactRefs = taskResult ? taskArtifactRefs(taskResult) : [];
   const replaySummary = taskResult ? buildReplaySummary(taskResult) : null;
@@ -173,6 +175,49 @@ export function TaskResultPanel({
               <p className="text-red-200">{taskResult.error_text || "--"}</p>
             </div>
           </div>
+          {taskCostView ? (
+            <div className="mt-4 border-t border-white/10 pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium text-white/80">{t("模型用量与成本", "Model usage and cost")}</p>
+                <span className="theme-status-pill rounded-md px-2 py-1 font-mono text-xs">
+                  {taskCostView.budgetStatus ?? taskCostView.costStatus}
+                </span>
+              </div>
+              <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                <p>
+                  <span className="text-white/50">{t("已估算", "Estimated")}: </span>
+                  <span className="font-mono text-white/80">
+                    {formatUsdNanos(taskCostView.taskKnownCostUsdNanos ?? taskCostView.estimatedCostUsdNanos)}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-white/50">{t("软上限", "Soft limit")}: </span>
+                  <span className="font-mono text-white/80">
+                    {formatUsdNanos(taskCostView.softTaskLimitUsdNanos) ?? "--"}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-white/50">{t("硬上限", "Hard limit")}: </span>
+                  <span className="font-mono text-white/80">
+                    {formatUsdNanos(taskCostView.hardTaskLimitUsdNanos) ?? "--"}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-white/50">{t("未知计价记录", "Unknown price records")}: </span>
+                  <span className="font-mono text-white/80">{taskCostView.unknownRecordCount}</span>
+                </p>
+              </div>
+              {taskCostView.signals.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {taskCostView.signals.map((signal) => (
+                    <span key={signal} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-white/65">
+                      {signal}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {taskGoalView ? (
             <div className={`mt-4 rounded-xl border px-3 py-3 ${toneClassName(taskGoalView.tone)}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
