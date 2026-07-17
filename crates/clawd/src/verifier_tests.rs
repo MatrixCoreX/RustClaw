@@ -79,7 +79,7 @@ planner_kind = "tool"
 output_kind = "text"
 side_effect = true
 auto_invocable = true
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string" }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "read_text_range", "write_text", "make_dir", "remove_path"] }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } } } }
 planner_capabilities = [
   { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"] },
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"] },

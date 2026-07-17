@@ -10,6 +10,27 @@ fn parse_plan_action_step(step: &Value, state: &AppState) -> Option<AgentAction>
     serde_json::from_value::<AgentAction>(normalized).ok()
 }
 
+fn plan_actions_follow_enum_contract(state: &AppState, actions: &[AgentAction]) -> bool {
+    let mut valid = true;
+    for action in actions {
+        let (executable, args) = match action {
+            AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+            AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+            _ => continue,
+        };
+        let canonical = state.resolve_canonical_skill_name(executable);
+        for violation in crate::schema_contract::executable_enum_violations(state, &canonical, args)
+        {
+            info!(
+                "plan_result_enum_constraint_rejected executable={} field={} constraint=enum",
+                canonical, violation.field
+            );
+            valid = false;
+        }
+    }
+    valid
+}
+
 fn parse_xml_tool_parameter_value(raw: &str) -> Value {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -224,6 +245,12 @@ pub(super) async fn parse_single_plan_actions(
         }
     }
     if actions.is_empty() {
+        None
+    } else if !plan_actions_follow_enum_contract(state, &actions) {
+        info!(
+            "plan_result_registry_contract_rejected task_id={} reason=invalid_enum_value",
+            task.task_id
+        );
         None
     } else {
         Some(actions)
