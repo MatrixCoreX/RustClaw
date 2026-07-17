@@ -83,8 +83,23 @@ REQUIRED_FILE_TOKENS = {
     "crates/clawd/src/agent_engine/skill_execution.rs": (
         "run_mcp_tool_observation",
         "task_cancellation_token",
-        '"mcp.tool_call"',
         '"mcp_result"',
+        "record_mcp_tool_execution_observation",
+    ),
+    "crates/clawd/src/agent_engine/skill_execution_observations.rs": (
+        "record_mcp_tool_execution_observation",
+        '"mcp.tool_call"',
+        '"owner_layer": "mcp_runtime"',
+        '"lifecycle_state"',
+        '"policy_decision"',
+        '"latency_ms"',
+        '"output_bytes"',
+        '"truncated"',
+        '"error_code"',
+    ),
+    "crates/clawd/src/task_journal_event_stream.rs": (
+        'Some("mcp_runtime")',
+        '"mcp_tool_call"',
     ),
     "crates/clawd/src/mcp_admin_routes.rs": (
         "require_mcp_admin",
@@ -101,6 +116,10 @@ REQUIRED_FILE_TOKENS = {
         "streamable_http_runtime_initializes_discovers_and_calls",
         "large_catalog_uses_bounded_search_then_discloses_matching_schema",
         "health_tick_reconnects_closed_transport_without_replaying_a_tool",
+    ),
+    "crates/clawd/src/agent_engine/skill_execution_mcp_tests.rs": (
+        "mcp_execution_records_auditable_teaching_observation",
+        "mcp_transport_failure_records_machine_error_without_raw_detail",
     ),
     "crates/clawcli/tests/mcp_commands.rs": (
         "mcp_commands_use_authenticated_machine_endpoints",

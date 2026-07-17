@@ -167,6 +167,36 @@ fn event_stream_exposes_planner_verifier_and_permission_machine_events() {
 }
 
 #[test]
+fn event_stream_projects_mcp_runtime_observation_as_dedicated_event() {
+    let mut journal = TaskJournal::for_task("task-mcp-events", "ask", "inspect");
+    journal.push_task_observation(json!({
+        "schema_version": 1,
+        "owner_layer": "mcp_runtime",
+        "stage": "tool_call",
+        "capability": "mcp.fixture.lookup",
+        "server_id": "fixture",
+        "tool_name": "lookup",
+        "lifecycle_state": "ready",
+        "policy_decision": "allow",
+        "status": "ok",
+        "latency_ms": 17,
+        "output_bytes": 42,
+        "truncated": false,
+        "error_code": null,
+    }));
+
+    let event = journal
+        .event_stream_snapshot()
+        .into_iter()
+        .find(|event| event["event_type"] == "mcp_tool_call")
+        .expect("mcp event");
+    assert_eq!(event["payload"]["owner_layer"], "mcp_runtime");
+    assert_eq!(event["payload"]["capability"], "mcp.fixture.lookup");
+    assert_eq!(event["payload"]["lifecycle_state"], "ready");
+    assert_eq!(event["payload"]["latency_ms"], 17);
+}
+
+#[test]
 fn trace_json_projects_goal_and_context_budget_events() {
     let mut journal = TaskJournal::for_task("task-context-events", "ask", "inspect");
     journal.record_context_bundle_summary(
