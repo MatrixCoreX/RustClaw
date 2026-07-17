@@ -388,7 +388,7 @@ fn bounded_machine_token(value: &str, max_chars: usize) -> Option<String> {
     if value.is_empty()
         || !value
             .chars()
-            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || "_.:-".contains(ch))
+            .all(|ch| ch.is_ascii_alphanumeric() || "_.:-".contains(ch))
     {
         return None;
     }

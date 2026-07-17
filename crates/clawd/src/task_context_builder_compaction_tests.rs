@@ -218,6 +218,8 @@ fn deterministic_fallback_preserves_stable_machine_references() {
             .join("\n"),
             "x".repeat(13_000)
         );
+        view.last_turn_full =
+            "risk:stale next:stale open:stale constraint:no_external_publish".to_string();
     }
     let plan = plan_agent_loop_context_compaction(&bundle).unwrap();
 
@@ -252,9 +254,22 @@ fn deterministic_fallback_preserves_stable_machine_references() {
     ] {
         assert!(context.contains(machine_ref), "{machine_ref} missing");
     }
+    let continuity_values = record["continuity_refs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["ref"].as_str())
+        .collect::<Vec<_>>();
     for transient_ref in ["risk:stale", "next:stale", "open:stale"] {
-        assert!(!context.contains(transient_ref), "{transient_ref} leaked");
+        assert!(
+            !continuity_values.contains(&transient_ref),
+            "{transient_ref} leaked into stable continuity refs"
+        );
     }
+    assert_eq!(
+        record["current_state_refs"],
+        serde_json::json!(["risk:stale", "next:stale", "open:stale"])
+    );
 }
 
 #[test]
@@ -310,4 +325,33 @@ fn model_summary_receives_deterministic_continuity_references() {
     ] {
         assert!(context.contains(machine_ref), "{machine_ref} missing");
     }
+}
+
+#[test]
+fn deterministic_reference_extraction_rejects_truncated_tokens() {
+    let mut bundle = context_bundle(13_000);
+    bundle.execution_view.as_mut().unwrap().recent_turns_full = format!(
+        "constraint:no_duplicate_tool_call. decision:canary_b... fact:build_green…\n{}",
+        "x".repeat(13_000)
+    );
+    let plan = plan_agent_loop_context_compaction(&bundle).unwrap();
+
+    let record = apply_context_compaction_with_inputs(
+        "task-context-compaction-truncated-refs",
+        &mut bundle,
+        &plan,
+        empty_prompt_memory_context(),
+        "last_turn".to_string(),
+        None,
+        "context_compaction_schema_rejected",
+    );
+    let refs = record["continuity_refs"].as_array().unwrap();
+    let values = refs
+        .iter()
+        .filter_map(|item| item["ref"].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(values.contains(&"constraint:no_duplicate_tool_call"));
+    assert!(!values.contains(&"decision:canary_b"));
+    assert!(!values.contains(&"fact:build_green"));
 }

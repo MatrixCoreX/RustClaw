@@ -204,6 +204,19 @@ fn model_assisted_compaction_rejects_non_machine_keys() {
 }
 
 #[test]
+fn model_assisted_compaction_accepts_case_sensitive_machine_reference_keys() {
+    let mut value = valid_output();
+    value["facts"][0]["fact_key"] = json!("artifact:README.md");
+    value["risk_flags"] = json!(["window:2026_07_20_0200Z"]);
+
+    let normalized = normalize_model_assisted_compaction_output(&value)
+        .expect("machine reference keys may contain case-sensitive values");
+
+    assert_eq!(normalized["facts"][0]["fact_key"], "artifact:README.md");
+    assert_eq!(normalized["risk_flags"][0], "window:2026_07_20_0200Z");
+}
+
+#[test]
 fn model_assisted_compaction_cross_checks_source_provenance() {
     let normalized = normalize_model_assisted_compaction_output(&valid_output()).unwrap();
     let source_bundle = json!({

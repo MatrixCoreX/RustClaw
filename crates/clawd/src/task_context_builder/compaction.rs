@@ -24,6 +24,7 @@ const CONTINUITY_REF_NAMESPACES: &[&str] = &[
     "side_effect",
     "window",
 ];
+const CURRENT_STATE_REF_NAMESPACES: &[&str] = &["next", "open", "risk"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContextCompactionPlan {
@@ -301,15 +302,19 @@ pub(super) fn apply_context_compaction_with_inputs(
         return Value::Null;
     };
     let continuity_refs = deterministic_continuity_refs(view);
+    let current_state_refs =
+        extract_machine_refs(view.last_turn_full.as_str(), CURRENT_STATE_REF_NAMESPACES);
     let model_summary_attached = model_summary.is_some();
     let mut compacted_summary = model_summary.clone();
     if let Some(summary) = compacted_summary.as_mut() {
         attach_continuity_refs(summary, &continuity_refs);
+        attach_current_state_refs(summary, &current_state_refs);
     } else if !continuity_refs.is_empty() {
         compacted_summary = Some(json!({
             "schema_version": 1,
             "summary_kind": "deterministic_machine_reference_continuity",
             "continuity_refs": continuity_refs,
+            "current_state_refs": current_state_refs,
         }));
     }
     let continuity_summary_attached = compacted_summary.is_some();
@@ -363,6 +368,7 @@ pub(super) fn apply_context_compaction_with_inputs(
         "continuity_summary_attached": continuity_summary_attached,
         "model_summary": model_summary.unwrap_or(Value::Null),
         "continuity_refs": continuity_refs,
+        "current_state_refs": current_state_refs,
         "before_char_count": plan.before_char_count,
         "after_char_count": after_char_count,
         "threshold_chars": plan.threshold_chars,
@@ -389,6 +395,22 @@ fn attach_continuity_refs(summary: &mut Value, continuity_refs: &[Value]) {
     );
 }
 
+fn attach_current_state_refs(summary: &mut Value, current_state_refs: &[String]) {
+    let Some(object) = summary.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "current_state_refs".to_string(),
+        Value::Array(
+            current_state_refs
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+}
+
 fn deterministic_continuity_refs(view: &super::ExecutionContextView) -> Vec<Value> {
     let mut refs = Vec::new();
     for (source_ref, value) in [
@@ -406,19 +428,15 @@ fn deterministic_continuity_refs(view: &super::ExecutionContextView) -> Vec<Valu
             view.recent_execution_anchor.as_str(),
         ),
         (
-            "recent_execution_context",
-            view.recent_execution_context.as_str(),
-        ),
-        ("recent_turns_full", view.recent_turns_full.as_str()),
-        (
             "compacted_history_context",
             view.compacted_history_context.as_str(),
         ),
+        ("recent_turns_full", view.recent_turns_full.as_str()),
     ] {
         if !context_slot_present(value) {
             continue;
         }
-        for machine_ref in extract_continuity_machine_refs(value) {
+        for machine_ref in extract_machine_refs(value, CONTINUITY_REF_NAMESPACES) {
             if refs.iter().any(|item: &Value| {
                 item.get("ref").and_then(Value::as_str) == Some(machine_ref.as_str())
             }) {
@@ -437,7 +455,7 @@ fn deterministic_continuity_refs(view: &super::ExecutionContextView) -> Vec<Valu
     refs
 }
 
-fn extract_continuity_machine_refs(value: &str) -> Vec<String> {
+fn extract_machine_refs(value: &str, namespaces: &[&str]) -> Vec<String> {
     let bytes = value.as_bytes();
     let mut refs = Vec::new();
     let mut index = 0;
@@ -459,7 +477,7 @@ fn extract_continuity_machine_refs(value: &str) -> Vec<String> {
             continue;
         }
         let namespace = &value[namespace_start..index];
-        if !CONTINUITY_REF_NAMESPACES.contains(&namespace) {
+        if !namespaces.contains(&namespace) {
             index += 1;
             continue;
         }
@@ -471,9 +489,27 @@ fn extract_continuity_machine_refs(value: &str) -> Vec<String> {
         if index == value_start {
             continue;
         }
-        refs.push(value[namespace_start..index].to_string());
+        let mut token_end = index;
+        let mut trailing_dot_count = 0;
+        while token_end > value_start && bytes[token_end - 1] == b'.' {
+            token_end -= 1;
+            trailing_dot_count += 1;
+        }
+        if token_end == value_start
+            || trailing_dot_count >= 3
+            || is_truncation_marker_at(value, index)
+        {
+            continue;
+        }
+        refs.push(value[namespace_start..token_end].to_string());
     }
     refs
+}
+
+fn is_truncation_marker_at(value: &str, index: usize) -> bool {
+    value
+        .get(index..)
+        .is_some_and(|tail| tail.starts_with("...") || tail.starts_with('…'))
 }
 
 fn is_machine_namespace_char(value: u8) -> bool {
