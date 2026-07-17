@@ -33,6 +33,7 @@ pub(crate) struct ExecutionIsolationPlan {
 pub(crate) struct ExecutionIsolationRuntime {
     pub plan: ExecutionIsolationPlan,
     pub artifact_refs: Vec<Value>,
+    pub reused: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
@@ -144,10 +145,19 @@ pub(crate) fn create_execution_isolation(
         "reuse_current_workspace" | "reuse_read_only_workspace" | "delegate_remote_executor" => {}
         other => bail!("unknown_isolation_creation_kind:{other}"),
     }
-    Ok(ExecutionIsolationRuntime {
-        plan: plan.clone(),
-        artifact_refs: vec![execution_isolation_artifact_ref(plan)],
-    })
+    Ok(execution_isolation_runtime(plan, false))
+}
+
+pub(crate) fn create_or_reuse_execution_isolation(
+    plan: &ExecutionIsolationPlan,
+    created_at_unix: u64,
+) -> Result<ExecutionIsolationRuntime> {
+    if !plan.requires_cleanup || !plan.execution_root.exists() {
+        return create_execution_isolation(plan, created_at_unix);
+    }
+    ensure_safe_allocation_path(plan)?;
+    validate_existing_isolation(plan)?;
+    Ok(execution_isolation_runtime(plan, true))
 }
 
 pub(crate) fn cleanup_execution_isolation(plan: &ExecutionIsolationPlan) -> Result<()> {
@@ -164,6 +174,13 @@ pub(crate) fn cleanup_execution_isolation(plan: &ExecutionIsolationPlan) -> Resu
 
 pub(crate) fn is_execution_isolation_root(path: &Path) -> bool {
     read_isolation_marker(path).is_some()
+}
+
+pub(crate) fn execution_isolation_root_profile(path: &Path) -> Option<String> {
+    read_isolation_marker(path)?
+        .get("profile")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 pub(crate) fn cleanup_abandoned_isolation_workspaces(
@@ -203,6 +220,24 @@ pub(crate) fn execution_isolation_artifact_ref(plan: &ExecutionIsolationPlan) ->
         "remote": plan.remote,
         "requires_cleanup": plan.requires_cleanup,
     })
+}
+
+fn execution_isolation_runtime(
+    plan: &ExecutionIsolationPlan,
+    reused: bool,
+) -> ExecutionIsolationRuntime {
+    let mut artifact = execution_isolation_artifact_ref(plan);
+    if let Some(obj) = artifact.as_object_mut() {
+        obj.insert(
+            "allocation_state".to_string(),
+            json!(if reused { "reused" } else { "created" }),
+        );
+    }
+    ExecutionIsolationRuntime {
+        plan: plan.clone(),
+        artifact_refs: vec![artifact],
+        reused,
+    }
 }
 
 pub(crate) fn isolation_profile_from_token(token: &str) -> Option<CapabilityIsolationProfile> {
@@ -266,6 +301,26 @@ fn write_isolation_marker(plan: &ExecutionIsolationPlan, created_at_unix: u64) -
         serde_json::to_vec_pretty(&marker)?,
     )
     .with_context(|| format!("write isolation marker {}", plan.execution_root.display()))
+}
+
+fn validate_existing_isolation(plan: &ExecutionIsolationPlan) -> Result<()> {
+    let marker = read_isolation_marker(&plan.execution_root)
+        .context("existing_isolation_marker_missing_or_invalid")?;
+    for (field, expected) in [
+        ("task_key", plan.task_key.as_str()),
+        ("profile", plan.profile.as_str()),
+        ("creation_kind", plan.creation_kind.as_str()),
+    ] {
+        if marker.get(field).and_then(Value::as_str) != Some(expected) {
+            bail!("existing_isolation_contract_mismatch:{field}");
+        }
+    }
+    if plan.creation_kind == "create_local_git_worktree"
+        && !plan.execution_root.join(".git").exists()
+    {
+        bail!("existing_isolation_git_worktree_missing");
+    }
+    Ok(())
 }
 
 fn create_git_worktree(plan: &ExecutionIsolationPlan) -> Result<()> {

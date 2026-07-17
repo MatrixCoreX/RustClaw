@@ -11,6 +11,7 @@ mod ask_planner_frontdoor;
 mod ask_runtime;
 mod async_poll_executor;
 mod channels;
+mod child_task_execution_scope;
 mod locator;
 mod resume_replay_executor;
 pub(crate) mod run_capability;
@@ -210,8 +211,17 @@ async fn process_claimed_task_by_kind(
 ) -> anyhow::Result<()> {
     match task.kind.as_str() {
         "ask" => {
-            process_ask_task(state, task, payload).await?;
+            let child_scope =
+                child_task_execution_scope::ChildTaskExecutionScope::prepare(state, task, payload)?;
+            process_ask_task(child_scope.state(state), task, payload).await?;
             if repo::child_tasks::is_child_subagent_payload(payload) {
+                if let Some(projection) = child_scope.projection(state) {
+                    repo::child_tasks::record_child_task_execution_scope(
+                        state,
+                        &task.task_id,
+                        &projection,
+                    )?;
+                }
                 repo::child_tasks::record_child_task_terminal_projection(
                     state,
                     &task.task_id,

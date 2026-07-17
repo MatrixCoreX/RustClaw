@@ -151,6 +151,46 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "local_worktree_child_accepts_scoped_write_but_rejects_publish",
         "child_rejects_non_machine_allowlist_tokens_and_unknown_profile",
     ),
+    "crates/clawd/src/execution_isolation.rs": (
+        "create_or_reuse_execution_isolation",
+        "validate_existing_isolation",
+        "existing_isolation_contract_mismatch",
+        "execution_isolation_root_profile",
+        '"allocation_state"',
+    ),
+    "crates/clawd/src/worker/child_task_execution_scope.rs": (
+        "ChildTaskExecutionScope",
+        "create_or_reuse_execution_isolation",
+        '"owner_layer": "child_task_execution_scope"',
+        '"isolated_worktree"',
+        '"primary_workspace_read_only"',
+        '"parent_owned_after_patch_decision"',
+    ),
+    "crates/clawd/src/worker/mod.rs": (
+        "ChildTaskExecutionScope::prepare",
+        "child_scope.state(state)",
+        "record_child_task_execution_scope",
+        "record_child_task_terminal_projection",
+    ),
+    "crates/clawd/src/skills.rs": (
+        "execution_isolation_root_profile",
+        '"local_worktree"',
+        "CapabilityIsolationProfile::LocalWorktree | CapabilityIsolationProfile::ReadOnly",
+    ),
+    "crates/clawd/src/repo/child_tasks.rs": (
+        "record_child_task_execution_scope",
+        '"child_task_execution_scope"',
+        "record_child_task_terminal_projection",
+    ),
+    "crates/clawd/src/worker/child_task_execution_scope_tests.rs": (
+        "local_worktree_child_binds_and_reuses_task_scoped_workspace",
+        "read_only_child_keeps_primary_root_without_allocation",
+        "unsupported_child_profile_fails_closed",
+    ),
+    "crates/clawd/src/skills_tests/task_scoped_worktree.rs": (
+        "task_scoped_worktree_reuses_root_across_multiple_skill_calls",
+        "skill call must not allocate a nested worktree",
+    ),
     "crates/clawd/src/task_journal_tests/event_stream_hooks.rs": (
         "trace_json_includes_pollable_machine_event_stream",
         "trace_json_projects_goal_and_context_budget_events",

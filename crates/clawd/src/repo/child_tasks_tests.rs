@@ -116,6 +116,52 @@ fn stored_result_json(state: &crate::AppState, task_id: &str) -> Value {
 }
 
 #[test]
+fn terminal_child_result_retains_task_scoped_execution_projection() {
+    let temp = TempDirGuard::new("child_execution_scope");
+    let db_path = temp.path.join("tasks.sqlite");
+    let state = file_backed_state_with_schema(&db_path);
+    let spec = sample_child_spec("task-parent-scope", "task-child-scope", true);
+    let payload = child_payload(&spec);
+    insert_task(
+        &state,
+        "task-child-scope",
+        "succeeded",
+        &payload,
+        &json!({"text": "child result"}),
+    );
+    let projection = json!({
+        "schema_version": 1,
+        "owner_layer": "child_task_execution_scope",
+        "permission_profile": "local_worktree",
+        "workspace_binding": "isolated_worktree",
+        "artifact_refs": [{
+            "kind": "execution_isolation_workspace",
+            "cleanup_ref": "isolation:worktrees:task-child-scope"
+        }]
+    });
+
+    assert!(
+        record_child_task_execution_scope(&state, "task-child-scope", &projection)
+            .expect("record child execution scope")
+    );
+    assert!(
+        record_child_task_terminal_projection(&state, "task-child-scope", &payload,)
+            .expect("record terminal projection")
+    );
+
+    let result = stored_result_json(&state, "task-child-scope");
+    assert_eq!(
+        result["child_task_execution_scope"]["workspace_binding"],
+        "isolated_worktree"
+    );
+    assert_eq!(
+        result["child_task_execution_scope"]["artifact_refs"][0]["cleanup_ref"],
+        "isolation:worktrees:task-child-scope"
+    );
+    assert_eq!(result["child_task_result"]["status"], "succeeded");
+}
+
+#[test]
 fn child_timeout_projection_blocks_required_parent_after_restart() {
     let temp = TempDirGuard::new("child_timeout_restart");
     let db_path = temp.path.join("tasks.sqlite");

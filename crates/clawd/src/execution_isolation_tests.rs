@@ -119,12 +119,99 @@ fn local_worktree_plan_uses_isolated_cleanup_ref() {
 }
 
 #[test]
+fn local_worktree_allocation_reuses_matching_task_scope() {
+    let root = TempRoot::new("worktree_reuse");
+    init_git_repo(&root.path);
+    let plan = plan_execution_isolation(
+        &root.path,
+        "task-worktree-reuse",
+        CapabilityIsolationProfile::LocalWorktree,
+    )
+    .expect("worktree isolation plan");
+
+    let created =
+        create_or_reuse_execution_isolation(&plan, 100).expect("create child worktree scope");
+    let reused =
+        create_or_reuse_execution_isolation(&plan, 101).expect("reuse child worktree scope");
+
+    assert!(!created.reused);
+    assert!(reused.reused);
+    assert_eq!(
+        reused.artifact_refs[0]["allocation_state"],
+        serde_json::json!("reused")
+    );
+    assert_eq!(
+        execution_isolation_root_profile(&plan.execution_root).as_deref(),
+        Some("local_worktree")
+    );
+    cleanup_execution_isolation(&plan).expect("cleanup reused worktree");
+}
+
+#[test]
+fn existing_isolation_with_mismatched_marker_fails_closed() {
+    let root = TempRoot::new("worktree_marker_mismatch");
+    init_git_repo(&root.path);
+    let plan = plan_execution_isolation(
+        &root.path,
+        "task-worktree-mismatch",
+        CapabilityIsolationProfile::LocalWorktree,
+    )
+    .expect("worktree isolation plan");
+    create_execution_isolation(&plan, 100).expect("create child worktree scope");
+    let marker_path = plan.execution_root.join(MARKER_FILE);
+    let mut marker: Value = serde_json::from_slice(&fs::read(&marker_path).expect("read marker"))
+        .expect("parse marker");
+    marker["task_key"] = serde_json::json!("another-task");
+    fs::write(
+        &marker_path,
+        serde_json::to_vec_pretty(&marker).expect("serialize marker"),
+    )
+    .expect("replace marker");
+
+    let error = create_or_reuse_execution_isolation(&plan, 101)
+        .expect_err("mismatched worktree marker must not be reused");
+    assert!(error
+        .to_string()
+        .contains("existing_isolation_contract_mismatch:task_key"));
+    cleanup_execution_isolation(&plan).expect("cleanup mismatched worktree");
+}
+
+#[test]
 fn isolation_profile_from_token_accepts_only_machine_tokens() {
     assert_eq!(
         isolation_profile_from_token("local_temp_workspace"),
         Some(CapabilityIsolationProfile::LocalTempWorkspace)
     );
     assert_eq!(isolation_profile_from_token("Local Temp Workspace"), None);
+}
+
+fn init_git_repo(path: &Path) {
+    for args in [
+        vec!["init", "--quiet"],
+        vec!["config", "user.email", "rustclaw-test@example.invalid"],
+        vec!["config", "user.name", "RustClaw Test"],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .status()
+            .expect("run git setup");
+        assert!(status.success());
+    }
+    fs::write(path.join("README.md"), "fixture\n").expect("write fixture");
+    for args in [
+        vec!["add", "README.md"],
+        vec!["commit", "--quiet", "-m", "fixture"],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .status()
+            .expect("run git commit");
+        assert!(status.success());
+    }
 }
 
 fn unique_suffix() -> u128 {
