@@ -21,6 +21,7 @@ fn provider(name: &str, base_url: &str) -> LlmProviderRuntime {
             max_concurrency: 1,
             params: claw_core::config::LlmProviderParams::default(),
         },
+        pricing: None,
         client: Client::new(),
         semaphore: Arc::new(Semaphore::new(1)),
         breaker: Arc::new(crate::providers::CircuitBreaker::new()),

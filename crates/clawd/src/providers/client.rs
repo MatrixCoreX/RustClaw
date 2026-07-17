@@ -46,7 +46,7 @@ pub(crate) fn build_llm_http_client(timeout_seconds: u64) -> reqwest::Result<Cli
         .build()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct LlmUsageSnapshot {
     pub(crate) prompt_tokens: Option<u64>,
     pub(crate) completion_tokens: Option<u64>,

@@ -912,6 +912,10 @@ pub struct LlmConfig {
     pub selected_vendor: Option<String>,
     #[serde(default)]
     pub selected_model: Option<String>,
+    /// Optional machine-readable pricing catalog. Entries are matched by exact
+    /// provider/model identifiers; missing entries remain explicitly unknown.
+    #[serde(default)]
+    pub pricing: Vec<LlmModelPricingConfig>,
     #[serde(default)]
     pub openai: Option<LlmVendorConfig>,
     #[serde(default)]
@@ -933,6 +937,39 @@ pub struct LlmConfig {
     // Legacy flat provider list, kept for backward compatibility.
     #[serde(default)]
     pub providers: Vec<LlmProviderConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LlmModelPricingConfig {
+    pub provider: String,
+    pub model: String,
+    pub effective_from: String,
+    #[serde(default = "default_llm_pricing_currency")]
+    pub currency: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub input_usd_per_million: Option<f64>,
+    #[serde(default)]
+    pub output_usd_per_million: Option<f64>,
+    #[serde(default)]
+    pub cache_read_usd_per_million: Option<f64>,
+    #[serde(default)]
+    pub cache_write_usd_per_million: Option<f64>,
+    #[serde(default)]
+    pub reasoning_usd_per_million: Option<f64>,
+    #[serde(default)]
+    pub long_context_threshold_tokens: Option<u64>,
+    #[serde(default)]
+    pub long_context_input_usd_per_million: Option<f64>,
+    #[serde(default)]
+    pub long_context_output_usd_per_million: Option<f64>,
+    #[serde(default)]
+    pub long_context_cache_read_usd_per_million: Option<f64>,
+}
+
+fn default_llm_pricing_currency() -> String {
+    "USD".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]

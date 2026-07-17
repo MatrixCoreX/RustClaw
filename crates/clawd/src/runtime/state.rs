@@ -398,6 +398,8 @@ pub(crate) struct TaskMetricsRegistry {
     /// Ordered, machine-only metadata for measuring calls before the planner.
     /// Prompt and response text are intentionally not retained here.
     pub(crate) llm_call_sequence_per_task: Arc<Mutex<HashMap<String, Vec<LlmCallSequenceEntry>>>>,
+    pub(crate) llm_cost_records_per_task:
+        Arc<Mutex<HashMap<String, Vec<crate::providers::LlmCallCostRecord>>>>,
     /// Final machine-classified provider blocker for the current task attempt. This is only set
     /// after the complete fallback set is exhausted and is consumed by finalization to create a
     /// resumable waiting checkpoint.
@@ -1262,6 +1264,7 @@ impl AppState {
             .lock()
             .unwrap()
             .remove(task_id);
+        self.clear_task_llm_cost_records(task_id);
         self.clear_task_provider_blocker(task_id);
     }
 
