@@ -27,7 +27,7 @@ Runtime environment:
 Allowed tools and skills contract:
 __TOOL_SPEC__
 
-Skill playbooks:
+Progressively disclosed skill context (compact registry index plus selected playbooks):
 __SKILL_PLAYBOOKS__
 
 Recent assistant replies (optional; for ordinal previous / two-turns-back / three-turns-back assistant replies — turn_id, relative_index -1/-2/-3, short_preview, has_code_block; ordered replies may also include `ordered_entries=1:... | 2:...`):

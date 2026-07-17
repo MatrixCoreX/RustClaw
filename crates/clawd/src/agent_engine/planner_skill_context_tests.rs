@@ -1,0 +1,121 @@
+use super::*;
+use serde_json::json;
+
+fn task() -> crate::ClaimedTask {
+    crate::ClaimedTask {
+        task_id: "planner-skill-context-test".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: Some("planner-skill-context-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    }
+}
+
+fn state() -> crate::AppState {
+    crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry()
+}
+
+fn full_visible_playbook_chars(state: &crate::AppState, task: &crate::ClaimedTask) -> usize {
+    state
+        .planner_available_skills_for_task(task)
+        .into_iter()
+        .filter_map(|skill| state.skill_registry_prompt_rel_path(&skill))
+        .map(|path| crate::load_prompt_template_for_state(state, &path, "").0)
+        .map(|text| text.chars().count())
+        .sum()
+}
+
+fn plan_with_step(action_type: &str, skill: &str, args: serde_json::Value) -> crate::PlanResult {
+    crate::PlanResult {
+        goal: "fixture_goal".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: action_type.to_string(),
+            skill: skill.to_string(),
+            args,
+            depends_on: Vec::new(),
+            why: "fixture".to_string(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: "{}".to_string(),
+    }
+}
+
+fn loop_state_with_plan(plan: crate::PlanResult) -> super::super::LoopState {
+    let mut loop_state = super::super::LoopState {
+        round_no: 2,
+        ..Default::default()
+    };
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: plan.goal.clone(),
+            execution_recipe_summary: None,
+            plan_result: Some(plan),
+            verify_result: None,
+        });
+    loop_state
+}
+
+#[test]
+fn first_round_uses_only_budgeted_compact_index() {
+    let state = state();
+    let task = task();
+    let loop_state = super::super::LoopState {
+        round_no: 1,
+        ..Default::default()
+    };
+    let context = build_planner_skill_context(&state, &task, &loop_state);
+
+    assert_eq!(context.disclosure_mode, "compact_index");
+    assert!(context.selected_skills.is_empty());
+    assert!(context.text.contains("runtime_skill_context_v2"));
+    assert!(context.text.contains("Compact skill index:"));
+    assert!(!context.text.contains("Selected skill playbooks:"));
+    assert!(context.quick_index_chars <= SKILL_QUICK_INDEX_CHAR_BUDGET);
+    assert_eq!(context.playbook_chars, 0);
+    assert!(context.text.chars().count() < full_visible_playbook_chars(&state, &task));
+}
+
+#[test]
+fn later_round_expands_playbook_from_structured_capability_only() {
+    let state = state();
+    let loop_state = loop_state_with_plan(plan_with_step(
+        "call_capability",
+        "filesystem.list_entries",
+        json!({"path": "."}),
+    ));
+    let context = build_planner_skill_context(&state, &task(), &loop_state);
+
+    assert_eq!(context.disclosure_mode, "scoped_playbooks");
+    assert_eq!(context.selected_skills, vec!["fs_basic".to_string()]);
+    assert!(context.text.contains("Selected skill playbooks:"));
+    assert!(context.text.contains("### fs_basic"));
+    assert!(context.playbook_chars <= SKILL_PLAYBOOK_CHAR_BUDGET);
+}
+
+#[test]
+fn user_visible_response_text_never_selects_a_skill_playbook() {
+    let state = state();
+    let loop_state = loop_state_with_plan(plan_with_step(
+        "respond",
+        "respond",
+        json!({"content": "fs_basic filesystem.list_entries"}),
+    ));
+    let context = build_planner_skill_context(&state, &task(), &loop_state);
+
+    assert_eq!(context.disclosure_mode, "compact_index");
+    assert!(context.selected_skills.is_empty());
+    assert!(!context.text.contains("Selected skill playbooks:"));
+}

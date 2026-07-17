@@ -10,9 +10,8 @@ use tracing::{info, warn};
 
 use super::{
     attempt_ledger::build_attempt_ledger_compact, build_loop_history_compact,
-    build_single_plan_prompt, build_skill_playbooks_text_scoped,
-    build_skill_quick_index_text_scoped, build_turn_analysis_prompt_block, AgentLoopGuardPolicy,
-    LoopState, AGENT_TOOL_SPEC_PATH,
+    build_planner_skill_context, build_single_plan_prompt, build_turn_analysis_prompt_block,
+    AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH,
 };
 use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult};
 
@@ -30,12 +29,11 @@ impl<'a> PlannerToolLibrary<'a> {
         Self { state, task }
     }
 
-    fn skill_playbooks(&self) -> String {
-        build_skill_playbooks_text_scoped(self.state, self.task, None)
-    }
-
-    fn skill_quick_index(&self) -> String {
-        build_skill_quick_index_text_scoped(self.state, self.task, None)
+    fn skill_context(
+        &self,
+        loop_state: &LoopState,
+    ) -> super::planner_skill_context::PlannerSkillContext {
+        build_planner_skill_context(self.state, self.task, loop_state)
     }
 
     fn tool_spec(&self) -> Result<String, String> {
@@ -84,8 +82,8 @@ pub(super) async fn plan_round_actions(
         220,
     );
     let planner_tool_library = PlannerToolLibrary::new(state, task);
-    let skill_playbooks = planner_tool_library.skill_playbooks();
-    let skill_quick_index = planner_tool_library.skill_quick_index();
+    let skill_context = planner_tool_library.skill_context(loop_state);
+    let skill_playbooks = &skill_context.text;
     let tool_spec_template = planner_tool_library.tool_spec()?;
     let turn_analysis =
         build_turn_analysis_prompt_block(turn_analysis_for_prompt, boundary_envelope_for_prompt);
@@ -101,8 +99,11 @@ pub(super) async fn plan_round_actions(
             prompt_logical_path,
         )
         .map_err(|e| e.to_string())?;
-        (prompt_name, resolved.source, resolved.version, {
-            let mut prompt = build_single_plan_prompt(
+        (
+            prompt_name,
+            resolved.source,
+            resolved.version,
+            build_single_plan_prompt(
                 &resolved.template,
                 &user_request_for_prompt,
                 goal,
@@ -116,14 +117,8 @@ pub(super) async fn plan_round_actions(
                 &runtime_os,
                 &runtime_shell,
                 &workspace_root,
-            );
-            prompt.push_str(
-                        "\n\n## Skill Quick Index (first-round routing hint)\nGoal: reduce misclassification while minimizing avoidable extra rounds.\n- Do NOT end round-1 with a generic chat-style final answer when a skill might be relevant.\n- In round-1, prioritize intent classification + missing-slot check, but finish immediately when one bounded resolution/current-runtime step can already complete the request safely.\n- Ask one concise clarification only when safe completion is truly blocked after current-turn text, immediate context, and bounded resolution/default inference have been used.\n- Use immediate `call_skill` in round-1 whenever intent is clear or can be completed by one bounded resolution/current-runtime step.\n",
-                    );
-            prompt.push_str(&skill_quick_index);
-            prompt.push('\n');
-            prompt
-        })
+            ),
+        )
     } else {
         let history_compact = build_loop_history_compact(loop_state);
         // Phase 3.3 / observation history regression fix:
@@ -192,12 +187,16 @@ pub(super) async fn plan_round_actions(
         policy.multi_round_enabled
     );
     info!(
-        "plan_llm_request task_id={} round={} planner_mode=agent_loop prompt_chars={} tool_spec_chars={} playbooks_chars={} recent_replies_chars={} user_request={}",
+        "plan_llm_request task_id={} round={} planner_mode=agent_loop prompt_chars={} tool_spec_chars={} skill_context_chars={} skill_context_mode={} selected_skills={} quick_index_chars={} playbook_chars={} recent_replies_chars={} user_request={}",
         task.task_id,
         loop_state.round_no,
         prompt_text.chars().count(),
         tool_spec_template.chars().count(),
         skill_playbooks.chars().count(),
+        skill_context.disclosure_mode,
+        skill_context.selected_skills.join(","),
+        skill_context.quick_index_chars,
+        skill_context.playbook_chars,
         recent_assistant_replies.chars().count(),
         crate::truncate_for_log(user_text)
     );

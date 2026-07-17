@@ -34,7 +34,7 @@ Runtime environment:
 Allowed tools and skills contract:
 __TOOL_SPEC__
 
-Skill playbooks:
+Progressively disclosed skill context (compact registry index plus selected playbooks):
 __SKILL_PLAYBOOKS__
 
 Attempt ledger:
