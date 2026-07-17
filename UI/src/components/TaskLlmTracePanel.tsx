@@ -246,6 +246,21 @@ export function TaskLlmTracePanel({
             <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-white/70">
               llm_calls={callCount}
             </span>
+            {taskLlmDebug.trace_layers?.provider_data?.classification ? (
+              <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-white/70">
+                provider_data={taskLlmDebug.trace_layers.provider_data.classification}
+              </span>
+            ) : null}
+            {taskLlmDebug.trace_layers?.rustclaw_decisions?.classification ? (
+              <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-white/70">
+                runtime_data={taskLlmDebug.trace_layers.rustclaw_decisions.classification}
+              </span>
+            ) : null}
+            {taskLlmDebug.redaction?.field_count ? (
+              <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-white/70">
+                redacted_fields={taskLlmDebug.redaction.field_count}
+              </span>
+            ) : null}
           </div>
 
           {taskLlmDebug.flow_summary ? (

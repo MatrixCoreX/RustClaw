@@ -1,4 +1,4 @@
-use super::sanitize_user_visible_text;
+use super::{redact_sensitive_text, sanitize_user_visible_text};
 
 #[test]
 fn sanitizes_ansi_and_sensitive_url_params() {
@@ -43,6 +43,18 @@ fn redacts_short_lived_secret_token_references_from_visible_text() {
     let sanitized = sanitize_user_visible_text(raw);
 
     assert_eq!(sanitized, "adapter returned [REDACTED]");
+}
+
+#[test]
+fn sensitive_only_redaction_preserves_teaching_prompt_structure() {
+    let raw = "### MEMORY_USE_POLICY\napi_key=hidden\nrequest token tp-1234567890abcdefghijkl";
+
+    let redacted = redact_sensitive_text(raw);
+
+    assert!(redacted.contains("### MEMORY_USE_POLICY"));
+    assert!(redacted.contains("api_key=[REDACTED]"));
+    assert!(!redacted.contains("hidden"));
+    assert!(!redacted.contains("tp-1234567890abcdefghijkl"));
 }
 
 #[test]

@@ -102,7 +102,7 @@ export function useTaskRuntime({
 
   const fetchTaskLlmDebugById = async (id: string): Promise<TaskLlmDebugResponse> => {
     const normalizedId = encodeURIComponent(id.trim());
-    const res = await apiFetch(`/v1/debug/tasks/${normalizedId}`);
+    const res = await apiFetch(`/v1/debug/tasks/${normalizedId}?teaching=true`);
     const body = (await res.json()) as ApiResponse<TaskLlmDebugResponse>;
     if (!res.ok || !body.ok || !body.data) {
       throw new Error(body.error || `task llm debug query failed (${res.status})`);
