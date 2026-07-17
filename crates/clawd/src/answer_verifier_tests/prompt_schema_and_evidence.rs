@@ -1,35 +1,12 @@
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use serde_json::json;
 
 use super::super::{
-    answer_verifier_user_request_for_prompt, backend_identity_metadata_answer_verifier_guard,
-    execution_evidence_prompt_block, output_contract_prompt_block, AnswerVerifierOut,
+    answer_verifier_user_request_for_prompt, execution_evidence_prompt_block,
+    output_contract_prompt_block, AnswerVerifierOut,
 };
 use super::*;
-
-fn state_with_mimo_provider() -> crate::AppState {
-    let mut state = crate::AppState::test_default_with_fixture_provider();
-    state.core.llm_providers = vec![Arc::new(crate::LlmProviderRuntime {
-        config: claw_core::config::LlmProviderConfig {
-            name: "vendor-mimo".to_string(),
-            provider_type: "openai_compat".to_string(),
-            base_url: "http://fixture.invalid".to_string(),
-            api_key: "fixture".to_string(),
-            model: "mimo-v2.5-pro".to_string(),
-            context_window_tokens: None,
-            priority: 1,
-            timeout_seconds: 5,
-            max_concurrency: 1,
-            params: claw_core::config::LlmProviderParams::default(),
-        },
-        client: reqwest::Client::new(),
-        semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        breaker: Arc::new(crate::providers::CircuitBreaker::new()),
-    })];
-    state
-}
 
 #[test]
 fn answer_verifier_prompt_request_preserves_original_language_over_resolved_intent() {
@@ -60,51 +37,6 @@ fn answer_verifier_prompt_request_preserves_original_language_over_resolved_inte
     assert!(request_for_prompt.contains("Resolved semantic request:"));
     assert!(request_for_prompt.contains("Use a read-only file reading capability"));
     assert!(request_for_prompt.contains("preserve the original user's language"));
-}
-
-#[test]
-fn backend_identity_metadata_guard_accepts_runtime_identity_label() {
-    let state = state_with_mimo_provider();
-    let route = backend_identity_guard_route();
-
-    let guard = backend_identity_metadata_answer_verifier_guard(&state, &route, "RustClaw")
-        .expect("runtime identity should be handled without model verifier");
-
-    assert!(guard.pass);
-    assert!(guard.missing_evidence_fields.is_empty());
-    assert!(!guard.should_retry);
-}
-
-#[test]
-fn backend_identity_metadata_guard_rejects_provider_identity_leak() {
-    let state = state_with_mimo_provider();
-    let route = backend_identity_guard_route();
-
-    let guard = backend_identity_metadata_answer_verifier_guard(
-        &state,
-        &route,
-        "你好，我是 MiMo-v2.5-pro，由小米 MiMo 团队开发。",
-    )
-    .expect("backend provider identity should be handled structurally");
-
-    assert!(!guard.pass);
-    assert_eq!(guard.missing_evidence_fields, vec!["identity"]);
-    assert_eq!(
-        guard.answer_incomplete_reason,
-        "backend_identity_metadata_in_final_answer"
-    );
-    assert!(guard.should_retry);
-}
-
-#[test]
-fn backend_identity_metadata_guard_is_route_independent() {
-    let state = state_with_mimo_provider();
-    let route = route_with_mode();
-
-    let guard = backend_identity_metadata_answer_verifier_guard(&state, &route, "MiMo-v2.5-pro")
-        .expect("provider identity must be handled for every answer contract");
-    assert!(!guard.pass);
-    assert_eq!(guard.missing_evidence_fields, vec!["identity"]);
 }
 
 #[test]

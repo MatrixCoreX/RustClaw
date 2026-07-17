@@ -32,17 +32,6 @@ pub(crate) async fn verify_answer_observe_only(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
-    if let Some(identity_guard) =
-        backend_identity_metadata_answer_verifier_guard(state, route_result, candidate_answer)
-    {
-        tracing::info!(
-            task_id = %task.task_id,
-            pass = identity_guard.pass,
-            answer_incomplete_reason = %identity_guard.answer_incomplete_reason,
-            "answer_verifier_backend_identity_metadata_guard"
-        );
-        return Some(identity_guard);
-    }
     if !should_verify_answer(route_result, journal, candidate_answer) {
         return None;
     }
@@ -213,75 +202,6 @@ pub(super) fn answer_verifier_user_request_for_prompt(
     user_request: &str,
 ) -> String {
     crate::language_policy::task_user_request_for_prompt(task, user_request)
-}
-
-pub(super) fn backend_identity_metadata_answer_verifier_guard(
-    state: &AppState,
-    _route_result: &AnswerContract,
-    candidate_answer: &str,
-) -> Option<AnswerVerifierOut> {
-    if candidate_answer_mentions_backend_identity_metadata(state, candidate_answer) {
-        return Some(AnswerVerifierOut {
-            pass: false,
-            missing_evidence_fields: vec!["identity".to_string()],
-            answer_incomplete_reason: "backend_identity_metadata_in_final_answer".to_string(),
-            should_retry: true,
-            retry_instruction: "answer_with_agent_runtime_identity".to_string(),
-            confidence: 0.98,
-        });
-    }
-    if candidate_answer_is_runtime_identity_label(state, candidate_answer) {
-        return Some(AnswerVerifierOut {
-            pass: true,
-            missing_evidence_fields: Vec::new(),
-            answer_incomplete_reason: String::new(),
-            should_retry: false,
-            retry_instruction: String::new(),
-            confidence: 0.99,
-        });
-    }
-    None
-}
-
-fn candidate_answer_mentions_backend_identity_metadata(
-    state: &AppState,
-    candidate_answer: &str,
-) -> bool {
-    let normalized_answer = normalize_identity_metadata_token(candidate_answer);
-    if normalized_answer.is_empty() {
-        return false;
-    }
-    state.core.llm_providers.iter().any(|provider| {
-        provider
-            .config
-            .name
-            .trim()
-            .strip_prefix("vendor-")
-            .into_iter()
-            .chain([
-                provider.config.name.trim(),
-                provider.config.model.trim(),
-                provider.config.provider_type.trim(),
-            ])
-            .map(normalize_identity_metadata_token)
-            .filter(|token| token.len() >= 4)
-            .any(|token| normalized_answer.contains(&token))
-    })
-}
-
-fn candidate_answer_is_runtime_identity_label(state: &AppState, candidate_answer: &str) -> bool {
-    let candidate = candidate_answer
-        .trim()
-        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_ascii_whitespace());
-    !candidate.is_empty() && candidate.eq_ignore_ascii_case(state.agent_runtime_identity_label())
-}
-
-fn normalize_identity_metadata_token(value: &str) -> String {
-    value
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .flat_map(|ch| ch.to_lowercase())
-        .collect()
 }
 
 pub(super) fn structural_satisfaction_can_skip_verifier(
