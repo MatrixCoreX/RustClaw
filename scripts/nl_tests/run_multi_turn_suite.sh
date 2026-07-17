@@ -28,6 +28,8 @@ PROVIDER_RETRY_SLEEP_VALUE="${PROVIDER_RETRY_SLEEP_SECONDS:-3}"
 PRINT_LLM_TRACE_VALUE="${PRINT_LLM_TRACE:-1}"
 ISOLATE_CHAT_ID_BASE_VALUE="${ISOLATE_CHAT_ID_BASE:-1}"
 PROMPT_REPLY_ONLY=0
+ASSERT_FINAL_MACHINE_REF_CONTINUITY=0
+declare -a REQUIRED_FINAL_REFS=()
 
 usage() {
   cat <<'EOF'
@@ -52,6 +54,11 @@ Options:
   --provider-retry-sleep N
                         sleep seconds before provider retry (default: 3)
   --turn-count N        override turn count for custom multi-turn case files
+  --assert-final-machine-ref-continuity
+                        require the final reply to retain every stable machine ref
+                        introduced by this case's prompts
+  --require-final-ref REF
+                        require an exact ref/value in the final reply; repeatable
   --no-llm-trace        Do not print per-turn LLM request/response trace
   --prompt-reply-only   Print only prompt and assistant reply for each turn
   -h, --help            show this help
@@ -411,6 +418,67 @@ print(json.dumps(row, ensure_ascii=False))
 PY
 }
 
+assert_final_semantics() {
+  local final_file="$1"
+  local turn_count="$2"
+  shift 2
+  python3 - "$final_file" "$ASSERT_FINAL_MACHINE_REF_CONTINUITY" "$turn_count" "$@" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+final_path = Path(sys.argv[1])
+assert_continuity = sys.argv[2] == "1"
+turn_count = int(sys.argv[3])
+prompts = sys.argv[4:4 + turn_count]
+required = list(sys.argv[4 + turn_count:])
+
+obj = json.loads(final_path.read_text(encoding="utf-8"))
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+parts = [str(result.get("text") or "")]
+for item in result.get("messages") or []:
+    if isinstance(item, str):
+        parts.append(item)
+    elif isinstance(item, dict):
+        parts.append(str(item.get("text") or ""))
+final_text = "\n".join(parts)
+
+if assert_continuity:
+    namespaces = (
+        "artifact",
+        "child",
+        "constraint",
+        "decision",
+        "evidence",
+        "fact",
+        "failure",
+        "goal",
+        "permission",
+        "side_effect",
+        "window",
+    )
+    namespace_pattern = "|".join(re.escape(item) for item in namespaces)
+    pattern = re.compile(
+        rf"(?<![a-z0-9_.:-])(?:{namespace_pattern}):[A-Za-z0-9_./:-]+"
+    )
+    for prompt in prompts:
+        for machine_ref in pattern.findall(prompt):
+            if machine_ref not in required:
+                required.append(machine_ref)
+
+missing = [item for item in required if item not in final_text]
+if missing:
+    print("  [semantic] final reply missing required references:")
+    for item in missing:
+        print(f"    - {item}")
+    raise SystemExit(1)
+
+print(f"  [semantic] final reference assertions passed count={len(required)}")
+PY
+}
+
 load_cases() {
   local case_file="$1"
   local turn_count="$2"
@@ -514,6 +582,14 @@ while [[ $# -gt 0 ]]; do
       TURN_COUNT_OVERRIDE="${2:-}"
       shift 2
       ;;
+    --assert-final-machine-ref-continuity)
+      ASSERT_FINAL_MACHINE_REF_CONTINUITY=1
+      shift
+      ;;
+    --require-final-ref)
+      REQUIRED_FINAL_REFS+=("${2:-}")
+      shift 2
+      ;;
     --no-llm-trace)
       PRINT_LLM_TRACE_VALUE=0
       shift
@@ -589,6 +665,7 @@ else
 fi
 
 index=0
+suite_failed=0
 while IFS=$'\t' read -r -a parts; do
   [[ "${#parts[@]}" -eq $((TURN_COUNT + 1)) ]] || continue
   case_name="${parts[0]}"
@@ -688,6 +765,23 @@ while IFS=$'\t' read -r -a parts; do
     fi
   done
 
+  final_index=$((TURN_COUNT - 1))
+  final_status="${effective_statuses[$final_index]}"
+  if [[ -z "$final_status" ]]; then
+    final_status="$(extract_status "${finals[$final_index]}")"
+  fi
+  if [[ "$final_status" == "succeeded" ]] \
+    && ((ASSERT_FINAL_MACHINE_REF_CONTINUITY == 1 || ${#REQUIRED_FINAL_REFS[@]} > 0)); then
+    if ! assert_final_semantics \
+      "${finals[$final_index]}" \
+      "$TURN_COUNT" \
+      "${prompts[@]}" \
+      "${REQUIRED_FINAL_REFS[@]}"; then
+      suite_failed=1
+      effective_statuses[$final_index]="semantic_failure"
+    fi
+  fi
+
   meta_file="${case_dir}/meta.txt"
   {
     echo "index=${index}"
@@ -719,4 +813,8 @@ if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "  - $RUN_DIR"
   echo "  - $RUN_LOG"
   echo "  - $SUMMARY_JSONL"
+fi
+
+if ((suite_failed != 0)); then
+  exit 1
 fi

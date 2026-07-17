@@ -27,7 +27,7 @@
     "summary_kind": {"const": "model_assisted_context_compaction"},
     "facts": {
       "type": "array",
-      "maxItems": 24,
+      "maxItems": 64,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -50,7 +50,7 @@
     },
     "decisions": {
       "type": "array",
-      "maxItems": 24,
+      "maxItems": 64,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -77,7 +77,7 @@
     },
     "source_refs": {
       "type": "array",
-      "maxItems": 24,
+      "maxItems": 64,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -101,7 +101,7 @@
   "$defs": {
     "boundedMachineRefs": {
       "type": "array",
-      "maxItems": 24,
+      "maxItems": 64,
       "items": {"type": "string", "minLength": 1, "maxLength": 256}
     },
     "boundedTextRefs": {

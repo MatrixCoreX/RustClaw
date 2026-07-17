@@ -10,6 +10,20 @@ const CONTEXT_COMPACTION_THRESHOLD_CHARS: usize = 24_000;
 const TRANSCRIPT_COMPACTION_THRESHOLD_CHARS: usize = 12_000;
 const COMPACTED_LAST_TURN_SEGMENT_CHARS: usize = 800;
 const COMPACTED_LAST_TURN_TOTAL_CHARS: usize = 1_600;
+const MAX_CONTINUITY_REFS: usize = 128;
+const CONTINUITY_REF_NAMESPACES: &[&str] = &[
+    "artifact",
+    "child",
+    "constraint",
+    "decision",
+    "evidence",
+    "fact",
+    "failure",
+    "goal",
+    "permission",
+    "side_effect",
+    "window",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContextCompactionPlan {
@@ -286,17 +300,29 @@ pub(super) fn apply_context_compaction_with_inputs(
     let Some(view) = bundle.execution_view.as_mut() else {
         return Value::Null;
     };
+    let continuity_refs = deterministic_continuity_refs(view);
+    let model_summary_attached = model_summary.is_some();
+    let mut compacted_summary = model_summary.clone();
+    if let Some(summary) = compacted_summary.as_mut() {
+        attach_continuity_refs(summary, &continuity_refs);
+    } else if !continuity_refs.is_empty() {
+        compacted_summary = Some(json!({
+            "schema_version": 1,
+            "summary_kind": "deterministic_machine_reference_continuity",
+            "continuity_refs": continuity_refs,
+        }));
+    }
+    let continuity_summary_attached = compacted_summary.is_some();
     view.memory_ctx = compacted_memory_ctx;
     view.budget_tier = ExecutionContextBudgetTier::Light;
     view.recent_turns_full = "<none>".to_string();
     view.last_turn_full = compacted_last_turn;
     view.recent_execution_context = "<none>".to_string();
-    view.compacted_history_context = model_summary
+    view.compacted_history_context = compacted_summary
         .as_ref()
         .map(render_compacted_history_context)
         .unwrap_or_else(|| "<none>".to_string());
 
-    let model_summary_attached = model_summary.is_some();
     let after_char_count = context_budget_slots(view)
         .iter()
         .filter(|(_, value)| context_slot_present(value))
@@ -325,10 +351,18 @@ pub(super) fn apply_context_compaction_with_inputs(
         "source_event_range": plan.source_event_range,
         "source_event_ranges": plan.source_event_ranges,
         "summary_kind": "deterministic_context_budget",
-        "compaction_source": if model_summary_attached { "model_assisted" } else { "deterministic_fallback" },
+        "compaction_source": if model_summary_attached {
+            "model_assisted"
+        } else if continuity_summary_attached {
+            "deterministic_machine_reference_fallback"
+        } else {
+            "deterministic_fallback"
+        },
         "model_status_code": model_status_code,
         "model_summary_attached": model_summary_attached,
+        "continuity_summary_attached": continuity_summary_attached,
         "model_summary": model_summary.unwrap_or(Value::Null),
+        "continuity_refs": continuity_refs,
         "before_char_count": plan.before_char_count,
         "after_char_count": after_char_count,
         "threshold_chars": plan.threshold_chars,
@@ -343,6 +377,115 @@ pub(super) fn apply_context_compaction_with_inputs(
     });
     bundle.compaction_records.push(record.clone());
     record
+}
+
+fn attach_continuity_refs(summary: &mut Value, continuity_refs: &[Value]) {
+    let Some(object) = summary.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "continuity_refs".to_string(),
+        Value::Array(continuity_refs.to_vec()),
+    );
+}
+
+fn deterministic_continuity_refs(view: &super::ExecutionContextView) -> Vec<Value> {
+    let mut refs = Vec::new();
+    for (source_ref, value) in [
+        ("runtime_context", view.runtime_context.as_str()),
+        ("goal_context", view.goal_context.as_str()),
+        ("active_task_context", view.active_task_context.as_str()),
+        (
+            "active_execution_anchor_context",
+            view.active_execution_anchor_context.as_str(),
+        ),
+        ("session_alias_context", view.session_alias_context.as_str()),
+        ("last_turn_full", view.last_turn_full.as_str()),
+        (
+            "recent_execution_anchor",
+            view.recent_execution_anchor.as_str(),
+        ),
+        (
+            "recent_execution_context",
+            view.recent_execution_context.as_str(),
+        ),
+        ("recent_turns_full", view.recent_turns_full.as_str()),
+        (
+            "compacted_history_context",
+            view.compacted_history_context.as_str(),
+        ),
+    ] {
+        if !context_slot_present(value) {
+            continue;
+        }
+        for machine_ref in extract_continuity_machine_refs(value) {
+            if refs.iter().any(|item: &Value| {
+                item.get("ref").and_then(Value::as_str) == Some(machine_ref.as_str())
+            }) {
+                continue;
+            }
+            refs.push(json!({
+                "ref": machine_ref,
+                "source_ref": source_ref,
+                "provenance": source_provenance(source_ref),
+            }));
+            if refs.len() >= MAX_CONTINUITY_REFS {
+                return refs;
+            }
+        }
+    }
+    refs
+}
+
+fn extract_continuity_machine_refs(value: &str) -> Vec<String> {
+    let bytes = value.as_bytes();
+    let mut refs = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if !bytes[index].is_ascii_lowercase()
+            || index
+                .checked_sub(1)
+                .is_some_and(|previous| is_machine_ref_char(bytes[previous]))
+        {
+            index += 1;
+            continue;
+        }
+        let namespace_start = index;
+        index += 1;
+        while index < bytes.len() && is_machine_namespace_char(bytes[index]) {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b':' {
+            continue;
+        }
+        let namespace = &value[namespace_start..index];
+        if !CONTINUITY_REF_NAMESPACES.contains(&namespace) {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        let value_start = index;
+        while index < bytes.len() && is_machine_ref_value_char(bytes[index]) {
+            index += 1;
+        }
+        if index == value_start {
+            continue;
+        }
+        refs.push(value[namespace_start..index].to_string());
+    }
+    refs
+}
+
+fn is_machine_namespace_char(value: u8) -> bool {
+    value.is_ascii_lowercase() || value.is_ascii_digit() || matches!(value, b'_' | b'.' | b'-')
+}
+
+fn is_machine_ref_value_char(value: u8) -> bool {
+    value.is_ascii_alphanumeric() || matches!(value, b'_' | b'.' | b'/' | b':' | b'-')
+}
+
+fn is_machine_ref_char(value: u8) -> bool {
+    is_machine_namespace_char(value) || value == b':'
 }
 
 fn render_compacted_history_context(model_summary: &Value) -> String {
