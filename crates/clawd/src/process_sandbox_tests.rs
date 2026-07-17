@@ -3,7 +3,10 @@ use std::process::Stdio;
 
 use claw_core::config::ToolSandboxMode;
 
-use super::{prepare_process_command, ProcessNetworkPolicy, ProcessSandboxRequest};
+use super::{
+    prepare_durable_process_command, prepare_process_command, ProcessNetworkPolicy,
+    ProcessSandboxRequest,
+};
 
 struct TestDir(PathBuf);
 
@@ -57,6 +60,44 @@ async fn danger_full_uses_direct_backend() {
     .expect("direct command");
 
     assert_eq!(prepared.backend, "direct");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn durable_sandbox_omits_parent_death_while_foreground_keeps_it() {
+    if !std::path::Path::new("/usr/bin/bwrap").is_file()
+        && !std::path::Path::new("/bin/bwrap").is_file()
+    {
+        return;
+    }
+    let root = TestDir::new("durable_lifetime");
+    let request = || ProcessSandboxRequest {
+        mode: ToolSandboxMode::WorkspaceWrite,
+        workspace_root: root.path(),
+        execution_root: root.path(),
+        network: ProcessNetworkPolicy::Deny,
+        additional_writable_paths: &[],
+    };
+    let foreground = prepare_process_command("bash", request()).expect("foreground command");
+    let durable =
+        prepare_durable_process_command("bash", request()).expect("durable async command");
+    let foreground_args = foreground
+        .command
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let durable_args = durable
+        .command
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert!(foreground_args.iter().any(|arg| arg == "--die-with-parent"));
+    assert!(!durable_args.iter().any(|arg| arg == "--die-with-parent"));
+    assert!(durable_args.iter().any(|arg| arg == "--new-session"));
+    assert!(durable_args.iter().any(|arg| arg == "--unshare-pid"));
 }
 
 #[cfg(target_os = "linux")]

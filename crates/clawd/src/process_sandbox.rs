@@ -33,6 +33,27 @@ pub(crate) fn prepare_process_command(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
 ) -> Result<PreparedProcessCommand, &'static str> {
+    prepare_process_command_for_lifetime(program, request, ProcessLifetime::ParentBound)
+}
+
+pub(crate) fn prepare_durable_process_command(
+    program: impl AsRef<OsStr>,
+    request: ProcessSandboxRequest<'_>,
+) -> Result<PreparedProcessCommand, &'static str> {
+    prepare_process_command_for_lifetime(program, request, ProcessLifetime::DurableAsync)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessLifetime {
+    ParentBound,
+    DurableAsync,
+}
+
+fn prepare_process_command_for_lifetime(
+    program: impl AsRef<OsStr>,
+    request: ProcessSandboxRequest<'_>,
+    lifetime: ProcessLifetime,
+) -> Result<PreparedProcessCommand, &'static str> {
     if request.mode == ToolSandboxMode::DangerFull {
         return Ok(PreparedProcessCommand {
             command: Command::new(program),
@@ -62,8 +83,10 @@ pub(crate) fn prepare_process_command(
         }
 
         let mut command = Command::new(backend);
+        if lifetime == ProcessLifetime::ParentBound {
+            command.arg("--die-with-parent");
+        }
         command
-            .arg("--die-with-parent")
             .arg("--new-session")
             .arg("--unshare-pid")
             .arg("--unshare-ipc")

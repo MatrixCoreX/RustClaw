@@ -548,10 +548,18 @@ pub(crate) async fn execute_builtin_skill_with_task(
             if async_start {
                 let job_id = required_string(map, "_clawd_async_job_id")?;
                 let job_dir = required_string(map, "_clawd_async_job_dir")?;
+                let async_expires_at = map
+                    .get("_clawd_async_expires_at")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_else(|| (crate::now_ts_u64() as i64).saturating_add(3_600));
+                let async_max_runtime_seconds = async_expires_at
+                    .saturating_sub(crate::now_ts_u64() as i64)
+                    .clamp(1, 86_400) as u64;
                 return start_async_command(
                     &cwd_path,
                     &sanitized_command,
                     state.skill_rt.max_cmd_length,
+                    async_max_runtime_seconds,
                     crate::skills::task_allows_sudo(state, task),
                     &job_id,
                     Path::new(&job_dir),
