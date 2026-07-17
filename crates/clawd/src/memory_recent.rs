@@ -9,6 +9,21 @@ use super::{
     RETRIEVAL_SUCCESS_STATE_FAILED,
 };
 
+const CONTEXT_TRUNCATION_MARKER: &str = "...(truncated)";
+
+fn bounded_context_segment(text: &str, max_len: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.len() <= max_len {
+        return trimmed.to_string();
+    }
+    let prefix_limit = max_len.saturating_sub(CONTEXT_TRUNCATION_MARKER.len());
+    format!(
+        "{}{}",
+        utf8_safe_prefix(trimmed, prefix_limit),
+        CONTEXT_TRUNCATION_MARKER
+    )
+}
+
 fn strip_llm_reply_memory_prefix(text: &str) -> &str {
     text.trim()
         .strip_prefix(LLM_SHORT_TERM_MEMORY_PREFIX)
@@ -641,23 +656,23 @@ fn format_last_turn_full_context(
     max_segment_chars: usize,
     max_total_chars: usize,
 ) -> String {
-    let user_text = utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string();
-    let assistant_text = utf8_safe_prefix(assistant_content.trim(), max_segment_chars).to_string();
+    let user_text = bounded_context_segment(user_content, max_segment_chars);
+    let assistant_text = bounded_context_segment(assistant_content, max_segment_chars);
     let formatted = format!(
         "[LAST_TURN_FULL]\nUser: {}\nAssistant: {}\n[/LAST_TURN_FULL]",
         user_text, assistant_text
     );
     if formatted.len() > max_total_chars {
-        let truncated = utf8_safe_prefix(&formatted, max_total_chars).to_string();
-        if !truncated.ends_with("[/LAST_TURN_FULL]") {
-            let mut out = truncated;
-            if out.len() + 18 <= max_total_chars {
-                out.push_str("[/LAST_TURN_FULL]");
-            }
-            out
-        } else {
-            truncated
-        }
+        const CLOSING: &str = "\n[/LAST_TURN_FULL]";
+        let prefix_limit = max_total_chars
+            .saturating_sub(CONTEXT_TRUNCATION_MARKER.len())
+            .saturating_sub(CLOSING.len());
+        format!(
+            "{}{}{}",
+            utf8_safe_prefix(&formatted, prefix_limit),
+            CONTEXT_TRUNCATION_MARKER,
+            CLOSING
+        )
     } else {
         formatted
     }
@@ -691,9 +706,8 @@ pub(crate) fn build_recent_turns_full_context_with_sources(
     let mut source_task_ids = Vec::new();
     for (idx, turn) in turns.iter().enumerate() {
         let relative = -((idx as i64) + 1);
-        let user_view = utf8_safe_prefix(turn.user_text.trim(), max_segment_chars).to_string();
-        let assistant_view =
-            utf8_safe_prefix(turn.assistant_text.trim(), max_segment_chars).to_string();
+        let user_view = bounded_context_segment(&turn.user_text, max_segment_chars);
+        let assistant_view = bounded_context_segment(&turn.assistant_text, max_segment_chars);
         let turn_block = format!(
             "[TURN {}]\nUser: {}\nAssistant: {}\n[/TURN]\n",
             relative, user_view, assistant_view
@@ -711,6 +725,10 @@ pub(crate) fn build_recent_turns_full_context_with_sources(
         (out, source_task_ids)
     }
 }
+
+#[cfg(test)]
+#[path = "memory_recent_tests.rs"]
+mod tests;
 
 pub(crate) fn build_last_turn_full_context(
     state: &AppState,

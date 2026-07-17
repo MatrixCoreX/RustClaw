@@ -141,6 +141,13 @@ pub(super) async fn parse_single_plan_actions(
     state: &AppState,
     task: &ClaimedTask,
 ) -> Option<Vec<AgentAction>> {
+    if plan_json_has_unterminated_string(raw) {
+        info!(
+            "plan_result_unterminated_json_string_rejected task_id={}",
+            task.task_id
+        );
+        return None;
+    }
     let mut step_values = Vec::new();
     if let Ok(validated) = crate::prompt_utils::validate_against_schema::<Value>(
         raw,
@@ -221,6 +228,26 @@ pub(super) async fn parse_single_plan_actions(
     } else {
         Some(actions)
     }
+}
+
+fn plan_json_has_unterminated_string(raw: &str) -> bool {
+    let Some(json_start) = raw.find(['{', '[']) else {
+        return false;
+    };
+    let mut in_string = false;
+    let mut escaped = false;
+    for ch in raw[json_start..].chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+        } else if ch == '"' {
+            in_string = !in_string;
+        }
+    }
+    in_string
 }
 
 fn recover_malformed_terminal_actions(raw: &str) -> Option<Vec<AgentAction>> {
@@ -404,3 +431,7 @@ fn decode_json_like_string(raw: &str) -> String {
             .replace("\\\\", "\\")
     })
 }
+
+#[cfg(test)]
+#[path = "planning_parse_tests.rs"]
+mod tests;
