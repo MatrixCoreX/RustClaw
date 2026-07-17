@@ -58,6 +58,7 @@ pub(crate) enum VerifyIssueKind {
     SkillNotVisible,
     CapabilityUnavailable,
     MissingRequiredArg,
+    InvalidArgumentValue,
     DefaultCreationTargetApplied,
     UnresolvedTemplateArg,
     InvalidDependsOn,
@@ -87,6 +88,7 @@ impl VerifyIssueKind {
             Self::SkillNotVisible => "SkillNotVisible",
             Self::CapabilityUnavailable => "CapabilityUnavailable",
             Self::MissingRequiredArg => "MissingRequiredArg",
+            Self::InvalidArgumentValue => "InvalidArgumentValue",
             Self::DefaultCreationTargetApplied => "DefaultCreationTargetApplied",
             Self::UnresolvedTemplateArg => "UnresolvedTemplateArg",
             Self::InvalidDependsOn => "InvalidDependsOn",
@@ -109,6 +111,7 @@ impl VerifyIssueKind {
         match self {
             Self::SkillNotVisible | Self::CapabilityUnavailable => FailureAttribution::ToolGap,
             Self::MissingRequiredArg
+            | Self::InvalidArgumentValue
             | Self::UnresolvedTemplateArg
             | Self::InvalidDependsOn
             | Self::PrimaryFallbackConflict
@@ -132,6 +135,7 @@ impl VerifyIssueKind {
             Self::SkillNotVisible => "verify_skill_not_visible",
             Self::CapabilityUnavailable => "verify_capability_unavailable",
             Self::MissingRequiredArg => "verify_missing_required_arg",
+            Self::InvalidArgumentValue => "verify_invalid_argument_value",
             Self::DefaultCreationTargetApplied => "verify_default_creation_target_applied",
             Self::UnresolvedTemplateArg => "verify_unresolved_template_arg",
             Self::InvalidDependsOn => "verify_invalid_depends_on",
@@ -159,6 +163,7 @@ impl VerifyIssueKind {
             Self::SkillNotVisible => "skill_not_visible",
             Self::CapabilityUnavailable => "capability_unavailable",
             Self::MissingRequiredArg => "missing_required_arg",
+            Self::InvalidArgumentValue => "invalid_argument_value",
             Self::DefaultCreationTargetApplied => "default_creation_target_applied",
             Self::UnresolvedTemplateArg => "unresolved_template_arg",
             Self::InvalidDependsOn => "invalid_depends_on",
@@ -182,6 +187,7 @@ impl VerifyIssueKind {
             Self::SkillNotVisible => "clawd.verify.skill_not_visible",
             Self::CapabilityUnavailable => "clawd.verify.capability_unavailable",
             Self::MissingRequiredArg => "clawd.verify.missing_required_arg",
+            Self::InvalidArgumentValue => "clawd.verify.invalid_argument_value",
             Self::DefaultCreationTargetApplied => "clawd.verify.default_creation_target_applied",
             Self::UnresolvedTemplateArg => "clawd.verify.unresolved_template_arg",
             Self::InvalidDependsOn => "clawd.verify.invalid_depends_on",
@@ -561,6 +567,19 @@ fn verify_step_args(
     issues: &mut Vec<VerifyIssue>,
 ) {
     let has_unresolved_template = value_contains_unresolved_template(&step.args, template_scope);
+    for violation in
+        crate::schema_contract::executable_enum_violations(state, normalized_skill, &step.args)
+    {
+        issues.push(VerifyIssue {
+            step_id: step.step_id.clone(),
+            kind: VerifyIssueKind::InvalidArgumentValue,
+            detail: format!(
+                "error_code=invalid_argument_value field={} constraint=enum",
+                violation.field
+            ),
+            missing_fields: Vec::new(),
+        });
+    }
     let manifest_required = manifest_required_args(state, normalized_skill);
     let fallback_required = required_args_for_skill(normalized_skill);
     let mut required: Vec<String> = if manifest_required.is_empty() {
@@ -616,6 +635,7 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
         VerifyIssueKind::SkillNotVisible
             | VerifyIssueKind::CapabilityUnavailable
             | VerifyIssueKind::MissingRequiredArg
+            | VerifyIssueKind::InvalidArgumentValue
             | VerifyIssueKind::UnresolvedTemplateArg
             | VerifyIssueKind::InvalidDependsOn
             | VerifyIssueKind::PrimaryFallbackConflict
@@ -1262,6 +1282,9 @@ mod approval_tests;
 #[cfg(test)]
 #[path = "verifier_permission_tests.rs"]
 mod permission_tests;
+#[cfg(test)]
+#[path = "verifier_schema_tests.rs"]
+mod schema_tests;
 #[cfg(test)]
 #[path = "verifier_tests.rs"]
 pub(super) mod tests;

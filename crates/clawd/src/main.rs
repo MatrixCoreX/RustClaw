@@ -78,6 +78,7 @@ mod routing_context;
 mod runtime;
 mod schedule_service;
 mod scheduled_run_contract;
+mod schema_contract;
 mod semantic_judge;
 mod skill_availability;
 mod skills;
