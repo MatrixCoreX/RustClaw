@@ -100,6 +100,7 @@ pub(crate) fn list_dispatched_paused_checkpoint_resume_executions_internal(
         if let Some(dispatched) = dispatched_paused_checkpoint_resume_execution_from_result_json(
             task,
             &result_json,
+            &state.worker.worker_id,
             now_ts,
         ) {
             out.push(dispatched);
@@ -185,6 +186,7 @@ pub(crate) fn claim_dispatched_paused_checkpoint_resume_execution_internal(
     let Some(dispatched) = dispatched_paused_checkpoint_resume_execution_from_result_json(
         task.clone(),
         &result_json,
+        &state.worker.worker_id,
         now_ts,
     ) else {
         return Ok(None);
@@ -495,6 +497,7 @@ pub(crate) fn record_claimed_dispatched_paused_checkpoint_resume_execution_resul
 fn dispatched_paused_checkpoint_resume_execution_from_result_json(
     task: ClaimedTask,
     result_json: &Value,
+    expected_worker_id: &str,
     now_ts: i64,
 ) -> Option<DispatchedPausedCheckpointResumeExecution> {
     let lifecycle =
@@ -515,6 +518,9 @@ fn dispatched_paused_checkpoint_resume_execution_from_result_json(
         .filter(|value| !value.is_empty())?;
     let task_checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(result_json)?;
     if task_checkpoint.checkpoint_id != checkpoint_id {
+        return None;
+    }
+    if !super::active_resume_claim_owner(lifecycle_obj, checkpoint_id, expected_worker_id, now_ts) {
         return None;
     }
     let claim = lifecycle_obj.get("resume_executor_claim")?;

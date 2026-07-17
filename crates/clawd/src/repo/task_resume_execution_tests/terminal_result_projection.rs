@@ -83,6 +83,7 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
         )
     });
     insert_task(&state, task_id, "running", Some(&stale_retry), now - 10);
+    activate_resume_owner(&state, task_id, checkpoint_id, now, now + 31);
 
     let claimed_executor = claim_ready_paused_checkpoint_resume_executor_internal(
         &state,

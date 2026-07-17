@@ -46,7 +46,7 @@ pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
             );
         }
     }
-    let lease_seconds = interval.max(60) as i64;
+    let lease_seconds = resume_execution_lease_seconds(state);
     prepare_due_paused_checkpoint_resume_work(state, now, lease_seconds)?;
     plan_ready_paused_checkpoint_resume_executors(state, now, lease_seconds)?;
     record_planned_paused_checkpoint_resume_handoffs(state, now)?;
@@ -55,6 +55,15 @@ pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
     project_recorded_paused_checkpoint_resume_dispatch_results(state, now, lease_seconds)?;
     Ok(())
 }
+
+fn resume_execution_lease_seconds(state: &AppState) -> i64 {
+    state
+        .worker
+        .worker_task_heartbeat_seconds
+        .clamp(5, 10)
+        .saturating_mul(3) as i64
+}
+
 fn prepare_due_paused_checkpoint_resume_work(
     state: &AppState,
     now: u64,

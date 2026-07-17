@@ -1,7 +1,30 @@
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Barrier};
+use std::time::Duration;
 use uuid::Uuid;
 
 use super::*;
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "rustclaw-task-admin-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&path).expect("create temp directory");
+        Self(path)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 fn state_with_tasks_table() -> crate::AppState {
     let state = crate::AppState::test_default_with_fixture_provider();
@@ -32,6 +55,25 @@ fn state_with_tasks_table() -> crate::AppState {
     .expect("create tasks table");
     drop(db);
     state
+}
+
+fn file_backed_state_with_schema(db_path: &Path) -> crate::AppState {
+    let manager = r2d2_sqlite::SqliteConnectionManager::file(db_path).with_init(
+        |conn: &mut rusqlite::Connection| {
+            conn.busy_timeout(Duration::from_secs(5))?;
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+            conn.pragma_update(None, "synchronous", "NORMAL")?;
+            conn.pragma_update(None, "foreign_keys", "ON")?;
+            Ok(())
+        },
+    );
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.db = r2d2::Pool::builder()
+        .max_size(8)
+        .build(manager)
+        .expect("build file-backed test pool");
+    state.worker.database_sqlite_path = db_path.to_path_buf();
+    state.with_seeded_db_schema()
 }
 
 fn insert_running_task(state: &crate::AppState, task_id: &str, result_json: &Value) {
@@ -240,6 +282,8 @@ fn resume_task_with_input_records_structured_resume_metadata() {
     let lifecycle = &result["task_lifecycle"];
     assert_eq!(lifecycle["source"], "task_admin_control");
     assert_eq!(lifecycle["message_key"], "clawd.task.resume_requested");
+    assert_eq!(lifecycle["manual_control_kind"], "resume");
+    assert_eq!(lifecycle["manual_control_status"], "pending");
     assert_eq!(lifecycle["resume_due"], true);
     assert_eq!(lifecycle["resume_input"]["task_id"], task_id);
     assert_eq!(lifecycle["resume_input"]["checkpoint_id"], "ckpt-resume");
@@ -273,4 +317,51 @@ fn resume_task_with_input_rejects_checkpoint_mismatch() {
     .expect("resume task");
 
     assert!(update.is_none());
+}
+
+#[test]
+fn concurrent_duplicate_resume_requests_have_one_accepted_owner() {
+    let temp = TempDir::new();
+    let state = file_backed_state_with_schema(&temp.0.join("tasks.sqlite"));
+    let task_id = Uuid::new_v4().to_string();
+    insert_running_task(
+        &state,
+        &task_id,
+        &paused_checkpoint_result("ckpt-concurrent-resume", 1),
+    );
+    let barrier = Arc::new(Barrier::new(8));
+    let mut threads = Vec::new();
+
+    for _ in 0..8 {
+        let state = state.clone();
+        let task_id = task_id.clone();
+        let barrier = Arc::clone(&barrier);
+        threads.push(std::thread::spawn(move || {
+            barrier.wait();
+            resume_task_with_input(
+                &state,
+                TaskResumeControlInput {
+                    task_id,
+                    checkpoint_id: Some("ckpt-concurrent-resume".to_string()),
+                    resume_reason: Some("manual_resume".to_string()),
+                    user_message: None,
+                    new_constraints: None,
+                },
+            )
+            .expect("concurrent resume request")
+        }));
+    }
+
+    let outcomes = threads
+        .into_iter()
+        .map(|thread| thread.join().expect("join resume request"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes.iter().filter(|outcome| outcome.is_some()).count(),
+        1
+    );
+    assert_eq!(
+        outcomes.iter().filter(|outcome| outcome.is_none()).count(),
+        7
+    );
 }

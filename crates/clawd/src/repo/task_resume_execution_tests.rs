@@ -111,6 +111,46 @@ fn stored_task_status_error_result(
     )
 }
 
+fn activate_resume_owner(
+    state: &crate::AppState,
+    task_id: &str,
+    checkpoint_id: &str,
+    claimed_at: i64,
+    expires_at: i64,
+) {
+    let db = state.core.db.get().expect("get db");
+    let raw: String = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| row.get(0),
+        )
+        .expect("load task result");
+    let mut result: serde_json::Value = serde_json::from_str(&raw).expect("parse task result");
+    result["task_lifecycle"]["resume_claim"] = json!({
+        "schema_version": 1,
+        "owner": state.worker.worker_id,
+        "owner_layer": "worker_recovery",
+        "checkpoint_id": checkpoint_id,
+        "claimed_at": claimed_at,
+        "expires_at": expires_at
+    });
+    db.execute(
+        "UPDATE tasks
+         SET result_json = ?2,
+             lease_owner = ?3,
+             lease_expires_at = ?4
+         WHERE task_id = ?1",
+        rusqlite::params![
+            task_id,
+            result.to_string(),
+            state.worker.worker_id,
+            expires_at
+        ],
+    )
+    .expect("activate task resume owner");
+}
+
 #[test]
 fn record_paused_checkpoint_resume_execution_plan_requires_active_executor_claim() {
     let state = state_with_tasks_table();
@@ -296,6 +336,7 @@ fn list_planned_paused_checkpoint_resume_executions_requires_active_machine_plan
         "task_checkpoint": checkpoint_json("ckpt-text-plan", vec![])
     });
     insert_task(&state, "ready-planned", "running", Some(&ready_planner), 10);
+    activate_resume_owner(&state, "ready-planned", "ckpt-planned", now, now + 31);
     insert_task(
         &state,
         "invalid-text-plan",
@@ -353,6 +394,33 @@ fn list_planned_paused_checkpoint_resume_executions_requires_active_machine_plan
     assert!(planned[0].execution_plan.get("text").is_none());
     assert!(planned[0].execution_plan.get("error_text").is_none());
 
+    {
+        let db = state.core.db.get().expect("get db");
+        let raw: String = db
+            .query_row(
+                "SELECT result_json FROM tasks WHERE task_id = 'ready-planned'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load planned result");
+        let mut result: serde_json::Value =
+            serde_json::from_str(&raw).expect("parse planned result");
+        result["task_lifecycle"]["resume_claim"]["owner"] = json!("stale-worker");
+        db.execute(
+            "UPDATE tasks SET result_json = ?1 WHERE task_id = 'ready-planned'",
+            rusqlite::params![result.to_string()],
+        )
+        .expect("replace resume owner");
+    }
+    let stale_owner =
+        list_planned_paused_checkpoint_resume_executions_internal(&state, now + 4, 10)
+            .expect("list stale owner");
+    assert!(
+        stale_owner.is_empty(),
+        "a downstream execution plan must not cross worker ownership"
+    );
+    activate_resume_owner(&state, "ready-planned", "ckpt-planned", now + 4, now + 31);
+
     let expired = list_planned_paused_checkpoint_resume_executions_internal(&state, now + 31, 10)
         .expect("list after lease expiry");
     assert!(
@@ -385,6 +453,7 @@ fn record_planned_paused_checkpoint_resume_handoff_requires_active_machine_plan(
         "task_checkpoint": checkpoint_json("ckpt-handoff", vec![])
     });
     insert_task(&state, "ready-handoff", "running", Some(&ready_planner), 10);
+    activate_resume_owner(&state, "ready-handoff", "ckpt-handoff", now, now + 31);
 
     let claimed = claim_ready_paused_checkpoint_resume_executor_internal(
         &state,
@@ -569,6 +638,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
         "task_checkpoint": checkpoint_json("ckpt-handoff-claim", vec!["write_file:tmp/report.txt"])
     });
     insert_task(&state, "handoff-claim", "running", Some(&ready_planner), 10);
+    activate_resume_owner(&state, "handoff-claim", "ckpt-handoff-claim", now, now + 31);
 
     let claimed_executor = claim_ready_paused_checkpoint_resume_executor_internal(
         &state,

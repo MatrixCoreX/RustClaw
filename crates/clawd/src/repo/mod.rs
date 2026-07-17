@@ -6,6 +6,7 @@ pub(crate) mod submit;
 pub(crate) mod task_admin;
 pub(crate) mod task_approval;
 pub(crate) mod task_goal;
+pub(crate) mod task_mutation_ledger;
 pub(crate) mod task_resume_execution;
 pub(crate) mod tasks;
 
@@ -39,6 +40,10 @@ pub(crate) use task_approval::{
     consume_task_approval_grant, decide_task_approval_request, TaskApprovalConsumeOutcome,
 };
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
+pub(crate) use task_mutation_ledger::{
+    begin_task_mutation, complete_task_mutation, mark_task_mutation_uncertain,
+    BeginTaskMutationOutcome, TaskMutationLease, TaskMutationRecord,
+};
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;
 pub(crate) use task_resume_execution::{
     claim_dispatched_paused_checkpoint_resume_execution_internal,

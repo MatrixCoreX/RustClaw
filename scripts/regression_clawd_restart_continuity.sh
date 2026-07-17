@@ -9,6 +9,7 @@ AUTO_BUILD="${AUTO_BUILD:-1}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-1}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 COMMAND_SLEEP_SECONDS="${COMMAND_SLEEP_SECONDS:-8}"
+ASYNC_EXPIRES_SECONDS="${ASYNC_EXPIRES_SECONDS:-120}"
 LOG_DIR="${LOG_DIR:-${ROOT_DIR}/target/clawd_restart_continuity_$(date +%Y%m%d_%H%M%S)}"
 
 TEMP_WORKSPACE=""
@@ -44,7 +45,7 @@ PY
 }
 
 ensure_binary() {
-  if [[ ! -x "$CLAWD_BIN" && "$AUTO_BUILD" == "1" ]]; then
+  if [[ "$AUTO_BUILD" == "1" ]]; then
     (cd "$ROOT_DIR" && cargo build -p clawd)
   fi
   [[ -x "$CLAWD_BIN" ]] || {
@@ -84,6 +85,7 @@ text = replace_once(r'^listen\s*=\s*".*"$', f'listen = "127.0.0.1:{port}"', text
 text = replace_once(r'^sqlite_path\s*=\s*".*"$', f'sqlite_path = "{sqlite_path}"', text)
 text = replace_once(r'^access_profile\s*=\s*".*"$', 'access_profile = "full"', text)
 text = replace_once(r'^poll_interval_ms\s*=\s*\d+$', 'poll_interval_ms = 200', text)
+text = replace_once(r'^task_heartbeat_seconds\s*=\s*\d+$', 'task_heartbeat_seconds = 5', text)
 text = replace_once(r'^task_timeout_seconds\s*=\s*\d+$', 'task_timeout_seconds = 120', text)
 path.write_text(text, encoding="utf-8")
 PY
@@ -136,13 +138,14 @@ wait_for_health() {
 submit_long_command() {
   local request_path="$LOG_DIR/submit_request.json"
   local response_path="$LOG_DIR/submit_response.json"
-  python3 - "$request_path" "$COMMAND_SLEEP_SECONDS" <<'PY'
+  python3 - "$request_path" "$COMMAND_SLEEP_SECONDS" "$ASYNC_EXPIRES_SECONDS" <<'PY'
 from pathlib import Path
 import json
 import sys
 
 path = Path(sys.argv[1])
 sleep_seconds = int(sys.argv[2])
+expires_seconds = int(sys.argv[3])
 command = (
     "printf 'mutation-once\\n' >> document/restart-continuity-counter.txt; "
     f"sleep {sleep_seconds}; "
@@ -159,7 +162,7 @@ path.write_text(json.dumps({
             "command": command,
             "async_start": True,
             "poll_after_seconds": 1,
-            "expires_in_seconds": 60,
+            "expires_in_seconds": expires_seconds,
         },
     },
 }, ensure_ascii=False), encoding="utf-8")

@@ -1144,6 +1144,33 @@ fn registry_idempotency_guard_switches_mutate_capability_to_action_fingerprint()
 }
 
 #[test]
+fn registry_idempotency_guard_resolves_planner_capability_before_policy() {
+    let state = state_with_registry(registry_governance_fixture(), &["config_edit"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let action = crate::AgentAction::CallCapability {
+        capability: "config.apply".to_string(),
+        args: serde_json::json!({
+            "field_path": "skills.photo_organize",
+            "value": true
+        }),
+    };
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+
+    assert_eq!(fingerprint, "skill:config_edit:action:apply_config_change");
+    assert!(super::registry_idempotency_guard_attribution(
+        &state,
+        &policy,
+        &action,
+        &fingerprint,
+        "registry_idempotency_repeat_completed_action",
+        Some(1),
+        None,
+    )
+    .is_some());
+}
+
+#[test]
 fn registry_idempotency_guard_keeps_observe_capability_args_fingerprint() {
     let state = state_with_registry(registry_governance_fixture(), &["config_edit", "fs_basic"]);
     let mut policy = base_policy();

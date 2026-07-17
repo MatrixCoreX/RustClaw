@@ -992,6 +992,41 @@ pub(super) async fn execute_prepared_skill_action(
         normalized_skill,
         crate::truncate_for_log(&exec_args.to_string())
     );
+    let raw_action_effect = crate::execution_recipe::classify_skill_action_effect(
+        state,
+        normalized_skill,
+        classification_args,
+    );
+    let mutation_guard = match super::mutation_ledger::prepare_mutation_execution(
+        state,
+        task,
+        normalized_skill,
+        classification_args,
+        fingerprint,
+        raw_action_effect,
+    )? {
+        super::mutation_ledger::MutationExecutionGuard::NotRequired => None,
+        super::mutation_ledger::MutationExecutionGuard::Acquired(lease) => Some(lease),
+        super::mutation_ledger::MutationExecutionGuard::Completed(record) => {
+            return super::mutation_ledger::record_completed_without_replay(
+                state,
+                task,
+                loop_state,
+                &record,
+                fingerprint,
+                normalized_skill,
+                global_step,
+                step_in_round,
+            );
+        }
+        super::mutation_ledger::MutationExecutionGuard::Uncertain(record) => {
+            return Ok(
+                super::mutation_ledger::publish_uncertain_mutation_checkpoint(
+                    state, task, loop_state, &record,
+                ),
+            );
+        }
+    };
     let structured_validation = Arc::new(Mutex::new(None::<Value>));
     let structured_extra = Arc::new(Mutex::new(None::<Value>));
     let structured_validation_slot = Arc::clone(&structured_validation);
@@ -1055,11 +1090,19 @@ pub(super) async fn execute_prepared_skill_action(
         step_execution.status,
     )
     .await;
-    let raw_action_effect = crate::execution_recipe::classify_skill_action_effect(
-        state,
-        normalized_skill,
-        classification_args,
-    );
+    let mutation_completion_persisted = match (&mutation_guard, step_execution.output.as_deref()) {
+        (Some(lease), Some(output)) => super::mutation_ledger::complete_mutation_execution(
+            state,
+            lease,
+            output,
+            structured_extra.as_ref(),
+        ),
+        (Some(lease), None) => {
+            super::mutation_ledger::mark_mutation_execution_uncertain(state, lease);
+            false
+        }
+        (None, _) => true,
+    };
     let action_effect = crate::execution_recipe::effective_action_effect_for_recipe(
         loop_state.execution_recipe,
         raw_action_effect,
@@ -1077,7 +1120,7 @@ pub(super) async fn execute_prepared_skill_action(
     };
     match step_execution.output.as_ref() {
         Some(out) => {
-            let outcome = handle_skill_step_success(
+            let mut outcome = handle_skill_step_success(
                 state,
                 task,
                 loop_state,
@@ -1097,6 +1140,20 @@ pub(super) async fn execute_prepared_skill_action(
                 read_file_requested_path.as_deref(),
             )
             .await?;
+            if !mutation_completion_persisted {
+                if let Some(lease) = mutation_guard.as_ref() {
+                    super::support::publish_agent_loop_mutation_reconciliation_checkpoint(
+                        state,
+                        task,
+                        loop_state,
+                        &lease.record.action_ref,
+                        &lease.record.fingerprint_hash,
+                        "started",
+                    );
+                    outcome.stop_signal = Some("mutation_reconciliation_required".to_string());
+                    outcome.continue_in_round = false;
+                }
+            }
             Ok(outcome)
         }
         None => {
@@ -1104,7 +1161,7 @@ pub(super) async fn execute_prepared_skill_action(
                 return Err(TASK_CANCELED_ERR.to_string());
             }
             let err = step_execution.error.clone().unwrap_or_default();
-            match handle_skill_step_failure(
+            let failure_outcome = handle_skill_step_failure(
                 state,
                 task,
                 &step_execution,
@@ -1122,8 +1179,23 @@ pub(super) async fn execute_prepared_skill_action(
                 &err,
                 action_trace_kind,
             )
-            .await?
-            {
+            .await?;
+            if let Some(lease) = mutation_guard.as_ref() {
+                super::support::publish_agent_loop_mutation_reconciliation_checkpoint(
+                    state,
+                    task,
+                    loop_state,
+                    &lease.record.action_ref,
+                    &lease.record.fingerprint_hash,
+                    "uncertain",
+                );
+                return Ok(SkillActionOutcome {
+                    ended_with_user_visible_output: false,
+                    stop_signal: Some("mutation_reconciliation_required".to_string()),
+                    continue_in_round: false,
+                });
+            }
+            match failure_outcome {
                 Some(stop_reason) if stop_reason == "recoverable_failure_continue_in_round" => {
                     Ok(SkillActionOutcome {
                         ended_with_user_visible_output: false,
