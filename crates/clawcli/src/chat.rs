@@ -150,7 +150,14 @@ fn follow_and_render_task(
             return finish_chat_detach(thread, cursor, &task_id);
         }
         match followed {
-            Ok(()) => break,
+            Ok(()) => {
+                let status = task::get_task_status(base_url, key, &task_id)?;
+                if status.is_terminal() || status.is_background_waiting() {
+                    output::print_task_status(&status, false, &events::EventFilters::default());
+                    return Ok(());
+                }
+                continue;
+            }
             Err(error) if events::task_event_stream_timed_out(&error) => continue,
             Err(error) => {
                 eprintln!("error_code=chat_event_stream_failed detail={error}");
