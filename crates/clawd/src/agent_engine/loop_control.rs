@@ -969,8 +969,12 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     let mut round = 1usize;
     let mut answer_verifier_retry_count = 0usize;
     let loop_started_at = Instant::now();
-    let worker_soft_checkpoint_after =
-        worker_soft_checkpoint_after(state.worker.worker_task_timeout_seconds);
+    let worker_task_timeout_seconds = crate::worker::task_budget::task_execution_timeout_seconds(
+        state.worker.worker_task_timeout_seconds,
+        &task.kind,
+        &task.payload_json,
+    );
+    let worker_soft_checkpoint_after = worker_soft_checkpoint_after(worker_task_timeout_seconds);
     loop {
         while round <= loop_state.max_rounds {
             ensure_task_running(state, task)?;

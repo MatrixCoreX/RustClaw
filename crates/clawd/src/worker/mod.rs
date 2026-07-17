@@ -18,6 +18,7 @@ pub(crate) mod run_capability;
 mod run_skill_finalize;
 mod run_skill_permission;
 mod runtime_support;
+pub(crate) mod task_budget;
 
 // Phase 3.3 Stage 2.2：ask_finalize.rs 已物理搬移到 `crate::finalize::task`，
 // 调用面统一通过 `crate::finalize::*` facade 访问。
@@ -137,7 +138,22 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         };
 
         let task_kind_for_timeout_log = task.kind.clone();
-        let worker_timeout_secs = state.worker.worker_task_timeout_seconds.max(1);
+        let task_budget = task_budget::task_execution_budget(
+            state.worker.worker_task_timeout_seconds,
+            &task.kind,
+            &payload,
+        );
+        let worker_timeout_secs = task_budget.timeout_seconds;
+        info!(
+            "worker_task_budget task_id={} kind={} class={} requested_profile={} profile_valid={} timeout_seconds={} admin_max_seconds={}",
+            task.task_id,
+            task.kind,
+            task_budget.class.as_str(),
+            task_budget.requested_profile.as_deref().unwrap_or("none"),
+            task_budget.profile_valid,
+            worker_timeout_secs,
+            task_budget.admin_max_seconds
+        );
         let _task_cancellation = state.worker.register_active_task(&task.task_id);
         let heartbeat_stop = start_task_heartbeat(state.clone(), task.task_id.clone());
         let task_result = tokio::time::timeout(Duration::from_secs(worker_timeout_secs), async {
