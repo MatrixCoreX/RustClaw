@@ -292,23 +292,20 @@ fn action_scoped_required_args(
     normalized_skill: &str,
     args: &serde_json::Value,
 ) -> Vec<String> {
-    let Some(action) = args
+    let action = args
         .as_object()
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
         .map(normalize_schema_token)
-        .filter(|value| !value.is_empty())
-    else {
-        return Vec::new();
-    };
+        .filter(|value| !value.is_empty());
     state
         .skill_manifest(normalized_skill)
         .and_then(|manifest| {
-            manifest
-                .planner_capabilities
-                .into_iter()
-                .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
-                .map(|mapping| mapping.required)
+            claw_core::skill_registry::select_planner_capability_mapping(
+                &manifest.planner_capabilities,
+                action.as_deref(),
+            )
+            .map(|mapping| mapping.required.clone())
         })
         .unwrap_or_default()
 }
@@ -323,13 +320,13 @@ fn action_scoped_risk_level(
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
         .map(normalize_schema_token)
-        .filter(|value| !value.is_empty())?;
+        .filter(|value| !value.is_empty());
     state.skill_manifest(normalized_skill).and_then(|manifest| {
-        manifest
-            .planner_capabilities
-            .into_iter()
-            .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
-            .and_then(|mapping| mapping.risk_level)
+        claw_core::skill_registry::select_planner_capability_mapping(
+            &manifest.planner_capabilities,
+            action.as_deref(),
+        )
+        .and_then(|mapping| mapping.risk_level)
     })
 }
 
@@ -350,16 +347,15 @@ fn registry_declares_non_mutating_planner_action(
     state
         .skill_manifest(normalized_skill)
         .is_some_and(|manifest| {
-            manifest.planner_capabilities.into_iter().any(|mapping| {
-                mapping
-                    .action
-                    .as_deref()
-                    .map(normalize_schema_token)
-                    .is_some_and(|mapped| mapped == action)
-                    && matches!(
-                        mapping.effect,
-                        Some(PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate)
-                    )
+            claw_core::skill_registry::select_planner_capability_mapping(
+                &manifest.planner_capabilities,
+                Some(action.as_str()),
+            )
+            .is_some_and(|mapping| {
+                matches!(
+                    mapping.effect,
+                    Some(PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate)
+                )
             })
         })
 }

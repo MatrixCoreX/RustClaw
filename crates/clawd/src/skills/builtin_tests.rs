@@ -589,6 +589,56 @@ async fn run_safe_command_idle_timeout_kills_silent_command() {
 }
 
 #[tokio::test]
+async fn run_safe_command_rejects_sudo_without_explicit_policy() {
+    let root = TempDirGuard::new("run_cmd_sudo_policy");
+    let err = super::run_safe_command(&root.path, "sudo -n true", 4096, 10, 10, 8000, false)
+        .await
+        .expect_err("sudo must be rejected before process dispatch");
+    assert!(err.contains("sudo_not_allowed"), "unexpected error: {err}");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn run_safe_command_idle_timeout_leaves_no_live_child_process() {
+    let root = TempDirGuard::new("run_cmd_idle_timeout_child_cleanup");
+    let command = "sleep 30 & child=$!; printf '%s' \"$child\" > child.pid; wait \"$child\"";
+    let err = super::run_safe_command(&root.path, command, 4096, 10, 1, 8000, false)
+        .await
+        .expect_err("silent process group should hit idle timeout");
+    assert!(
+        err.contains("run_cmd.idle_timeout"),
+        "unexpected error: {err}"
+    );
+
+    let child_pid = fs::read_to_string(root.path.join("child.pid"))
+        .expect("child pid file")
+        .trim()
+        .parse::<u32>()
+        .expect("child pid");
+    for _ in 0..50 {
+        if !linux_process_is_live(child_pid) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let _ = std::process::Command::new("kill")
+        .args(["-KILL", &child_pid.to_string()])
+        .status();
+    panic!("timed-out command left a live child process pid={child_pid}");
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_is_live(pid: u32) -> bool {
+    let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    stat.rsplit_once(") ")
+        .and_then(|(_, tail)| tail.chars().next())
+        .is_some_and(|state| state != 'Z' && state != 'X')
+}
+
+#[tokio::test]
 async fn run_cmd_nonzero_exit_returns_structured_error() {
     let root = TempDirGuard::new("run_cmd_structured_nonzero");
     let state = test_state(root.path.clone());

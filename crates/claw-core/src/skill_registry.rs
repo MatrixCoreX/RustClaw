@@ -171,6 +171,29 @@ pub struct PlannerCapabilityMapping {
     pub final_answer_shape: Option<String>,
 }
 
+/// Selects an exact action policy, or the preferred/unique policy for an
+/// actionless direct invocation. An explicit unknown action never falls back.
+pub fn select_planner_capability_mapping<'a>(
+    mappings: &'a [PlannerCapabilityMapping],
+    action: Option<&str>,
+) -> Option<&'a PlannerCapabilityMapping> {
+    if let Some(action) = trim_optional_string(action).map(|value| normalize_schema_token(&value)) {
+        return mappings
+            .iter()
+            .find(|mapping| mapping.action.as_deref() == Some(action.as_str()));
+    }
+
+    let mut actionless = mappings.iter().filter(|mapping| mapping.action.is_none());
+    if let Some(first) = actionless.next() {
+        let second = actionless.next();
+        return mappings
+            .iter()
+            .find(|mapping| mapping.action.is_none() && mapping.preferred)
+            .or_else(|| second.is_none().then_some(first));
+    }
+    (mappings.len() == 1).then(|| &mappings[0])
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 pub struct MatrixAdmissionConfig {
     #[serde(default)]
@@ -702,11 +725,7 @@ fn matching_planner_capability<'a>(
     entry: &'a SkillRegistryEntry,
     action: Option<&str>,
 ) -> Option<&'a PlannerCapabilityMapping> {
-    let action = trim_optional_string(action).map(|value| normalize_schema_token(&value))?;
-    entry
-        .planner_capabilities
-        .iter()
-        .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
+    select_planner_capability_mapping(&entry.planner_capabilities, action)
 }
 
 fn once_per_task_from_effect(effect: PlannerCapabilityEffect) -> bool {

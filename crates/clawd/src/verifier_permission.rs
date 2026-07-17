@@ -44,34 +44,31 @@ fn step_permission_decision_json(
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
         .map(normalize_schema_token);
-    let registry_policy = action.as_deref().and_then(|action| {
-        state
-            .skill_manifest(&normalized_skill)
-            .and_then(|manifest| {
-                manifest
-                    .planner_capabilities
-                    .into_iter()
-                    .find(|mapping| mapping.action.as_deref() == Some(action))
-                    .map(|mapping| {
-                        json!({
-                            "capability": mapping.name,
-                            "effect": mapping.effect.map(|effect| effect.as_token()),
-                            "risk_level": mapping.risk_level.map(risk_level_token),
-                            "isolation_profile": mapping.isolation_profile.map(|profile| profile.as_token()),
-                            "network_access": mapping.network_access,
-                            "filesystem_write": mapping.filesystem_write,
-                            "external_publish": mapping.external_publish,
-                            "credential_access": mapping.credential_access,
-                            "subprocess": mapping.subprocess,
-                            "package_install": mapping.package_install,
-                            "privilege_escalation": mapping.privilege_escalation,
-                            "once_per_task": mapping.once_per_task,
-                            "dedup_scope": mapping.dedup_scope.map(|scope| scope.as_token()),
-                            "idempotent": mapping.idempotent,
-                        })
-                    })
-            })
-    });
+    let registry_policy = state
+        .skill_manifest(&normalized_skill)
+        .and_then(|manifest| {
+            let mapping = claw_core::skill_registry::select_planner_capability_mapping(
+                &manifest.planner_capabilities,
+                action.as_deref(),
+            )?;
+            let policy = json!({
+                "capability": mapping.name,
+                "effect": mapping.effect.map(|effect| effect.as_token()),
+                "risk_level": mapping.risk_level.map(risk_level_token),
+                "isolation_profile": mapping.isolation_profile.map(|profile| profile.as_token()),
+                "network_access": mapping.network_access,
+                "filesystem_write": mapping.filesystem_write,
+                "external_publish": mapping.external_publish,
+                "credential_access": mapping.credential_access,
+                "subprocess": mapping.subprocess,
+                "package_install": mapping.package_install,
+                "privilege_escalation": mapping.privilege_escalation,
+                "once_per_task": mapping.once_per_task,
+                "dedup_scope": mapping.dedup_scope.map(|scope| scope.as_token()),
+                "idempotent": mapping.idempotent,
+            });
+            Some(policy)
+        });
     let requires_confirmation = state.skill_rt.tools_policy.approval_required(
         risk_requires_confirmation,
         planner_requested_approval,
@@ -189,27 +186,23 @@ pub(super) fn step_sandbox_denial_reason(
         .get("action")
         .and_then(Value::as_str)
         .map(normalize_schema_token);
-    let registry_policy = action.as_deref().and_then(|action| {
-        state
-            .skill_manifest(normalized_skill)
-            .and_then(|manifest| {
-                manifest
-                    .planner_capabilities
-                    .into_iter()
-                    .find(|mapping| mapping.action.as_deref() == Some(action))
+    let registry_policy = state.skill_manifest(normalized_skill).and_then(|manifest| {
+        claw_core::skill_registry::select_planner_capability_mapping(
+            &manifest.planner_capabilities,
+            action.as_deref(),
+        )
+        .map(|mapping| {
+            json!({
+                "isolation_profile": mapping.isolation_profile.map(|profile| profile.as_token()),
+                "network_access": mapping.network_access,
+                "filesystem_write": mapping.filesystem_write,
+                "external_publish": mapping.external_publish,
+                "credential_access": mapping.credential_access,
+                "subprocess": mapping.subprocess,
+                "package_install": mapping.package_install,
+                "privilege_escalation": mapping.privilege_escalation,
             })
-            .map(|mapping| {
-                json!({
-                    "isolation_profile": mapping.isolation_profile.map(|profile| profile.as_token()),
-                    "network_access": mapping.network_access,
-                    "filesystem_write": mapping.filesystem_write,
-                    "external_publish": mapping.external_publish,
-                    "credential_access": mapping.credential_access,
-                    "subprocess": mapping.subprocess,
-                    "package_install": mapping.package_install,
-                    "privilege_escalation": mapping.privilege_escalation,
-                })
-            })
+        })
     });
     sandbox_denial_reason(state, normalized_skill, effect, registry_policy.as_ref())
 }

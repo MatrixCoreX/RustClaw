@@ -554,6 +554,45 @@ fn registry_resolves_action_governance_from_explicit_fields_effects_and_legacy_d
 }
 
 #[test]
+fn registry_selects_preferred_actionless_capability_for_direct_invocation() {
+    let toml = r#"
+[[skills]]
+name = "direct_runner"
+enabled = true
+kind = "runner"
+once_per_task = false
+idempotent = true
+planner_capabilities = [
+  { name = "runner.execute", effect = "external", preferred = true, once_per_task = true, idempotent = false, external_publish = true, credential_access = true },
+  { name = "runner.alias", effect = "external", once_per_task = true, idempotent = false, external_publish = true, credential_access = true }
+]
+"#;
+    let path = std::env::temp_dir().join(format!(
+        "test_registry_direct_capability_{}_{}.toml",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&path, toml).unwrap();
+    let registry = SkillsRegistry::load_from_path(&path).unwrap();
+
+    let selected =
+        select_planner_capability_mapping(registry.planner_capabilities("direct_runner"), None)
+            .expect("preferred direct capability");
+    assert_eq!(selected.name, "runner.execute");
+    assert_eq!(selected.external_publish, Some(true));
+    assert_eq!(selected.credential_access, Some(true));
+    assert!(select_planner_capability_mapping(
+        registry.planner_capabilities("direct_runner"),
+        Some("unknown_action")
+    )
+    .is_none());
+    assert!(registry.resolved_once_per_task("direct_runner", None));
+    assert!(!registry.resolved_idempotent("direct_runner", None));
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn registry_manifest_infers_and_allows_planner_kind_override() {
     let toml = r#"
 [[skills]]
