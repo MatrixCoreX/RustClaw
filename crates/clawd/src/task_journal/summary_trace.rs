@@ -166,6 +166,15 @@ fn canonical_json_for_fingerprint(value: &Value) -> String {
     canonical_value_for_fingerprint(value).to_string()
 }
 
+fn plan_step_args_fingerprint(step: &crate::PlanStep) -> Option<String> {
+    let action_ref = plan_step_action_ref(step).or_else(|| plan_step_fallback_action_ref(step))?;
+    Some(crate::evidence_policy::fnv1a_hex(&format!(
+        "{}\n{}",
+        action_ref.trim(),
+        canonical_json_for_fingerprint(&step.args)
+    )))
+}
+
 fn canonical_value_for_fingerprint(value: &Value) -> Value {
     match value {
         Value::Array(items) => Value::Array(
@@ -198,11 +207,7 @@ fn verifier_issue_forbidden_repeat_fingerprint(
         .iter()
         .find(|step| step.step_id == issue.step_id)?;
     let action_ref = plan_step_action_ref(step).or_else(|| plan_step_fallback_action_ref(step))?;
-    let args_fingerprint = crate::evidence_policy::fnv1a_hex(&format!(
-        "{}\n{}",
-        action_ref.trim(),
-        canonical_json_for_fingerprint(&step.args)
-    ));
+    let args_fingerprint = plan_step_args_fingerprint(step)?;
     Some(format!("{}:{}", action_ref.trim(), args_fingerprint))
 }
 
@@ -248,6 +253,7 @@ pub(super) fn plan_trace_json(plan: &crate::PlanResult) -> Value {
         "steps": plan.steps.iter().map(|step| {
             let raw_action_ref = plan_step_raw_action_ref(step);
             let matrix_action_ref = plan_step_action_ref(step);
+            let args_fingerprint = plan_step_args_fingerprint(step);
             json!({
                 "step_id": &step.step_id,
                 "action_type": &step.action_type,
@@ -255,6 +261,7 @@ pub(super) fn plan_trace_json(plan: &crate::PlanResult) -> Value {
                 "action_ref": matrix_action_ref.clone(),
                 "matrix_action_ref": matrix_action_ref,
                 "raw_action_ref": raw_action_ref,
+                "args_fingerprint": args_fingerprint,
                 "depends_on": &step.depends_on,
                 "why": crate::truncate_for_log(&step.why),
             })
@@ -291,6 +298,7 @@ pub(super) struct RequestedPlanCapability {
     pub(super) action_type: String,
     pub(super) capability: String,
     pub(super) action_ref: Option<String>,
+    pub(super) args_fingerprint: Option<String>,
 }
 
 pub(super) fn raw_plan_steps(raw_plan_text: &str) -> Vec<Value> {
@@ -338,6 +346,7 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
         action_type: action_type.to_string(),
         capability: capability.to_string(),
         action_ref: None,
+        args_fingerprint: None,
     })
 }
 
@@ -354,10 +363,12 @@ fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPla
                     action_type: normalized_step.action_type.clone(),
                     capability: normalized_step.skill.clone(),
                     action_ref: None,
+                    args_fingerprint: None,
                 });
             if requested.action_ref.is_none() {
                 requested.action_ref = plan_step_action_ref(normalized_step);
             }
+            requested.args_fingerprint = plan_step_args_fingerprint(normalized_step);
             requested
         })
         .collect()
@@ -422,6 +433,7 @@ pub(super) fn round_capability_resolution_records_json(
                 "requested_action_type": action_type,
                 "requested_capability": requested.capability,
                 "requested_action_ref": requested.action_ref,
+                "args_fingerprint": requested.args_fingerprint,
                 "resolution_source": capability_resolution_source(&action_type),
             })
         })
@@ -763,6 +775,11 @@ pub(super) fn step_trace_json(
             .and_then(|value| value.action_ref.as_deref())
             .map(|_| "action_ref_only")
             .unwrap_or("not_recorded_in_step_trace"),
+        "args_fingerprint": requested.and_then(|value| value.args_fingerprint.as_deref()),
+        "args_fingerprint_status": requested
+            .and_then(|value| value.args_fingerprint.as_deref())
+            .map(|_| "recorded_hash_only")
+            .unwrap_or("not_recorded"),
         "output_excerpt": step.output_excerpt.as_deref(),
         "observed_evidence": observed_evidence,
         "output_evidence_ids": output_evidence_ids,

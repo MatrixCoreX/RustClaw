@@ -1496,6 +1496,71 @@ fn trace_json_preserves_planner_action_ref() {
 }
 
 #[test]
+fn trace_json_records_only_canonical_plan_argument_fingerprints() {
+    let mut journal = TaskJournal::for_task("task-fingerprint", "ask", "inspect process");
+    let steps = [
+        json!({"action": "ps", "filter": "private_filter_value"}),
+        json!({"filter": "private_filter_value", "action": "ps"}),
+        json!({"action": "ps", "filter": "different_filter_value"}),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, args)| crate::PlanStep {
+        step_id: format!("step_{}", index + 1),
+        action_type: "call_skill".to_string(),
+        skill: "process_basic".to_string(),
+        args,
+        depends_on: Vec::new(),
+        why: "inspect".to_string(),
+    })
+    .collect();
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 1,
+        goal: "inspect process".to_string(),
+        plan_result: Some(crate::PlanResult {
+            goal: "inspect process".to_string(),
+            missing_slots: Vec::new(),
+            needs_confirmation: false,
+            output_contract: None,
+            steps,
+            planner_notes: String::new(),
+            plan_kind: crate::PlanKind::Single,
+            raw_plan_text: String::new(),
+        }),
+        ..Default::default()
+    });
+    journal
+        .step_results
+        .push(TaskJournalStepTrace::ok("step_1", "process_basic", "ok"));
+
+    let trace = journal.to_trace_json();
+    let first = trace
+        .pointer("/rounds/0/plan_result/steps/0/args_fingerprint")
+        .and_then(Value::as_str)
+        .unwrap();
+    let reordered = trace
+        .pointer("/rounds/0/plan_result/steps/1/args_fingerprint")
+        .and_then(Value::as_str)
+        .unwrap();
+    let different = trace
+        .pointer("/rounds/0/plan_result/steps/2/args_fingerprint")
+        .and_then(Value::as_str)
+        .unwrap();
+
+    assert_eq!(first, reordered);
+    assert_ne!(first, different);
+    assert_eq!(first.len(), 16);
+    assert_eq!(
+        trace
+            .pointer("/step_results/0/args_fingerprint")
+            .and_then(Value::as_str),
+        Some(first)
+    );
+    assert!(!trace.to_string().contains("private_filter_value"));
+    assert!(!trace.to_string().contains("different_filter_value"));
+}
+
+#[test]
 fn trace_json_includes_contract_policy_for_contract_rejection() {
     let mut journal = TaskJournal::for_task("task-contract", "ask", "列出文件名");
     let err = crate::skills::structured_skill_error_from_parts(

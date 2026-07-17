@@ -101,6 +101,28 @@ REQUIRED_FILE_TOKENS = {
         '"context_prompt_attribution"',
         '"context_compaction"',
     ),
+    "crates/clawd/src/task_journal/summary_trace.rs": (
+        "plan_step_args_fingerprint",
+        '"args_fingerprint"',
+        '"recorded_hash_only"',
+    ),
+    "crates/clawd/src/task_context_builder_compaction_tests.rs": (
+        "compacted_coding_continuity_reaches_the_next_planner_prompt",
+        "constraint:no_external_publish",
+        "artifact:src/lib.rs",
+        "side_effect:write:src/lib.rs",
+        "failure:verification:cargo_test",
+    ),
+    "scripts/nl_tests/summarize_rollout_metrics.py": (
+        '"prompt_bytes_before_max"',
+        '"prompt_bytes_after_max"',
+        '"avg_tool_calls_per_turn"',
+        '"duplicate_tool_call_count"',
+        '"duplicate_tool_call_rate"',
+        '"tool_call_fingerprint_coverage_count"',
+        '"prompt_bytes_after_relative_increase"',
+        '"prompt_truncation_rate_rise"',
+    ),
     "prompts/layers/manifest.toml": (
         'logical_path = "prompts/context_compaction_prompt.md"',
         'overlay = ["prompts/layers/overlays/context_compaction_prompt.md"]',
