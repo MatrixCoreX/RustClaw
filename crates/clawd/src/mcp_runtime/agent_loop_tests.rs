@@ -156,10 +156,23 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         payload_json,
     };
 
-    let reply =
-        crate::agent_engine::run_agent_with_tools(&state, &task, user_request, user_request, None)
-            .await
-            .expect("ordinary MCP agent loop");
+    let initial_observations = [json!({
+        "schema_version": 1,
+        "owner_layer": "agent_hooks",
+        "stage": "pre_compact",
+        "decision": "allow",
+        "reason_code": "pre_compact_observed",
+    })];
+    let reply = crate::agent_engine::run_agent_with_tools(
+        &state,
+        &task,
+        user_request,
+        user_request,
+        None,
+        &initial_observations,
+    )
+    .await
+    .expect("ordinary MCP agent loop");
 
     assert!(!reply.should_fail_task, "error={:?}", reply.error_text);
     assert!(
@@ -169,6 +182,9 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
     );
     assert_eq!(state.task_llm_call_count(&task_id), 2);
     let journal = reply.task_journal.as_ref().expect("task journal");
+    assert!(journal.task_observations.iter().any(|observation| {
+        observation.get("stage").and_then(Value::as_str) == Some("pre_compact")
+    }));
     assert!(journal.rounds.iter().any(|round| {
         round.plan_result.as_ref().is_some_and(|plan| {
             serde_json::from_str::<Value>(&plan.raw_plan_text)
