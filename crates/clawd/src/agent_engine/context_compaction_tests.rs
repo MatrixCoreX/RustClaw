@@ -120,6 +120,27 @@ fn model_assisted_compaction_preserves_multilingual_fact_values() {
 }
 
 #[test]
+fn model_assisted_compaction_preserves_permission_and_child_task_refs() {
+    let mut value = valid_output();
+    value["permission_state_refs"] = json!([
+        "permission:request:42",
+        "permission:profile:workspace_write"
+    ]);
+    value["child_task_refs"] = json!(["child:writer:task-7", "child:tester:task-8"]);
+    value["resume_entrypoint"] = json!("await_user_input");
+
+    let normalized = normalize_model_assisted_compaction_output(&value)
+        .expect("permission and child refs are bounded machine references");
+
+    assert_eq!(
+        normalized["permission_state_refs"],
+        value["permission_state_refs"]
+    );
+    assert_eq!(normalized["child_task_refs"], value["child_task_refs"]);
+    assert_eq!(normalized["resume_entrypoint"], "await_user_input");
+}
+
+#[test]
 fn model_assisted_compaction_rejects_nested_instruction_fields() {
     let mut value = valid_output();
     value["facts"][0]["next_action"] = json!("run a tool");
