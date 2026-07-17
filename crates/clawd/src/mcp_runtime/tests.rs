@@ -35,7 +35,11 @@ async fn stdio_runtime_discovers_calls_bounds_and_stops() {
     assert!(lookup.policy.idempotent);
 
     let success = runtime
-        .call("mcp.fixture.lookup", json!({"query": "machine-token"}))
+        .call(
+            "mcp.fixture.lookup",
+            json!({"query": "machine-token"}),
+            None,
+        )
         .await
         .expect("lookup call");
     assert_eq!(success.status, "ok");
@@ -46,7 +50,7 @@ async fn stdio_runtime_discovers_calls_bounds_and_stops() {
     assert!(!success.truncated);
 
     let failure = runtime
-        .call("mcp.fixture.fail", json!({}))
+        .call("mcp.fixture.fail", json!({}), None)
         .await
         .expect("tool-level errors remain protocol results");
     assert_eq!(failure.status, "error");
@@ -57,7 +61,7 @@ async fn stdio_runtime_discovers_calls_bounds_and_stops() {
     );
 
     let large = runtime
-        .call("mcp.fixture.large", json!({}))
+        .call("mcp.fixture.large", json!({}), None)
         .await
         .expect("oversized result projection");
     assert!(large.truncated);
@@ -65,7 +69,7 @@ async fn stdio_runtime_discovers_calls_bounds_and_stops() {
     assert!(large.structured_content.is_none());
 
     let timeout = runtime
-        .call("mcp.fixture.slow", json!({}))
+        .call("mcp.fixture.slow", json!({}), None)
         .await
         .expect_err("slow tool must time out");
     assert_eq!(timeout.code(), "mcp_call_timeout");
@@ -200,24 +204,44 @@ async fn streamable_http_fixture(Json(message): Json<serde_json::Value>) -> Resp
             "serverInfo": {"name": "rustclaw-http-fixture", "version": "1"},
         }),
         "tools/list" => json!({
-            "tools": [{
-                "name": "lookup",
-                "description": "fixture_lookup",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
+            "tools": [
+                {
+                    "name": "lookup",
+                    "description": "fixture_lookup",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
                 },
-            }],
+                {
+                    "name": "slow",
+                    "description": "fixture_slow",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                }
+            ],
         }),
-        "tools/call" => json!({
-            "content": [{"type": "text", "text": "fixture_http_text"}],
-            "structuredContent": {
-                "query": message.pointer("/params/arguments/query").cloned(),
-                "transport": "streamable_http",
-            },
-            "isError": false,
-        }),
+        "tools/call" => {
+            if message
+                .pointer("/params/name")
+                .and_then(serde_json::Value::as_str)
+                == Some("slow")
+            {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+            json!({
+                "content": [{"type": "text", "text": "fixture_http_text"}],
+                "structuredContent": {
+                    "query": message.pointer("/params/arguments/query").cloned(),
+                    "transport": "streamable_http",
+                },
+                "isError": false,
+            })
+        }
         "ping" => json!({}),
         _ => {
             return (
@@ -263,7 +287,7 @@ async fn streamable_http_runtime_initializes_discovers_and_calls() {
     fixture.command = None;
     fixture.args.clear();
     fixture.url = Some(format!("http://{address}/mcp"));
-    fixture.allowed_tools = vec!["lookup".to_string()];
+    fixture.allowed_tools = vec!["lookup".to_string(), "slow".to_string()];
     let runtime = McpRuntime::new(config);
     runtime.start().await;
     assert_eq!(
@@ -275,7 +299,7 @@ async fn streamable_http_runtime_initializes_discovers_and_calls() {
         "ok"
     );
     let outcome = runtime
-        .call("mcp.fixture.lookup", json!({"query": "http-token"}))
+        .call("mcp.fixture.lookup", json!({"query": "http-token"}), None)
         .await
         .expect("HTTP MCP call");
     assert_eq!(outcome.status, "ok");
@@ -286,6 +310,28 @@ async fn streamable_http_runtime_initializes_discovers_and_calls() {
             "transport": "streamable_http",
         }))
     );
+
+    let runtime = Arc::new(runtime);
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    let slow_runtime = Arc::clone(&runtime);
+    let slow_cancellation = cancellation.clone();
+    let slow = tokio::spawn(async move {
+        slow_runtime
+            .call("mcp.fixture.slow", json!({}), Some(slow_cancellation))
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    cancellation.cancel();
+    let cancelled = slow
+        .await
+        .expect("join cancelled call")
+        .expect_err("slow call must cancel");
+    assert_eq!(cancelled.code(), "mcp_call_cancelled");
+    let unrelated = runtime
+        .call("mcp.fixture.lookup", json!({"query": "after-cancel"}), None)
+        .await
+        .expect("unrelated call remains available");
+    assert_eq!(unrelated.status, "ok");
     runtime.stop().await;
     let _ = stop_tx.send(());
     server.await.expect("join HTTP fixture");

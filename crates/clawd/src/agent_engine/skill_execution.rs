@@ -55,7 +55,11 @@ async fn run_mcp_tool_observation(
     let outcome = state
         .core
         .mcp_runtime
-        .call(capability, args)
+        .call(
+            capability,
+            args,
+            state.worker.task_cancellation_token(&task.task_id),
+        )
         .await
         .map_err(|error| {
             json!({

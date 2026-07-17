@@ -195,6 +195,24 @@ fn cancel_task_by_id_accepts_provider_cancel_token_alias() {
 }
 
 #[test]
+fn cancel_task_by_id_signals_the_matching_active_runtime_only() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    let other_task_id = Uuid::new_v4().to_string();
+    insert_running_task(&state, &task_id, &json!({}));
+    insert_running_task(&state, &other_task_id, &json!({}));
+    let token = state.worker.register_active_task(&task_id);
+    let other_token = state.worker.register_active_task(&other_task_id);
+
+    assert_eq!(cancel_task_by_id(&state, &task_id).expect("cancel task"), 1);
+    assert!(token.is_cancelled());
+    assert!(!other_token.is_cancelled());
+
+    state.worker.unregister_active_task(&task_id);
+    state.worker.unregister_active_task(&other_task_id);
+}
+
+#[test]
 fn resume_task_with_input_records_structured_resume_metadata() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4().to_string();

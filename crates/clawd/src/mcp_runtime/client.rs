@@ -4,9 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ClientRequest, PaginatedRequestParams, PingRequest, Tool,
+    CallToolRequest, CallToolRequestParams, CallToolResult, CancelledNotificationParam,
+    ClientRequest, PaginatedRequestParams, PingRequest, ServerResult, Tool,
 };
-use rmcp::service::RunningService;
+use rmcp::service::{PeerRequestOptions, RunningService};
 use rmcp::{Peer, RoleClient};
 use serde_json::{Map, Value};
 use tokio::sync::{Mutex, Semaphore};
@@ -23,6 +24,7 @@ pub(crate) trait McpClient: Send + Sync {
         &self,
         tool_name: &str,
         args: Map<String, Value>,
+        cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> McpClientFuture<'_, CallToolResult>;
     fn shutdown(&self) -> McpClientFuture<'_, ()>;
     fn is_closed(&self) -> bool;
@@ -99,20 +101,83 @@ impl McpClient for RmcpClient {
         &self,
         tool_name: &str,
         args: Map<String, Value>,
+        cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> McpClientFuture<'_, CallToolResult> {
         let tool_name = tool_name.to_string();
         Box::pin(async move {
-            let permit = tokio::time::timeout(self.timeout, self.concurrency.acquire())
+            let acquire = tokio::time::timeout(self.timeout, self.concurrency.acquire());
+            tokio::pin!(acquire);
+            let permit = if let Some(token) = cancellation.as_ref() {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        return Err(McpRuntimeError::new("mcp_call_cancelled"));
+                    }
+                    permit = &mut acquire => permit,
+                }
+            } else {
+                acquire.await
+            }
+            .map_err(|_| McpRuntimeError::new("mcp_concurrency_timeout"))?
+            .map_err(|_| McpRuntimeError::new("mcp_client_stopped"))?;
+            let params = CallToolRequestParams::new(tool_name).with_arguments(args);
+            let mut request = self
+                .peer
+                .send_cancellable_request(
+                    ClientRequest::CallToolRequest(CallToolRequest::new(params)),
+                    PeerRequestOptions::no_options(),
+                )
                 .await
-                .map_err(|_| McpRuntimeError::new("mcp_concurrency_timeout"))?
-                .map_err(|_| McpRuntimeError::new("mcp_client_stopped"))?;
-            let request = CallToolRequestParams::new(tool_name).with_arguments(args);
-            let result = tokio::time::timeout(self.timeout, self.peer.call_tool(request))
-                .await
-                .map_err(|_| McpRuntimeError::new("mcp_call_timeout"))?
-                .map_err(|_| McpRuntimeError::new("mcp_call_failed"));
+                .map_err(|_| McpRuntimeError::new("mcp_call_failed"))?;
+            let request_peer = request.peer.clone();
+            let request_id = request.id.clone();
+            let timeout = tokio::time::sleep(self.timeout);
+            tokio::pin!(timeout);
+            let response = if let Some(token) = cancellation.as_ref() {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        let _ = request_peer
+                            .notify_cancelled(CancelledNotificationParam::new(
+                                Some(request_id),
+                                Some("task_cancelled".to_string()),
+                            ))
+                            .await;
+                        return Err(McpRuntimeError::new("mcp_call_cancelled"));
+                    }
+                    _ = &mut timeout => {
+                        let _ = request_peer
+                            .notify_cancelled(CancelledNotificationParam::new(
+                                Some(request_id),
+                                Some("request_timeout".to_string()),
+                            ))
+                            .await;
+                        return Err(McpRuntimeError::new("mcp_call_timeout"));
+                    }
+                    response = &mut request.rx => response,
+                }
+            } else {
+                tokio::select! {
+                    _ = &mut timeout => {
+                        let _ = request_peer
+                            .notify_cancelled(CancelledNotificationParam::new(
+                                Some(request_id),
+                                Some("request_timeout".to_string()),
+                            ))
+                            .await;
+                        return Err(McpRuntimeError::new("mcp_call_timeout"));
+                    }
+                    response = &mut request.rx => response,
+                }
+            };
             drop(permit);
-            result
+            let response = response
+                .map_err(|_| McpRuntimeError::new("mcp_call_failed"))?
+                .map_err(|_| McpRuntimeError::new("mcp_call_failed"))?;
+            match response {
+                ServerResult::CallToolResult(result) => Ok(result),
+                _ => Err(McpRuntimeError::new("mcp_call_unexpected_response")),
+            }
         })
     }
 

@@ -732,6 +732,7 @@ async fn main() -> anyhow::Result<()> {
                 .max(10),
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
             active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
+            task_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
             database_busy_timeout_ms: config.database.busy_timeout_ms,
             database_sqlite_path,
         },
