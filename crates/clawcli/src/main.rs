@@ -8,10 +8,11 @@ mod events;
 mod interrupt;
 mod output;
 mod replay;
+mod resources;
 mod task;
 
 use anyhow::Result;
-use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use std::path::PathBuf;
 
@@ -738,7 +739,10 @@ struct EventFilterArgs {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let mut command = Cli::command().about(resources::text("cli.about"));
+    localize_command_help(&mut command);
+    let matches = command.get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     let base_url = std::env::var("RUSTCLAW_BASE_URL")
         .ok()
         .map(|s| s.trim().to_string())
@@ -1411,10 +1415,20 @@ fn main() -> Result<()> {
             ReplayCommand::Diff { left, right, json } => replay::run_diff(left, right, *json),
         },
         Command::Completions { shell } => {
-            let mut cmd = Cli::command();
+            let mut cmd = Cli::command().about(resources::text("cli.about"));
+            localize_command_help(&mut cmd);
             let bin_name = cmd.get_name().to_string();
             generate(*shell, &mut cmd, bin_name, &mut std::io::stdout());
             Ok(())
+        }
+    }
+}
+
+fn localize_command_help(command: &mut clap::Command) {
+    for subcommand in command.get_subcommands_mut() {
+        let key = format!("command.{}", subcommand.get_name());
+        if let Some(about) = resources::optional_text(&key) {
+            *subcommand = subcommand.clone().about(about);
         }
     }
 }

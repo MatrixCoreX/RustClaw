@@ -388,38 +388,28 @@ fn push_tui_count_line(lines: &mut Vec<String>, key: &str, source: &Value, point
 
 fn print_tui_command_help() {
     println!();
-    println!("tui_keys: r,w,p,c,u,n,e,1,2,3,4,q");
-    println!("tui_key.r=refresh");
-    println!("tui_key.w=watch");
-    println!("tui_key.p=pause");
-    println!("tui_key.c=cancel");
-    println!("tui_key.u=resume");
-    println!("tui_key.n=continue");
-    println!("tui_key.e=export");
-    println!("tui_key.1=report");
-    println!("tui_key.2=review");
-    println!("tui_key.3=subagents");
-    println!("tui_key.4=permission");
-    println!("tui_key.q=quit");
+    for line in crate::resources::lines("tui.help") {
+        println!("{line}");
+    }
 }
 
 fn read_tui_command() -> Result<TuiCommand> {
     loop {
-        print!("clawcli-tui> ");
-        io::stdout().flush().context("flush tui prompt")?;
+        print!("{}", crate::resources::text("tui.prompt"));
+        io::stdout().flush().context("tui_prompt_flush_failed")?;
         let mut input = String::new();
         io::stdin()
             .read_line(&mut input)
-            .context("read tui command")?;
+            .context("tui_command_read_failed")?;
         if let Some(command) = tui_command_from_input(&input) {
             return Ok(command);
         }
-        println!("unknown_key");
+        println!("{}", crate::resources::text("tui.unknown_key"));
     }
 }
 
 fn read_tui_continue_message() -> Result<String> {
-    print!("clawcli-tui-continue> ");
+    print!("{}", crate::resources::text("tui.continue_prompt"));
     io::stdout().flush().context("flush_tui_continue_prompt")?;
     let mut input = String::new();
     io::stdin()
