@@ -159,6 +159,10 @@ fn terminal_child_result_retains_task_scoped_execution_projection() {
         "isolation:worktrees:task-child-scope"
     );
     assert_eq!(result["child_task_result"]["status"], "succeeded");
+    assert_eq!(
+        result["child_task_result"]["artifact_refs"][0],
+        "isolation:worktrees:task-child-scope"
+    );
 }
 
 #[test]

@@ -75,6 +75,30 @@ impl ChildTaskExecutionScope {
             .as_ref()
             .map(|runtime| runtime.plan.execution_root.as_path())
             .unwrap_or(fallback.skill_rt.workspace_root.as_path());
+        let patch_artifact = self.runtime.as_ref().map(|runtime| {
+            crate::execution_isolation::build_child_worktree_patch_artifact(&runtime.plan)
+                .unwrap_or_else(|_| {
+                    json!({
+                        "schema_version": 1,
+                        "kind": "child_worktree_patch",
+                        "status": "error",
+                        "error_code": "child_worktree_patch_artifact_failed",
+                        "reason_code": "child_worktree_patch_artifact_failed",
+                        "failure_stage": "patch_artifact_build",
+                        "apply_owner": "parent_agent",
+                        "apply_policy": "parent_review_required",
+                        "cleanup_ref": runtime.plan.cleanup_ref,
+                    })
+                })
+        });
+        let mut artifact_refs = self
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.artifact_refs.clone())
+            .unwrap_or_default();
+        if let Some(patch_artifact) = patch_artifact.as_ref() {
+            artifact_refs.push(patch_artifact.clone());
+        }
         Some(json!({
             "schema_version": 1,
             "owner_layer": "child_task_execution_scope",
@@ -87,11 +111,8 @@ impl ChildTaskExecutionScope {
             },
             "workspace_root": workspace_root.display().to_string(),
             "allocation_reused": self.runtime.as_ref().is_some_and(|runtime| runtime.reused),
-            "artifact_refs": self
-                .runtime
-                .as_ref()
-                .map(|runtime| runtime.artifact_refs.clone())
-                .unwrap_or_default(),
+            "artifact_refs": artifact_refs,
+            "patch_artifact": patch_artifact,
             "cleanup_policy": if self.runtime.is_some() {
                 "parent_owned_after_patch_decision"
             } else {

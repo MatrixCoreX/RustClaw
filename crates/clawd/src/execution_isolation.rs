@@ -9,6 +9,11 @@ use claw_core::skill_registry::CapabilityIsolationProfile;
 use serde::Serialize;
 use serde_json::{json, Value};
 
+#[path = "execution_isolation_patch.rs"]
+mod execution_isolation_patch;
+
+pub(crate) use execution_isolation_patch::build_child_worktree_patch_artifact;
+
 const ISOLATION_ROOT_DIR: &str = ".rustclaw";
 const ISOLATION_DIR: &str = "isolation";
 const TEMP_DIR: &str = "temp";
@@ -253,6 +258,10 @@ pub(crate) fn isolation_profile_from_token(token: &str) -> Option<CapabilityIsol
 
 fn isolation_base(workspace_root: &Path) -> PathBuf {
     workspace_root.join(ISOLATION_ROOT_DIR).join(ISOLATION_DIR)
+}
+
+pub(super) fn isolation_artifact_dir(workspace_root: &Path) -> PathBuf {
+    isolation_base(workspace_root).join("artifacts")
 }
 
 fn isolation_task_key(task_id: &str) -> Result<String> {
