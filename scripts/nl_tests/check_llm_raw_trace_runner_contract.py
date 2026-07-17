@@ -43,6 +43,11 @@ RUNNERS = (
         init_marker='init_llm_trace_offset "$LLM_TRACE_STATE_FILE"',
         require_max_chars=True,
     ),
+    RunnerContract(
+        path="scripts/regression_long_tail_nl_flows.sh",
+        poll_marker='print_new_llm_trace "$task_id" "$LOG_DIR/llm_trace.offset"',
+        init_marker='init_llm_trace_offset "$LOG_DIR/llm_trace.offset"',
+    ),
 )
 
 
