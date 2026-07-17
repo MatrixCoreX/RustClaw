@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use super::{subagent_action_parts_from_args, LoopState, SubagentRuntimeConfig};
+use crate::agent_runtime_contract::SubagentRole;
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
     DEFAULT_MAX_CHILDREN_PER_PARENT,
@@ -33,6 +34,9 @@ pub(super) fn record_persistent_child_task_from_args(
     config: &SubagentRuntimeConfig,
 ) -> Result<&'static str, &'static str> {
     let specs = persistent_child_specs(task, args)?;
+    let write_enabled = specs
+        .iter()
+        .any(|spec| spec.permission_profile == ChildTaskPermissionProfile::LocalWorktree);
     let parent = child_parent_context(task);
     let max_parallel = persistent_max_parallel(args, config);
     let recursion_depth = child_recursion_depth_from_payload(&task.payload_json);
@@ -65,6 +69,7 @@ pub(super) fn record_persistent_child_task_from_args(
         global_step,
         step_in_round,
         specs.len(),
+        write_enabled,
         enqueue,
     );
     Ok(SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING)
@@ -122,11 +127,14 @@ fn persistent_child_spec(
     top_level_args: Option<&Value>,
 ) -> Result<ChildTaskSpec, &'static str> {
     let (role, objective, context_refs, options) = subagent_action_parts_from_args(args);
+    let role_kind = SubagentRole::parse_token(role.trim())
+        .ok_or(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)?;
     let objective = objective.trim();
     if objective.is_empty() {
         return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
     }
-    let permission_profile = persistent_permission_profile(args, top_level_args)?;
+    let permission_profile = persistent_permission_profile(args, top_level_args, role_kind)?;
+    let allowed_capabilities = persistent_allowed_capabilities(&options, top_level_args)?;
     let required = args
         .get("required")
         .and_then(Value::as_bool)
@@ -141,7 +149,7 @@ fn persistent_child_spec(
         "objective": objective,
         "context_refs": context_refs,
         "context_slice": options.context_slice,
-        "allowed_capabilities": options.allowed_capabilities,
+        "allowed_capabilities": allowed_capabilities,
     });
     Ok(ChildTaskSpec {
         parent_task_id: task.task_id.clone(),
@@ -159,6 +167,7 @@ fn persistent_child_spec(
 fn persistent_permission_profile(
     args: &Value,
     top_level_args: Option<&Value>,
+    role: SubagentRole,
 ) -> Result<ChildTaskPermissionProfile, &'static str> {
     let token = args
         .get("permission_profile")
@@ -168,12 +177,63 @@ fn persistent_permission_profile(
                 .as_str()
         })
         .or_else(|| top_level_args?.get("permission_profile")?.as_str())
-        .unwrap_or("read_only")
+        .unwrap_or(if role == SubagentRole::Writer {
+            "local_worktree"
+        } else {
+            "read_only"
+        })
         .trim();
-    match token {
-        "" | "read_only" => Ok(ChildTaskPermissionProfile::ReadOnly),
+    match (token, role) {
+        ("local_worktree", SubagentRole::Writer | SubagentRole::Worker | SubagentRole::Test) => {
+            Ok(ChildTaskPermissionProfile::LocalWorktree)
+        }
+        ("" | "read_only", SubagentRole::Writer) => {
+            Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)
+        }
+        ("" | "read_only", _) => Ok(ChildTaskPermissionProfile::ReadOnly),
         _ => Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED),
     }
+}
+
+fn persistent_allowed_capabilities(
+    options: &super::SubagentActionOptions,
+    top_level_args: Option<&Value>,
+) -> Result<Vec<String>, &'static str> {
+    let capabilities = if options.allowed_capabilities.is_empty() {
+        top_level_args
+            .and_then(|value| value.get("allowed_capabilities"))
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        options.allowed_capabilities.clone()
+    };
+    if capabilities.is_empty()
+        || capabilities.len() > 32
+        || capabilities
+            .iter()
+            .any(|capability| !machine_capability_token(capability))
+    {
+        return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+    }
+    Ok(capabilities)
+}
+
+fn machine_capability_token(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.len() <= 160
+        && value.chars().all(|ch| {
+            ch.is_ascii_lowercase()
+                || ch.is_ascii_digit()
+                || matches!(ch, '_' | '-' | '.' | ':' | '/')
+        })
 }
 
 fn persistent_child_budget(args: &Value, top_level_args: Option<&Value>) -> ChildTaskBudget {
@@ -275,6 +335,7 @@ fn record_persistent_schedule_observation(
     global_step: usize,
     step_in_round: usize,
     requested_child_count: usize,
+    write_enabled: bool,
     enqueue: Value,
 ) {
     loop_state.task_observations.push(json!({
@@ -288,7 +349,12 @@ fn record_persistent_schedule_observation(
         "child_task_ids": enqueue.get("child_task_ids").cloned().unwrap_or_else(|| json!([])),
         "child_task_enqueue": enqueue,
         "task_lifecycle": loop_state.task_lifecycle,
-        "write_enabled": false,
+        "write_enabled": write_enabled,
+        "write_scope": if write_enabled {
+            "persistent_local_worktree"
+        } else {
+            "read_only"
+        },
         "external_publish_enabled": false,
         "failure_isolated": true,
         "global_step": global_step,

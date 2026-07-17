@@ -39,7 +39,7 @@ risk_level = "low"
 side_effect = false
 planner_capabilities = [
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"], risk_level = "low", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
-  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_worktree", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "filesystem.publish_text", action = "publish_text", effect = "external", required = ["path"], risk_level = "high", isolation_profile = "local_worktree", network_access = true, filesystem_write = true, external_publish = true, credential_access = true, subprocess = false, package_install = false, privilege_escalation = false },
 ]
 "#,
@@ -170,8 +170,23 @@ fn read_only_child_rejects_declared_write_capability() {
 
 #[test]
 fn local_worktree_child_accepts_scoped_write_but_rejects_publish() {
-    let state = test_state();
+    let mut state = test_state();
     install_filesystem_registry(&state);
+    let worktree_root = std::env::temp_dir().join(format!(
+        "rustclaw_child_policy_worktree_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&worktree_root).expect("create worktree fixture");
+    std::fs::write(
+        worktree_root.join(".rustclaw-isolation.json"),
+        serde_json::json!({
+            "marker_kind": "rustclaw_execution_isolation",
+            "profile": "local_worktree"
+        })
+        .to_string(),
+    )
+    .expect("write worktree marker");
+    state.skill_rt.workspace_root = worktree_root.clone();
     let write_task = child_task(
         "local_worktree",
         serde_json::json!(["filesystem.write_text"]),
@@ -210,6 +225,37 @@ fn local_worktree_child_accepts_scoped_write_but_rejects_publish() {
             .expect("violations")
             .contains(&serde_json::json!(violation)));
     }
+    std::fs::remove_dir_all(worktree_root).expect("remove worktree fixture");
+}
+
+#[test]
+fn local_worktree_child_rejects_unbound_primary_workspace() {
+    let state = test_state();
+    install_filesystem_registry(&state);
+    let task = child_task(
+        "local_worktree",
+        serde_json::json!(["filesystem.write_text"]),
+    );
+
+    let error = child_task_execution_policy_error(
+        &state,
+        &task,
+        "fs_basic",
+        &serde_json::json!({
+            "action": "write_text",
+            "path": "notes.txt",
+            "content": "isolated"
+        }),
+    )
+    .expect("unbound worktree child must fail closed");
+    let parsed = crate::skills::parse_structured_skill_error(&error).expect("structured error");
+    let extra = parsed.extra.expect("extra");
+
+    assert_eq!(parsed.error_kind, "child_task_policy_violation");
+    assert!(extra["violations"]
+        .as_array()
+        .expect("violations")
+        .contains(&serde_json::json!("child_worktree_binding_required")));
 }
 
 #[test]

@@ -12,7 +12,11 @@ use serde_json::{json, Value};
 #[path = "execution_isolation_patch.rs"]
 mod execution_isolation_patch;
 
-pub(crate) use execution_isolation_patch::build_child_worktree_patch_artifact;
+pub(crate) use execution_isolation_patch::{
+    build_child_worktree_patch_artifact, child_patch_base_is_parent_ancestor,
+    cleanup_child_worktree_artifacts, load_validated_child_worktree_patch_artifact,
+    ValidatedChildPatchArtifact,
+};
 
 const ISOLATION_ROOT_DIR: &str = ".rustclaw";
 const ISOLATION_DIR: &str = "isolation";

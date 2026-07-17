@@ -63,7 +63,8 @@ impl SubagentRuntimeConfig {
             "max_parallel_readonly": self.max_parallel_readonly,
             "default_timeout_ms": self.default_timeout_ms,
             "context_evidence_enabled": self.context_evidence_root.is_some(),
-            "write_enabled": false,
+            "inline_write_enabled": false,
+            "persistent_worktree_write_enabled": true,
             "external_publish_enabled": false,
         })
     }

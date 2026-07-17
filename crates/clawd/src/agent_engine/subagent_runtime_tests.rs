@@ -120,7 +120,7 @@ fn subagent_action_rejects_unknown_role_as_machine_state() {
         &mut loop_state,
         1,
         1,
-        "writer",
+        "unsupported_writer_probe",
         "",
         &[],
         SubagentActionOptions::default(),
@@ -133,7 +133,7 @@ fn subagent_action_rejects_unknown_role_as_machine_state() {
     assert_eq!(observation["error_code"], "subagent_role_not_allowed");
     assert_eq!(observation["allowed_roles"][0], "observe");
     assert_eq!(observation["allowed_roles"][1], "explorer");
-    assert_eq!(observation["allowed_roles"][6], "verifier");
+    assert_eq!(observation["allowed_roles"][7], "verifier");
     assert_eq!(observation["write_enabled"], false);
     assert_eq!(observation["external_publish_enabled"], false);
 }
@@ -327,6 +327,7 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
         "role": "review",
         "objective": "machine_child_objective:persistent-review",
         "context_refs": ["AGENTS.md"],
+        "allowed_capabilities": ["filesystem.read_text_range"],
         "required": true,
         "budget": {
             "max_rounds": 3,
@@ -395,6 +396,71 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
             .and_then(|value| value.get("resume_entrypoint"))
             .and_then(serde_json::Value::as_str),
         Some("next_planner_round")
+    );
+}
+
+#[test]
+fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-persistent-writer-parent".to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: Some("ui-user".to_string()),
+        external_chat_id: Some("ui-chat".to_string()),
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text": "parent task"}).to_string(),
+    };
+    insert_running_parent_task(&state, &task);
+    let mut loop_state = LoopState::new(3);
+    let args = serde_json::json!({
+        "execution_mode": "persistent_child_task",
+        "role": "writer",
+        "objective": "machine_child_objective:isolated-write",
+        "context_refs": ["README.md"],
+        "allowed_capabilities": ["filesystem.write_text"],
+        "required": true,
+        "result_contract": {
+            "output_format": "machine_json",
+            "required_keys": ["artifact_refs", "evidence_refs"]
+        }
+    });
+
+    let stop_signal = record_persistent_child_task_from_args(
+        &state,
+        &task,
+        &mut loop_state,
+        1,
+        1,
+        &args,
+        &SubagentRuntimeConfig::default(),
+    )
+    .expect("schedule persistent writer");
+
+    assert_eq!(
+        stop_signal,
+        subagent_runtime_persistent::SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING
+    );
+    let observation = loop_state
+        .task_observations
+        .last()
+        .expect("writer observation");
+    assert_eq!(observation["write_enabled"], true);
+    assert_eq!(observation["write_scope"], "persistent_local_worktree");
+    let child_task_id = observation["child_task_ids"][0]
+        .as_str()
+        .expect("child task id");
+    let (_, payload) = child_task_row(&state, child_task_id);
+    assert_eq!(payload["child_task_contract"]["role"], "writer");
+    assert_eq!(
+        payload["child_task_contract"]["permission_profile"],
+        "local_worktree"
+    );
+    assert_eq!(
+        payload["child_task_contract"]["scope"]["allowed_capabilities"][0],
+        "filesystem.write_text"
     );
 }
 
@@ -566,7 +632,11 @@ fn subagent_runtime_config_rejects_disabled_role_as_machine_state() {
         "subagent_role_disabled_by_config"
     );
     assert_eq!(observation["allowed_roles"][0], "observe");
-    assert_eq!(observation["runtime_config"]["write_enabled"], false);
+    assert_eq!(observation["runtime_config"]["inline_write_enabled"], false);
+    assert_eq!(
+        observation["runtime_config"]["persistent_worktree_write_enabled"],
+        true
+    );
     assert_eq!(observation["write_enabled"], false);
     assert_eq!(observation["external_publish_enabled"], false);
 }
@@ -859,7 +929,7 @@ fn subagent_batch_isolates_optional_child_failures_and_parallel_limit() {
                 "objective": "scheduled_optional_child"
             },
             {
-                "role": "writer",
+                "role": "unsupported_writer_probe",
                 "objective": "invalid_optional_child"
             },
             {
@@ -901,7 +971,7 @@ fn subagent_batch_required_child_failure_stops_parent_loop() {
                 "objective": "optional_success"
             },
             {
-                "role": "writer",
+                "role": "unsupported_writer_probe",
                 "objective": "required_invalid_child",
                 "required": true
             }

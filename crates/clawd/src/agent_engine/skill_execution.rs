@@ -692,6 +692,8 @@ pub(super) async fn execute_prepared_skill_action(
     global_step: usize,
     step_in_round: usize,
     normalized_skill: &str,
+    child_policy_skill: &str,
+    child_policy_args: &Value,
     exec_args: Value,
     recovery_args: Option<Value>,
     write_file_effective_path: Option<WriteFileEffectivePath>,
@@ -701,7 +703,7 @@ pub(super) async fn execute_prepared_skill_action(
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
     if let Some(err) =
-        child_task_execution_policy_error(state, task, normalized_skill, classification_args)
+        child_task_execution_policy_error(state, task, child_policy_skill, child_policy_args)
     {
         return Ok(handle_preflight_argument_failure(
             state,

@@ -129,6 +129,7 @@ failure_policy = "deny"
     let actions = vec![action.clone()];
     let round_steps = Vec::<String>::new();
     let policy = test_policy();
+    let policy_args = exec_args.clone();
 
     let outcome = super::execute_prepared_skill_action(
         &state,
@@ -145,6 +146,8 @@ failure_policy = "deny"
         1,
         1,
         "fs_basic",
+        "fs_basic",
+        &policy_args,
         exec_args,
         None,
         None,
@@ -269,6 +272,7 @@ failure_policy = "deny"
         args: exec_args.clone(),
     };
     let actions = vec![action.clone()];
+    let policy_args = exec_args.clone();
 
     let _ = super::execute_prepared_skill_action(
         &state,
@@ -285,6 +289,8 @@ failure_policy = "deny"
         1,
         1,
         "fs_basic",
+        "fs_basic",
+        &policy_args,
         exec_args,
         None,
         None,

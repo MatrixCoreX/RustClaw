@@ -57,7 +57,7 @@ pub(super) fn child_task_execution_policy_error(
             append_read_only_violations(capability, &mut violations);
         }
         ("local_worktree", Some(capability)) => {
-            append_local_worktree_violations(capability, &mut violations);
+            append_local_worktree_violations(state, capability, &mut violations);
         }
         ("read_only" | "local_worktree", None) => {}
         _ => violations.push("permission_profile_unsupported"),
@@ -239,9 +239,16 @@ fn append_read_only_violations(
 }
 
 fn append_local_worktree_violations(
+    state: &AppState,
     capability: &SelectedCapability,
     violations: &mut Vec<&'static str>,
 ) {
+    if crate::execution_isolation::execution_isolation_root_profile(&state.skill_rt.workspace_root)
+        .as_deref()
+        != Some("local_worktree")
+    {
+        violations.push("child_worktree_binding_required");
+    }
     for field in [
         "network_access",
         "external_publish",
@@ -259,13 +266,13 @@ fn append_local_worktree_violations(
             .get("filesystem_write")
             .and_then(Value::as_bool)
             == Some(true);
-    if mutates_workspace
-        && capability
+    if mutates_workspace {
+        let profile = capability
             .policy
             .get("isolation_profile")
-            .and_then(Value::as_str)
-            != Some("local_worktree")
-    {
-        violations.push("local_worktree_isolation_required");
+            .and_then(Value::as_str);
+        if !matches!(profile, Some("local_worktree" | "local_current_workspace")) {
+            violations.push("local_worktree_isolation_required");
+        }
     }
 }

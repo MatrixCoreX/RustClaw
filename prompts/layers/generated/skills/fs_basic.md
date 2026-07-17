@@ -12,6 +12,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Compare explicit paths.
 - Write or append text, create directories, or remove files/directories when confirmation permits.
 - Apply/review/revert structured workspace patches with exact-context and checkpoint protection.
+- Review and decide isolated child-task patches through parent-owned machine actions.
 
 ## Actions
 - `stat_paths`
@@ -28,6 +29,9 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - `apply_patch`
 - `diff`
 - `rewind`
+- `review_child_patch`
+- `apply_child_patch`
+- `reject_child_patch`
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
@@ -64,6 +68,9 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 | `apply_patch` | `patch` | yes | string(unified diff) | - | Apply a Git-compatible unified diff. Exact context must match; optional `precondition_hashes` maps paths to `sha256:<hex>` or `missing`. Requires confirmation. |
 | `diff` | `checkpoint_id` / `paths` | no | string / string[] | current workspace | Return a checkpoint patch or a bounded current Git diff as machine evidence. |
 | `rewind` | `checkpoint_id` | yes | string | - | Restore a patch checkpoint only when target hashes still match the recorded post-patch state. Requires confirmation. |
+| `review_child_patch` | `child_task_id` | yes | string | - | Load a terminal child worktree patch after validating parent ownership, artifact hash, base commit, and preconditions. Optional `patch_ref` pins the expected artifact. |
+| `apply_child_patch` | `child_task_id` | yes | string | - | Apply the validated child patch through the normal workspace checkpoint path, persist the parent disposition, and clean the isolated worktree. Optional `patch_ref` pins the expected artifact. Requires confirmation. |
+| `reject_child_patch` | `child_task_id` | yes | string | - | Persist parent rejection and clean the isolated worktree without changing the primary workspace. Optional `patch_ref` pins the expected artifact. Requires confirmation. |
 
 ## Boundaries
 - Known explicit path facts: use `stat_paths`, not search.
@@ -79,6 +86,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
 - Existing source edits: prefer `apply_patch` over whole-file `write_text`; keep whole-file writes for explicit small replacements or new files.
 - Review and recovery: use `diff` and `rewind` checkpoint artifacts; never reconstruct a patch or checkpoint id from final-answer prose.
+- Child patch decisions: call `review_child_patch` before `apply_child_patch`; use only observed `child_task_id` and `patch_ref` machine fields. Children never apply or merge directly into the primary workspace.
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.
 - Legacy `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `fs_search`, and `system_basic` remain accepted for compatibility, but prefer `fs_basic` when this contract covers the task.
 

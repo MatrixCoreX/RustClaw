@@ -127,7 +127,28 @@ fn terminal_child_result_retains_task_scoped_execution_projection() {
         "task-child-scope",
         "succeeded",
         &payload,
-        &json!({"text": "child result"}),
+        &json!({
+            "text": "child result",
+            "task_journal": {
+                "summary": {
+                    "coding_workflow": {
+                        "schema_version": 1,
+                        "verification_status": "verified",
+                        "verification_command_count": 1,
+                        "verification_commands": ["cargo test -p fixture"],
+                        "failure_kind_count": 0,
+                        "failure_kinds": [],
+                        "changed_file_count": 1,
+                        "changed_files": ["src/lib.rs"],
+                        "checkpoint_refs": ["checkpoint:child-scope"],
+                        "validation_gate": {
+                            "gate_status": "satisfied",
+                            "can_report_fully_verified": true
+                        }
+                    }
+                }
+            }
+        }),
     );
     let projection = json!({
         "schema_version": 1,
@@ -163,6 +184,18 @@ fn terminal_child_result_retains_task_scoped_execution_projection() {
         result["child_task_result"]["artifact_refs"][0],
         "isolation:worktrees:task-child-scope"
     );
+    assert_eq!(
+        result["child_task_result"]["verification_artifact"]["verification_status"],
+        "verified"
+    );
+    assert_eq!(
+        result["child_task_result"]["verification_artifact"]["verification_commands"][0],
+        "cargo test -p fixture"
+    );
+    assert!(result["child_task_result"]["evidence_refs"]
+        .as_array()
+        .expect("evidence refs")
+        .contains(&json!("task:task-child-scope:verification")));
 }
 
 #[test]
@@ -289,5 +322,48 @@ fn parent_child_merge_recovers_child_ids_from_nested_journal_observations() {
     assert_eq!(
         merge["merge"]["finding_refs"][0],
         "child_task:task-child-nested-ok:structured_result"
+    );
+}
+
+#[test]
+fn scheduler_limits_local_worktree_children_across_writer_role_aliases() {
+    let temp = TempDirGuard::new("writer_profile_capacity");
+    let db_path = temp.path.join("tasks.sqlite");
+    let state = file_backed_state_with_schema(&db_path);
+    let parent_task_id = "task-parent-writer-capacity";
+    insert_task(
+        &state,
+        parent_task_id,
+        "running",
+        &json!({"text": "parent"}),
+        &json!({}),
+    );
+    let mut writer = sample_child_spec(parent_task_id, "task-child-writer", true);
+    writer.role = "writer".to_string();
+    writer.permission_profile = ChildTaskPermissionProfile::LocalWorktree;
+    writer.scope["allowed_capabilities"] = json!(["filesystem.write_text"]);
+    let mut worker = sample_child_spec(parent_task_id, "task-child-worker", true);
+    worker.role = "worker".to_string();
+    worker.permission_profile = ChildTaskPermissionProfile::LocalWorktree;
+    worker.scope["allowed_capabilities"] = json!(["filesystem.write_text"]);
+    let parent = ChildTaskParentContext {
+        parent_task_id: parent_task_id.to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+    };
+
+    let scheduled = enqueue_child_task_specs(&state, &parent, &[writer, worker], 4, 1)
+        .expect("schedule bounded writer children");
+
+    assert_eq!(scheduled["queued_child_count"], 1);
+    assert_eq!(scheduled["scheduler"]["scheduled_child_count"], 1);
+    assert_eq!(scheduled["scheduler"]["skipped_child_count"], 1);
+    assert_eq!(
+        scheduled["scheduler"]["skipped_child_tasks"][0]["reason_code"],
+        "child_profile_capacity_exceeded"
     );
 }
