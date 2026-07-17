@@ -316,6 +316,46 @@ test("extracts trace events and stable machine meta", () => {
   ]);
 });
 
+test("projects agent hook execution fields for teaching traces", () => {
+  const event = {
+    seq: 4,
+    event_type: "agent_hook",
+    payload: {
+      status: "error",
+      owner_layer: "agent_hooks",
+      stage: "permission_request",
+      decision: "deny",
+      reason_code: "fixture_denied",
+      status_code: "fixture_denied",
+      error_code: "hook_handler_timeout",
+      handler_id: "workspace_policy_guard",
+      handler_kind: "command",
+      blocking: true,
+      failure_policy: "deny",
+      trust_status: "trusted",
+      content_sha256: "sha256:fixture",
+      duration_ms: 120,
+      attempts: 1,
+      output_truncated: false,
+    },
+  };
+
+  const meta = traceEventMeta(event);
+  assert.ok(meta.includes("handler_id=workspace_policy_guard"));
+  assert.ok(meta.includes("handler_kind=command"));
+  assert.ok(meta.includes("trust_status=trusted"));
+  assert.ok(meta.includes("error_code=hook_handler_timeout"));
+  assert.ok(meta.includes("duration_ms=120"));
+  assert.ok(meta.includes("attempts=1"));
+  assert.ok(meta.includes("output_truncated=false"));
+
+  const view = buildTaskTraceEventView(event, "en");
+  assert.equal(view.title, "Agent lifecycle hook");
+  assert.equal(view.detail, "workspace_policy_guard · permission_request · deny");
+  assert.equal(view.tone, "failed");
+  assert.ok(view.meta.includes("failure_policy=deny"));
+});
+
 test("extracts task lifecycle event meta for UI progress cards", () => {
   const result: TaskQueryResponse = {
     task_id: "task-events",

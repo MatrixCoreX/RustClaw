@@ -278,6 +278,17 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "phase",
     "decision",
     "reason_code",
+    "status_code",
+    "error_code",
+    "handler_id",
+    "handler_kind",
+    "blocking",
+    "failure_policy",
+    "trust_status",
+    "content_sha256",
+    "duration_ms",
+    "attempts",
+    "output_truncated",
     "role",
     "team_id",
     "parent_task_id",
@@ -416,7 +427,7 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
     }
     return "";
   };
-  const meta = traceEventMeta(event).slice(0, 8);
+  const meta = traceEventMeta(event).slice(0, eventType === "agent_hook" ? 18 : 8);
   const status = field("status");
   const failureCount = Number(field("failure_count") || "0");
   const unverifiedRisk = field("unverified_risk");
@@ -494,6 +505,27 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       title: tLocal("上下文压缩", "Context compaction"),
       detail: tLocal(`压缩记录 ${count} 条。`, `${count} compaction record(s).`),
       tone: "attention",
+      meta,
+    };
+  }
+
+  if (eventType === "agent_hook") {
+    const handler = field("handler_id");
+    const stage = field("stage");
+    const decision = field("decision");
+    const hookTone: TaskTraceEventView["tone"] =
+      field("error_code") || decision === "deny"
+        ? "failed"
+        : decision === "require_confirmation" || decision === "background_wait"
+          ? "attention"
+          : field("status") === "ok" || decision === "allow"
+            ? "ok"
+            : tone;
+    return {
+      eventType,
+      title: tLocal("Agent 生命周期 Hook", "Agent lifecycle hook"),
+      detail: [handler, stage, decision].filter(Boolean).join(" · ") || eventType,
+      tone: hookTone,
       meta,
     };
   }

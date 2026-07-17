@@ -168,6 +168,27 @@ REQUIRED_FILE_TOKENS = {
     "crates/clawd/src/finalize/journal_tests.rs": (
         "terminal_builder_executes_stop_and_session_end_at_real_owner",
     ),
+    "crates/clawcli/src/events.rs": (
+        '"handler_id"',
+        '"handler_kind"',
+        '"trust_status"',
+        '"failure_policy"',
+        '"output_truncated"',
+    ),
+    "crates/clawcli/src/events_tests.rs": (
+        "agent_hook_events_preserve_handler_execution_fields",
+    ),
+    "UI/src/lib/task-result.ts": (
+        'eventType === "agent_hook"',
+        '"handler_id"',
+        '"handler_kind"',
+        '"trust_status"',
+        '"failure_policy"',
+        '"output_truncated"',
+    ),
+    "UI/src/lib/task-result.test.ts": (
+        "projects agent hook execution fields for teaching traces",
+    ),
     "configs/agent_guard.toml": (
         "[[agent.hooks.handlers]]",
         'kind = "command"',

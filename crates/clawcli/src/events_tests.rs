@@ -82,6 +82,66 @@ fn live_event_renderer_is_shared_across_compact_jsonl_and_quiet_modes() {
 }
 
 #[test]
+fn agent_hook_events_preserve_handler_execution_fields() {
+    let data = serde_json::json!({
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "event_stream": [{
+                        "seq": 4,
+                        "event_type": "agent_hook",
+                        "payload": {
+                            "owner_layer": "agent_hooks",
+                            "stage": "pre_tool_use",
+                            "decision": "deny",
+                            "reason_code": "fixture_denied",
+                            "status_code": "fixture_denied",
+                            "error_code": "hook_handler_timeout",
+                            "handler_id": "workspace_policy_guard",
+                            "handler_kind": "command",
+                            "blocking": true,
+                            "failure_policy": "deny",
+                            "trust_status": "trusted",
+                            "content_sha256": "sha256:fixture",
+                            "duration_ms": 120,
+                            "attempts": 1,
+                            "output_truncated": false
+                        }
+                    }]
+                }
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "agent_hook");
+    assert_eq!(
+        events[0].fields.get("handler_id").map(String::as_str),
+        Some("workspace_policy_guard")
+    );
+    assert_eq!(
+        events[0].fields.get("handler_kind").map(String::as_str),
+        Some("command")
+    );
+    assert_eq!(
+        events[0].fields.get("trust_status").map(String::as_str),
+        Some("trusted")
+    );
+    assert_eq!(
+        events[0].fields.get("error_code").map(String::as_str),
+        Some("hook_handler_timeout")
+    );
+    assert_eq!(
+        events[0].fields.get("attempts").map(String::as_str),
+        Some("1")
+    );
+    assert!(events[0].line.contains("failure_policy=deny"));
+    assert!(events[0].line.contains("output_truncated=false"));
+}
+
+#[test]
 fn event_stream_status_classifies_only_unsupported_endpoints_as_fallback() {
     for status in [
         StatusCode::NOT_FOUND,
