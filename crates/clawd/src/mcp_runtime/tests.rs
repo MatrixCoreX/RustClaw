@@ -20,6 +20,9 @@ async fn stdio_runtime_discovers_calls_bounds_and_stops() {
     assert_eq!(lifecycle.len(), 1);
     assert_eq!(lifecycle[0].state, McpLifecycleState::Ready);
     assert_eq!(lifecycle[0].tool_count, 4);
+    let probe = runtime.probe("fixture").await.expect("protocol ping");
+    assert_eq!(probe.server_id, "fixture");
+    assert_eq!(probe.status, "ok");
 
     let tools = runtime.tools();
     assert_eq!(tools.len(), 4);
@@ -215,6 +218,7 @@ async fn streamable_http_fixture(Json(message): Json<serde_json::Value>) -> Resp
             },
             "isError": false,
         }),
+        "ping" => json!({}),
         _ => {
             return (
                 StatusCode::OK,
@@ -265,6 +269,10 @@ async fn streamable_http_runtime_initializes_discovers_and_calls() {
     assert_eq!(
         runtime.lifecycle_snapshots()[0].state,
         McpLifecycleState::Ready
+    );
+    assert_eq!(
+        runtime.probe("fixture").await.expect("HTTP ping").status,
+        "ok"
     );
     let outcome = runtime
         .call("mcp.fixture.lookup", json!({"query": "http-token"}))

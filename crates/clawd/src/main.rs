@@ -56,6 +56,7 @@ mod language_policy;
 mod llm_gateway;
 mod log_utils;
 mod machine_kv_projection;
+mod mcp_admin_routes;
 mod mcp_runtime;
 mod media_artifact_paths;
 mod memory;
@@ -121,6 +122,7 @@ pub(crate) use log_utils::{
     append_act_plan_log, append_subtask_result, highlight_tag, truncate_for_agent_trace,
     truncate_for_log,
 };
+use mcp_admin_routes::{list_mcp_servers, list_mcp_tools, test_mcp_server};
 pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 #[cfg(test)]
@@ -812,6 +814,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/tasks/pause-by-task-id", post(pause_task_by_id))
         .route("/tasks/goal-by-task-id", post(goal_by_task_id))
         .route("/admin/reload-skills", post(reload_skills_handler))
+        .route("/admin/mcp/servers", get(list_mcp_servers))
+        .route("/admin/mcp/tools", get(list_mcp_tools))
+        .route("/admin/mcp/servers/:server_id/test", post(test_mcp_server))
         .with_state(state.clone());
 
     let ui_service =

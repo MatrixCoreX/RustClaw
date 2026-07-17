@@ -6,6 +6,7 @@ mod exec;
 mod goal;
 mod health;
 mod llm_trace;
+mod mcp;
 mod models;
 mod permission;
 mod report;
@@ -28,6 +29,7 @@ pub(crate) use goal::{
 };
 pub(crate) use health::run_health;
 pub(crate) use llm_trace::run_llm_trace;
+pub(crate) use mcp::run_mcp;
 pub(crate) use models::{run_models_catalog, run_models_readiness};
 pub(crate) use permission::{
     run_permission_capability, run_permission_explain, run_permission_inspect,

@@ -1326,6 +1326,21 @@ impl AppState {
         self.core.mcp_runtime.tools()
     }
 
+    pub(crate) fn mcp_lifecycle_snapshots(&self) -> Vec<crate::mcp_runtime::McpLifecycleSnapshot> {
+        self.core.mcp_runtime.lifecycle_snapshots()
+    }
+
+    pub(crate) async fn probe_mcp_server(
+        &self,
+        server_id: &str,
+    ) -> Result<crate::mcp_runtime::McpProbeOutcome, &'static str> {
+        self.core
+            .mcp_runtime
+            .probe(server_id)
+            .await
+            .map_err(|error| error.code())
+    }
+
     pub(crate) fn skill_invocation_requires_confirmation_policy(
         &self,
         canonical_name: &str,
