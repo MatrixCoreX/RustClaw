@@ -8,82 +8,106 @@
     "schema_version",
     "summary_kind",
     "facts",
+    "decisions",
     "open_questions",
     "active_goal_refs",
+    "constraint_refs",
+    "evidence_refs",
     "artifact_refs",
+    "completed_side_effect_refs",
+    "failure_refs",
+    "permission_state_refs",
+    "child_task_refs",
+    "resume_entrypoint",
     "source_refs",
     "risk_flags"
   ],
   "properties": {
-    "schema_version": {
-      "const": 1
-    },
-    "summary_kind": {
-      "const": "model_assisted_context_compaction"
-    },
+    "schema_version": {"const": 1},
+    "summary_kind": {"const": "model_assisted_context_compaction"},
     "facts": {
       "type": "array",
       "maxItems": 24,
       "items": {
         "type": "object",
-        "additionalProperties": true
+        "additionalProperties": false,
+        "required": ["fact_key", "fact_value", "source_ref", "provenance"],
+        "properties": {
+          "fact_key": {"type": "string", "minLength": 1, "maxLength": 96},
+          "fact_value": {"type": "string", "maxLength": 1024},
+          "source_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+          "provenance": {
+            "enum": [
+              "trusted_machine_state",
+              "structured_runtime_evidence",
+              "memory_retrieval_evidence",
+              "attachment_analysis_evidence",
+              "untrusted_conversation_evidence"
+            ]
+          }
+        }
       }
     },
-    "open_questions": {
+    "decisions": {
       "type": "array",
       "maxItems": 24,
       "items": {
-        "type": "string"
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["decision_key", "decision_value", "source_ref"],
+        "properties": {
+          "decision_key": {"type": "string", "minLength": 1, "maxLength": 96},
+          "decision_value": {"type": "string", "maxLength": 1024},
+          "source_ref": {"type": "string", "minLength": 1, "maxLength": 256}
+        }
       }
     },
-    "active_goal_refs": {
-      "type": "array",
-      "maxItems": 24,
-      "items": {
-        "type": "string"
-      }
-    },
-    "artifact_refs": {
-      "type": "array",
-      "maxItems": 24,
-      "items": {
-        "type": "string"
-      }
+    "open_questions": {"$ref": "#/$defs/boundedTextRefs"},
+    "active_goal_refs": {"$ref": "#/$defs/boundedMachineRefs"},
+    "constraint_refs": {"$ref": "#/$defs/boundedMachineRefs"},
+    "evidence_refs": {"$ref": "#/$defs/boundedMachineRefs"},
+    "artifact_refs": {"$ref": "#/$defs/boundedMachineRefs"},
+    "completed_side_effect_refs": {"$ref": "#/$defs/boundedMachineRefs"},
+    "failure_refs": {"$ref": "#/$defs/boundedMachineRefs"},
+    "permission_state_refs": {"$ref": "#/$defs/boundedMachineRefs"},
+    "child_task_refs": {"$ref": "#/$defs/boundedMachineRefs"},
+    "resume_entrypoint": {
+      "type": ["string", "null"],
+      "enum": [null, "next_planner_round", "poll_async_job", "await_user_input", "verify_and_finalize"]
     },
     "source_refs": {
       "type": "array",
       "maxItems": 24,
       "items": {
         "type": "object",
-        "additionalProperties": true
-      }
-    },
-    "risk_flags": {
-      "type": "array",
-      "maxItems": 24,
-      "items": {
-        "type": "string",
-        "not": {
-          "enum": [
-            "current_user_instruction",
-            "user_instruction",
-            "assistant_instruction",
-            "next_instruction",
-            "next_action",
-            "task_directive"
-          ]
+        "additionalProperties": false,
+        "required": ["ref", "provenance"],
+        "properties": {
+          "ref": {"type": "string", "minLength": 1, "maxLength": 256},
+          "provenance": {
+            "enum": [
+              "trusted_machine_state",
+              "structured_runtime_evidence",
+              "memory_retrieval_evidence",
+              "attachment_analysis_evidence",
+              "untrusted_conversation_evidence"
+            ]
+          }
         }
       }
-    }
+    },
+    "risk_flags": {"$ref": "#/$defs/boundedMachineRefs"}
   },
-  "not": {
-    "anyOf": [
-      { "required": ["current_user_instruction"] },
-      { "required": ["user_instruction"] },
-      { "required": ["assistant_instruction"] },
-      { "required": ["next_instruction"] },
-      { "required": ["next_action"] },
-      { "required": ["task_directive"] }
-    ]
+  "$defs": {
+    "boundedMachineRefs": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {"type": "string", "minLength": 1, "maxLength": 256}
+    },
+    "boundedTextRefs": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+    }
   }
 }

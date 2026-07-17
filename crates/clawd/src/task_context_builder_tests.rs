@@ -149,6 +149,7 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
             last_turn_full: "<none>".to_string(),
             recent_execution_anchor: "### EXECUTION_ANCHOR\nstep".to_string(),
             recent_execution_context: "<none>".to_string(),
+            compacted_history_context: "### COMPACTED_HISTORY_CONTEXT\n{}".to_string(),
             image_context: None,
         }),
         compaction_records: Vec::new(),
@@ -164,4 +165,6 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
     assert!(resolved.contains("### TASK_GOAL_CONTEXT"));
     assert!(resolved.contains("### CONTEXT_BUDGET_REPORT"));
     assert!(memory.contains("### RECENT_EXECUTION_CONTEXT"));
+    assert!(resolved.contains("### COMPACTED_HISTORY_CONTEXT"));
+    assert!(memory.contains("### COMPACTED_HISTORY_CONTEXT"));
 }

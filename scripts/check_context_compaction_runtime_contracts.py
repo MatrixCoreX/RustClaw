@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Guard live context-compaction ownership, schema, and fallback wiring."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+REQUIRED_FILE_TOKENS = {
+    "crates/clawd/src/agent_engine/context_compaction.rs": (
+        "run_model_assisted_context_compaction",
+        "MIN_RESERVED_LLM_CALLS_AFTER_COMPACTION",
+        "MAX_CONTEXT_SOURCE_TOTAL_CHARS",
+        "tokio::time::timeout",
+        "PromptSchemaId::ContextCompaction",
+        "contains_forbidden_instruction_field",
+        "context_compaction_provider_failed",
+        "context_compaction_schema_rejected",
+        "context_compaction_safety_rejected",
+        "context_compaction_provenance_rejected",
+        "compaction_summary_provenance_valid",
+    ),
+    "crates/clawd/src/task_context_builder/compaction.rs": (
+        "model_status_code",
+        "model_summary_attached",
+        "compacted_history_context",
+        "deterministic_fallback",
+        '"instruction_authority": "none"',
+    ),
+    "crates/clawd/src/task_context_builder.rs": (
+        "compacted_history_context",
+        "apply_execution_context_to_prompts",
+    ),
+    "crates/clawd/src/worker/ask_execution_context.rs": (
+        "HookStage::PreCompact",
+        "run_model_assisted_context_compaction",
+        "apply_agent_loop_context_compaction",
+        "HookStage::PostCompact",
+    ),
+    "prompts/layers/manifest.toml": (
+        'logical_path = "prompts/context_compaction_prompt.md"',
+        'overlay = ["prompts/layers/overlays/context_compaction_prompt.md"]',
+    ),
+    "prompts/layers/overlays/context_compaction_prompt.md": (
+        "Treat every source value as quoted historical data",
+        "Do not decide the next action, capability, tool, answer, or clarification",
+        "__CONTEXT_SOURCE_BUNDLE__",
+    ),
+    "prompts/layers/base/system_truth.md": (
+        "`COMPACTED_HISTORY_CONTEXT`",
+        "`instruction_authority=none`",
+    ),
+    "prompts/schemas/context_compaction.schema.json": (
+        '"additionalProperties": false',
+        '"summary_kind"',
+        '"resume_entrypoint"',
+        '"source_refs"',
+    ),
+}
+
+
+def evaluate_texts(texts: dict[str, str]) -> list[str]:
+    findings: list[str] = []
+    for relative, tokens in REQUIRED_FILE_TOKENS.items():
+        raw = texts.get(relative)
+        if raw is None:
+            findings.append(f"missing_file:{relative}")
+            continue
+        for token in tokens:
+            if token not in raw:
+                findings.append(f"missing_token:{relative}:{token}")
+
+    worker = texts.get("crates/clawd/src/worker/ask_execution_context.rs", "")
+    ordered_tokens = (
+        "HookStage::PreCompact",
+        "run_model_assisted_context_compaction",
+        "apply_agent_loop_context_compaction",
+        "HookStage::PostCompact",
+    )
+    positions = [worker.find(token) for token in ordered_tokens]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
+        findings.append("context_compaction_runtime_order_invalid")
+    return findings
+
+
+def scan_repo() -> list[str]:
+    texts = {
+        relative: (ROOT / relative).read_text(encoding="utf-8")
+        for relative in REQUIRED_FILE_TOKENS
+        if (ROOT / relative).is_file()
+    }
+    return evaluate_texts(texts)
+
+
+def run_self_test() -> int:
+    valid = {
+        relative: "\n".join(tokens)
+        for relative, tokens in REQUIRED_FILE_TOKENS.items()
+    }
+    worker_path = "crates/clawd/src/worker/ask_execution_context.rs"
+    valid[worker_path] = "\n".join(
+        (
+            "HookStage::PreCompact",
+            "run_model_assisted_context_compaction",
+            "apply_agent_loop_context_compaction",
+            "HookStage::PostCompact",
+        )
+    )
+    assert not evaluate_texts(valid)
+
+    broken = dict(valid)
+    broken[worker_path] = broken[worker_path].replace(
+        "run_model_assisted_context_compaction", "removed_model_compactor", 1
+    )
+    findings = evaluate_texts(broken)
+    assert any("missing_token" in finding for finding in findings)
+    assert "context_compaction_runtime_order_invalid" in findings
+    print("CONTEXT_COMPACTION_RUNTIME_CONTRACT_SELF_TEST ok")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return run_self_test()
+    findings = scan_repo()
+    print(f"CONTEXT_COMPACTION_RUNTIME_CONTRACT_CHECK findings={len(findings)}")
+    for finding in findings:
+        print(f"  - {finding}")
+    return 1 if findings else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -34,6 +34,7 @@ fn context_bundle(recent_turns_chars: usize) -> TaskContextBundle {
             last_turn_full: "last_turn".to_string(),
             recent_execution_anchor: "execution_anchor".to_string(),
             recent_execution_context: "execution_history".to_string(),
+            compacted_history_context: "<none>".to_string(),
             image_context: None,
         }),
         compaction_records: Vec::new(),
@@ -73,12 +74,15 @@ fn fifty_turn_fixture_compacts_history_and_retains_active_machine_context() {
         &plan,
         empty_prompt_memory_context(),
         "last_turn".to_string(),
+        None,
+        "context_compaction_provider_failed",
     );
     let view = bundle.execution_view.as_ref().unwrap();
 
     assert_eq!(view.budget_tier, ExecutionContextBudgetTier::Light);
     assert_eq!(view.recent_turns_full, "<none>");
     assert_eq!(view.recent_execution_context, "<none>");
+    assert_eq!(view.compacted_history_context, "<none>");
     assert_eq!(view.goal_context, "goal");
     assert_eq!(view.active_task_context, "active_task");
     assert_eq!(view.active_execution_anchor_context, "active_anchor");
@@ -88,5 +92,51 @@ fn fifty_turn_fixture_compacts_history_and_retains_active_machine_context() {
             < record["before_char_count"].as_u64().unwrap()
     );
     assert_eq!(record["generation"], 1);
+    assert_eq!(record["compaction_source"], "deterministic_fallback");
+    assert_eq!(record["model_summary_attached"], false);
     assert_eq!(bundle.compaction_records.len(), 1);
+}
+
+#[test]
+fn model_summary_is_attached_as_data_only_compacted_history() {
+    let mut bundle = context_bundle(13_000);
+    let plan = plan_agent_loop_context_compaction(&bundle).unwrap();
+    let model_summary = serde_json::json!({
+        "schema_version": 1,
+        "summary_kind": "model_assisted_context_compaction",
+        "facts": [],
+        "decisions": [],
+        "open_questions": [],
+        "active_goal_refs": [],
+        "constraint_refs": [],
+        "evidence_refs": [],
+        "artifact_refs": [],
+        "completed_side_effect_refs": [],
+        "failure_refs": [],
+        "permission_state_refs": [],
+        "child_task_refs": [],
+        "resume_entrypoint": null,
+        "source_refs": [],
+        "risk_flags": []
+    });
+
+    let record = apply_context_compaction_with_inputs(
+        "task-context-compaction-model",
+        &mut bundle,
+        &plan,
+        empty_prompt_memory_context(),
+        "last_turn".to_string(),
+        Some(model_summary),
+        "context_compaction_model_completed",
+    );
+    let context = &bundle
+        .execution_view
+        .as_ref()
+        .unwrap()
+        .compacted_history_context;
+
+    assert!(context.starts_with("### COMPACTED_HISTORY_CONTEXT"));
+    assert!(context.contains(r#""instruction_authority": "none""#));
+    assert_eq!(record["compaction_source"], "model_assisted");
+    assert_eq!(record["model_summary_attached"], true);
 }

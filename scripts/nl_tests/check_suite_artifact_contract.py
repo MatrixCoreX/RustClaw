@@ -230,6 +230,8 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "MCP_RUNTIME_CONTRACT_CHECK findings=0",
         "AGENT_HOOK_RUNTIME_CONTRACT_SELF_TEST ok",
         "AGENT_HOOK_RUNTIME_CONTRACT_CHECK findings=0",
+        "CONTEXT_COMPACTION_RUNTIME_CONTRACT_SELF_TEST ok",
+        "CONTEXT_COMPACTION_RUNTIME_CONTRACT_CHECK findings=0",
     },
     "agent_parity_gate/agent_parity_gate_inventory_contracts.txt": {
         "AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok",

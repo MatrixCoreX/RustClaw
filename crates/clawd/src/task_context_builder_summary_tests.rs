@@ -34,6 +34,7 @@ fn summary_projects_first_class_compaction_record() {
             last_turn_full: "<none>".to_string(),
             recent_execution_anchor: "<none>".to_string(),
             recent_execution_context: "<none>".to_string(),
+            compacted_history_context: "<none>".to_string(),
             image_context: None,
         }),
         compaction_records: vec![serde_json::json!({
@@ -97,6 +98,7 @@ fn summary_marks_long_session_context_compaction_trigger() {
             last_turn_full: "<none>".to_string(),
             recent_execution_anchor: "<none>".to_string(),
             recent_execution_context: "<none>".to_string(),
+            compacted_history_context: "<none>".to_string(),
             image_context: None,
         }),
         compaction_records: Vec::new(),
