@@ -46,6 +46,71 @@ use skill_execution_preflight::{
 };
 use skill_execution_subagent::record_subagent_step_execution;
 
+async fn run_mcp_tool_observation(
+    state: &AppState,
+    task: &ClaimedTask,
+    capability: &str,
+    args: Value,
+) -> Result<(String, Value), String> {
+    let outcome = state
+        .core
+        .mcp_runtime
+        .call(capability, args)
+        .await
+        .map_err(|error| {
+            json!({
+                "error_code": error.code(),
+                "message_key": error.code(),
+                "adapter_kind": "mcp_tool",
+            })
+            .to_string()
+        })?;
+    let outcome_json = serde_json::to_value(&outcome).map_err(|_| {
+        json!({
+            "error_code": "mcp_result_serialize_failed",
+            "message_key": "mcp_result_serialize_failed",
+            "adapter_kind": "mcp_tool",
+        })
+        .to_string()
+    })?;
+    let audit_detail = json!({
+        "task_id": task.task_id,
+        "adapter_kind": "mcp_tool",
+        "capability": outcome.capability,
+        "server_id": outcome.server_id,
+        "tool_name": outcome.tool_name,
+        "status": outcome.status,
+        "output_bytes": outcome.output_bytes,
+        "truncated": outcome.truncated,
+        "error_code": outcome.error_code,
+    })
+    .to_string();
+    if let Err(error) = crate::repo::insert_audit_log(
+        state,
+        Some(task.user_id),
+        "mcp.tool_call",
+        Some(&audit_detail),
+        None,
+    ) {
+        warn!(error = %error, "mcp_tool_call_audit_failed");
+    }
+    let raw = serde_json::to_string(&outcome).map_err(|_| {
+        json!({
+            "error_code": "mcp_result_serialize_failed",
+            "message_key": "mcp_result_serialize_failed",
+            "adapter_kind": "mcp_tool",
+        })
+        .to_string()
+    })?;
+    Ok((
+        raw,
+        json!({
+            "adapter_kind": "mcp_tool",
+            "mcp_result": outcome_json,
+        }),
+    ))
+}
+
 #[cfg(test)]
 use skill_execution_preflight::{
     contains_unresolved_runtime_template_arg, preflight_failure_metadata,
@@ -844,6 +909,15 @@ pub(super) async fn execute_prepared_skill_action(
             let structured_extra_slot = Arc::clone(&structured_extra_slot);
             let exec_args_for_run = exec_args_for_run.clone();
             async move {
+                if state.mcp_tool(normalized_skill).is_some() {
+                    let (raw, extra) =
+                        run_mcp_tool_observation(state, task, normalized_skill, exec_args_for_run)
+                            .await?;
+                    if let Ok(mut slot) = structured_extra_slot.lock() {
+                        *slot = Some(extra);
+                    }
+                    return Ok(raw);
+                }
                 let outcome =
                     run_skill_with_runner_outcome(state, task, normalized_skill, exec_args_for_run)
                         .await?;
@@ -970,6 +1044,9 @@ mod hook_policy_tests;
 #[cfg(test)]
 #[path = "skill_execution_isolation_tests.rs"]
 mod isolation_tests;
+#[cfg(test)]
+#[path = "skill_execution_mcp_tests.rs"]
+mod mcp_tests;
 #[cfg(test)]
 #[path = "skill_execution_permission_tests.rs"]
 mod permission_tests;

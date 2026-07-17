@@ -56,6 +56,7 @@ mod language_policy;
 mod llm_gateway;
 mod log_utils;
 mod machine_kv_projection;
+mod mcp_runtime;
 mod media_artifact_paths;
 mod memory;
 mod observed_facts;
@@ -647,6 +648,19 @@ async fn main() -> anyhow::Result<()> {
         locator_scan_max_files,
     );
 
+    let mcp_runtime = Arc::new(crate::mcp_runtime::McpRuntime::new(config.mcp.clone()));
+    mcp_runtime.start().await;
+    for snapshot in mcp_runtime.lifecycle_snapshots() {
+        info!(
+            server_id = snapshot.server_id,
+            state = snapshot.state.as_token(),
+            transport = snapshot.transport,
+            tool_count = snapshot.tool_count,
+            error_code = snapshot.last_error_code.unwrap_or_default(),
+            "mcp_server_lifecycle"
+        );
+    }
+
     let state = AppState {
         core: crate::CoreServices {
             db: db_pool,
@@ -659,6 +673,7 @@ async fn main() -> anyhow::Result<()> {
                 skills_list: Arc::new(views.execution_skills),
             }))),
             active_provider_type,
+            mcp_runtime,
         },
         skill_rt: crate::SkillRuntime {
             skill_timeout_seconds: config.skills.skill_timeout_seconds,
@@ -834,7 +849,9 @@ async fn main() -> anyhow::Result<()> {
     // 仅在 unix + reload_on_sighup=true 时启用；其它 target / 显式禁用直接跳过。
     spawn_prompts_sighup_listener(state.clone(), config.prompts.clone());
 
-    axum::serve(listener, app).await?;
+    let serve_result = axum::serve(listener, app).await;
+    state.core.mcp_runtime.stop().await;
+    serve_result?;
     Ok(())
 }
 

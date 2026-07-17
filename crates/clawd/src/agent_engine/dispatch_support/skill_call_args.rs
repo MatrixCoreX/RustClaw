@@ -28,11 +28,16 @@ pub(super) fn strip_unsupported_planner_metadata_args(
     let Some(obj) = args.as_object_mut() else {
         return Vec::new();
     };
-    let Some(manifest) = state.skill_manifest(canonical_skill) else {
-        return Vec::new();
-    };
-    let Some(schema) = manifest.input_schema else {
-        return Vec::new();
+    let schema = if let Some(tool) = state.mcp_tool(canonical_skill) {
+        tool.input_schema
+    } else {
+        let Some(manifest) = state.skill_manifest(canonical_skill) else {
+            return Vec::new();
+        };
+        let Some(schema) = manifest.input_schema else {
+            return Vec::new();
+        };
+        schema
     };
     let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) else {
         return Vec::new();

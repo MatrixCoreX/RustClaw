@@ -255,6 +255,9 @@ fn is_confirmation_like_skill(skill: &str) -> bool {
 }
 
 fn manifest_required_args(state: &AppState, normalized_skill: &str) -> Vec<String> {
+    if let Some(tool) = state.mcp_tool(normalized_skill) {
+        return tool.required_args;
+    }
     state
         .skill_manifest(normalized_skill)
         .and_then(|manifest| manifest.input_schema)
@@ -315,6 +318,14 @@ fn action_scoped_risk_level(
     normalized_skill: &str,
     args: &serde_json::Value,
 ) -> Option<SkillRiskLevel> {
+    if let Some(tool) = state.mcp_tool(normalized_skill) {
+        return Some(match tool.policy.risk_level.as_str() {
+            "low" => SkillRiskLevel::Low,
+            "medium" => SkillRiskLevel::Medium,
+            "high" => SkillRiskLevel::High,
+            _ => SkillRiskLevel::Unknown,
+        });
+    }
     let action = args
         .as_object()
         .and_then(|obj| obj.get("action"))
@@ -335,6 +346,9 @@ fn registry_declares_non_mutating_planner_action(
     normalized_skill: &str,
     args: &serde_json::Value,
 ) -> bool {
+    if let Some(tool) = state.mcp_tool(normalized_skill) {
+        return matches!(tool.policy.effect.as_str(), "observe" | "validate");
+    }
     let Some(action) = args
         .as_object()
         .and_then(|obj| obj.get("action"))
@@ -1019,6 +1033,7 @@ pub(crate) fn verify_plan(
             let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
             if !visible_skills.contains(&normalized_skill)
                 && !planner_internal_tool_is_visible(&normalized_skill)
+                && state.mcp_tool(&normalized_skill).is_none()
             {
                 issues.push(VerifyIssue {
                     step_id: step.step_id.clone(),
