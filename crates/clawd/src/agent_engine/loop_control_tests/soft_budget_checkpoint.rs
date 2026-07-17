@@ -1,6 +1,7 @@
 use super::super::{
-    loop_state_has_recoverable_checkpoint_state, recoverable_provider_blocker_resume_reason,
-    soft_budget_checkpoint_resume_reason, worker_soft_checkpoint_after_seconds,
+    loop_state_has_checkpoint_handoff, loop_state_has_recoverable_checkpoint_state,
+    recoverable_provider_blocker_resume_reason, soft_budget_checkpoint_resume_reason,
+    worker_soft_checkpoint_after_seconds,
 };
 use super::{test_policy, LoopState, RoundOutcome};
 
@@ -110,6 +111,29 @@ fn worker_soft_checkpoint_deadline_keeps_hard_timeout_reserve() {
     assert_eq!(worker_soft_checkpoint_after_seconds(3), Some(2));
     assert_eq!(worker_soft_checkpoint_after_seconds(10), Some(9));
     assert_eq!(worker_soft_checkpoint_after_seconds(3600), Some(3570));
+}
+
+#[test]
+fn checkpoint_handoff_requires_matching_nonterminal_machine_state() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.task_lifecycle = Some(serde_json::json!({
+        "state": "waiting",
+        "checkpoint_id": "checkpoint-1"
+    }));
+    loop_state.task_checkpoint = Some(serde_json::json!({
+        "checkpoint_id": "checkpoint-1",
+        "resume_entrypoint": "next_planner_round"
+    }));
+    assert!(loop_state_has_checkpoint_handoff(&loop_state));
+
+    loop_state.task_lifecycle.as_mut().expect("lifecycle")["state"] = serde_json::json!("running");
+    assert!(!loop_state_has_checkpoint_handoff(&loop_state));
+
+    loop_state.task_lifecycle.as_mut().expect("lifecycle")["state"] =
+        serde_json::json!("background");
+    loop_state.task_checkpoint.as_mut().expect("checkpoint")["checkpoint_id"] =
+        serde_json::json!("checkpoint-other");
+    assert!(!loop_state_has_checkpoint_handoff(&loop_state));
 }
 
 #[test]

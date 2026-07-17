@@ -84,6 +84,39 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         'claimed.dispatch_claim.get("text").is_none()',
         'claimed.dispatch_claim.get("error_text").is_none()',
     ),
+    "crates/clawd/src/agent_engine/loop_control.rs": (
+        "loop_state_has_checkpoint_handoff",
+        'matches!(lifecycle_state, "waiting" | "background" | "needs_user")',
+        "if loop_state_has_checkpoint_handoff(&pre_finalize_loop_state)",
+        "return Ok(reply);",
+    ),
+    "crates/clawd/src/finalize/task.rs": (
+        "journal_has_checkpointed_nonterminal_lifecycle",
+        "update_task_checkpointed_result",
+        "answer.resume_context.is_none()",
+        "finalize_ask_checkpointed",
+    ),
+    "crates/clawd/src/repo/tasks.rs": (
+        "paused_lifecycle_owned_by_other_executor",
+        "update_task_checkpointed_result",
+        "lease_owner = NULL",
+        "lease_expires_at = 0",
+        "AND lease_expires_at <= ?1",
+        "if task_lease_expires_at > now_ts",
+        "AND lease_expires_at <= ?3",
+    ),
+    "crates/clawd/src/repo/tasks_tests.rs": (
+        "due_checkpoint_waits_for_frontend_worker_lease_and_claim_rechecks_it",
+        "foreground_heartbeat_cannot_reclaim_a_published_checkpoint",
+    ),
+    "crates/clawd/src/agent_engine/loop_control_tests/soft_budget_checkpoint.rs": (
+        "checkpoint_handoff_requires_matching_nonterminal_machine_state",
+    ),
+    "crates/clawd/src/finalize/task_tests/checkpoint_finalization.rs": (
+        "checkpointed_ask_finalization_overrides_failure_metric",
+        "lease_owner.is_none()",
+        "assert_eq!(lease_expires_at, 0)",
+    ),
     "crates/clawd/src/worker/runtime_support.rs": (
         "build_paused_checkpoint_resume_work_item",
         "plan_claimed_paused_checkpoint_resume_execution",

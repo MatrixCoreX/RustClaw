@@ -187,21 +187,64 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let heartbeat_at = now_ts_u64() as i64;
+    let current_result_json = db
+        .query_row(
+            "SELECT result_json
+             FROM tasks
+             WHERE task_id = ?1
+               AND status = 'running'
+             LIMIT 1",
+            params![task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    let Some(current_result_json) = current_result_json else {
+        return Ok(false);
+    };
+    if current_result_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .is_some_and(|result| {
+            paused_lifecycle_owned_by_other_executor(&result, state.worker.worker_id.as_str())
+        })
+    {
+        return Ok(false);
+    }
     let changed = db.execute(
         "UPDATE tasks
          SET updated_at = ?2,
              lease_owner = ?3,
              lease_expires_at = ?4
          WHERE task_id = ?1
-           AND status = 'running'",
+           AND status = 'running'
+           AND result_json IS ?5",
         params![
             task_id,
             heartbeat_at.to_string(),
             state.worker.worker_id,
-            worker_task_lease_expires_at(state, heartbeat_at)
+            worker_task_lease_expires_at(state, heartbeat_at),
+            current_result_json
         ],
     )?;
     Ok(changed > 0)
+}
+
+fn paused_lifecycle_owned_by_other_executor(result_json: &Value, worker_id: &str) -> bool {
+    let lifecycle =
+        crate::task_lifecycle::task_query_lifecycle_projection("running", Some(result_json), None);
+    let state = lifecycle
+        .get("state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(state, "waiting" | "background" | "needs_user") {
+        return false;
+    }
+    lifecycle
+        .pointer("/resume_claim/owner")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        != Some(worker_id)
 }
 
 pub(crate) fn worker_task_lease_expires_at(state: &AppState, now_ts: i64) -> i64 {
@@ -269,6 +312,29 @@ pub(crate) fn update_task_progress_result(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.execute(
         "UPDATE tasks SET result_json = ?2, updated_at = ?3 WHERE task_id = ?1 AND status IN ('queued','running')",
+        params![task_id, result_json, now_ts()],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn update_task_checkpointed_result(
+    state: &AppState,
+    task_id: &str,
+    result_json: &str,
+) -> anyhow::Result<()> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    db.execute(
+        "UPDATE tasks
+         SET result_json = ?2,
+             updated_at = ?3,
+             lease_owner = NULL,
+             lease_expires_at = 0
+         WHERE task_id = ?1
+           AND status IN ('queued','running')",
         params![task_id, result_json, now_ts()],
     )?;
     Ok(())
@@ -506,10 +572,11 @@ pub(crate) fn list_due_paused_checkpoint_tasks_internal(
          FROM tasks
          WHERE status = 'running'
            AND result_json IS NOT NULL
+           AND lease_expires_at <= ?1
          ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) ASC,
                   task_id ASC",
     )?;
-    let rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map(params![now_ts], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
     })?;
 
@@ -576,21 +643,26 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let raw_result_json = db
+    let task_row = db
         .query_row(
-            "SELECT result_json
+            "SELECT result_json, lease_expires_at
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
              LIMIT 1",
             params![task_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
         )
-        .optional()?
-        .flatten();
+        .optional()?;
+    let Some((raw_result_json, task_lease_expires_at)) = task_row else {
+        return Ok(None);
+    };
     let Some(raw_result_json) = raw_result_json else {
         return Ok(None);
     };
+    if task_lease_expires_at > now_ts {
+        return Ok(None);
+    }
     let mut result_json = match serde_json::from_str::<Value>(&raw_result_json) {
         Ok(value) => value,
         Err(_) => return Ok(None),
@@ -664,11 +736,12 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
              lease_expires_at = ?6
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_expires_at <= ?3",
         params![
             task_id,
             updated_result_json,
-            now_ts.to_string(),
+            now_ts,
             raw_result_json,
             state.worker.worker_id,
             now_ts.saturating_add(lease_seconds)

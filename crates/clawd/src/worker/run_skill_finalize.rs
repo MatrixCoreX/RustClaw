@@ -560,7 +560,7 @@ async fn finalize_run_skill_success(
         }
     };
     if let Some(result) = pending_checkpoint_result {
-        repo::update_task_progress_result(state, &task.task_id, &result.to_string())?;
+        repo::update_task_checkpointed_result(state, &task.task_id, &result.to_string())?;
         let _ = repo::insert_audit_log(
             state,
             Some(task.user_id),

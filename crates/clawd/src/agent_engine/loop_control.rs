@@ -589,6 +589,36 @@ fn soft_budget_checkpoint_resume_reason(
     None
 }
 
+fn loop_state_has_checkpoint_handoff(loop_state: &LoopState) -> bool {
+    let Some(lifecycle) = loop_state.task_lifecycle.as_ref() else {
+        return false;
+    };
+    let lifecycle_state = lifecycle
+        .get("state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(lifecycle_state, "waiting" | "background" | "needs_user") {
+        return false;
+    }
+    let lifecycle_checkpoint_id = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let checkpoint_id = loop_state
+        .task_checkpoint
+        .as_ref()
+        .and_then(|checkpoint| checkpoint.get("checkpoint_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    matches!(
+        (lifecycle_checkpoint_id, checkpoint_id),
+        (Some(lifecycle_id), Some(checkpoint_id)) if lifecycle_id == checkpoint_id
+    )
+}
+
 fn recoverable_provider_blocker_resume_reason(loop_state: &LoopState) -> Option<&'static str> {
     let latest = loop_state
         .attempt_ledger_entries
@@ -1008,6 +1038,9 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             agent_run_context,
         )
         .await?;
+        if loop_state_has_checkpoint_handoff(&pre_finalize_loop_state) {
+            return Ok(reply);
+        }
         let answer_contract = answer_contract_for_reply(user_text, &reply);
         promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
             &mut reply,
