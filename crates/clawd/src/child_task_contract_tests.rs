@@ -112,7 +112,8 @@ fn merge_child_results_propagates_required_failure_without_parsing_prose() {
             "status": "succeeded",
             "required": true,
             "evidence_refs": ["child-evidence:1"],
-            "finding_refs": ["child-finding:1"]
+            "finding_refs": ["child-finding:1"],
+            "artifact_refs": ["child-artifact:1"]
         }),
         json!({
             "child_task_id": "task-child-optional",
@@ -139,6 +140,7 @@ fn merge_child_results_propagates_required_failure_without_parsing_prose() {
     assert_eq!(merged["optional_failed_count"], 1);
     assert_eq!(merged["evidence_refs"][0], "child-evidence:1");
     assert_eq!(merged["finding_refs"][0], "child-finding:1");
+    assert_eq!(merged["artifact_refs"][0], "child-artifact:1");
 }
 
 #[test]

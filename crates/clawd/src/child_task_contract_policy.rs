@@ -83,6 +83,7 @@ pub(crate) fn merge_child_task_results(parent_task_id: &str, child_results: &[Va
     let mut optional_failed_count = 0usize;
     let mut evidence_refs = Vec::new();
     let mut finding_refs = Vec::new();
+    let mut artifact_refs = Vec::new();
 
     for result in child_results {
         let required = result
@@ -110,6 +111,7 @@ pub(crate) fn merge_child_task_results(parent_task_id: &str, child_results: &[Va
         }
         append_machine_ref_array(result.get("evidence_refs"), &mut evidence_refs);
         append_machine_ref_array(result.get("finding_refs"), &mut finding_refs);
+        append_machine_ref_array(result.get("artifact_refs"), &mut artifact_refs);
     }
 
     let status = if required_failed_count > 0 {
@@ -133,6 +135,7 @@ pub(crate) fn merge_child_task_results(parent_task_id: &str, child_results: &[Va
         "optional_failed_count": optional_failed_count,
         "evidence_refs": evidence_refs,
         "finding_refs": finding_refs,
+        "artifact_refs": artifact_refs,
     })
 }
 

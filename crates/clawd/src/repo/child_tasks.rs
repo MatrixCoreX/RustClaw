@@ -246,7 +246,7 @@ pub(crate) fn record_child_task_terminal_projection(
             "observed_result_json": result_json,
         });
     }
-    let child_result = child_task_result_projection(&status, payload);
+    let child_result = child_task_result_projection(&status, payload, &result_json);
     let lifecycle = child_terminal_lifecycle_projection(&status, payload);
     let Some(obj) = result_json.as_object_mut() else {
         return Ok(false);
@@ -535,7 +535,7 @@ fn machine_token(value: &str) -> String {
     }
 }
 
-fn child_task_result_projection(status: &str, payload: &Value) -> Value {
+fn child_task_result_projection(status: &str, payload: &Value, result_json: &Value) -> Value {
     let contract = payload.get("child_task_contract").unwrap_or(&Value::Null);
     let child_task_id = contract
         .get("child_task_id")
@@ -556,6 +556,21 @@ fn child_task_result_projection(status: &str, payload: &Value) -> Value {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let status = child_terminal_status(status);
+    let mut evidence_refs = vec![format!("task:{child_task_id}:result_json")];
+    let mut artifact_refs = Vec::new();
+    for pointer in [
+        "/child_task_execution_scope/patch_artifact/patch_ref",
+        "/child_task_execution_scope/artifact_refs/0/cleanup_ref",
+    ] {
+        if let Some(reference) = result_json
+            .pointer(pointer)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            evidence_refs.push(reference.to_string());
+            artifact_refs.push(reference.to_string());
+        }
+    }
     json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
         "parent_task_id": parent_task_id,
@@ -581,7 +596,8 @@ fn child_task_result_projection(status: &str, payload: &Value) -> Value {
         } else {
             "clawd.child_task.not_succeeded"
         },
-        "evidence_refs": [format!("task:{child_task_id}:result_json")],
+        "evidence_refs": evidence_refs,
+        "artifact_refs": artifact_refs,
         "finding_refs": if status == "succeeded" {
             json!([format!("child_task:{child_task_id}:structured_result")])
         } else {

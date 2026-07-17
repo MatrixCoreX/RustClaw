@@ -157,6 +157,17 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "existing_isolation_contract_mismatch",
         "execution_isolation_root_profile",
         '"allocation_state"',
+        "build_child_worktree_patch_artifact",
+    ),
+    "crates/clawd/src/execution_isolation_patch.rs": (
+        "build_child_worktree_patch_artifact",
+        "GIT_INDEX_FILE",
+        '"kind": "child_worktree_patch"',
+        '"apply_owner": "parent_agent"',
+        '"apply_policy": "parent_review_required"',
+        '"patch_sha256"',
+        "MAX_CHILD_PATCH_BYTES",
+        "MAX_CHILD_PATCH_FILES",
     ),
     "crates/clawd/src/worker/child_task_execution_scope.rs": (
         "ChildTaskExecutionScope",
@@ -165,6 +176,9 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         '"isolated_worktree"',
         '"primary_workspace_read_only"',
         '"parent_owned_after_patch_decision"',
+        '"patch_artifact"',
+        '"child_worktree_patch_artifact_failed"',
+        '"artifact_refs"',
     ),
     "crates/clawd/src/worker/mod.rs": (
         "ChildTaskExecutionScope::prepare",
@@ -190,6 +204,12 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     "crates/clawd/src/skills_tests/task_scoped_worktree.rs": (
         "task_scoped_worktree_reuses_root_across_multiple_skill_calls",
         "skill call must not allocate a nested worktree",
+    ),
+    "crates/clawd/src/execution_isolation_patch_tests.rs": (
+        "child_worktree_patch_contains_tracked_and_untracked_changes_without_staging",
+        "unchanged_child_worktree_returns_empty_review_artifact",
+        "apply",
+        "--check",
     ),
     "crates/clawd/src/task_journal_tests/event_stream_hooks.rs": (
         "trace_json_includes_pollable_machine_event_stream",
