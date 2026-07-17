@@ -395,13 +395,12 @@ fn action_scoped_risk_level(
     canonical_skill: &str,
     action: Option<&str>,
 ) -> Option<SkillRiskLevel> {
-    let action = action?;
     state.skill_manifest(canonical_skill).and_then(|manifest| {
-        manifest
-            .planner_capabilities
-            .into_iter()
-            .find(|mapping| mapping.action.as_deref() == Some(action))
-            .and_then(|mapping| mapping.risk_level)
+        claw_core::skill_registry::select_planner_capability_mapping(
+            &manifest.planner_capabilities,
+            action,
+        )
+        .and_then(|mapping| mapping.risk_level)
     })
 }
 
@@ -411,31 +410,24 @@ fn action_scoped_capability_policy(
     action: Option<&str>,
 ) -> Option<Value> {
     state.skill_manifest(canonical_skill).and_then(|manifest| {
-        let capabilities = manifest.planner_capabilities;
-        capabilities
-            .iter()
-            .find(|mapping| mapping.action.as_deref() == action)
-            .or_else(|| {
-                if capabilities.len() == 1 {
-                    capabilities.first()
-                } else {
-                    None
-                }
+        claw_core::skill_registry::select_planner_capability_mapping(
+            &manifest.planner_capabilities,
+            action,
+        )
+        .map(|mapping| {
+            json!({
+                "isolation_profile": mapping
+                    .isolation_profile
+                    .map(|value| value.as_token()),
+                "network_access": mapping.network_access,
+                "filesystem_write": mapping.filesystem_write,
+                "external_publish": mapping.external_publish,
+                "credential_access": mapping.credential_access,
+                "subprocess": mapping.subprocess,
+                "package_install": mapping.package_install,
+                "privilege_escalation": mapping.privilege_escalation,
             })
-            .map(|mapping| {
-                json!({
-                    "isolation_profile": mapping
-                        .isolation_profile
-                        .map(|value| value.as_token()),
-                    "network_access": mapping.network_access,
-                    "filesystem_write": mapping.filesystem_write,
-                    "external_publish": mapping.external_publish,
-                    "credential_access": mapping.credential_access,
-                    "subprocess": mapping.subprocess,
-                    "package_install": mapping.package_install,
-                    "privilege_escalation": mapping.privilege_escalation,
-                })
-            })
+        })
     })
 }
 

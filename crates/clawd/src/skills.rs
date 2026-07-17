@@ -1306,18 +1306,11 @@ fn action_scoped_isolation_profile(
 ) -> Option<CapabilityIsolationProfile> {
     let action = skill_action_token(args);
     state.skill_manifest(skill_name).and_then(|manifest| {
-        let capabilities = manifest.planner_capabilities;
-        capabilities
-            .iter()
-            .find(|mapping| mapping.action.as_deref() == action.as_deref())
-            .or_else(|| {
-                if capabilities.len() == 1 {
-                    capabilities.first()
-                } else {
-                    None
-                }
-            })
-            .and_then(|mapping| mapping.isolation_profile)
+        claw_core::skill_registry::select_planner_capability_mapping(
+            &manifest.planner_capabilities,
+            action.as_deref(),
+        )
+        .and_then(|mapping| mapping.isolation_profile)
     })
 }
 
@@ -1382,13 +1375,12 @@ fn effective_dispatch_risk_level(
     let Some(manifest) = state.skill_manifest(skill_name) else {
         return SkillRiskLevel::Unknown;
     };
-    let action_risk = skill_action_token(args).and_then(|action| {
-        manifest
-            .planner_capabilities
-            .iter()
-            .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
-            .and_then(|mapping| mapping.risk_level)
-    });
+    let action = skill_action_token(args);
+    let action_risk = claw_core::skill_registry::select_planner_capability_mapping(
+        &manifest.planner_capabilities,
+        action.as_deref(),
+    )
+    .and_then(|mapping| mapping.risk_level);
     action_risk
         .or(manifest.risk_level)
         .unwrap_or(SkillRiskLevel::Unknown)

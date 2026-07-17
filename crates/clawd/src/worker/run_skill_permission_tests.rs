@@ -75,4 +75,16 @@ fn direct_high_risk_skill_stops_at_one_shot_approval_boundary() {
         verification.verify.permission_decision["steps"][0]["decision"],
         "require_confirmation"
     );
+    assert_eq!(
+        verification.verify.permission_decision["steps"][0]["sandbox"]["external_publish"],
+        true
+    );
+    assert_eq!(
+        verification.verify.permission_decision["steps"][0]["sandbox"]["credential_access"],
+        true
+    );
+    assert_eq!(
+        verification.verify.permission_decision["steps"][0]["registry_policy"]["capability"],
+        "system.run_command"
+    );
 }

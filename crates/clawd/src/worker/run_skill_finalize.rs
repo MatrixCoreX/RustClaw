@@ -148,19 +148,10 @@ fn run_skill_capability_contract(state: &AppState, payload: &Value, skill_name: 
         .as_ref()
         .and_then(|registry| registry.manifest(&canonical));
     let planner_mapping = registry.as_ref().and_then(|registry| {
-        let mappings = registry.planner_capabilities(&canonical);
-        action
-            .as_deref()
-            .and_then(|action| {
-                mappings
-                    .iter()
-                    .find(|mapping| mapping.action.as_deref() == Some(action))
-            })
-            .or_else(|| {
-                (action.is_none() && mappings.len() == 1)
-                    .then(|| mappings.first())
-                    .flatten()
-            })
+        claw_core::skill_registry::select_planner_capability_mapping(
+            registry.planner_capabilities(&canonical),
+            action.as_deref(),
+        )
     });
     let effect = planner_mapping
         .and_then(|mapping| mapping.effect)
