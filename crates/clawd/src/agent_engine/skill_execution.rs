@@ -12,6 +12,8 @@ use super::{
 };
 use crate::{repo, run_skill_with_runner_outcome};
 
+#[path = "child_task_execution_policy.rs"]
+mod child_task_execution_policy;
 #[path = "skill_execution_auto_sudo.rs"]
 mod skill_execution_auto_sudo;
 #[path = "skill_execution_evidence.rs"]
@@ -23,6 +25,7 @@ mod skill_execution_preflight;
 #[path = "skill_execution_subagent.rs"]
 mod skill_execution_subagent;
 
+use child_task_execution_policy::child_task_execution_policy_error;
 #[cfg(test)]
 use skill_execution_auto_sudo::build_auto_sudo_retry_args;
 use skill_execution_auto_sudo::{
@@ -697,6 +700,21 @@ pub(super) async fn execute_prepared_skill_action(
     action_trace_kind: &str,
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
+    if let Some(err) =
+        child_task_execution_policy_error(state, task, normalized_skill, classification_args)
+    {
+        return Ok(handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        ));
+    }
     if normalized_skill == "subagent" {
         record_subagent_hook_stage(
             state,
@@ -1129,6 +1147,9 @@ pub(super) async fn execute_prepared_skill_action(
 #[cfg(test)]
 #[path = "skill_execution_async_start_tests.rs"]
 mod async_start_tests;
+#[cfg(test)]
+#[path = "child_task_execution_policy_tests.rs"]
+mod child_task_policy_tests;
 #[cfg(test)]
 #[path = "skill_execution_hook_policy_tests.rs"]
 mod hook_policy_tests;

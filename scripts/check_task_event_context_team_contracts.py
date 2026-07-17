@@ -127,6 +127,30 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         '"recommended_next_action"',
         "SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED",
     ),
+    "crates/clawd/src/agent_engine/child_task_execution_policy.rs": (
+        "child_task_execution_policy_error",
+        "is_child_subagent_payload",
+        'pointer("/scope/allowed_capabilities")',
+        '"child_task_policy_violation"',
+        '"owner_layer": "child_task_execution_policy"',
+        "PolicyDecision::Deny.as_token()",
+        '"read_only"',
+        '"local_worktree"',
+        '"capability_not_allowed"',
+        '"permission_profile_unsupported"',
+    ),
+    "crates/clawd/src/agent_engine/skill_execution.rs": (
+        "child_task_execution_policy_error(",
+        "if normalized_skill == \"subagent\"",
+        "handle_preflight_argument_failure(",
+    ),
+    "crates/clawd/src/agent_engine/child_task_execution_policy_tests.rs": (
+        "read_only_child_accepts_declared_observe_capability",
+        "child_rejects_missing_or_out_of_scope_capability",
+        "read_only_child_rejects_declared_write_capability",
+        "local_worktree_child_accepts_scoped_write_but_rejects_publish",
+        "child_rejects_non_machine_allowlist_tokens_and_unknown_profile",
+    ),
     "crates/clawd/src/task_journal_tests/event_stream_hooks.rs": (
         "trace_json_includes_pollable_machine_event_stream",
         "trace_json_projects_goal_and_context_budget_events",
@@ -230,6 +254,16 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
             findings.append(f"subagent_machine_boundary_missing:{token}")
     if "write_permission" in subagent_text and '"read_only"' not in subagent_text:
         findings.append("subagent_write_permission_not_read_only")
+
+    skill_execution = texts.get("crates/clawd/src/agent_engine/skill_execution.rs") or ""
+    child_policy_index = skill_execution.find("child_task_execution_policy_error(")
+    subagent_dispatch_index = skill_execution.find('if normalized_skill == "subagent"')
+    if (
+        child_policy_index < 0
+        or subagent_dispatch_index < 0
+        or child_policy_index > subagent_dispatch_index
+    ):
+        findings.append("child_task_policy_not_before_subagent_dispatch")
 
     tests = texts.get("crates/clawd/src/task_journal_tests/event_stream_hooks.rs") or ""
     for test_name in (
