@@ -156,6 +156,21 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
     for (index, observation) in journal.task_observations.iter().enumerate() {
         collect_coding_evidence_value(observation, &mut coding_evidence, None, 0);
         if observation
+            .get("observation_kind")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some("context_prompt_attribution")
+        {
+            let mut payload = observation.clone();
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("index".to_string(), json!(index));
+            }
+            events.push(task_event_json(
+                &mut seq,
+                "context_prompt_attribution",
+                payload,
+            ));
+        } else if observation
             .get("owner_layer")
             .and_then(Value::as_str)
             .map(str::trim)

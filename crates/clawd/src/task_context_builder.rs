@@ -5,6 +5,9 @@ use crate::memory;
 use crate::memory::service::PromptMemoryContext;
 use crate::{AppState, ClaimedTask};
 
+const CONTEXT_PROMPT_TEMPLATE_MAX_CHARS: usize = 2_000;
+const CONTEXT_PROMPT_OVERHEAD_MAX_CHARS: usize = 1_800;
+
 #[path = "task_context_builder/compaction.rs"]
 mod compaction;
 #[path = "task_context_builder/summary.rs"]
@@ -276,8 +279,7 @@ pub(crate) fn build_runtime_context(state: &AppState) -> String {
     format!(
         "### RUNTIME_CONTEXT\n\
 current_process_cwd: {}\n\
-workspace_root: {}\n\
-Use these as current-turn runtime facts. For local filesystem operations, workspace_root is the default workspace boundary; current_process_cwd is the clawd process working directory.",
+workspace_root: {}",
         current_process_cwd.display(),
         workspace_root.display()
     )
@@ -320,10 +322,7 @@ fn build_active_task_context(
         return "<none>".to_string();
     }
 
-    let mut lines = vec![
-        "### ACTIVE_TASK_CONTEXT".to_string(),
-        "Use this as authoritative semantic context for short follow-ups, corrections, scope updates, and output-shape refinements on the current active task. It is not a filesystem locator or execution target by itself.".to_string(),
-    ];
+    let mut lines = vec!["### ACTIVE_TASK_CONTEXT".to_string()];
     if let Some(prompt) = last_prompt {
         lines.push("last_primary_task_prompt:".to_string());
         lines.push(truncate_context_snippet(prompt, 700));
@@ -386,10 +385,7 @@ fn ordered_entries_context_line(entries: &[String]) -> Option<String> {
 fn build_active_execution_anchor_context(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> String {
-    let mut lines = vec![
-        "### ACTIVE_EXECUTION_ANCHOR".to_string(),
-        "Latest structured execution state for immediate/proximal follow-ups only. Prefer this over older active-task text for references to the current/latest result, but do not use it when the current request structurally selects an older assistant or execution turn by relative offset; use the matching recent-turn or recent-execution context for that older offset.".to_string(),
-    ];
+    let mut lines = vec!["### ACTIVE_EXECUTION_ANCHOR".to_string()];
     if let Some(frame) = session_snapshot.active_followup_frame.as_ref() {
         let source_request = frame.source_request.trim();
         if !source_request.is_empty() {
@@ -432,7 +428,7 @@ fn build_active_execution_anchor_context(
             lines.push(["observed_ordered_entries:", entries.as_str()].join(" "));
         }
     }
-    if lines.len() <= 2 {
+    if lines.len() <= 1 {
         "<none>".to_string()
     } else {
         lines.join("\n")
@@ -449,10 +445,7 @@ fn build_session_alias_context(
         return "<none>".to_string();
     }
 
-    let mut lines = vec![
-        "### SESSION_ALIAS_BINDINGS".to_string(),
-        "Temporary user-defined references for this session. Use them only when the current message explicitly mentions one of these aliases or updates a mapping. They are not durable memory and not execution evidence by themselves.".to_string(),
-    ];
+    let mut lines = vec!["### SESSION_ALIAS_BINDINGS".to_string()];
     for binding in conversation_state.alias_bindings.iter().rev().take(8).rev() {
         lines.push(format!(
             "- alias: {}\n  target: {}",
@@ -590,28 +583,75 @@ pub(crate) fn set_execution_image_context(
     }
 }
 
+fn render_context_projection_prompt(
+    state: &AppState,
+    logical_path: &'static str,
+    prompt_kind: &'static str,
+    placeholder: &'static str,
+    context: &str,
+) -> anyhow::Result<(String, Value)> {
+    let (template, resolved_source) =
+        crate::bootstrap::load_required_prompt_template_for_state(state, logical_path)
+            .map_err(anyhow::Error::new)?;
+    let template_char_count = template.chars().count();
+    if template_char_count > CONTEXT_PROMPT_TEMPLATE_MAX_CHARS {
+        anyhow::bail!("context_prompt_template_budget_exceeded:{logical_path}");
+    }
+    let rendered = crate::render_prompt_template(&template, &[(placeholder, context)]);
+    let rendered_char_count = rendered.chars().count();
+    let overhead_char_count = rendered_char_count.saturating_sub(context.chars().count());
+    if overhead_char_count > CONTEXT_PROMPT_OVERHEAD_MAX_CHARS {
+        anyhow::bail!("context_prompt_overhead_budget_exceeded:{logical_path}");
+    }
+    let attribution = json!({
+        "schema_version": 1,
+        "prompt_kind": prompt_kind,
+        "logical_path": logical_path,
+        "resolved_source": resolved_source,
+        "template_char_count": template_char_count,
+        "rendered_char_count": rendered_char_count,
+        "overhead_char_count": overhead_char_count,
+    });
+    Ok((rendered, attribution))
+}
+
 pub(crate) fn apply_execution_context_to_prompts(
+    state: &AppState,
     bundle: &TaskContextBundle,
     chat_prompt_context: &mut String,
     resolved_prompt_for_execution: &mut String,
     prompt_with_memory_for_execution: &mut String,
-) {
+) -> anyhow::Result<Vec<Value>> {
     let Some(execution_view) = bundle.execution_view.as_ref() else {
-        return;
+        return Ok(Vec::new());
     };
+    let mut prompt_attribution = Vec::new();
     if execution_view.runtime_context != "<none>" {
+        let (context_block, attribution) = render_context_projection_prompt(
+            state,
+            "prompts/context_runtime_context.md",
+            "runtime_context",
+            "__RUNTIME_CONTEXT__",
+            &execution_view.runtime_context,
+        )?;
         chat_prompt_context.push_str("\n\n");
-        chat_prompt_context.push_str(&execution_view.runtime_context);
+        chat_prompt_context.push_str(&context_block);
         prompt_with_memory_for_execution.push_str("\n\n");
-        prompt_with_memory_for_execution.push_str(&execution_view.runtime_context);
+        prompt_with_memory_for_execution.push_str(&context_block);
+        prompt_attribution.push(attribution);
     }
     if execution_view.session_alias_context != "<none>" {
-        let alias_context_block = format!(
-            "\n\n{}\nAlias execution rule: when the current goal or request mentions more than one alias, treat each alias target as an independent authoritative concrete target. Do not rebuild a file alias under another directory alias unless that exact alias target says it is inside that directory.",
-            execution_view.session_alias_context
-        );
+        let (alias_context, attribution) = render_context_projection_prompt(
+            state,
+            "prompts/context_session_aliases.md",
+            "session_aliases",
+            "__SESSION_ALIAS_BINDINGS__",
+            &execution_view.session_alias_context,
+        )?;
+        let alias_context_block = format!("\n\n{alias_context}");
         resolved_prompt_for_execution.push_str(&alias_context_block);
         prompt_with_memory_for_execution.push_str(&alias_context_block);
+        prompt_attribution.push(attribution);
     }
     if execution_view.goal_context != "<none>" {
         let goal_context_block = format!("\n\n{}", execution_view.goal_context);
@@ -619,17 +659,30 @@ pub(crate) fn apply_execution_context_to_prompts(
         prompt_with_memory_for_execution.push_str(&goal_context_block);
     }
     if execution_view.active_task_context != "<none>" {
-        let active_task_context_block = format!("\n\n{}", execution_view.active_task_context);
+        let (active_task_context, attribution) = render_context_projection_prompt(
+            state,
+            "prompts/context_active_task.md",
+            "active_task",
+            "__ACTIVE_TASK_CONTEXT__",
+            &execution_view.active_task_context,
+        )?;
+        let active_task_context_block = format!("\n\n{active_task_context}");
         resolved_prompt_for_execution.push_str(&active_task_context_block);
         prompt_with_memory_for_execution.push_str(&active_task_context_block);
+        prompt_attribution.push(attribution);
     }
     if execution_view.active_execution_anchor_context != "<none>" {
-        let anchor_context_block = format!(
-            "\n\n{}\nActive ordered-entry rule: when the current request semantically selects an item by position or relative position from this active ordered list and the reference is to the current/latest result, use that exact listed entry under the bound target. Do not re-list, sort, or reinterpret the parent directory to choose a different item. If the request structurally selects an older turn/result, do not apply this active ordered list; bind the selected item from the matching recent-turn or recent-execution context instead.",
-            execution_view.active_execution_anchor_context
-        );
+        let (anchor_context, attribution) = render_context_projection_prompt(
+            state,
+            "prompts/context_active_execution_anchor.md",
+            "active_execution_anchor",
+            "__ACTIVE_EXECUTION_ANCHOR__",
+            &execution_view.active_execution_anchor_context,
+        )?;
+        let anchor_context_block = format!("\n\n{anchor_context}");
         resolved_prompt_for_execution.push_str(&anchor_context_block);
         prompt_with_memory_for_execution.push_str(&anchor_context_block);
+        prompt_attribution.push(attribution);
     }
     if execution_view.recent_turns_full != "<none>" {
         chat_prompt_context.push_str("\n\n");
@@ -650,11 +703,16 @@ pub(crate) fn apply_execution_context_to_prompts(
         "<none>"
     };
     if prompt_execution_context != "<none>" {
-        prompt_with_memory_for_execution.push_str(
-            "\n\n### RECENT_EXECUTION_CONTEXT\n\
-Use this block only as supporting evidence for genuinely short follow-up requests. Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this block override a needed clarification, and do not treat an artifact-type noun alone as a concrete target.\n",
-        );
-        prompt_with_memory_for_execution.push_str(prompt_execution_context);
+        let (recent_execution_context, attribution) = render_context_projection_prompt(
+            state,
+            "prompts/context_recent_execution.md",
+            "recent_execution",
+            "__RECENT_EXECUTION_CONTEXT__",
+            prompt_execution_context,
+        )?;
+        prompt_with_memory_for_execution.push_str("\n\n");
+        prompt_with_memory_for_execution.push_str(&recent_execution_context);
+        prompt_attribution.push(attribution);
     }
     if execution_view.compacted_history_context != "<none>" {
         resolved_prompt_for_execution.push_str("\n\n");
@@ -669,7 +727,7 @@ Use this block only as supporting evidence for genuinely short follow-up request
         .filter(|v| !v.is_empty())
     {
         let image_context_block =
-            format!("\n\nAttached image analysis context:\n{}", image_context);
+            format!("\n\n### ATTACHED_IMAGE_ANALYSIS_CONTEXT\n{image_context}");
         resolved_prompt_for_execution.push_str(&image_context_block);
         prompt_with_memory_for_execution.push_str(&image_context_block);
     }
@@ -679,6 +737,7 @@ Use this block only as supporting evidence for genuinely short follow-up request
     );
     resolved_prompt_for_execution.push_str(&budget_report_block);
     prompt_with_memory_for_execution.push_str(&budget_report_block);
+    Ok(prompt_attribution)
 }
 
 #[cfg(test)]

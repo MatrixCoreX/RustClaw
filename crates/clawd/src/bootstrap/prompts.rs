@@ -16,10 +16,8 @@ use crate::{llm_vendor_name, AppState};
 ///   会经过 [`prompt_layers::resolve_prompt_rel_path_for_vendor`] 解析到具体磁盘文件 / manifest 拼层。
 /// - `label` 是日志/告警里给运维看的人类可读名字。
 ///
-/// 列表与 `crates/clawd/src/{main.rs,agent_engine.rs,semantic_judge.rs,
-/// agent_engine/observed_output.rs,skills/builtin.rs,memory/service.rs,schedule_service.rs,
-/// ask_flow.rs}` 里 `include_str!` 的兜底常量一一对应；若新增 prompt 兜底常量请同步追加这里
-/// 或显式标注「不参与启动校验」。
+/// 列表覆盖带 `include_str!` 兜底的核心 prompt 和 required-only layered prompt。新增关键
+/// prompt 时应同步追加，或显式标注“不参与启动校验”。
 const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
     (
         "prompts/clarify_question_prompt.md",
@@ -81,6 +79,26 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "prompts/answer_verifier_prompt.md",
         "answer_verifier (finalize.answer)",
     ),
+    (
+        "prompts/context_runtime_context.md",
+        "runtime context projection (task_context_builder)",
+    ),
+    (
+        "prompts/context_active_task.md",
+        "active task context projection (task_context_builder)",
+    ),
+    (
+        "prompts/context_active_execution_anchor.md",
+        "active execution anchor projection (task_context_builder)",
+    ),
+    (
+        "prompts/context_session_aliases.md",
+        "session alias context projection (task_context_builder)",
+    ),
+    (
+        "prompts/context_recent_execution.md",
+        "recent execution context projection (task_context_builder)",
+    ),
 ];
 
 /// §3.5b: 启动期 prompt 校验单条记录。
@@ -106,7 +124,8 @@ pub(crate) struct PromptValidationReport {
 /// 若返回的 `template` 仍为空字符串，则说明 disk + manifest 都没货，运行时会跌回 `include_str!`
 /// 兜底常量。这种隐式兜底在生产应被运维感知，所以列入 `missing`。
 ///
-/// 仅做日志告警（WARN），**不**阻塞启动 —— 编译期 `include_str!` 已确保最坏情况下也有可用模板。
+/// 仅做日志告警（WARN），**不**阻塞启动。带 `include_str!` 的调用面仍可回退；required-only
+/// layered prompt 会在实际调用时失败关闭，避免把自然语言规则重新复制进 Rust。
 pub(crate) fn validate_core_prompts(
     workspace_root: &Path,
     selected_vendor: Option<&str>,

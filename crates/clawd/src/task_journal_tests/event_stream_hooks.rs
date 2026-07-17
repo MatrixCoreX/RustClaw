@@ -210,6 +210,18 @@ fn trace_json_projects_goal_and_context_budget_events() {
         "active_goal_refs": ["goal_context"],
         "risk_flags": ["budget_excluded_context"]
     })));
+    journal.push_task_observation(json!({
+        "schema_version": 1,
+        "observation_kind": "context_prompt_attribution",
+        "prompt_count": 1,
+        "template_char_count": 420,
+        "rendered_char_count": 512,
+        "prompts": [{
+            "prompt_kind": "runtime_context",
+            "logical_path": "prompts/context_runtime_context.md",
+            "resolved_source": "prompts/layers/overlays/context_runtime_context.md"
+        }]
+    }));
 
     let trace = journal.to_trace_json();
     let events = trace
@@ -228,6 +240,12 @@ fn trace_json_projects_goal_and_context_budget_events() {
         .iter()
         .find(|event| event.get("event_type").and_then(Value::as_str) == Some("context_compaction"))
         .expect("context_compaction event");
+    let prompt_attribution = events
+        .iter()
+        .find(|event| {
+            event.get("event_type").and_then(Value::as_str) == Some("context_prompt_attribution")
+        })
+        .expect("context_prompt_attribution event");
 
     assert_eq!(
         goal.pointer("/payload/goal_status").and_then(Value::as_str),
@@ -250,6 +268,18 @@ fn trace_json_projects_goal_and_context_budget_events() {
             .pointer("/payload/records/0/summary_kind")
             .and_then(Value::as_str),
         Some("deterministic_context_budget")
+    );
+    assert_eq!(
+        prompt_attribution
+            .pointer("/payload/prompts/0/logical_path")
+            .and_then(Value::as_str),
+        Some("prompts/context_runtime_context.md")
+    );
+    assert_eq!(
+        prompt_attribution
+            .pointer("/payload/template_char_count")
+            .and_then(Value::as_u64),
+        Some(420)
     );
 }
 

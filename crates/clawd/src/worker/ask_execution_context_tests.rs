@@ -3,7 +3,8 @@ use serde_json::json;
 
 #[tokio::test]
 async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
-    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     {
         let db = state.core.db.get().expect("database");
         for index in 0..52_i64 {
@@ -115,6 +116,23 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
                 .and_then(|record| record.get("compaction_id"))
                 .is_some()
     }));
+    let prompt_attribution = prepared
+        .initial_task_observations
+        .iter()
+        .find(|item| {
+            item.get("observation_kind")
+                .and_then(serde_json::Value::as_str)
+                == Some("context_prompt_attribution")
+        })
+        .expect("context prompt attribution");
+    assert!(prompt_attribution["prompt_count"].as_u64().unwrap() >= 1);
+    assert!(prompt_attribution["prompts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item.get("logical_path").is_some()
+            && item["template_char_count"].as_u64().unwrap() <= 2_000
+            && item["overhead_char_count"].as_u64().unwrap() <= 1_800));
     assert!(!prepared
         .context_bundle
         .summary()
