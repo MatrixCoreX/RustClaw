@@ -212,7 +212,9 @@ fn deterministic_fallback_preserves_stable_machine_references() {
                 "goal:atlas_release constraint:no_external_publish",
                 "decision:canary_before_rollout fact:build_green",
                 "artifact:README.md window:2026_07_20_0200Z",
+                "owner: release_team",
                 "risk:stale next:stale open:stale",
+                "constraint: read_only",
                 "自然语言不参与机器引用选择",
             ]
             .join("\n"),
@@ -251,6 +253,7 @@ fn deterministic_fallback_preserves_stable_machine_references() {
         "fact:build_green",
         "artifact:README.md",
         "window:2026_07_20_0200Z",
+        "owner:release_team",
     ] {
         assert!(context.contains(machine_ref), "{machine_ref} missing");
     }
@@ -266,6 +269,7 @@ fn deterministic_fallback_preserves_stable_machine_references() {
             "{transient_ref} leaked into stable continuity refs"
         );
     }
+    assert!(!continuity_values.contains(&"constraint:read_only"));
     assert_eq!(
         record["current_state_refs"],
         serde_json::json!(["risk:stale", "next:stale", "open:stale"])
