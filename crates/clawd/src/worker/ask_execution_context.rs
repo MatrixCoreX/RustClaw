@@ -109,12 +109,30 @@ pub(super) async fn prepare_ask_execution_context(
     let mut resolved_prompt_for_execution = planner_user_request.to_string();
     let mut prompt_with_memory_for_execution = execution_view.memory_ctx.prompt_with_memory.clone();
     let recent_execution_context = execution_view.recent_execution_context.clone();
-    crate::task_context_builder::apply_execution_context_to_prompts(
-        &context_bundle,
-        &mut chat_prompt_context,
-        &mut resolved_prompt_for_execution,
-        &mut prompt_with_memory_for_execution,
-    );
+    let context_prompt_attribution =
+        crate::task_context_builder::apply_execution_context_to_prompts(
+            state,
+            &context_bundle,
+            &mut chat_prompt_context,
+            &mut resolved_prompt_for_execution,
+            &mut prompt_with_memory_for_execution,
+        )?;
+    if !context_prompt_attribution.is_empty() {
+        initial_task_observations.push(json!({
+            "schema_version": 1,
+            "observation_kind": "context_prompt_attribution",
+            "prompt_count": context_prompt_attribution.len(),
+            "template_char_count": context_prompt_attribution
+                .iter()
+                .filter_map(|item| item.get("template_char_count").and_then(Value::as_u64))
+                .sum::<u64>(),
+            "rendered_char_count": context_prompt_attribution
+                .iter()
+                .filter_map(|item| item.get("rendered_char_count").and_then(Value::as_u64))
+                .sum::<u64>(),
+            "prompts": context_prompt_attribution,
+        }));
+    }
     info!(
         "ask_context_ready task_id={} recalled_recent_count={} context_summary_bytes={} recent_execution_bytes={}",
         task.task_id,

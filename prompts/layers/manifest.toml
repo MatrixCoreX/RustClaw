@@ -94,6 +94,26 @@ overlay = ["prompts/layers/overlays/context_compaction_prompt.md"]
 vendor_patch = "summary/common.md"
 
 [[prompts]]
+logical_path = "prompts/context_runtime_context.md"
+overlay = ["prompts/layers/overlays/context_runtime_context.md"]
+
+[[prompts]]
+logical_path = "prompts/context_active_task.md"
+overlay = ["prompts/layers/overlays/context_active_task.md"]
+
+[[prompts]]
+logical_path = "prompts/context_active_execution_anchor.md"
+overlay = ["prompts/layers/overlays/context_active_execution_anchor.md"]
+
+[[prompts]]
+logical_path = "prompts/context_session_aliases.md"
+overlay = ["prompts/layers/overlays/context_session_aliases.md"]
+
+[[prompts]]
+logical_path = "prompts/context_recent_execution.md"
+overlay = ["prompts/layers/overlays/context_recent_execution.md"]
+
+[[prompts]]
 logical_path = "prompts/schedule_intent_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",

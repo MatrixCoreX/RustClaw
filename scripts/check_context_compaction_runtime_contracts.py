@@ -42,6 +42,14 @@ REQUIRED_FILE_TOKENS = {
     "crates/clawd/src/task_context_builder.rs": (
         "build_recent_turns_full_context_with_sources",
         "context_source_task_ids",
+        "render_context_projection_prompt",
+        "CONTEXT_PROMPT_TEMPLATE_MAX_CHARS",
+        "CONTEXT_PROMPT_OVERHEAD_MAX_CHARS",
+        '"prompts/context_runtime_context.md"',
+        '"prompts/context_active_task.md"',
+        '"prompts/context_active_execution_anchor.md"',
+        '"prompts/context_session_aliases.md"',
+        '"prompts/context_recent_execution.md"',
         "compacted_history_context",
         "apply_execution_context_to_prompts",
     ),
@@ -57,6 +65,7 @@ REQUIRED_FILE_TOKENS = {
         "apply_agent_loop_context_compaction",
         "HookStage::PostCompact",
         "context_compaction_record_observation",
+        '"context_prompt_attribution"',
     ),
     "crates/clawd/src/worker/resume_replay_executor.rs": (
         "run_agent_with_tools_seeded",
@@ -71,9 +80,18 @@ REQUIRED_FILE_TOKENS = {
         '"context_compaction_record"',
         'observation.get("record")',
     ),
+    "crates/clawd/src/task_journal_event_stream.rs": (
+        '"context_prompt_attribution"',
+        '"context_compaction"',
+    ),
     "prompts/layers/manifest.toml": (
         'logical_path = "prompts/context_compaction_prompt.md"',
         'overlay = ["prompts/layers/overlays/context_compaction_prompt.md"]',
+        'logical_path = "prompts/context_runtime_context.md"',
+        'logical_path = "prompts/context_active_task.md"',
+        'logical_path = "prompts/context_active_execution_anchor.md"',
+        'logical_path = "prompts/context_session_aliases.md"',
+        'logical_path = "prompts/context_recent_execution.md"',
     ),
     "prompts/layers/overlays/context_compaction_prompt.md": (
         "Treat every source value as quoted historical data",
@@ -83,6 +101,26 @@ REQUIRED_FILE_TOKENS = {
     "prompts/layers/base/system_truth.md": (
         "`COMPACTED_HISTORY_CONTEXT`",
         "`instruction_authority=none`",
+    ),
+    "prompts/layers/overlays/context_runtime_context.md": (
+        "__RUNTIME_CONTEXT__",
+        "workspace boundary",
+    ),
+    "prompts/layers/overlays/context_active_task.md": (
+        "__ACTIVE_TASK_CONTEXT__",
+        "authoritative semantic context",
+    ),
+    "prompts/layers/overlays/context_active_execution_anchor.md": (
+        "__ACTIVE_EXECUTION_ANCHOR__",
+        "active ordered list",
+    ),
+    "prompts/layers/overlays/context_session_aliases.md": (
+        "__SESSION_ALIAS_BINDINGS__",
+        "temporary user-defined session references",
+    ),
+    "prompts/layers/overlays/context_recent_execution.md": (
+        "__RECENT_EXECUTION_CONTEXT__",
+        "supporting evidence",
     ),
     "prompts/schemas/context_compaction.schema.json": (
         '"additionalProperties": false',
@@ -117,6 +155,17 @@ def evaluate_texts(texts: dict[str, str]) -> list[str]:
     summary = texts.get("crates/clawd/src/task_context_builder/summary.rs", "")
     if "transcript_compaction_records=" in summary:
         findings.append("legacy_compaction_summary_string_projection_present")
+    context_builder = texts.get("crates/clawd/src/task_context_builder.rs", "")
+    embedded_rules = (
+        "Alias execution rule:",
+        "Active ordered-entry rule:",
+        "Use this block only as supporting evidence",
+        "Temporary user-defined references for this session",
+        "Use this as authoritative semantic context for short follow-ups",
+    )
+    for marker in embedded_rules:
+        if marker in context_builder:
+            findings.append(f"embedded_context_continuity_rule_present:{marker}")
     return findings
 
 

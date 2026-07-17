@@ -143,9 +143,13 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
             memory_ctx: empty_prompt_memory_context(),
             runtime_context: "### RUNTIME_CONTEXT\nworkspace_root: /workspace".to_string(),
             goal_context: "### TASK_GOAL_CONTEXT\n{}".to_string(),
-            active_task_context: "<none>".to_string(),
-            active_execution_anchor_context: "<none>".to_string(),
-            session_alias_context: "<none>".to_string(),
+            active_task_context: "### ACTIVE_TASK_CONTEXT\nlast_primary_task_prompt: inspect"
+                .to_string(),
+            active_execution_anchor_context:
+                "### ACTIVE_EXECUTION_ANCHOR\nfollowup_bound_target: /workspace/a.txt".to_string(),
+            session_alias_context:
+                "### SESSION_ALIAS_BINDINGS\n- alias: report\n  target: /workspace/a.txt"
+                    .to_string(),
             recent_turns_full: "### RECENT_TURNS\nturn".to_string(),
             last_turn_full: "<none>".to_string(),
             recent_execution_anchor: "### EXECUTION_ANCHOR\nstep".to_string(),
@@ -158,8 +162,12 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
     let mut chat = String::new();
     let mut resolved = "request".to_string();
     let mut memory = "request".to_string();
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
 
-    apply_execution_context_to_prompts(&bundle, &mut chat, &mut resolved, &mut memory);
+    let attribution =
+        apply_execution_context_to_prompts(&state, &bundle, &mut chat, &mut resolved, &mut memory)
+            .expect("render layered context prompts");
 
     assert!(chat.contains("### RUNTIME_CONTEXT"));
     assert!(chat.contains("### RECENT_TURNS"));
@@ -168,4 +176,19 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
     assert!(memory.contains("### RECENT_EXECUTION_CONTEXT"));
     assert!(resolved.contains("### COMPACTED_HISTORY_CONTEXT"));
     assert!(memory.contains("### COMPACTED_HISTORY_CONTEXT"));
+    assert_eq!(attribution.len(), 5);
+    assert_eq!(attribution[0]["prompt_kind"], "runtime_context");
+    assert_eq!(attribution[1]["prompt_kind"], "session_aliases");
+    assert_eq!(attribution[2]["prompt_kind"], "active_task");
+    assert_eq!(attribution[3]["prompt_kind"], "active_execution_anchor");
+    assert_eq!(attribution[4]["prompt_kind"], "recent_execution");
+    assert!(attribution.iter().all(|item| {
+        item["template_char_count"].as_u64().unwrap() <= 2_000
+            && item["overhead_char_count"].as_u64().unwrap() <= 1_800
+    }));
+    assert!(!memory.contains("__RUNTIME_CONTEXT__"));
+    assert!(!memory.contains("__SESSION_ALIAS_BINDINGS__"));
+    assert!(!memory.contains("__ACTIVE_TASK_CONTEXT__"));
+    assert!(!memory.contains("__ACTIVE_EXECUTION_ANCHOR__"));
+    assert!(!memory.contains("__RECENT_EXECUTION_CONTEXT__"));
 }
