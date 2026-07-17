@@ -576,7 +576,7 @@ fn query_recent_terminal_ask_turns_for_chat(
     user_key: &str,
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String)>> {
-    let limit = limit.max(1).min(12);
+    let limit = limit.max(1).min(64);
     let mut stmt = db.prepare(
         "SELECT payload_json, result_json, error_text, status
          FROM tasks
@@ -666,7 +666,7 @@ pub(crate) fn build_recent_turns_full_context(
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
-    let max_turns = max_turns.max(1).min(10);
+    let max_turns = max_turns.max(1).min(64);
     let max_segment_chars = max_segment_chars.max(128);
     let max_total_chars = max_total_chars.max(512);
     let turns = query_recent_terminal_ask_turns_for_chat(

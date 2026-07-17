@@ -87,7 +87,8 @@ pub(crate) use self::filesystem_lifecycle_contract::{
     scratch_filesystem_lifecycle_observed_steps_match,
 };
 use self::loop_control::{
-    run_agent_with_loop, run_agent_with_loop_direct_plan, run_agent_with_loop_seeded,
+    run_agent_with_loop_direct_plan, run_agent_with_loop_seeded,
+    run_agent_with_loop_with_initial_observations,
 };
 use self::loop_state_contract_evidence::{
     active_plan_file_targets_for_loop_seed, boundary_observation_needs_clarify_for_loop_seed,
@@ -1026,19 +1027,27 @@ pub(crate) async fn run_agent_with_tools(
     goal: &str,
     user_request: &str,
     agent_run_context: Option<AgentRunContext>,
+    initial_task_observations: &[Value],
 ) -> Result<AskReply, String> {
     info!(
-        "run_agent_with_tools: task_id={} user_id={} chat_id={} goal={}",
+        "run_agent_with_tools: task_id={} observation_count={} goal={}",
         task.task_id,
-        task.user_id,
-        task.chat_id,
+        initial_task_observations.len(),
         crate::truncate_for_log(goal)
     );
     let user_text = user_request.trim();
-    if !user_text.is_empty() {
-        return run_agent_with_loop(state, task, goal, user_text, agent_run_context.as_ref()).await;
+    if user_text.is_empty() {
+        return Ok(AskReply::non_llm(String::new()));
     }
-    return Ok(AskReply::non_llm(String::new()));
+    run_agent_with_loop_with_initial_observations(
+        state,
+        task,
+        goal,
+        user_text,
+        agent_run_context.as_ref(),
+        initial_task_observations,
+    )
+    .await
 }
 
 pub(crate) async fn run_agent_with_tools_seeded(

@@ -14,6 +14,7 @@ pub(super) struct PreparedAskFlow {
     pub(super) prompt_with_memory_for_execution: String,
     pub(super) recent_execution_context: String,
     pub(super) session_alias_bindings: Vec<crate::conversation_state::SessionAliasBinding>,
+    pub(super) initial_task_observations: Vec<Value>,
 }
 
 pub(super) async fn prepare_ask_flow(
@@ -44,6 +45,7 @@ pub(super) async fn prepare_ask_flow(
         prompt_with_memory_for_execution: prepared_execution.prompt_with_memory_for_execution,
         recent_execution_context: prepared_execution.recent_execution_context,
         session_alias_bindings,
+        initial_task_observations: prepared_execution.initial_task_observations,
     })
 }
 
@@ -89,6 +91,7 @@ pub(super) async fn execute_ask_dispatch(
         &prepared_flow.prompt_with_memory_for_execution,
         &prepared_flow.planner_user_request,
         agent_run_context,
+        &prepared_flow.initial_task_observations,
     )
     .await)
 }

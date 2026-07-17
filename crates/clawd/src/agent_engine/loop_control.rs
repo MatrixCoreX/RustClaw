@@ -830,14 +830,25 @@ fn initial_execution_recipe_spec(
     crate::execution_recipe::ExecutionRecipeSpec::default()
 }
 
-pub(super) async fn run_agent_with_loop(
+pub(super) async fn run_agent_with_loop_with_initial_observations(
     state: &AppState,
     task: &ClaimedTask,
     goal: &str,
     user_text: &str,
     agent_run_context: Option<&AgentRunContext>,
+    initial_task_observations: &[Value],
 ) -> Result<AskReply, String> {
-    run_agent_with_loop_seeded(state, task, goal, user_text, agent_run_context, None).await
+    run_agent_with_loop_seeded_and_initial_plan(
+        state,
+        task,
+        goal,
+        user_text,
+        agent_run_context,
+        None,
+        None,
+        initial_task_observations,
+    )
+    .await
 }
 
 pub(super) async fn run_agent_with_loop_seeded(
@@ -856,6 +867,7 @@ pub(super) async fn run_agent_with_loop_seeded(
         agent_run_context,
         resume_checkpoint,
         None,
+        &[],
     )
     .await
 }
@@ -876,6 +888,7 @@ pub(super) async fn run_agent_with_loop_direct_plan(
         agent_run_context,
         None,
         Some(initial_plan),
+        &[],
     )
     .await
 }
@@ -888,10 +901,14 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     agent_run_context: Option<&AgentRunContext>,
     resume_checkpoint: Option<&crate::task_lifecycle::TaskCheckpoint>,
     initial_plan: Option<&crate::PlanResult>,
+    initial_task_observations: &[Value],
 ) -> Result<AskReply, String> {
     let base_policy = load_agent_loop_guard_policy(state);
     let mut loop_state = LoopState::new(base_policy.max_rounds.max(1));
     super::seed_loop_state_for_agent_run(&mut loop_state, agent_run_context, resume_checkpoint);
+    loop_state
+        .task_observations
+        .extend(initial_task_observations.iter().cloned());
     record_session_start_hooks(state, task, user_text, &mut loop_state).await;
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         initial_execution_recipe_spec(goal, user_text, agent_run_context),

@@ -18,7 +18,7 @@ fn empty_prompt_memory_context() -> crate::memory::service::PromptMemoryContext 
 }
 
 #[test]
-fn summary_emits_transcript_compaction_record_for_light_execution_budget() {
+fn summary_projects_first_class_compaction_record() {
     let bundle = TaskContextBundle {
         raw_sources: TaskContextRawSources::default(),
         planner_view: PlannerContextView::default(),
@@ -36,6 +36,13 @@ fn summary_emits_transcript_compaction_record_for_light_execution_budget() {
             recent_execution_context: "<none>".to_string(),
             image_context: None,
         }),
+        compaction_records: vec![serde_json::json!({
+            "schema_version": 1,
+            "summary_kind": "deterministic_context_budget",
+            "active_goal_refs": ["goal_context"],
+            "source_refs": [{"ref": "recent_turns_full"}],
+            "risk_flags": ["budget_excluded_context", "old_assistant_output_not_instruction"],
+        })],
     };
 
     let summary = bundle.summary();
@@ -92,6 +99,7 @@ fn summary_marks_long_session_context_compaction_trigger() {
             recent_execution_context: "<none>".to_string(),
             image_context: None,
         }),
+        compaction_records: Vec::new(),
     };
 
     let summary = bundle.summary();

@@ -116,6 +116,14 @@ REQUIRED_FILE_TOKENS = {
         "HookStage::UserPromptSubmit",
         "lifecycle_stage_outcome_for_state",
     ),
+    "crates/clawd/src/worker/ask_execution_context.rs": (
+        "plan_agent_loop_context_compaction",
+        "HookStage::PreCompact",
+        "apply_agent_loop_context_compaction",
+        "HookStage::PostCompact",
+        "initial_task_observations",
+        "machine_observations",
+    ),
     "crates/clawd/src/agent_engine/skill_execution_observations.rs": (
         "record_hook_evaluation_observation",
         "record_permission_request_hook",

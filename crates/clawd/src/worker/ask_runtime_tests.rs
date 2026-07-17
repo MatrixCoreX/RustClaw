@@ -32,6 +32,7 @@ fn planner_context_keeps_raw_request_without_pre_planner_route() {
         prompt_with_memory_for_execution: "memory context\nraw request".to_string(),
         recent_execution_context: "<none>".to_string(),
         session_alias_bindings: Vec::new(),
+        initial_task_observations: Vec::new(),
     };
 
     let context = build_agent_run_context_from_prepared_flow(&flow);

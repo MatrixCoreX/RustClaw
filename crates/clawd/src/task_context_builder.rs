@@ -5,8 +5,14 @@ use crate::memory;
 use crate::memory::service::PromptMemoryContext;
 use crate::{AppState, ClaimedTask};
 
+#[path = "task_context_builder/compaction.rs"]
+mod compaction;
 #[path = "task_context_builder/summary.rs"]
 mod summary;
+
+pub(crate) use compaction::{
+    apply_agent_loop_context_compaction, plan_agent_loop_context_compaction,
+};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskContextRawSources {
@@ -38,6 +44,7 @@ pub(crate) struct TaskContextBundle {
     pub(crate) raw_sources: TaskContextRawSources,
     pub(crate) planner_view: PlannerContextView,
     pub(crate) execution_view: Option<ExecutionContextView>,
+    pub(crate) compaction_records: Vec<Value>,
 }
 
 impl TaskContextBundle {
@@ -534,9 +541,9 @@ pub(crate) fn build_agent_loop_task_context_bundle(
             task.user_key.as_deref(),
             task.user_id,
             task.chat_id,
-            5,
+            64,
             560,
-            6400,
+            48_000,
         ),
         last_turn_full: memory::build_last_turn_full_context(
             state,
@@ -558,6 +565,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         raw_sources: TaskContextRawSources::default(),
         planner_view,
         execution_view: Some(execution_view),
+        compaction_records: Vec::new(),
     }
 }
 
@@ -658,6 +666,10 @@ Use this block only as supporting evidence for genuinely short follow-up request
 #[cfg(test)]
 #[path = "task_context_builder_summary_tests.rs"]
 mod summary_tests;
+
+#[cfg(test)]
+#[path = "task_context_builder_compaction_tests.rs"]
+mod compaction_tests;
 
 #[cfg(test)]
 #[path = "task_context_builder_tests.rs"]
