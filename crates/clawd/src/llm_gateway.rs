@@ -605,6 +605,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
 
     let mut last_error = "unknown llm error".to_string();
     let mut any_provider_attempted = false;
+    let mut selected_provider_count = 0_u64;
     let mut skipped_providers: Vec<(String, u64)> = Vec::new();
     let mut recoverable_provider_blocker: Option<TaskProviderBlocker> = None;
 
@@ -619,8 +620,31 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         // retry / timeout 配额。也避免在 model_io.log 里反复刷同一个坏 provider。
         let breaker_decision = provider.breaker.before_attempt();
         match breaker_decision {
-            crate::providers::AttemptDecision::Allow => {}
+            crate::providers::AttemptDecision::Allow => {
+                selected_provider_count = selected_provider_count.saturating_add(1);
+                state.note_task_provider_route_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    &provider_name,
+                    true,
+                    selected_provider_count > 1,
+                    false,
+                    false,
+                    provider.breaker.snapshot(),
+                );
+            }
             crate::providers::AttemptDecision::AllowTrial => {
+                selected_provider_count = selected_provider_count.saturating_add(1);
+                state.note_task_provider_route_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    &provider_name,
+                    true,
+                    selected_provider_count > 1,
+                    false,
+                    true,
+                    provider.breaker.snapshot(),
+                );
                 info!(
                     "{} [LLM_CALL] stage=circuit_half_open task_id={} provider={} prompt_source={} note=trial_after_cooldown",
                     crate::highlight_tag("llm"),
@@ -630,6 +654,16 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 );
             }
             crate::providers::AttemptDecision::SkipCooldown { remaining_ms } => {
+                state.note_task_provider_route_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    &provider_name,
+                    false,
+                    false,
+                    true,
+                    false,
+                    provider.breaker.snapshot(),
+                );
                 warn!(
                     "{} [LLM_CALL] stage=circuit_open_skip task_id={} provider={} prompt_source={} cooldown_remaining_ms={}",
                     crate::highlight_tag("llm"),
@@ -749,6 +783,12 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     call_started_at.elapsed().as_millis() as u64,
                 );
                 provider.breaker.note_success();
+                state.note_task_provider_breaker_snapshot_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    &provider_name,
+                    provider.breaker.snapshot(),
+                );
                 state.clear_task_provider_blocker(&task.task_id);
                 stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
                 touch_llm_task_lease(state, &task.task_id, prompt_label, "call_success");
@@ -787,6 +827,12 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     // 上游链路已恢复，不应继续维持 Open/HalfOpen。
                     provider.breaker.note_success();
                 }
+                state.note_task_provider_breaker_snapshot_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    &provider_name,
+                    provider.breaker.snapshot(),
+                );
                 last_error =
                     format!("provider={provider_name} error_kind={error_kind} failed: {err}");
                 warn!(

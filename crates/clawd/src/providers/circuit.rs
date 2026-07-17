@@ -25,6 +25,8 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
+
 /// 连续 N 次失败触发 Open。
 const FAILURE_THRESHOLD: u32 = 3;
 
@@ -39,6 +41,24 @@ enum State {
     Closed,
     Open,
     HalfOpen,
+}
+
+impl State {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Closed => "closed",
+            Self::Open => "open",
+            Self::HalfOpen => "half_open",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct CircuitBreakerSnapshot {
+    pub(crate) state: String,
+    pub(crate) consecutive_failures: u32,
+    pub(crate) current_cooldown_ms: u64,
+    pub(crate) remaining_cooldown_ms: u64,
 }
 
 #[derive(Debug)]
@@ -137,15 +157,26 @@ impl CircuitBreaker {
         }
     }
 
-    /// 仅供观测/测试用。
-    #[cfg(test)]
-    fn snapshot(&self) -> (State, u32, u64) {
+    /// Machine-only runtime snapshot for task telemetry and tests.
+    pub(crate) fn snapshot(&self) -> CircuitBreakerSnapshot {
+        let now = Instant::now();
         let inner = self.inner.lock().unwrap();
-        (
-            inner.state,
-            inner.consecutive_failures,
-            inner.current_cooldown_ms,
-        )
+        let remaining_cooldown_ms = if inner.state == State::Open {
+            let cooldown = Duration::from_millis(inner.current_cooldown_ms);
+            let elapsed = inner
+                .opened_at
+                .map(|opened_at| now.saturating_duration_since(opened_at))
+                .unwrap_or(cooldown);
+            cooldown.saturating_sub(elapsed).as_millis() as u64
+        } else {
+            0
+        };
+        CircuitBreakerSnapshot {
+            state: inner.state.as_str().to_string(),
+            consecutive_failures: inner.consecutive_failures,
+            current_cooldown_ms: inner.current_cooldown_ms,
+            remaining_cooldown_ms,
+        }
     }
 }
 

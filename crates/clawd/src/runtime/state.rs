@@ -39,10 +39,16 @@ pub(crate) struct LlmPromptBucket {
     pub(crate) elapsed_ms: u64,
     pub(crate) provider_attempt_count: u64,
     pub(crate) provider_retry_count: u64,
+    pub(crate) provider_selection_count: u64,
+    pub(crate) provider_fallback_count: u64,
+    pub(crate) provider_circuit_skip_count: u64,
+    pub(crate) provider_circuit_trial_count: u64,
     pub(crate) provider_retryable_error_count: u64,
     pub(crate) provider_final_error_count: u64,
     pub(crate) provider_last_retry_error_kinds: BTreeMap<String, u64>,
     pub(crate) provider_final_error_kinds: BTreeMap<String, u64>,
+    pub(crate) provider_breaker_snapshots:
+        BTreeMap<String, crate::providers::CircuitBreakerSnapshot>,
     pub(crate) prompt_truncation_count: u64,
     pub(crate) prompt_bytes_before_max: Option<usize>,
     pub(crate) prompt_bytes_budget_min: Option<usize>,
@@ -1125,6 +1131,59 @@ impl AppState {
                 .or_insert(0);
             *counter = counter.saturating_add(1);
         }
+    }
+
+    pub(crate) fn note_task_provider_route_with_label(
+        &self,
+        task_id: &str,
+        label: &str,
+        provider: &str,
+        selected: bool,
+        fallback: bool,
+        circuit_skipped: bool,
+        circuit_trial: bool,
+        breaker: crate::providers::CircuitBreakerSnapshot,
+    ) {
+        let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
+        let bucket = guard
+            .entry(task_id.to_string())
+            .or_default()
+            .entry(label.to_string())
+            .or_default();
+        if selected {
+            bucket.provider_selection_count = bucket.provider_selection_count.saturating_add(1);
+        }
+        if fallback {
+            bucket.provider_fallback_count = bucket.provider_fallback_count.saturating_add(1);
+        }
+        if circuit_skipped {
+            bucket.provider_circuit_skip_count =
+                bucket.provider_circuit_skip_count.saturating_add(1);
+        }
+        if circuit_trial {
+            bucket.provider_circuit_trial_count =
+                bucket.provider_circuit_trial_count.saturating_add(1);
+        }
+        bucket
+            .provider_breaker_snapshots
+            .insert(provider.to_string(), breaker);
+    }
+
+    pub(crate) fn note_task_provider_breaker_snapshot_with_label(
+        &self,
+        task_id: &str,
+        label: &str,
+        provider: &str,
+        breaker: crate::providers::CircuitBreakerSnapshot,
+    ) {
+        let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
+        guard
+            .entry(task_id.to_string())
+            .or_default()
+            .entry(label.to_string())
+            .or_default()
+            .provider_breaker_snapshots
+            .insert(provider.to_string(), breaker);
     }
 
     pub(crate) fn note_task_prompt_truncation_with_label(

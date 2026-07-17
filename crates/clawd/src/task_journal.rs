@@ -1204,6 +1204,10 @@ mod context_compaction_tests;
 mod cost_tests;
 
 #[cfg(test)]
+#[path = "task_journal_provider_routing_tests.rs"]
+mod provider_routing_tests;
+
+#[cfg(test)]
 #[path = "task_journal_goal_tests.rs"]
 mod goal_tests;
 

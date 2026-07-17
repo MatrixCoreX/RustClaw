@@ -851,10 +851,15 @@ pub(super) fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
                         "elapsed_ms": bucket.elapsed_ms,
                         "provider_attempt_count": bucket.provider_attempt_count,
                         "provider_retry_count": bucket.provider_retry_count,
+                        "provider_selection_count": bucket.provider_selection_count,
+                        "provider_fallback_count": bucket.provider_fallback_count,
+                        "provider_circuit_skip_count": bucket.provider_circuit_skip_count,
+                        "provider_circuit_trial_count": bucket.provider_circuit_trial_count,
                         "provider_retryable_error_count": bucket.provider_retryable_error_count,
                         "provider_final_error_count": bucket.provider_final_error_count,
                         "provider_last_retry_error_kinds": bucket.provider_last_retry_error_kinds,
                         "provider_final_error_kinds": bucket.provider_final_error_kinds,
+                        "provider_breaker_snapshots": bucket.provider_breaker_snapshots,
                         "prompt_truncation_count": bucket.prompt_truncation_count,
                         "prompt_bytes_before_max": bucket.prompt_bytes_before_max,
                         "prompt_bytes_budget_min": bucket.prompt_bytes_budget_min,
@@ -866,6 +871,52 @@ pub(super) fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
             .collect();
         Value::Object(object)
     });
+    let provider_selection_count = metrics
+        .by_prompt
+        .as_ref()
+        .map(|map| {
+            map.values()
+                .map(|bucket| bucket.provider_selection_count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let provider_fallback_count = metrics
+        .by_prompt
+        .as_ref()
+        .map(|map| {
+            map.values()
+                .map(|bucket| bucket.provider_fallback_count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let provider_retry_count = metrics
+        .by_prompt
+        .as_ref()
+        .map(|map| {
+            map.values()
+                .map(|bucket| bucket.provider_retry_count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let provider_circuit_skip_count = metrics
+        .by_prompt
+        .as_ref()
+        .map(|map| {
+            map.values()
+                .map(|bucket| bucket.provider_circuit_skip_count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let provider_circuit_trial_count = metrics
+        .by_prompt
+        .as_ref()
+        .map(|map| {
+            map.values()
+                .map(|bucket| bucket.provider_circuit_trial_count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let logical_calls = metrics.llm_calls_per_task.unwrap_or(0);
     json!({
         "used_evidence_ids_count": metrics.used_evidence_ids_count,
         "delivery_consistent": metrics.delivery_consistent,
@@ -878,6 +929,21 @@ pub(super) fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
             .unwrap_or(0),
         "frontdoor_llm": frontdoor_llm_metrics_json(metrics),
         "by_prompt": by_prompt_value,
+        "provider_routing": {
+            "logical_calls": logical_calls,
+            "provider_selections": provider_selection_count,
+            "provider_fallbacks": provider_fallback_count,
+            "provider_retries": provider_retry_count,
+            "circuit_skips": provider_circuit_skip_count,
+            "circuit_trials": provider_circuit_trial_count,
+            "fallback_amplification_millis": if logical_calls == 0 {
+                0
+            } else {
+                provider_selection_count
+                    .saturating_mul(1_000)
+                    .saturating_div(logical_calls)
+            },
+        },
         "llm_cost": metrics.llm_cost_summary,
         "llm_cost_records": metrics.llm_cost_records,
     })

@@ -9,12 +9,12 @@ fn closed_allows_until_threshold() {
         cb.note_failure();
     }
     // 第 FAILURE_THRESHOLD-1 次失败后，仍处于 Closed
-    assert_eq!(cb.snapshot().0, State::Closed);
+    assert_eq!(cb.snapshot().state, "closed");
 
     // 第 FAILURE_THRESHOLD 次：触发 Open
     assert!(matches!(cb.before_attempt(), AttemptDecision::Allow));
     cb.note_failure();
-    assert_eq!(cb.snapshot().0, State::Open);
+    assert_eq!(cb.snapshot().state, "open");
 }
 
 #[test]
@@ -38,12 +38,13 @@ fn success_resets_counter_and_state() {
     let cb = CircuitBreaker::new();
     cb.note_failure();
     cb.note_failure();
-    assert_eq!(cb.snapshot().1, 2);
+    assert_eq!(cb.snapshot().consecutive_failures, 2);
     cb.note_success();
-    let (state, fails, cooldown) = cb.snapshot();
-    assert_eq!(state, State::Closed);
-    assert_eq!(fails, 0);
-    assert_eq!(cooldown, INITIAL_COOLDOWN_MS);
+    let snapshot = cb.snapshot();
+    assert_eq!(snapshot.state, "closed");
+    assert_eq!(snapshot.consecutive_failures, 0);
+    assert_eq!(snapshot.current_cooldown_ms, INITIAL_COOLDOWN_MS);
+    assert_eq!(snapshot.remaining_cooldown_ms, 0);
 }
 
 #[test]
@@ -57,9 +58,9 @@ fn half_open_failure_doubles_cooldown_capped_at_max() {
         inner.current_cooldown_ms = INITIAL_COOLDOWN_MS;
     }
     cb.note_failure();
-    let (state, _, cooldown) = cb.snapshot();
-    assert_eq!(state, State::Open);
-    assert_eq!(cooldown, INITIAL_COOLDOWN_MS * 2);
+    let snapshot = cb.snapshot();
+    assert_eq!(snapshot.state, "open");
+    assert_eq!(snapshot.current_cooldown_ms, INITIAL_COOLDOWN_MS * 2);
 
     // 反复 HalfOpen→Open，cooldown 翻倍直到封顶
     for _ in 0..20 {
@@ -69,7 +70,7 @@ fn half_open_failure_doubles_cooldown_capped_at_max() {
         }
         cb.note_failure();
     }
-    assert_eq!(cb.snapshot().2, MAX_COOLDOWN_MS);
+    assert_eq!(cb.snapshot().current_cooldown_ms, MAX_COOLDOWN_MS);
 }
 
 #[test]
@@ -88,5 +89,5 @@ fn open_transitions_to_half_open_after_cooldown_zero() {
         AttemptDecision::AllowTrial => {}
         other => panic!("expected AllowTrial after cooldown, got {other:?}"),
     }
-    assert_eq!(cb.snapshot().0, State::HalfOpen);
+    assert_eq!(cb.snapshot().state, "half_open");
 }
