@@ -946,6 +946,7 @@ pub(super) fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
         },
         "llm_cost": metrics.llm_cost_summary,
         "llm_cost_records": metrics.llm_cost_records,
+        "llm_cost_budget": metrics.llm_cost_budget,
     })
 }
 
@@ -1047,6 +1048,9 @@ pub(super) fn cost_budget_json(journal: &TaskJournal) -> Value {
     if verifier_attempt_count > 1 {
         signals.push("verifier_retry_observed");
     }
+    if let Some(cost_budget) = journal.task_metrics.llm_cost_budget.as_ref() {
+        signals.extend(cost_budget.signals.iter().map(String::as_str));
+    }
     json!({
         "schema_version": 1,
         "owner_layer": "agent_loop",
@@ -1080,6 +1084,7 @@ pub(super) fn cost_budget_json(journal: &TaskJournal) -> Value {
                 .llm_cost_summary
                 .as_ref()
                 .map(|summary| summary.estimated_cost_usd_nanos),
+            "llm_cost_budget": journal.task_metrics.llm_cost_budget,
         },
         "signals": signals,
     })

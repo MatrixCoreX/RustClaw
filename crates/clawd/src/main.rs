@@ -174,8 +174,8 @@ pub(crate) use runtime::{
     ChannelConfig, ClaimedTask, CommandIntentRuntime, CoreServices, LlmCallSequenceEntry,
     LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
     PolicyConfig, RateLimiter, ReloadContext, RuntimeChannel, ScheduleIntentOutput,
-    ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry,
-    TaskProviderBlocker, ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
+    ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskCostBlocker,
+    TaskMetricsRegistry, TaskProviderBlocker, ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -706,6 +706,7 @@ async fn main() -> anyhow::Result<()> {
             memory: memory_runtime,
             routing,
             self_extension: config.self_extension.clone(),
+            llm_cost_governance: config.llm.cost_governance.clone(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
                 config.limits.global_rpm,
                 config.limits.user_rpm,

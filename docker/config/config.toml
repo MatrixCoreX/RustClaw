@@ -45,6 +45,14 @@ selected_model = "MiniMax-M3"
 # 默认厂商标识 / Default selected vendor.
 selected_vendor = "minimax"
 
+[llm.cost_governance]
+enabled = true
+soft_task_usd = 0.50
+soft_user_24h_usd = 10.0
+soft_provider_24h_usd = 100.0
+hard_task_usd = 5.0
+checkpoint_retry_after_seconds = 3600
+
 # Optional machine-readable price catalog. Runtime records `unknown` when the
 # active provider/model has no matching entry or the provider omits usage.
 [[llm.pricing]]

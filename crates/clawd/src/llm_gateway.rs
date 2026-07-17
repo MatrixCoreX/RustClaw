@@ -10,6 +10,65 @@ use crate::providers::client::ProviderErrorKind;
 use crate::runtime::TaskProviderBlocker;
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
 
+const TASK_LLM_COST_POLICY_BLOCKED_ERR: &str = "llm_cost_policy_blocked";
+
+fn llm_cost_policy_allows(
+    state: &AppState,
+    task: &ClaimedTask,
+    provider: Option<&str>,
+    prompt_source: &str,
+) -> bool {
+    match state.evaluate_llm_cost_budget(task, provider) {
+        Ok(snapshot) => {
+            if snapshot.hard_exceeded {
+                warn!(
+                    "{} [LLM_CALL] stage=cost_policy_block task_id={} provider={} prompt_source={} status={} observed_cost_usd_nanos={} hard_limit_usd_nanos={}",
+                    crate::highlight_tag("llm"),
+                    task.task_id,
+                    provider.unwrap_or("provider_set"),
+                    prompt_source,
+                    snapshot.status,
+                    snapshot.task_known_cost_usd_nanos,
+                    snapshot.hard_task_limit_usd_nanos.unwrap_or(0),
+                );
+                false
+            } else {
+                true
+            }
+        }
+        Err(err) => {
+            warn!(
+                "{} [LLM_CALL] stage=cost_policy_observation_error task_id={} provider={} prompt_source={} error={}",
+                crate::highlight_tag("llm"),
+                task.task_id,
+                provider.unwrap_or("provider_set"),
+                prompt_source,
+                crate::truncate_for_log(&err),
+            );
+            true
+        }
+    }
+}
+
+fn record_llm_cost(
+    state: &AppState,
+    task: &ClaimedTask,
+    record: crate::providers::LlmCallCostRecord,
+    prompt_source: &str,
+) {
+    let provider = record.provider.clone();
+    if let Err(err) = state.note_task_llm_cost_record(task, record) {
+        warn!(
+            "{} [LLM_CALL] stage=cost_ledger_write_error task_id={} prompt_source={} error={}",
+            crate::highlight_tag("llm"),
+            task.task_id,
+            prompt_source,
+            crate::truncate_for_log(&err),
+        );
+    }
+    let _ = state.evaluate_llm_cost_budget(task, Some(&provider));
+}
+
 fn touch_llm_task_lease(state: &AppState, task_id: &str, prompt_label: &str, stage: &str) {
     match crate::repo::touch_running_task(state, task_id) {
         Ok(true) => {}
@@ -572,6 +631,11 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         return Err("No available LLM provider configured".to_string());
     }
     state.clear_task_provider_blocker(&task.task_id);
+    state.clear_task_cost_blocker(&task.task_id);
+    state.restore_task_llm_call_count_from_cost_ledger(&task.task_id);
+    if !llm_cost_policy_allows(state, task, None, prompt_source) {
+        return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
+    }
 
     // Phase 1.3: 预算检查 —— 在真正命中 provider 之前短路异常放大的任务。
     // 预算统计包括本次调用链里所有 `run_with_fallback_*` 入口累计的调用次数
@@ -676,6 +740,21 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 continue;
             }
         }
+        if !llm_cost_policy_allows(
+            state,
+            task,
+            Some(provider.config.name.as_str()),
+            prompt_source,
+        ) {
+            state.note_task_llm_elapsed_with_label(
+                &task.task_id,
+                prompt_label,
+                call_started_at.elapsed().as_millis() as u64,
+            );
+            stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
+            touch_llm_task_lease(state, &task.task_id, prompt_label, "cost_policy_wait");
+            return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
+        }
         any_provider_attempted = true;
         touch_llm_task_lease(state, &task.task_id, prompt_label, "provider_attempt_start");
 
@@ -746,8 +825,9 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     sanitized,
                     None,
                 );
-                state.note_task_llm_cost_record(
-                    &task.task_id,
+                record_llm_cost(
+                    state,
+                    task,
                     crate::providers::build_cost_record(
                         logical_call_index,
                         prompt_label,
@@ -758,6 +838,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                         output.usage.as_ref(),
                         provider.pricing.as_ref(),
                     ),
+                    prompt_source,
                 );
                 let _ = crate::insert_audit_log(
                     state,
@@ -863,8 +944,9 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     false,
                     Some(&err.message),
                 );
-                state.note_task_llm_cost_record(
-                    &task.task_id,
+                record_llm_cost(
+                    state,
+                    task,
                     crate::providers::build_cost_record(
                         logical_call_index,
                         prompt_label,
@@ -875,6 +957,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                         err.usage.as_ref(),
                         provider.pricing.as_ref(),
                     ),
+                    prompt_source,
                 );
                 let _ = crate::insert_audit_log(
                     state,

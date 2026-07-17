@@ -1,6 +1,7 @@
 use crate::providers::client::LlmUsageSnapshot;
 use crate::providers::LlmCallCostRecord;
 use crate::AppState;
+use crate::ClaimedTask;
 
 use super::TaskJournal;
 
@@ -32,12 +33,29 @@ fn known_record(call_index: u64) -> LlmCallCostRecord {
     }
 }
 
+fn task(task_id: &str) -> ClaimedTask {
+    ClaimedTask {
+        task_id: task_id.to_string(),
+        user_id: 7,
+        chat_id: 8,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    }
+}
+
 #[test]
 fn journal_projects_per_call_usage_and_task_cost_without_request_content() {
     let state = AppState::test_default_with_fixture_provider();
     let task_id = "task-cost-known";
+    let task = task(task_id);
     state.note_task_llm_call_with_label_and_prompt_size(task_id, "plan", 123);
-    state.note_task_llm_cost_record(task_id, known_record(1));
+    state
+        .note_task_llm_cost_record(&task, known_record(1))
+        .expect("persist cost record");
 
     let mut journal = TaskJournal::for_task(task_id, "ask", "opaque user input");
     journal.record_runtime_llm_metrics(&state, task_id);
@@ -70,16 +88,19 @@ fn journal_projects_per_call_usage_and_task_cost_without_request_content() {
 }
 
 #[test]
-fn journal_marks_unobserved_llm_call_cost_unknown_and_clear_removes_records() {
+fn journal_marks_unobserved_llm_call_cost_unknown_and_clear_keeps_durable_records() {
     let state = AppState::test_default_with_fixture_provider();
     let task_id = "task-cost-unknown";
+    let task = task(task_id);
     state.note_task_llm_call_with_label_and_prompt_size(task_id, "chat", 10);
     let summary = state.task_llm_cost_summary(task_id);
     assert_eq!(summary.status, "unknown");
     assert_eq!(summary.unknown_reasons, vec!["logical_call_not_observed"]);
 
-    state.note_task_llm_cost_record(task_id, known_record(1));
+    state
+        .note_task_llm_cost_record(&task, known_record(1))
+        .expect("persist cost record");
     assert_eq!(state.task_llm_cost_records(task_id).len(), 1);
     state.clear_task_llm_call_count(task_id);
-    assert!(state.task_llm_cost_records(task_id).is_empty());
+    assert_eq!(state.task_llm_cost_records(task_id).len(), 1);
 }

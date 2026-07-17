@@ -157,3 +157,24 @@ CREATE TABLE IF NOT EXISTS task_mutation_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_task_mutation_ledger_status_updated
     ON task_mutation_ledger(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS llm_cost_ledger (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id                  TEXT NOT NULL,
+    user_id                  INTEGER NOT NULL,
+    provider                 TEXT NOT NULL,
+    model                    TEXT NOT NULL,
+    logical_call_index       INTEGER NOT NULL,
+    prompt_label             TEXT NOT NULL,
+    provider_status          TEXT NOT NULL,
+    cost_status              TEXT NOT NULL,
+    estimated_cost_usd_nanos INTEGER,
+    record_json              TEXT NOT NULL,
+    created_at_ts            INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_cost_ledger_task_id
+    ON llm_cost_ledger(task_id, id);
+CREATE INDEX IF NOT EXISTS idx_llm_cost_ledger_user_created
+    ON llm_cost_ledger(user_id, created_at_ts);
+CREATE INDEX IF NOT EXISTS idx_llm_cost_ledger_provider_created
+    ON llm_cost_ledger(provider, created_at_ts);

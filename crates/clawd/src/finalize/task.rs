@@ -10,6 +10,8 @@ mod task_answer_verifier_failure;
 mod task_config_guard_recovery;
 #[path = "task_content_evidence_delivery.rs"]
 mod task_content_evidence_delivery;
+#[path = "task_cost_wait.rs"]
+mod task_cost_wait;
 #[path = "task_delivery_guards.rs"]
 mod task_delivery_guards;
 #[path = "task_deterministic_recovery.rs"]
@@ -51,6 +53,7 @@ use task_answer_verifier_failure::{
 };
 use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
 use task_content_evidence_delivery::backfill_file_delivery_contract_from_journal;
+use task_cost_wait::record_cost_wait_checkpoint;
 use task_delivery_guards::{
     delivery_path_gap_should_finalize_as_clarify, drop_execution_summaries_when_delivery_is_scalar,
     missing_file_delivery_reply_text, should_reinsert_execution_summaries_for_delivery,
@@ -1102,6 +1105,32 @@ pub(crate) async fn finalize_ask_result(
                     "task_call_end task_id={} kind=ask status=canceled path=normal",
                     task.task_id
                 );
+                return Ok(());
+            }
+            if let Some(cost_blocker) = state.task_cost_blocker(&task.task_id) {
+                let checkpoint_id =
+                    record_cost_wait_checkpoint(state, task, &mut journal, &cost_blocker);
+                journal.record_runtime_llm_metrics(state, &task.task_id);
+                journal.record_final_answer("");
+                crate::finalize::ensure_task_metrics(&mut journal, "", &[]);
+                finalize_ask_checkpointed(state, task, "", &[], &mut journal).await?;
+                let transition = crate::log_ask_transition(
+                    state,
+                    &task.task_id,
+                    Some(crate::AskState::Finalizing),
+                    crate::AskState::Completed,
+                    "finalize_cost_policy_wait_checkpoint",
+                    None,
+                );
+                journal.transitions.push(transition);
+                info!(
+                    "task_journal_summary task_id={} kind=ask phase=cost_policy_wait checkpoint_id={} policy_status_code={} {}",
+                    task.task_id,
+                    checkpoint_id,
+                    cost_blocker.status_code,
+                    journal.to_log_json()
+                );
+                state.clear_task_llm_call_count(&task.task_id);
                 return Ok(());
             }
             if let Some(provider_blocker) = state.task_provider_blocker(&task.task_id) {

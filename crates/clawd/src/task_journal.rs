@@ -587,6 +587,7 @@ pub(crate) struct TaskJournalTaskMetrics {
     /// Provider-call usage and cost records contain machine metadata only.
     pub(crate) llm_cost_records: Option<Vec<crate::providers::LlmCallCostRecord>>,
     pub(crate) llm_cost_summary: Option<crate::providers::LlmTaskCostSummary>,
+    pub(crate) llm_cost_budget: Option<crate::runtime::LlmCostBudgetSnapshot>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -815,6 +816,7 @@ impl TaskJournal {
         self.record_llm_call_sequence(state.task_llm_call_sequence(task_id));
         self.task_metrics.llm_cost_records = Some(state.task_llm_cost_records(task_id));
         self.task_metrics.llm_cost_summary = Some(state.task_llm_cost_summary(task_id));
+        self.task_metrics.llm_cost_budget = state.task_llm_cost_budget(task_id);
     }
 
     pub(crate) fn record_task_lifecycle(&mut self, lifecycle: Value) {

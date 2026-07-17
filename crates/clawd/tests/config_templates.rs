@@ -57,6 +57,10 @@ fn prompts_strict_validation(value: &toml::Value) -> bool {
         .expect("prompts.strict_validation_at_startup")
 }
 
+fn llm_cost_governance(value: &toml::Value) -> &toml::Value {
+    &value["llm"]["cost_governance"]
+}
+
 fn strict_json_overlay_prompt_files() -> BTreeSet<String> {
     let overlay_dir = workspace_root().join("prompts/layers/overlays");
     let markers = [
@@ -113,6 +117,35 @@ fn minimax_templates_allow_the_repo_default_model() {
         root_model,
         minimax_default_model(&docker_config),
         "root and docker minimax defaults should stay aligned",
+    );
+}
+
+#[test]
+fn llm_cost_governance_templates_are_enabled_aligned_and_bounded() {
+    let root = workspace_root();
+    let root_config = parse_toml(&root.join("configs/config.toml"));
+    let docker_config = parse_toml(&root.join("docker/config/config.toml"));
+    let root_governance = llm_cost_governance(&root_config);
+    let docker_governance = llm_cost_governance(&docker_config);
+
+    assert_eq!(
+        root_governance, docker_governance,
+        "root and docker LLM cost governance must stay aligned",
+    );
+    assert_eq!(
+        root_governance["enabled"].as_bool(),
+        Some(true),
+        "repository runtime template must enable cost governance",
+    );
+    let soft_task = root_governance["soft_task_usd"]
+        .as_float()
+        .expect("soft task cost");
+    let hard_task = root_governance["hard_task_usd"]
+        .as_float()
+        .expect("hard task cost");
+    assert!(
+        hard_task > soft_task,
+        "hard task ceiling must exceed the soft task threshold",
     );
 }
 
