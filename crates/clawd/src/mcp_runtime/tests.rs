@@ -14,7 +14,7 @@ use super::test_support::{fixture_config, started_fixture_runtime};
 use super::types::McpLifecycleState;
 
 #[tokio::test]
-async fn stdio_runtime_discovers_calls_bounds_and_stops() {
+async fn stdio_runtime_discovers_paginated_tools_calls_bounds_and_stops() {
     let runtime = McpRuntime::new(fixture_config());
     runtime.start().await;
 
@@ -28,6 +28,18 @@ async fn stdio_runtime_discovers_calls_bounds_and_stops() {
 
     let tools = runtime.tools();
     assert_eq!(tools.len(), 4);
+    assert_eq!(
+        tools
+            .iter()
+            .map(|tool| tool.capability.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "mcp.fixture.fail",
+            "mcp.fixture.large",
+            "mcp.fixture.lookup",
+            "mcp.fixture.slow",
+        ]
+    );
     let lookup = runtime
         .tool("mcp.fixture.lookup")
         .expect("lookup descriptor");
@@ -82,6 +94,80 @@ async fn stdio_runtime_discovers_calls_bounds_and_stops() {
         runtime.lifecycle_snapshots()[0].state,
         McpLifecycleState::Stopped
     );
+}
+
+#[tokio::test]
+async fn duplicate_namespaces_fail_closed_before_connecting() {
+    let mut config = fixture_config();
+    let mut second = config
+        .servers
+        .get("fixture")
+        .expect("fixture config")
+        .clone();
+    second.capability_prefix = Some("fixture".to_string());
+    config
+        .servers
+        .get_mut("fixture")
+        .expect("fixture config")
+        .capability_prefix = Some("fixture".to_string());
+    config.servers.insert("fixture_two".to_string(), second);
+    let runtime = McpRuntime::new(config);
+
+    runtime.start().await;
+
+    assert!(runtime.tools().is_empty());
+    let lifecycle = runtime.lifecycle_snapshots();
+    assert_eq!(lifecycle.len(), 2);
+    assert!(lifecycle.iter().all(|snapshot| {
+        snapshot.state == McpLifecycleState::Degraded
+            && snapshot.last_error_code.as_deref() == Some("mcp_capability_prefix_duplicate")
+    }));
+    runtime.stop().await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn duplicate_tool_failure_cleans_up_stdio_process() {
+    let pid_file =
+        std::env::temp_dir().join(format!("rustclaw-mcp-fixture-pid-{}", uuid::Uuid::new_v4()));
+    let mut config = fixture_config();
+    let fixture = config.servers.get_mut("fixture").expect("fixture config");
+    fixture
+        .env
+        .insert("MCP_FIXTURE_MODE".to_string(), "duplicate_tool".to_string());
+    fixture.env.insert(
+        "MCP_FIXTURE_PID_FILE".to_string(),
+        pid_file.to_string_lossy().into_owned(),
+    );
+    let runtime = McpRuntime::new(config);
+
+    runtime.start().await;
+
+    let lifecycle = runtime.lifecycle_snapshots();
+    assert_eq!(lifecycle[0].state, McpLifecycleState::Degraded);
+    assert_eq!(
+        lifecycle[0].last_error_code.as_deref(),
+        Some("mcp_tool_name_duplicate")
+    );
+    assert!(runtime.tools().is_empty());
+    let pid: u32 = std::fs::read_to_string(&pid_file)
+        .expect("fixture pid")
+        .parse()
+        .expect("numeric fixture pid");
+    let mut exited = false;
+    for _ in 0..50 {
+        if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            exited = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        exited,
+        "fixture process must exit after discovery rejection"
+    );
+    runtime.stop().await;
+    let _ = std::fs::remove_file(pid_file);
 }
 
 #[tokio::test]
@@ -247,6 +333,70 @@ async fn dynamic_mcp_capability_reaches_resolver_prompt_and_verifier_policy() {
         issue.kind == crate::verifier::VerifyIssueKind::MissingRequiredArg
             && issue.missing_fields == vec!["query"]
     }));
+    runtime.stop().await;
+}
+
+#[tokio::test]
+async fn mutating_mcp_tool_requires_shared_permission_confirmation() {
+    let mut config = fixture_config();
+    let fixture = config.servers.get_mut("fixture").expect("fixture config");
+    fixture.tool_policies.insert(
+        "lookup".to_string(),
+        claw_core::config::McpToolPolicyConfig {
+            effect: claw_core::config::McpToolEffectConfig::Mutate,
+            risk_level: claw_core::config::McpToolRiskConfig::High,
+            idempotent: false,
+            filesystem_write: true,
+            ..claw_core::config::McpToolPolicyConfig::default()
+        },
+    );
+    let runtime = Arc::new(McpRuntime::new(config));
+    runtime.start().await;
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.mcp_runtime = Arc::clone(&runtime);
+    let task = crate::ClaimedTask {
+        task_id: "mcp-confirm-task".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: Some("mcp-confirm-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "mcp.fixture.lookup",
+        json!({"query": "machine-token"}),
+    );
+
+    let verified = crate::verifier::verify_plan(
+        &state,
+        &task,
+        crate::verifier::VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        crate::verifier::VerifyMode::Enforce,
+    );
+
+    assert!(verified.approved);
+    assert!(verified.needs_confirmation);
+    assert_eq!(
+        verified.permission_decision["decision"],
+        "require_confirmation"
+    );
+    let permission = &verified.permission_decision["steps"][0];
+    assert_eq!(permission["decision"], "require_confirmation");
+    assert_eq!(permission["risk_level"], "high");
+    assert_eq!(permission["action_effect"]["mutates"], true);
+    assert_eq!(permission["action_effect"]["observes"], false);
+    assert_eq!(permission["registry_policy"]["filesystem_write"], true);
+    assert_eq!(permission["registry_policy"]["idempotent"], false);
     runtime.stop().await;
 }
 

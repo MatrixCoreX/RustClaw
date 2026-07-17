@@ -5,6 +5,12 @@ import sys
 import time
 
 
+pid_file = os.environ.get("MCP_FIXTURE_PID_FILE")
+if pid_file:
+    with open(pid_file, "w", encoding="utf-8") as fixture_pid_file:
+        fixture_pid_file.write(str(os.getpid()))
+
+
 def send(request_id, result):
     sys.stdout.write(
         json.dumps(
@@ -39,6 +45,13 @@ TOOLS = [
 ]
 
 
+def fixture_tools():
+    tools = list(TOOLS)
+    if os.environ.get("MCP_FIXTURE_MODE") == "duplicate_tool":
+        tools.append(tool("lookup", {"query": {"type": "string"}}, ["query"]))
+    return tools
+
+
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
@@ -58,11 +71,12 @@ for line in sys.stdin:
             },
         )
     elif method == "tools/list":
+        tools = fixture_tools()
         cursor = message.get("params", {}).get("cursor")
         if cursor is None:
-            send(request_id, {"tools": TOOLS[:2], "nextCursor": "page-2"})
+            send(request_id, {"tools": tools[:2], "nextCursor": "page-2"})
         else:
-            send(request_id, {"tools": TOOLS[2:]})
+            send(request_id, {"tools": tools[2:]})
             marker = os.environ.get("MCP_FIXTURE_EXIT_ONCE_MARKER")
             if marker and not os.path.exists(marker):
                 with open(marker, "w", encoding="utf-8") as marker_file:
