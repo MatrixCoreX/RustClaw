@@ -226,6 +226,8 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "registry skills have a generated layered prompt body",
         "REGISTRY_PARITY mode=all",
         "differences=0",
+        "MCP_RUNTIME_CONTRACT_SELF_TEST ok",
+        "MCP_RUNTIME_CONTRACT_CHECK findings=0",
     },
     "agent_parity_gate/agent_parity_gate_inventory_contracts.txt": {
         "AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok",

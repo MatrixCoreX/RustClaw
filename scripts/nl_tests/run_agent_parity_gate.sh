@@ -421,6 +421,8 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_long_files.py"
   python3 "${ROOT_DIR}/scripts/check_skill_prompts.py"
   python3 "${ROOT_DIR}/scripts/check_skill_registry_parity.py" --mode all --strict
+  python3 "${ROOT_DIR}/scripts/check_mcp_runtime_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_mcp_runtime_contracts.py"
 } > "${OUT_DIR}/maintainability_skill_contracts.txt"
 
 echo "AGENT_PARITY_GATE_STEP agent_parity_gate_inventory_contracts"
