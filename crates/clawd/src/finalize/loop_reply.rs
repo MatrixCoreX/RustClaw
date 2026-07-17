@@ -392,7 +392,7 @@ use synthesis_preference::{
 
 // Stage 3.1：build_loop_journal 已搬移到 `crate::finalize::build_from_loop_state`，
 // 行为零变化。本文件保留 thin alias 以最小化 diff。
-use crate::finalize::build_from_loop_state as build_loop_journal;
+use crate::finalize::build_terminal_from_loop_state as build_loop_journal;
 
 fn priority_last_respond_for_final_delivery<'a>(
     loop_state: &'a LoopState,
@@ -467,15 +467,17 @@ pub(crate) async fn finalize_loop_reply(
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&user_error, &delivery_messages);
         let journal = build_loop_journal(
+            state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             None,
             delivery_consistent,
             &user_error,
             crate::task_journal::TaskJournalFinalStatus::ResumeFailure,
-        );
+        )
+        .await;
         return Ok(AskReply::non_llm(user_error.clone())
             .with_messages(delivery_messages)
             .with_task_journal(journal)
@@ -496,15 +498,17 @@ pub(crate) async fn finalize_loop_reply(
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
         let journal = build_loop_journal(
+            state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             None,
             delivery_consistent,
             &message,
             crate::task_journal::TaskJournalFinalStatus::Failure,
-        );
+        )
+        .await;
         return Ok(AskReply::non_llm(message.clone())
             .with_messages(delivery_messages)
             .with_task_journal(journal)
@@ -543,7 +547,7 @@ pub(crate) async fn finalize_loop_reply(
             state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             finalizer_summary.clone(),
         )
@@ -715,7 +719,7 @@ pub(crate) async fn finalize_loop_reply(
             state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             finalizer_summary.clone(),
         )
@@ -1275,7 +1279,7 @@ pub(crate) async fn finalize_loop_reply(
             state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             finalizer_summary.clone(),
         )
@@ -1324,15 +1328,17 @@ pub(crate) async fn finalize_loop_reply(
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&clarify, &delivery_messages);
         let journal = build_loop_journal(
+            state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             finalizer_summary,
             delivery_consistent,
             &clarify,
             crate::task_journal::TaskJournalFinalStatus::Clarify,
-        );
+        )
+        .await;
         return Ok(AskReply::non_llm(clarify.clone())
             .with_messages(delivery_messages)
             .with_task_journal(journal));
@@ -1372,7 +1378,7 @@ pub(crate) async fn finalize_loop_reply(
             state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             finalizer_summary.clone(),
         )
@@ -1419,15 +1425,17 @@ pub(crate) async fn finalize_loop_reply(
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&clarify, &delivery_messages);
         let journal = build_loop_journal(
+            state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             finalizer_summary,
             delivery_consistent,
             &clarify,
             crate::task_journal::TaskJournalFinalStatus::Clarify,
-        );
+        )
+        .await;
         return Ok(AskReply::non_llm(clarify.clone())
             .with_messages(delivery_messages)
             .with_task_journal(journal));
@@ -1491,15 +1499,17 @@ pub(crate) async fn finalize_loop_reply(
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
         let journal = build_loop_journal(
+            state,
             task,
             user_text,
-            &loop_state,
+            &mut loop_state,
             agent_run_context,
             finalizer_summary,
             delivery_consistent,
             &message,
             crate::task_journal::TaskJournalFinalStatus::Failure,
-        );
+        )
+        .await;
         return Ok(AskReply::non_llm(message.clone())
             .with_messages(delivery_messages)
             .with_task_journal(journal)
@@ -1776,20 +1786,23 @@ pub(crate) async fn finalize_loop_reply(
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&final_text, &delivery_deduped);
 
+    let final_status = successful_delivery_final_status(
+        &loop_state,
+        finalizer_summary.as_ref(),
+        &delivery_deduped,
+    );
     let mut journal = build_loop_journal(
+        state,
         task,
         user_text,
-        &loop_state,
+        &mut loop_state,
         agent_run_context,
         finalizer_summary.clone(),
         delivery_consistent,
         &final_text,
-        successful_delivery_final_status(
-            &loop_state,
-            finalizer_summary.as_ref(),
-            &delivery_deduped,
-        ),
-    );
+        final_status,
+    )
+    .await;
     if let Some(route_result) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
         let defer_to_post_write_readback =
             crate::answer_verifier::post_write_content_evidence_missing_before_verifier(

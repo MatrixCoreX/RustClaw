@@ -23,7 +23,9 @@ mod task;
 
 // === JOURNAL BUILDER（Stage 3.1）===
 // finalize 子层共享的 journal 构建入口（行为零变化，仅抽离物理位置）。
-pub(crate) use journal::{build_from_loop_state, ensure_task_metrics};
+pub(crate) use journal::{
+    build_from_loop_state, build_terminal_from_loop_state, ensure_task_metrics,
+};
 
 // === HELPER 层（已物理位于 finalize/helpers.rs，Stage 2.1）===
 // 纯函数工具（planner artifact / delivery token 分类 / FinalizerDisposition 等）

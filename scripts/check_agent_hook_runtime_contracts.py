@@ -43,6 +43,7 @@ REQUIRED_FILE_TOKENS = {
         "hook_handler_blocking_stage_invalid",
         "lifecycle_hook_event",
         "lifecycle_metadata_key_allowed",
+        "sanitize_lifecycle_metadata_value",
         '"argument_fields"',
         '"argument_byte_count"',
         '"handler_id"',
@@ -127,6 +128,26 @@ REQUIRED_FILE_TOKENS = {
         "lifecycle_stage_outcome_for_state",
         'machine_observations("subagent")',
     ),
+    "crates/clawd/src/agent_engine.rs": (
+        "agent_loop.verifier_permission_request",
+        "HookStage::PermissionRequest",
+        "confirmation_can_proceed",
+        '"agent_hook_events"',
+        '"permission_hook_decision"',
+    ),
+    "crates/clawd/src/finalize/journal.rs": (
+        "build_terminal_from_loop_state",
+        "HookStage::Stop",
+        "HookStage::SessionEnd",
+        "lifecycle_stage_outcome_for_state",
+    ),
+    "crates/clawd/src/finalize/loop_reply.rs": (
+        "build_terminal_from_loop_state as build_loop_journal",
+        ".await",
+    ),
+    "crates/clawd/src/finalize/journal_tests.rs": (
+        "terminal_builder_executes_stop_and_session_end_at_real_owner",
+    ),
     "configs/agent_guard.toml": (
         "[[agent.hooks.handlers]]",
         'kind = "command"',
@@ -157,6 +178,7 @@ REQUIRED_FILE_TOKENS = {
         "trusted_command_hook_blocks_through_production_pre_tool_path",
         "configured_post_tool_hook_runs_through_production_owner",
         "configured_permission_hook_can_deny_at_production_owner",
+        "verifier_confirmation_runs_permission_hook_before_approval_creation",
         'handler["trust_status"]',
         'handler["content_sha256"]',
     ),
@@ -229,6 +251,12 @@ def evaluate(root: Path) -> list[str]:
     )
     if stage_match is None or stage_match.group(1).count("Self::") != 11:
         findings.append("hook_stage_count_not_eleven")
+    journal = texts.get("crates/clawd/src/finalize/journal.rs", "")
+    for legacy_terminal_constructor in ("stop_outcome(", "session_end_outcome("):
+        if legacy_terminal_constructor in journal:
+            findings.append(
+                f"synthetic_terminal_hook_in_journal:{legacy_terminal_constructor}"
+            )
     return findings
 
 

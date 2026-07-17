@@ -916,6 +916,43 @@ pub(crate) async fn build_confirmation_required_resume_context(
         .iter()
         .filter_map(crate::PlanStep::to_agent_action)
         .collect::<Vec<_>>();
+    let permission_evaluation = crate::agent_hooks::lifecycle_stage_outcome_for_state(
+        state,
+        &task.task_id,
+        crate::agent_hooks::HookStage::PermissionRequest,
+        "agent_loop.verifier_permission_request",
+        json!({
+            "request_source": "plan_verifier",
+            "remaining_step_count": remaining_steps_count,
+            "completed_step_count": subtask_results.len(),
+            "delivery_message_count": delivery_messages.len(),
+            "confirmation_step_count": confirmation_step_ids.len(),
+        }),
+    )
+    .await;
+    let permission_decision = permission_evaluation
+        .outcome
+        .decision_kind()
+        .unwrap_or(crate::policy_decision::PolicyDecision::Deny);
+    let confirmation_can_proceed = matches!(
+        permission_decision,
+        crate::policy_decision::PolicyDecision::Allow
+            | crate::policy_decision::PolicyDecision::RequireConfirmation
+    );
+    let required_decision = if confirmation_can_proceed {
+        crate::policy_decision::PolicyDecision::RequireConfirmation
+    } else {
+        permission_decision
+    };
+    let message_key = match required_decision {
+        crate::policy_decision::PolicyDecision::Deny => {
+            "clawd.agent_hook.permission_request_blocked"
+        }
+        crate::policy_decision::PolicyDecision::BackgroundWait => {
+            "clawd.agent_hook.permission_request_background_wait"
+        }
+        _ => "clawd.approval.explicit_confirmation_required",
+    };
     let mut resume_context = json!({
         "resume_context_id": format!("ctx-{}", uuid::Uuid::new_v4()),
         "user_request": user_request,
@@ -930,30 +967,45 @@ pub(crate) async fn build_confirmation_required_resume_context(
         },
         "remaining_steps": remaining_steps,
         "remaining_actions": remaining_actions,
-        "message_key": "clawd.approval.explicit_confirmation_required",
-        "required_decision": crate::policy_decision::PolicyDecision::RequireConfirmation.as_token(),
+        "message_key": message_key,
+        "required_decision": required_decision.as_token(),
+        "permission_hook_decision": permission_decision.as_token(),
+        "agent_hook_events": permission_evaluation.machine_observations("plan_verifier"),
     });
-    if let Some(binding) =
-        crate::approval_grant::binding_for_confirmation_steps(state, steps, confirmation_step_ids)
-    {
-        resume_context["approval_request"] = crate::approval_grant::pending_approval_request_json(
-            &task.task_id,
-            &binding,
-            crate::now_ts_u64() as i64,
-        );
+    if confirmation_can_proceed {
+        if let Some(binding) = crate::approval_grant::binding_for_confirmation_steps(
+            state,
+            steps,
+            confirmation_step_ids,
+        ) {
+            resume_context["approval_request"] =
+                crate::approval_grant::pending_approval_request_json(
+                    &task.task_id,
+                    &binding,
+                    crate::now_ts_u64() as i64,
+                );
+        }
     }
     let language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
+    let response_contract_kind = match required_decision {
+        crate::policy_decision::PolicyDecision::Deny => "resume_permission_request_denied",
+        crate::policy_decision::PolicyDecision::BackgroundWait => {
+            "resume_permission_request_background_wait"
+        }
+        _ => "resume_confirmation_required",
+    };
     let contract = crate::fallback::UserResponseContract::verifier_gate(
-        "resume_confirmation_required",
+        response_contract_kind,
         user_request,
         goal,
-        vec!["explicit_user_confirmation".to_string()],
+        vec![json!({"required_decision": required_decision.as_token()}).to_string()],
         vec![
-            "verification_issue_kind: ConfirmationRequired".to_string(),
-            format!("remaining_steps_count: {remaining_steps_count}"),
-            "needs_confirmation: true".to_string(),
-            format!("confirmation_detail_present: {}", !detail.trim().is_empty()),
+            json!({"verification_issue_kind": "confirmation_required"}).to_string(),
+            json!({"remaining_steps_count": remaining_steps_count}).to_string(),
+            json!({"needs_confirmation": confirmation_can_proceed}).to_string(),
+            json!({"permission_hook_decision": permission_decision.as_token()}).to_string(),
+            json!({"confirmation_detail_present": !detail.trim().is_empty()}).to_string(),
         ],
         "brief_failure_with_continue_option",
         &language_hint,

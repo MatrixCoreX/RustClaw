@@ -18,7 +18,7 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::task_journal::{
     delivery_payload_consistent, TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerSummary,
 };
-use crate::ClaimedTask;
+use crate::{AppState, ClaimedTask};
 use std::borrow::Cow;
 
 const FINALIZER_RECOVERED_TERMINAL_STOP_SIGNAL: &str = "finalizer_recovered_terminal_answer";
@@ -81,19 +81,6 @@ fn effective_final_stop_signal<'a>(
     Some(Cow::Borrowed(signal))
 }
 
-fn record_stop_signal_observation_fields(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    loop_stop_signal: Option<&str>,
-    final_stop_signal: Option<&str>,
-) {
-    if let Some(signal) = loop_stop_signal {
-        obj.insert("loop_stop_signal".to_string(), serde_json::json!(signal));
-    }
-    if let Some(signal) = final_stop_signal {
-        obj.insert("final_stop_signal".to_string(), serde_json::json!(signal));
-    }
-}
-
 fn strict_json_projection_observation(loop_state: &LoopState) -> Option<serde_json::Value> {
     if loop_state
         .output_vars
@@ -123,6 +110,60 @@ fn strict_json_projection_observation(loop_state: &LoopState) -> Option<serde_js
         "publishable": true,
         "output": output,
     }))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn build_terminal_from_loop_state(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: Option<TaskJournalFinalizerSummary>,
+    delivery_consistent: bool,
+    final_text: &str,
+    final_status: TaskJournalFinalStatus,
+) -> TaskJournal {
+    let effective_stop_signal = effective_final_stop_signal(
+        loop_state.last_stop_signal.as_deref(),
+        final_status,
+        finalizer_summary.as_ref(),
+    )
+    .map(Cow::into_owned);
+    let metadata = serde_json::json!({
+        "final_status": final_status.as_str(),
+        "loop_stop_signal": loop_state.last_stop_signal.as_deref(),
+        "final_stop_signal": effective_stop_signal,
+    });
+    for (stage, action_ref) in [
+        (crate::agent_hooks::HookStage::Stop, "agent_loop.stop"),
+        (
+            crate::agent_hooks::HookStage::SessionEnd,
+            "agent_loop.session_end",
+        ),
+    ] {
+        let evaluation = crate::agent_hooks::lifecycle_stage_outcome_for_state(
+            state,
+            &task.task_id,
+            stage,
+            action_ref,
+            metadata.clone(),
+        )
+        .await;
+        loop_state
+            .task_observations
+            .extend(evaluation.machine_observations("agent_loop"));
+    }
+    build_from_loop_state(
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        finalizer_summary,
+        delivery_consistent,
+        final_text,
+        final_status,
+    )
 }
 
 /// LOOP 层一次性构建 journal（替代原 `loop_reply::build_loop_journal`）。
@@ -174,29 +215,6 @@ pub(crate) fn build_from_loop_state(
     if let Some(observation) = strict_json_projection_observation(loop_state) {
         journal.push_task_observation(observation);
     }
-    let mut stop_observation =
-        crate::agent_hooks::stop_outcome(final_status.as_str()).to_machine_json("agent_loop");
-    if let Some(obj) = stop_observation.as_object_mut() {
-        obj.insert(
-            "final_status".to_string(),
-            serde_json::json!(final_status.as_str()),
-        );
-        record_stop_signal_observation_fields(
-            obj,
-            loop_state.last_stop_signal.as_deref(),
-            effective_stop_signal.as_deref(),
-        );
-    }
-    journal.push_task_observation(stop_observation);
-    let mut session_end = crate::agent_hooks::session_end_outcome(final_status.as_str())
-        .to_machine_json("agent_loop");
-    if let Some(obj) = session_end.as_object_mut() {
-        obj.insert(
-            "final_status".to_string(),
-            serde_json::json!(final_status.as_str()),
-        );
-    }
-    journal.push_task_observation(session_end);
     if let Some(summary) = finalizer_summary {
         journal.record_finalizer_summary(summary);
     } else {

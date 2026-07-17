@@ -253,6 +253,8 @@ fn lifecycle_event_drops_semantic_and_secret_metadata_fields() {
             "final_answer": "must-not-appear",
             "api_key": "must-not-appear",
             "access_token": "must-not-appear",
+            "status": "human sentence must not appear",
+            "nested": {"safe_key": "also not machine prose"},
             "非机器字段": "must-not-appear"
         }),
     );
@@ -260,6 +262,8 @@ fn lifecycle_event_drops_semantic_and_secret_metadata_fields() {
 
     assert_eq!(event["metadata"]["task_kind"], "ask");
     assert!(!raw.contains("must-not-appear"));
+    assert!(!raw.contains("human sentence"));
+    assert!(!raw.contains("machine prose"));
     assert!(event["metadata"]
         .as_object()
         .is_some_and(|value| value.len() == 1));

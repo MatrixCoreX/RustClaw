@@ -770,6 +770,20 @@ pub(super) async fn finalize_run_skill_confirmation_required(
             &confirmation_step_ids,
         )
         .await;
+    let required_decision = resume_context
+        .get("required_decision")
+        .and_then(Value::as_str)
+        .and_then(crate::policy_decision::PolicyDecision::parse_token)
+        .unwrap_or(crate::policy_decision::PolicyDecision::Deny);
+    let (failure_reason, audit_status) = match required_decision {
+        crate::policy_decision::PolicyDecision::BackgroundWait => {
+            ("hook_background_wait", "background_wait")
+        }
+        crate::policy_decision::PolicyDecision::Deny => {
+            ("hook_permission_denied", "permission_denied")
+        }
+        _ => ("explicit_approval_required", "approval_required"),
+    };
     let mut journal = crate::task_journal::TaskJournal::for_task(
         &task.task_id,
         "run_skill",
@@ -786,7 +800,7 @@ pub(super) async fn finalize_run_skill_confirmation_required(
     ));
     journal.record_final_answer(&user_error);
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
-    journal.record_final_failure_attribution_from_error("permission_denied");
+    journal.record_final_failure_attribution_from_error(failure_reason);
     let notify_outcome =
         super::maybe_notify_schedule_result(state, task, payload, false, &user_error).await;
     super::record_schedule_notify_outcome(&mut journal, notify_outcome);
@@ -798,7 +812,7 @@ pub(super) async fn finalize_run_skill_confirmation_required(
         state,
         &task.task_id,
         &result.to_string(),
-        "explicit_approval_required",
+        failure_reason,
     )?;
     let _ = repo::insert_audit_log(
         state,
@@ -809,7 +823,7 @@ pub(super) async fn finalize_run_skill_confirmation_required(
                 "task_id": task.task_id,
                 "chat_id": task.chat_id,
                 "skill_name": skill_name,
-                "status": "approval_required",
+                "status": audit_status,
             })
             .to_string(),
         ),
