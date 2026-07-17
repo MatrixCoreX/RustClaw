@@ -974,6 +974,15 @@ pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata 
                     .to_string(),
         };
     }
+    if error_kind == "child_task_policy_violation" {
+        return PreflightFailureMetadata {
+            reason: "child_task_policy_violation",
+            error_kind,
+            retry_instruction:
+                "child_task_policy=use_declared_capability_and_permission_profile;retry_same_policy=false"
+                    .to_string(),
+        };
+    }
     if structured
         .as_ref()
         .and_then(|value| structured_error_extra_string(value, "reason"))
