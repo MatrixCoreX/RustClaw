@@ -32,10 +32,6 @@ fn verifier_contract_markers_require_planner_semantic_contract() {
     assert!(route_contract_marker_is_scalar_path_only(&route));
 }
 
-fn backend_identity_guard_route() -> crate::answer_verifier::AnswerContract {
-    route_with_mode()
-}
-
 #[test]
 fn direct_answer_route_skips_answer_verifier() {
     let route = route_with_mode();
@@ -164,8 +160,8 @@ fn grounded_machine_kv_projection_skips_answer_verifier() {
 }
 
 #[test]
-fn unclassified_chat_does_not_require_model_answer_verifier() {
-    let mut route = backend_identity_guard_route();
+fn unclassified_chat_with_backend_reference_does_not_require_model_answer_verifier() {
+    let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -177,7 +173,7 @@ fn unclassified_chat_does_not_require_model_answer_verifier() {
     assert!(!should_verify_answer(
         &route,
         &journal,
-        "candidate response"
+        "decision: decision:minimax_primary"
     ));
 }
 
