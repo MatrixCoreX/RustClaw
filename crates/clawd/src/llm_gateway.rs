@@ -6,6 +6,8 @@ use tokio::sync::{oneshot, Semaphore};
 use tracing::{info, warn};
 
 use crate::providers::build_llm_http_client;
+use crate::providers::client::ProviderErrorKind;
+use crate::runtime::TaskProviderBlocker;
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
 
 fn touch_llm_task_lease(state: &AppState, task_id: &str, prompt_label: &str, stage: &str) {
@@ -562,6 +564,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     if providers.is_empty() {
         return Err("No available LLM provider configured".to_string());
     }
+    state.clear_task_provider_blocker(&task.task_id);
 
     // Phase 1.3: 预算检查 —— 在真正命中 provider 之前短路异常放大的任务。
     // 预算统计包括本次调用链里所有 `run_with_fallback_*` 入口累计的调用次数
@@ -594,7 +597,8 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
 
     let mut last_error = "unknown llm error".to_string();
     let mut any_provider_attempted = false;
-    let mut skipped_providers: Vec<String> = Vec::new();
+    let mut skipped_providers: Vec<(String, u64)> = Vec::new();
+    let mut recoverable_provider_blocker: Option<TaskProviderBlocker> = None;
 
     for provider in &providers {
         let vendor = crate::llm_vendor_name(provider);
@@ -626,7 +630,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     prompt_source,
                     remaining_ms
                 );
-                skipped_providers.push(format!("{provider_name}(cooldown_ms={remaining_ms})"));
+                skipped_providers.push((provider_name, remaining_ms));
                 continue;
             }
         }
@@ -724,6 +728,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     call_started_at.elapsed().as_millis() as u64,
                 );
                 provider.breaker.note_success();
+                state.clear_task_provider_blocker(&task.task_id);
                 stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
                 touch_llm_task_lease(state, &task.task_id, prompt_label, "call_success");
                 return Ok(cleaned_text);
@@ -731,6 +736,20 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
             Err(err) => {
                 touch_llm_task_lease(state, &task.task_id, prompt_label, "provider_error");
                 let error_kind = err.observability_kind();
+                if let Some(retry_after_seconds) = err.background_wait_seconds() {
+                    let message_key = match err.kind {
+                        ProviderErrorKind::QuotaExhausted => "provider.quota_exhausted",
+                        ProviderErrorKind::RateLimited => "provider.rate_limited",
+                        _ => "provider.temporarily_unavailable",
+                    };
+                    recoverable_provider_blocker = Some(TaskProviderBlocker {
+                        provider: provider.config.name.clone(),
+                        status_code: error_kind.to_string(),
+                        retry_after_seconds,
+                        external_provider_blocked: true,
+                        message_key: message_key.to_string(),
+                    });
+                }
                 state.note_task_provider_attempts_with_label(
                     &task.task_id,
                     prompt_label,
@@ -812,7 +831,27 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         // 全员被 breaker 拦下，所有 provider 当前都在 cooldown。
         // 这种情况要给一个**明确的可识别错误**，让上游日志/指标里能看见
         // "短时间集中失败"信号，而不是含糊的 "unknown llm error"。
-        let detail = skipped_providers.join(", ");
+        let retry_after_seconds = skipped_providers
+            .iter()
+            .map(|(_, remaining_ms)| remaining_ms.saturating_add(999) / 1_000)
+            .min()
+            .unwrap_or(1)
+            .max(1);
+        state.note_task_provider_blocker(
+            &task.task_id,
+            TaskProviderBlocker {
+                provider: "provider_set".to_string(),
+                status_code: "provider_circuit_open".to_string(),
+                retry_after_seconds,
+                external_provider_blocked: true,
+                message_key: "provider.temporarily_unavailable".to_string(),
+            },
+        );
+        let detail = skipped_providers
+            .iter()
+            .map(|(provider, remaining_ms)| format!("{provider}(cooldown_ms={remaining_ms})"))
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(format!(
             "all llm providers in circuit-breaker cooldown: {detail}"
         ));
@@ -820,10 +859,15 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     if !skipped_providers.is_empty() {
         // 至少有一个 provider 真的被打了（且全失败），但同时也跳过了若干在
         // cooldown 里的 provider。把跳过列表追加到 last_error 便于排障。
-        last_error = format!(
-            "{last_error}; skipped_in_cooldown=[{}]",
-            skipped_providers.join(", ")
-        );
+        let skipped_detail = skipped_providers
+            .iter()
+            .map(|(provider, remaining_ms)| format!("{provider}(cooldown_ms={remaining_ms})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        last_error = format!("{last_error}; skipped_in_cooldown=[{}]", skipped_detail);
+    }
+    if let Some(blocker) = recoverable_provider_blocker {
+        state.note_task_provider_blocker(&task.task_id, blocker);
     }
     Err(last_error)
 }

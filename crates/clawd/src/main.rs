@@ -173,7 +173,7 @@ pub(crate) use runtime::{
     LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
     PolicyConfig, RateLimiter, ReloadContext, RuntimeChannel, ScheduleIntentOutput,
     ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry,
-    ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
+    TaskProviderBlocker, ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};

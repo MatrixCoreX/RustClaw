@@ -14,7 +14,7 @@ pub(crate) use provider_runtime::{AgentRuntimeConfig, LlmProviderRuntime};
 pub(crate) use state::{
     build_skill_views, reload_skill_views, AppState, AskStateRegistry, ChannelConfig, ClaimedTask,
     CoreServices, LlmCallSequenceEntry, LlmPromptBucket, PolicyConfig, ReloadContext, SkillRuntime,
-    SkillViewsSnapshot, TaskMetricsRegistry, WorkerConfig,
+    SkillViewsSnapshot, TaskMetricsRegistry, TaskProviderBlocker, WorkerConfig,
 };
 pub(crate) use types::{
     AgentAction, AskReply, CommandIntentRuntime, LocalInteractionContext, MemoryConfigFileWrapper,

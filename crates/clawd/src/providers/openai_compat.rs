@@ -10,7 +10,9 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tracing::warn;
 
-use super::client::{is_quota_exhausted_429, ChatRequestHints, LlmProviderResponse, ProviderError};
+use super::client::{
+    is_quota_exhausted_response, ChatRequestHints, LlmProviderResponse, ProviderError,
+};
 use super::openai_usage_snapshot;
 use crate::LlmProviderRuntime;
 
@@ -73,7 +75,7 @@ pub(super) async fn call_openai_compat(
         .await
         .map_err(|err| {
             if err.is_timeout() {
-                ProviderError::retryable(format!("timeout: {err}"), req_body.clone())
+                ProviderError::timeout(format!("timeout: {err}"), req_body.clone())
             } else {
                 ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
             }
@@ -85,7 +87,7 @@ pub(super) async fn call_openai_compat(
     })?;
 
     if status.as_u16() == 429 {
-        let err = if is_quota_exhausted_429(&body_text) {
+        let err = if is_quota_exhausted_response(&body_text) {
             ProviderError::quota_exhausted_with_response(
                 format!("http {}: {}", status.as_u16(), body_text),
                 req_body.clone(),

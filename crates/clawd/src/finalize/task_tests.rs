@@ -11,7 +11,7 @@ use super::{
     deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
     deterministic_raw_tail_read_failure_recovery, deterministic_tree_summary_rows_failure_recovery,
     drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
-    finalize_ask_checkpointed, journal_has_checkpointed_nonterminal_lifecycle,
+    finalize_ask_checkpointed, finalize_ask_result, journal_has_checkpointed_nonterminal_lifecycle,
     journal_has_missing_file_search_evidence, machine_payload_observed_facts,
     non_failure_final_status, normalize_existing_file_delivery_token_answer,
     planner_output_contract_for_finalization, promote_verified_terminal_answer_after_verifier_pass,

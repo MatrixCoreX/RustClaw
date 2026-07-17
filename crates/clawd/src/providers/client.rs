@@ -73,6 +73,7 @@ pub(crate) struct LlmProviderResponse {
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderError {
     pub(crate) retryable: bool,
+    pub(crate) kind: ProviderErrorKind,
     pub(crate) message: String,
     pub(crate) request_payload: Value,
     pub(crate) raw_response: Option<String>,
@@ -93,6 +94,40 @@ pub(crate) enum BreakerImpact {
     Neutral,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProviderErrorKind {
+    Timeout,
+    TransportRetryable,
+    ProviderRetryableResponse,
+    RateLimited,
+    QuotaExhausted,
+    ProviderNonRetryableBusiness,
+    LocalNonRetryable,
+}
+
+impl ProviderErrorKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::TransportRetryable => "transport_retryable",
+            Self::ProviderRetryableResponse => "provider_retryable_response",
+            Self::RateLimited => "rate_limited",
+            Self::QuotaExhausted => "quota_exhausted",
+            Self::ProviderNonRetryableBusiness => "provider_non_retryable_business",
+            Self::LocalNonRetryable => "local_non_retryable",
+        }
+    }
+
+    pub(crate) fn background_wait_seconds(self) -> Option<u64> {
+        match self {
+            Self::QuotaExhausted => Some(3 * 60 * 60),
+            Self::RateLimited => Some(60),
+            Self::Timeout | Self::TransportRetryable | Self::ProviderRetryableResponse => Some(30),
+            Self::ProviderNonRetryableBusiness | Self::LocalNonRetryable => None,
+        }
+    }
+}
+
 impl std::fmt::Display for ProviderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
@@ -101,12 +136,31 @@ impl std::fmt::Display for ProviderError {
 
 impl ProviderError {
     pub(crate) fn is_rate_limited(&self) -> bool {
-        self.observability_kind() == "rate_limited"
+        self.kind == ProviderErrorKind::RateLimited
+    }
+
+    pub(crate) fn background_wait_seconds(&self) -> Option<u64> {
+        self.kind.background_wait_seconds()
+    }
+
+    pub(super) fn timeout(message: String, request_payload: Value) -> Self {
+        Self {
+            retryable: true,
+            kind: ProviderErrorKind::Timeout,
+            message,
+            request_payload,
+            raw_response: None,
+            usage: None,
+            attempts: 1,
+            retryable_error_count: 0,
+            breaker_impact: BreakerImpact::Failure,
+        }
     }
 
     pub(super) fn retryable(message: String, request_payload: Value) -> Self {
         Self {
             retryable: true,
+            kind: ProviderErrorKind::TransportRetryable,
             message,
             request_payload,
             raw_response: None,
@@ -125,6 +179,7 @@ impl ProviderError {
     ) -> Self {
         Self {
             retryable: true,
+            kind: ProviderErrorKind::ProviderRetryableResponse,
             message,
             request_payload,
             raw_response: Some(raw_response),
@@ -138,6 +193,7 @@ impl ProviderError {
     pub(super) fn non_retryable(message: String, request_payload: Value) -> Self {
         Self {
             retryable: false,
+            kind: ProviderErrorKind::LocalNonRetryable,
             message,
             request_payload,
             raw_response: None,
@@ -156,6 +212,7 @@ impl ProviderError {
     ) -> Self {
         Self {
             retryable: false,
+            kind: ProviderErrorKind::ProviderNonRetryableBusiness,
             message,
             request_payload,
             raw_response: Some(raw_response),
@@ -174,6 +231,7 @@ impl ProviderError {
     ) -> Self {
         Self {
             retryable: true,
+            kind: ProviderErrorKind::RateLimited,
             message,
             request_payload,
             raw_response: Some(raw_response),
@@ -192,6 +250,7 @@ impl ProviderError {
     ) -> Self {
         Self {
             retryable: false,
+            kind: ProviderErrorKind::QuotaExhausted,
             message,
             request_payload,
             raw_response: Some(raw_response),
@@ -221,32 +280,7 @@ impl ProviderError {
     }
 
     pub(crate) fn observability_kind(&self) -> &'static str {
-        let lower = self.message.to_ascii_lowercase();
-        if lower.contains("timeout") || lower.contains("timed out") {
-            return "timeout";
-        }
-        if is_quota_exhausted_429(&self.message) {
-            return "quota_exhausted";
-        }
-        if lower.contains("rate_limit")
-            || lower.contains("rate limit")
-            || lower.contains("429")
-            || lower.contains("too many requests")
-        {
-            return "rate_limited";
-        }
-        match (
-            self.breaker_impact,
-            self.raw_response.is_some(),
-            self.retryable,
-        ) {
-            (BreakerImpact::Failure, false, true) => "transport_retryable",
-            (BreakerImpact::Failure, true, true) => "provider_retryable_response",
-            (BreakerImpact::Healthy, true, true) => "provider_retryable_business",
-            (BreakerImpact::Healthy, true, false) => "provider_non_retryable_business",
-            (BreakerImpact::Neutral, false, false) => "local_non_retryable",
-            _ => "provider_error",
-        }
+        self.kind.as_str()
     }
 }
 
@@ -264,21 +298,32 @@ impl LlmProviderResponse {
     }
 }
 
-pub(crate) fn is_quota_exhausted_429(body_text: &str) -> bool {
-    let lower = body_text.to_ascii_lowercase();
-    [
-        "usage limit exceeded",
-        "quota exceeded",
-        "exceeded your current quota",
+pub(crate) fn is_quota_exhausted_response(body_text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(body_text) else {
+        return false;
+    };
+    const QUOTA_CODES: &[&str] = &[
+        "account_quota_exhausted",
+        "billing_hard_limit_reached",
+        "credit_balance_exhausted",
         "insufficient_quota",
-        "insufficient quota",
-        "credit balance",
-        "billing hard limit",
-        "out of credits",
-        "recharge",
+        "quota_exceeded",
+        "quota_exhausted",
+        "usage_limit_exceeded",
+    ];
+    [
+        "/error/code",
+        "/error/type",
+        "/code",
+        "/type",
+        "/status_code",
+        "/base_resp/status_code",
     ]
     .iter()
-    .any(|needle| lower.contains(needle))
+    .filter_map(|pointer| value.pointer(pointer))
+    .filter_map(Value::as_str)
+    .map(str::trim)
+    .any(|code| QUOTA_CODES.contains(&code))
 }
 
 /// Optional per-call generation hints (`temperature` / `max_tokens`).
@@ -508,7 +553,7 @@ async fn await_provider_call_with_timeout(
 ) -> Result<LlmProviderResponse, ProviderError> {
     match tokio::time::timeout(Duration::from_secs(timeout_seconds.max(1)), call).await {
         Ok(result) => result,
-        Err(_) => Err(ProviderError::retryable(
+        Err(_) => Err(ProviderError::timeout(
             format!(
                 "provider_call_timeout provider_type={provider_type} timeout_seconds={}",
                 timeout_seconds.max(1)

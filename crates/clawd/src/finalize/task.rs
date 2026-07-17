@@ -24,6 +24,8 @@ mod task_memory;
 mod task_observed_failure_recovery;
 #[path = "task_payload_helpers.rs"]
 mod task_payload_helpers;
+#[path = "task_provider_wait.rs"]
+mod task_provider_wait;
 #[path = "task_resume.rs"]
 mod task_resume;
 #[path = "task_runtime_failure_payload.rs"]
@@ -77,6 +79,7 @@ use task_payload_helpers::{
     answer_verifier_forces_task_failure, answer_verifier_should_force_task_failure,
     ask_result_payload, non_failure_final_status, normalize_existing_file_delivery_token_answer,
 };
+use task_provider_wait::record_provider_wait_checkpoint;
 pub(crate) use task_resume::answer_verifier_retry_answer_has_required_machine_evidence;
 use task_resume::{
     answer_verifier_retry_applicable, resume_context_execution_summary_messages,
@@ -1099,6 +1102,32 @@ pub(crate) async fn finalize_ask_result(
                     "task_call_end task_id={} kind=ask status=canceled path=normal",
                     task.task_id
                 );
+                return Ok(());
+            }
+            if let Some(provider_blocker) = state.task_provider_blocker(&task.task_id) {
+                let checkpoint_id =
+                    record_provider_wait_checkpoint(state, task, &mut journal, &provider_blocker);
+                journal.record_runtime_llm_metrics(state, &task.task_id);
+                journal.record_final_answer("");
+                crate::finalize::ensure_task_metrics(&mut journal, "", &[]);
+                finalize_ask_checkpointed(state, task, "", &[], &mut journal).await?;
+                let transition = crate::log_ask_transition(
+                    state,
+                    &task.task_id,
+                    Some(crate::AskState::Finalizing),
+                    crate::AskState::Completed,
+                    "finalize_provider_wait_checkpoint",
+                    None,
+                );
+                journal.transitions.push(transition);
+                info!(
+                    "task_journal_summary task_id={} kind=ask phase=provider_wait checkpoint_id={} provider_status_code={} {}",
+                    task.task_id,
+                    checkpoint_id,
+                    provider_blocker.status_code,
+                    journal.to_log_json()
+                );
+                state.clear_task_llm_call_count(&task.task_id);
                 return Ok(());
             }
             if let Some((user_error, resume_ctx)) = crate::parse_resume_context_error(&err_text) {

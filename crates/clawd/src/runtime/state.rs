@@ -11,6 +11,7 @@ use claw_core::skill_registry::{
 };
 use reqwest::Client;
 use serde::Serialize;
+use serde_json::Value;
 use tokio::sync::Semaphore;
 
 use super::policy::{RateLimiter, ToolsPolicy};
@@ -397,9 +398,35 @@ pub(crate) struct TaskMetricsRegistry {
     /// Ordered, machine-only metadata for measuring calls before the planner.
     /// Prompt and response text are intentionally not retained here.
     pub(crate) llm_call_sequence_per_task: Arc<Mutex<HashMap<String, Vec<LlmCallSequenceEntry>>>>,
+    /// Final machine-classified provider blocker for the current task attempt. This is only set
+    /// after the complete fallback set is exhausted and is consumed by finalization to create a
+    /// resumable waiting checkpoint.
+    pub(crate) provider_blocker_per_task: Arc<Mutex<HashMap<String, TaskProviderBlocker>>>,
     /// Live task-event wakeups. Event payloads and replay state live in SQLite; this registry only
     /// wakes connected consumers, so the default test fixture remains lightweight.
     pub(crate) task_event_notifier: crate::task_event_transport::TaskEventNotifier,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskProviderBlocker {
+    pub(crate) provider: String,
+    pub(crate) status_code: String,
+    pub(crate) retry_after_seconds: u64,
+    pub(crate) external_provider_blocked: bool,
+    pub(crate) message_key: String,
+}
+
+impl TaskProviderBlocker {
+    pub(crate) fn to_machine_json(&self) -> Value {
+        serde_json::json!({
+            "provider": self.provider,
+            "status_code": self.status_code,
+            "provider_error_class": self.status_code,
+            "retry_after_seconds": self.retry_after_seconds.max(1),
+            "external_provider_blocked": self.external_provider_blocked,
+            "message_key": self.message_key,
+        })
+    }
 }
 
 pub(crate) fn build_skill_views(
@@ -1166,6 +1193,31 @@ impl AppState {
             .unwrap_or_default()
     }
 
+    pub(crate) fn note_task_provider_blocker(&self, task_id: &str, blocker: TaskProviderBlocker) {
+        self.metrics
+            .provider_blocker_per_task
+            .lock()
+            .unwrap()
+            .insert(task_id.to_string(), blocker);
+    }
+
+    pub(crate) fn task_provider_blocker(&self, task_id: &str) -> Option<TaskProviderBlocker> {
+        self.metrics
+            .provider_blocker_per_task
+            .lock()
+            .unwrap()
+            .get(task_id)
+            .cloned()
+    }
+
+    pub(crate) fn clear_task_provider_blocker(&self, task_id: &str) {
+        self.metrics
+            .provider_blocker_per_task
+            .lock()
+            .unwrap()
+            .remove(task_id);
+    }
+
     /// Phase 1.3: 在每次真正发起 LLM 调用前做预算检查。
     /// 超过任一阈值就返回 `Some(reason)`，调用方应立即短路。
     /// 阈值刻意给得宽松（40 次 / 180 秒），只用于兜底异常放大场景。
@@ -1210,6 +1262,7 @@ impl AppState {
             .lock()
             .unwrap()
             .remove(task_id);
+        self.clear_task_provider_blocker(task_id);
     }
 
     pub(crate) fn get_skills_registry(&self) -> Option<Arc<SkillsRegistry>> {
