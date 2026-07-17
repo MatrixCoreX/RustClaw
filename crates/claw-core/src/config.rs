@@ -865,7 +865,8 @@ pub struct WorkerConfig {
     // - concurrency=1（单 worker，避免抢资源）
     // - poll_interval_ms=500
     // - queue_limit=64
-    // - task_timeout_seconds=3600（1 小时硬上限，远小于原 24h）
+    // - task_timeout_seconds=3600（所有任务类别的管理员硬上限，远小于原 24h；
+    //   结构化 budget_profile 可选择更短预算，但不能突破该上限）
     // 现存 demo 模板会显式设大值，行为不变；新部署默认即安全。
     #[serde(default = "default_worker_concurrency")]
     pub concurrency: usize,
