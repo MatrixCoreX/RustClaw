@@ -418,9 +418,11 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
                 .map(|seconds| now_ts.saturating_add(seconds))
         })
         .filter(|ts| *ts > now_ts);
-    let Some(next_check_after) = next_check_after else {
+    let deferred_checkpoint_result =
+        deferred_seeded_loop_checkpoint_result(projection_payload, checkpoint_id);
+    if next_check_after.is_none() && deferred_checkpoint_result.is_none() {
         return Ok(false);
-    };
+    }
 
     let db = state
         .core
@@ -518,6 +520,55 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
         return Ok(false);
     }
 
+    if let Some((mut deferred_result, mut deferred_lifecycle, deferred_checkpoint)) =
+        deferred_checkpoint_result
+    {
+        let mut projection = projection_payload.clone();
+        if let Some(projection_obj) = projection.as_object_mut() {
+            projection_obj.insert("projected_at".to_string(), serde_json::json!(now_ts));
+            projection_obj.insert(
+                "projection_result_status".to_string(),
+                serde_json::json!("rescheduled_checkpoint"),
+            );
+            projection_obj.insert(
+                "previous_checkpoint_id".to_string(),
+                serde_json::json!(checkpoint_id),
+            );
+        }
+        let Some(deferred_lifecycle_obj) = deferred_lifecycle.as_object_mut() else {
+            return Ok(false);
+        };
+        deferred_lifecycle_obj.insert("resume_executor_result_projection".to_string(), projection);
+        deferred_lifecycle_obj.insert(
+            "previous_checkpoint_id".to_string(),
+            serde_json::json!(checkpoint_id),
+        );
+        let Some(deferred_result_obj) = deferred_result.as_object_mut() else {
+            return Ok(false);
+        };
+        deferred_result_obj.insert("task_lifecycle".to_string(), deferred_lifecycle);
+        deferred_result_obj.insert(
+            "task_checkpoint".to_string(),
+            deferred_checkpoint.to_machine_json(),
+        );
+        let updated_result_json = deferred_result.to_string();
+        let changed = db.execute(
+            "UPDATE tasks
+             SET result_json = ?2,
+                 updated_at = ?3,
+                 lease_owner = NULL,
+                 lease_expires_at = 0
+             WHERE task_id = ?1
+               AND status = 'running'
+               AND result_json = ?4",
+            params![task_id, updated_result_json, now_ts, raw_result_json],
+        )?;
+        return Ok(changed > 0);
+    }
+
+    let Some(next_check_after) = next_check_after else {
+        return Ok(false);
+    };
     let wait_seconds = next_check_after.saturating_sub(now_ts).max(0);
     let resume_directive = obj
         .get("resume_executor")
@@ -613,7 +664,9 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
     let changed = db.execute(
         "UPDATE tasks
          SET result_json = ?2,
-             updated_at = ?3
+             updated_at = ?3,
+             lease_owner = NULL,
+             lease_expires_at = 0
          WHERE task_id = ?1
            AND status = 'running'
            AND result_json = ?4",
@@ -625,6 +678,36 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
         ],
     )?;
     Ok(changed > 0)
+}
+
+fn deferred_seeded_loop_checkpoint_result(
+    projection_payload: &Value,
+    previous_checkpoint_id: &str,
+) -> Option<(Value, Value, crate::task_lifecycle::TaskCheckpoint)> {
+    if projection_payload
+        .get("executor_result_status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        != Some("seeded_loop_deferred")
+    {
+        return None;
+    }
+    let result = projection_payload
+        .get("final_result_json")
+        .filter(|value| value.is_object())?
+        .clone();
+    let lifecycle =
+        crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&result), None);
+    let checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(&result)?;
+    if checkpoint.checkpoint_id == previous_checkpoint_id
+        || !crate::task_lifecycle::has_matching_nonterminal_checkpoint(
+            Some(&lifecycle),
+            Some(&checkpoint.to_machine_json()),
+        )
+    {
+        return None;
+    }
+    Some((result, lifecycle, checkpoint))
 }
 
 fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(

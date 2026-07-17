@@ -310,11 +310,48 @@ pub(crate) fn update_task_progress_result(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    db.execute(
-        "UPDATE tasks SET result_json = ?2, updated_at = ?3 WHERE task_id = ?1 AND status IN ('queued','running')",
-        params![task_id, result_json, now_ts()],
-    )?;
-    Ok(())
+    let progress_result = serde_json::from_str::<Value>(result_json).ok();
+    for _ in 0..3 {
+        let current_result_json = db
+            .query_row(
+                "SELECT result_json
+                 FROM tasks
+                 WHERE task_id = ?1
+                   AND status IN ('queued','running')
+                 LIMIT 1",
+                params![task_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        let Some(current_result_json) = current_result_json else {
+            return Ok(());
+        };
+        let now = now_ts().parse::<i64>().unwrap_or_default();
+        let merged_result_json = current_result_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .zip(progress_result.as_ref())
+            .and_then(|(current, progress)| {
+                crate::repo::task_resume_execution::merge_progress_with_active_resume_coordination(
+                    &current, progress, now,
+                )
+            })
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| result_json.to_string());
+        let changed = db.execute(
+            "UPDATE tasks
+             SET result_json = ?2,
+                 updated_at = ?3
+             WHERE task_id = ?1
+               AND status IN ('queued','running')
+               AND result_json IS ?4",
+            params![task_id, merged_result_json, now, current_result_json],
+        )?;
+        if changed > 0 {
+            return Ok(());
+        }
+    }
+    anyhow::bail!("task_progress_cas_exhausted")
 }
 
 pub(crate) fn update_task_checkpointed_result(

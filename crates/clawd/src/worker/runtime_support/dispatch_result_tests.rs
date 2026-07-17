@@ -224,6 +224,39 @@ fn seeded_agent_loop_terminal_payload_is_machine_only_for_success_and_failure() 
 }
 
 #[test]
+fn seeded_agent_loop_with_new_checkpoint_is_deferred_not_terminal() {
+    let claimed = seeded_claimed_dispatch();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-seeded-terminal", "ask", "continue");
+    journal.record_task_lifecycle(json!({
+        "schema_version": 1,
+        "state": "background",
+        "checkpoint_id": "ckpt-seeded-next",
+        "resume_reason": "provider_window",
+        "next_check_after": 9_999_999_999_i64
+    }));
+    let mut next_checkpoint = claimed.task_checkpoint.clone();
+    next_checkpoint.checkpoint_id = "ckpt-seeded-next".to_string();
+    journal.record_task_checkpoint(next_checkpoint.to_machine_json());
+    let reply = crate::AskReply::non_llm("waiting".to_string()).with_task_journal(journal);
+
+    let payload = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
+        &claimed,
+        Ok(reply),
+    )
+    .expect("seeded loop deferred payload");
+    assert_eq!(payload["executor_result_status"], "seeded_loop_deferred");
+    assert_eq!(payload["deferred_checkpoint_id"], "ckpt-seeded-next");
+    assert_eq!(payload["deferred_lifecycle_state"], "background");
+    assert_eq!(
+        payload["final_result_json"]["task_journal"]["summary"]["task_checkpoint"]["checkpoint_id"],
+        "ckpt-seeded-next"
+    );
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
+}
+
+#[test]
 fn seeded_agent_loop_terminal_payload_rejects_text_leaks_in_claim_chain() {
     let mut claimed = seeded_claimed_dispatch();
     claimed.dispatch_claim = json!({"text": "leak"});
