@@ -1361,6 +1361,10 @@ impl AppState {
         self.core.mcp_runtime.tools()
     }
 
+    pub(crate) fn mcp_planner_tools(&self) -> Vec<crate::mcp_runtime::McpToolDescriptor> {
+        self.core.mcp_runtime.planner_tools()
+    }
+
     pub(crate) fn mcp_lifecycle_snapshots(&self) -> Vec<crate::mcp_runtime::McpLifecycleSnapshot> {
         self.core.mcp_runtime.lifecycle_snapshots()
     }

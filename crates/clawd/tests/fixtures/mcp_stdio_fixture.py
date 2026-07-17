@@ -63,6 +63,11 @@ for line in sys.stdin:
             send(request_id, {"tools": TOOLS[:2], "nextCursor": "page-2"})
         else:
             send(request_id, {"tools": TOOLS[2:]})
+            marker = os.environ.get("MCP_FIXTURE_EXIT_ONCE_MARKER")
+            if marker and not os.path.exists(marker):
+                with open(marker, "w", encoding="utf-8") as marker_file:
+                    marker_file.write("exited\n")
+                raise SystemExit(0)
     elif method == "tools/call":
         params = message.get("params", {})
         name = params.get("name")

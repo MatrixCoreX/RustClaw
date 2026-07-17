@@ -11,7 +11,9 @@ use rmcp::transport::TokioChildProcess;
 use rmcp::ServiceExt;
 use serde_json::{json, Map, Value};
 use tokio::process::Command;
-use tokio::sync::RwLock as AsyncRwLock;
+use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use super::client::{McpClient, RmcpClient};
 use super::types::{
@@ -19,11 +21,24 @@ use super::types::{
     McpToolDescriptor, McpToolPolicy,
 };
 
+const MCP_CATALOG_SEARCH_CAPABILITY: &str = "mcp.catalog.search";
+const MCP_CATALOG_SEARCH_OUTPUT_BYTES: usize = 64 * 1024;
+
 pub(crate) struct McpRuntime {
     config: Arc<McpConfig>,
     clients: AsyncRwLock<HashMap<String, Arc<RmcpClient>>>,
     catalog: RwLock<HashMap<String, McpToolDescriptor>>,
     lifecycle: RwLock<HashMap<String, McpLifecycleSnapshot>>,
+    reconnect_locks: HashMap<String, Arc<AsyncMutex<()>>>,
+    reconnect_state: RwLock<HashMap<String, ReconnectState>>,
+    health_stop: CancellationToken,
+    health_task: AsyncMutex<Option<JoinHandle<()>>>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ReconnectState {
+    attempt: u32,
+    next_retry_at: Option<Instant>,
 }
 
 impl McpRuntime {
@@ -46,11 +61,20 @@ impl McpRuntime {
                 },
             );
         }
+        let reconnect_locks = config
+            .servers
+            .keys()
+            .map(|server_id| (server_id.clone(), Arc::new(AsyncMutex::new(()))))
+            .collect();
         Self {
             config: Arc::new(config),
             clients: AsyncRwLock::new(HashMap::new()),
             catalog: RwLock::new(HashMap::new()),
             lifecycle: RwLock::new(lifecycle),
+            reconnect_locks,
+            reconnect_state: RwLock::new(HashMap::new()),
+            health_stop: CancellationToken::new(),
+            health_task: AsyncMutex::new(None),
         }
     }
 
@@ -63,7 +87,18 @@ impl McpRuntime {
         if !self.config.enabled {
             return;
         }
-        let duplicate_prefixes = self.duplicate_enabled_prefixes();
+        if self.config.planner_visible_tools < 2 || self.config.catalog_search_max_results == 0 {
+            for server_id in self.config.enabled_server_names() {
+                self.set_lifecycle(
+                    &server_id,
+                    McpLifecycleState::Degraded,
+                    0,
+                    Some("mcp_runtime_limit_invalid"),
+                );
+            }
+            return;
+        }
+        let duplicate_namespaces = self.duplicate_enabled_namespaces();
         for server_id in self.config.enabled_server_names() {
             self.set_lifecycle(&server_id, McpLifecycleState::Starting, 0, None);
             let Some(server) = self.config.servers.get(&server_id).cloned() else {
@@ -75,7 +110,7 @@ impl McpRuntime {
                 );
                 continue;
             };
-            if duplicate_prefixes.contains(&server_namespace(&server_id, &server)) {
+            if duplicate_namespaces.contains(&server_namespace(&server_id, &server)) {
                 self.set_lifecycle(
                     &server_id,
                     McpLifecycleState::Degraded,
@@ -86,6 +121,7 @@ impl McpRuntime {
             }
             match self.start_server(&server_id, &server).await {
                 Ok(tool_count) => {
+                    self.clear_reconnect_state(&server_id);
                     self.set_lifecycle(&server_id, McpLifecycleState::Ready, tool_count, None)
                 }
                 Err(error) => {
@@ -101,12 +137,37 @@ impl McpRuntime {
                         0,
                         Some(error.code()),
                     );
+                    self.schedule_reconnect(&server_id, &error);
                 }
             }
         }
     }
 
+    pub(crate) async fn spawn_health_monitor(self: &Arc<Self>) {
+        if !self.config.enabled || self.config.enabled_server_names().is_empty() {
+            return;
+        }
+        let mut task = self.health_task.lock().await;
+        if task.is_some() {
+            return;
+        }
+        let runtime = Arc::clone(self);
+        let interval = self.health_interval();
+        *task = Some(tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = runtime.health_stop.cancelled() => break,
+                    _ = tokio::time::sleep(interval) => runtime.health_tick().await,
+                }
+            }
+        }));
+    }
+
     pub(crate) async fn stop(&self) {
+        self.health_stop.cancel();
+        if let Some(task) = self.health_task.lock().await.take() {
+            let _ = task.await;
+        }
         let clients = {
             let mut guard = self.clients.write().await;
             std::mem::take(&mut *guard)
@@ -120,6 +181,10 @@ impl McpRuntime {
                 0,
                 error.as_ref().map(McpRuntimeError::code),
             );
+        }
+        for server_id in self.config.enabled_server_names() {
+            self.remove_server_tools(&server_id);
+            self.set_lifecycle(&server_id, McpLifecycleState::Stopped, 0, None);
         }
     }
 
@@ -147,7 +212,26 @@ impl McpRuntime {
         tools
     }
 
+    pub(crate) fn planner_tools(&self) -> Vec<McpToolDescriptor> {
+        let tools = self.tools();
+        let visible_limit = self.config.planner_visible_tools.max(2);
+        if tools.len() <= visible_limit {
+            return tools;
+        }
+        let mut visible = tools
+            .into_iter()
+            .take(visible_limit.saturating_sub(1))
+            .collect::<Vec<_>>();
+        visible.push(catalog_search_descriptor());
+        visible
+    }
+
     pub(crate) fn tool(&self, capability: &str) -> Option<McpToolDescriptor> {
+        if capability == MCP_CATALOG_SEARCH_CAPABILITY
+            && self.tools().len() > self.config.planner_visible_tools.max(2)
+        {
+            return Some(catalog_search_descriptor());
+        }
         self.catalog
             .read()
             .expect("mcp catalog lock poisoned")
@@ -174,6 +258,7 @@ impl McpRuntime {
                 0,
                 Some(error.code()),
             );
+            self.schedule_reconnect(server_id, &error);
             return Err(error);
         }
         Ok(McpProbeOutcome {
@@ -197,6 +282,15 @@ impl McpRuntime {
             Value::Null => Map::new(),
             _ => return Err(McpRuntimeError::new("mcp_arguments_not_object")),
         };
+        if descriptor.capability == MCP_CATALOG_SEARCH_CAPABILITY {
+            if cancellation
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(McpRuntimeError::new("mcp_call_cancelled"));
+            }
+            return self.search_catalog(descriptor, args);
+        }
         let client = self
             .clients
             .read()
@@ -215,7 +309,22 @@ impl McpRuntime {
         }
         let result = client
             .call_tool(&descriptor.tool_name, args, cancellation)
-            .await?;
+            .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if reconnect_after_call_error(error.code()) {
+                    self.set_lifecycle(
+                        &descriptor.server_id,
+                        McpLifecycleState::Degraded,
+                        0,
+                        Some(error.code()),
+                    );
+                    self.schedule_reconnect(&descriptor.server_id, &error);
+                }
+                return Err(error);
+            }
+        };
         let max_output_bytes = self
             .config
             .servers
@@ -223,6 +332,115 @@ impl McpRuntime {
             .map(|server| server.max_output_bytes.max(128))
             .unwrap_or(128);
         project_call_result(descriptor, result, max_output_bytes)
+    }
+
+    fn search_catalog(
+        &self,
+        descriptor: McpToolDescriptor,
+        args: Map<String, Value>,
+    ) -> Result<McpCallOutcome, McpRuntimeError> {
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| McpRuntimeError::new("mcp_catalog_query_required"))?;
+        let server_filter = args
+            .get("server_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(self.config.catalog_search_max_results)
+            .clamp(1, self.config.catalog_search_max_results.max(1));
+        let normalized_query = query.to_lowercase();
+        let query_terms = normalized_query.split_whitespace().collect::<Vec<_>>();
+        let mut matches = self
+            .tools()
+            .into_iter()
+            .filter(|tool| server_filter.is_none_or(|server_id| tool.server_id == server_id))
+            .filter_map(|tool| {
+                let haystack = format!(
+                    "{} {} {} {}",
+                    tool.capability,
+                    tool.server_id,
+                    tool.tool_name,
+                    tool.description.as_deref().unwrap_or_default()
+                )
+                .to_lowercase();
+                let score = if tool.capability.eq_ignore_ascii_case(query)
+                    || tool.tool_name.eq_ignore_ascii_case(query)
+                {
+                    0
+                } else if haystack.contains(&normalized_query) {
+                    1
+                } else if !query_terms.is_empty()
+                    && query_terms.iter().all(|term| haystack.contains(term))
+                {
+                    2
+                } else {
+                    return None;
+                };
+                Some((score, tool))
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.capability.cmp(&right.1.capability))
+        });
+        let match_count = matches.len();
+        let mut result_items = Vec::new();
+        let mut truncated = match_count > limit;
+        for (_, tool) in matches.into_iter().take(limit) {
+            let item = json!({
+                "capability": tool.capability,
+                "server_id": tool.server_id,
+                "tool_name": tool.tool_name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+                "required_args": tool.required_args,
+                "optional_args": tool.optional_args,
+                "policy": tool.policy,
+            });
+            let mut candidate = result_items.clone();
+            candidate.push(item.clone());
+            if serde_json::to_vec(&candidate)
+                .map(|bytes| bytes.len() > MCP_CATALOG_SEARCH_OUTPUT_BYTES)
+                .unwrap_or(true)
+            {
+                truncated = true;
+                break;
+            }
+            result_items.push(item);
+        }
+        let structured_content = json!({
+            "query": query,
+            "server_id": server_filter,
+            "match_count": match_count,
+            "returned_count": result_items.len(),
+            "catalog_total": self.tools().len(),
+            "truncated": truncated,
+            "tools": result_items,
+        });
+        let output_bytes = serde_json::to_vec(&structured_content)
+            .map_err(|_| McpRuntimeError::new("mcp_result_serialize_failed"))?
+            .len();
+        Ok(McpCallOutcome {
+            capability: descriptor.capability,
+            server_id: descriptor.server_id,
+            tool_name: descriptor.tool_name,
+            status: "ok".to_string(),
+            structured_content: Some(structured_content),
+            content: json!([]),
+            protocol_meta: None,
+            output_bytes,
+            truncated,
+            error_code: None,
+        })
     }
 
     async fn start_server(
@@ -287,7 +505,128 @@ impl McpRuntime {
         Ok(tool_count)
     }
 
-    fn duplicate_enabled_prefixes(&self) -> HashSet<String> {
+    pub(crate) async fn health_tick(&self) {
+        for server_id in self.config.enabled_server_names() {
+            let client = self.clients.read().await.get(&server_id).cloned();
+            if let Some(client) = client {
+                if !client.is_closed() {
+                    if client.ping().await.is_ok() {
+                        continue;
+                    }
+                    let error = McpRuntimeError::new("mcp_health_ping_failed");
+                    self.set_lifecycle(
+                        &server_id,
+                        McpLifecycleState::Degraded,
+                        0,
+                        Some(error.code()),
+                    );
+                    self.disconnect_server(&server_id).await;
+                    self.clear_reconnect_state(&server_id);
+                    self.reconnect_server(&server_id).await;
+                    continue;
+                }
+                self.disconnect_server(&server_id).await;
+            }
+            if self.reconnect_due(&server_id) {
+                self.reconnect_server(&server_id).await;
+            }
+        }
+    }
+
+    async fn reconnect_server(&self, server_id: &str) {
+        let Some(lock) = self.reconnect_locks.get(server_id) else {
+            return;
+        };
+        let _guard = lock.lock().await;
+        if self
+            .clients
+            .read()
+            .await
+            .get(server_id)
+            .is_some_and(|client| !client.is_closed())
+        {
+            return;
+        }
+        let Some(server) = self.config.servers.get(server_id).cloned() else {
+            return;
+        };
+        self.set_lifecycle(server_id, McpLifecycleState::Starting, 0, None);
+        match self.start_server(server_id, &server).await {
+            Ok(tool_count) => {
+                self.clear_reconnect_state(server_id);
+                self.set_lifecycle(server_id, McpLifecycleState::Ready, tool_count, None);
+            }
+            Err(error) => {
+                self.set_lifecycle(
+                    server_id,
+                    McpLifecycleState::Degraded,
+                    0,
+                    Some(error.code()),
+                );
+                self.schedule_reconnect(server_id, &error);
+            }
+        }
+    }
+
+    async fn disconnect_server(&self, server_id: &str) {
+        let client = self.clients.write().await.remove(server_id);
+        self.remove_server_tools(server_id);
+        if let Some(client) = client {
+            let _ = client.shutdown().await;
+        }
+    }
+
+    fn health_interval(&self) -> Duration {
+        Duration::from_secs(
+            self.config
+                .enabled_server_names()
+                .into_iter()
+                .filter_map(|server_id| self.config.servers.get(&server_id))
+                .map(|server| server.health_check_seconds.max(1))
+                .min()
+                .unwrap_or(30),
+        )
+    }
+
+    fn reconnect_due(&self, server_id: &str) -> bool {
+        self.reconnect_state
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(server_id)
+            .and_then(|state| state.next_retry_at)
+            .is_none_or(|next_retry_at| Instant::now() >= next_retry_at)
+    }
+
+    fn schedule_reconnect(&self, server_id: &str, error: &McpRuntimeError) {
+        if !retryable_connection_error(error.code()) {
+            return;
+        }
+        let Some(server) = self.config.servers.get(server_id) else {
+            return;
+        };
+        let mut states = self
+            .reconnect_state
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = states.entry(server_id.to_string()).or_default();
+        state.attempt = state.attempt.saturating_add(1).min(31);
+        let base = server.reconnect_base_seconds.max(1);
+        let maximum = server.reconnect_max_seconds.max(base);
+        let exponential = base.saturating_mul(1_u64 << state.attempt.saturating_sub(1));
+        let bounded = exponential.min(maximum);
+        let jitter_percent = 80 + stable_server_jitter(server_id, state.attempt) % 41;
+        let delay_ms = bounded.saturating_mul(1000).saturating_mul(jitter_percent) / 100;
+        state.next_retry_at = Some(Instant::now() + Duration::from_millis(delay_ms.max(1)));
+    }
+
+    fn clear_reconnect_state(&self, server_id: &str) {
+        self.reconnect_state
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(server_id);
+    }
+
+    fn duplicate_enabled_namespaces(&self) -> HashSet<String> {
         let mut counts = HashMap::<String, usize>::new();
         for server_id in self.config.enabled_server_names() {
             if let Some(server) = self.config.servers.get(&server_id) {
@@ -414,6 +753,9 @@ fn validate_server_config(
         || server.max_output_bytes < 128
         || server.max_schema_bytes < 128
         || server.max_tools == 0
+        || server.health_check_seconds == 0
+        || server.reconnect_base_seconds == 0
+        || server.reconnect_max_seconds < server.reconnect_base_seconds
     {
         return Err(McpRuntimeError::new("mcp_server_limit_invalid"));
     }
@@ -603,4 +945,74 @@ fn valid_machine_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+fn catalog_search_descriptor() -> McpToolDescriptor {
+    McpToolDescriptor {
+        capability: MCP_CATALOG_SEARCH_CAPABILITY.to_string(),
+        server_id: "runtime".to_string(),
+        tool_name: "catalog_search".to_string(),
+        description: None,
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "server_id": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1},
+            },
+            "required": ["query"],
+        }),
+        required_args: vec!["query".to_string()],
+        optional_args: vec!["limit".to_string(), "server_id".to_string()],
+        policy: McpToolPolicy {
+            effect: "observe".to_string(),
+            risk_level: "low".to_string(),
+            idempotent: true,
+            isolation_profile: None,
+            network_access: false,
+            filesystem_write: false,
+            external_publish: false,
+            credential_access: false,
+            subprocess: false,
+            package_install: false,
+            privilege_escalation: false,
+        },
+    }
+}
+
+fn retryable_connection_error(error_code: &str) -> bool {
+    matches!(
+        error_code,
+        "mcp_secret_reference_unavailable"
+            | "mcp_stdio_spawn_failed"
+            | "mcp_initialize_timeout"
+            | "mcp_initialize_failed"
+            | "mcp_list_tools_timeout"
+            | "mcp_list_tools_failed"
+            | "mcp_health_ping_failed"
+            | "mcp_ping_timeout"
+            | "mcp_ping_failed"
+            | "mcp_transport_closed"
+            | "mcp_client_unavailable"
+            | "mcp_call_failed"
+            | "mcp_call_unexpected_response"
+    )
+}
+
+fn reconnect_after_call_error(error_code: &str) -> bool {
+    matches!(
+        error_code,
+        "mcp_call_failed"
+            | "mcp_call_unexpected_response"
+            | "mcp_transport_closed"
+            | "mcp_client_unavailable"
+    )
+}
+
+fn stable_server_jitter(server_id: &str, attempt: u32) -> u64 {
+    server_id.bytes().fold(u64::from(attempt), |state, byte| {
+        state
+            .wrapping_mul(1099511628211)
+            .wrapping_add(u64::from(byte))
+    })
 }

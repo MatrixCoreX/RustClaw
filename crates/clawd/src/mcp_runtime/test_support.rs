@@ -46,6 +46,7 @@ pub(crate) fn fixture_config() -> McpConfig {
     McpConfig {
         enabled: true,
         servers: HashMap::from([("fixture".to_string(), server)]),
+        ..McpConfig::default()
     }
 }
 

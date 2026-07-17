@@ -652,6 +652,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mcp_runtime = Arc::new(crate::mcp_runtime::McpRuntime::new(config.mcp.clone()));
     mcp_runtime.start().await;
+    mcp_runtime.spawn_health_monitor().await;
     for snapshot in mcp_runtime.lifecycle_snapshots() {
         info!(
             server_id = snapshot.server_id,
