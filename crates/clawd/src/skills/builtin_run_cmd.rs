@@ -480,12 +480,6 @@ pub(super) async fn run_safe_command_detailed(
     let soft_timeout = cmd_timeout_seconds.max(1);
     let idle_timeout = cmd_idle_timeout_seconds.max(1);
     let max_output_bytes = cmd_max_output_bytes.max(128);
-    let detached_background = looks_detached_background_command(command);
-    let wait_timeout = if detached_background {
-        soft_timeout.min(3)
-    } else {
-        soft_timeout
-    };
     let mut child = cmd.spawn().map_err(|err| {
         RunSafeCommandError::Command(CommandRunFailure::new(
             "spawn_failed",
@@ -504,7 +498,7 @@ pub(super) async fn run_safe_command_detailed(
     drop(tx);
 
     let mut wait_fut = Box::pin(child.wait());
-    let total_sleep = tokio::time::sleep(Duration::from_secs(wait_timeout));
+    let total_sleep = tokio::time::sleep(Duration::from_secs(soft_timeout));
     tokio::pin!(total_sleep);
     let idle_sleep = tokio::time::sleep(Duration::from_secs(idle_timeout));
     tokio::pin!(idle_sleep);
@@ -513,7 +507,6 @@ pub(super) async fn run_safe_command_detailed(
     let mut captured_bytes = 0usize;
     let mut output_truncated = false;
     let mut output_limit_reached = false;
-    let mut detached_timeout = false;
     let mut timeout_failure: Option<CommandRunFailure> = None;
     let mut status = None;
     let mut pipes_closed = false;
@@ -585,28 +578,17 @@ pub(super) async fn run_safe_command_detailed(
                 break;
             }
             _ = &mut total_sleep => {
-                let detached_note = if detached_background {
-                    "background start grace"
-                } else {
-                    "soft-timeout"
-                };
                 tracing::info!(
-                    "run_cmd {} reached; killing shell (wait={}s, configured={}s): {}",
-                    detached_note,
-                    wait_timeout,
+                    "run_cmd soft-timeout reached; killing shell (configured={}s): {}",
                     soft_timeout,
                     crate::truncate_for_log(command)
                 );
                 kill_shell_pid(child_pid).await;
                 let _ = tokio::time::timeout(Duration::from_secs(5), &mut wait_fut).await;
-                if detached_background {
-                    detached_timeout = true;
-                } else {
-                    timeout_failure = Some(CommandRunFailure::new(
-                        "timeout",
-                        format!("run_cmd.timeout seconds={soft_timeout}"),
-                    ));
-                }
+                timeout_failure = Some(CommandRunFailure::new(
+                    "timeout",
+                    format!("run_cmd.timeout seconds={soft_timeout}"),
+                ));
                 break;
             }
         }
@@ -622,14 +604,6 @@ pub(super) async fn run_safe_command_detailed(
     if output_limit_reached {
         return if text.trim().is_empty() {
             Ok(format!("exit=truncated command={}", command.trim()))
-        } else {
-            Ok(text)
-        };
-    }
-
-    if detached_timeout {
-        return if text.trim().is_empty() {
-            Ok(format!("detached=1 command={}", command.trim()))
         } else {
             Ok(text)
         };
