@@ -160,6 +160,10 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
         .as_str()
         .unwrap()
         .starts_with("context_compaction_"));
-    assert_eq!(record["compaction_source"], "deterministic_fallback");
+    assert_eq!(
+        record["compaction_source"],
+        "deterministic_machine_reference_fallback"
+    );
     assert_eq!(record["model_summary_attached"], false);
+    assert_eq!(record["continuity_summary_attached"], true);
 }

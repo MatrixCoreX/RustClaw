@@ -151,7 +151,7 @@ async fn observed_execution_without_delivery_does_not_reuse_route_fixed_question
         "fs_basic",
         r#"{"action":"inventory_dir","path":"/tmp","entries":[]}"#,
     ));
-    let mut route = free_route_result();
+    let route = free_route_result();
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -690,7 +690,7 @@ fn exact_directory_names_contract_replaces_file_list_synthesis_with_parent_dirs(
 }
 #[test]
 fn preferred_route_clarify_question_does_not_reuse_route_text() {
-    let mut route = scalar_route_result();
+    let route = scalar_route_result();
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

@@ -596,7 +596,7 @@ fn multi_status_json_direct_answer_keeps_all_observed_status_files() {
         "synthesize_answer",
         r#"{"healthy":true,"status":"login_required","account_label":"primary"}"#,
     ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    let route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         auto_locator_path: Some("/home/guagua/rustclaw/run".to_string()),

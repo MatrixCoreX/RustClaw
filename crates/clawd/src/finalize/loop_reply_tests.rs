@@ -714,7 +714,7 @@ async fn finalize_loop_reply_does_not_attach_control_envelope_without_structured
 async fn finalize_loop_reply_does_not_attach_control_envelope_from_route_machine_token() {
     let state = test_state();
     let task = claimed_task("task-control-envelope-route-token");
-    let mut route = scalar_route_result();
+    let route = scalar_route_result();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

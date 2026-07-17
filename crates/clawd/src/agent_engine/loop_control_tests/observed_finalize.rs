@@ -84,7 +84,7 @@ fn capability_inventory_names_can_stop_without_incremental_planner() {
         capability: "filesystem.list_file_names".to_string(),
         args: json!({"path":"/workspace/document","files_only":true,"names_only":true,"max_entries":5}),
     }];
-    let mut route = route_result(OutputResponseShape::Strict);
+    let route = route_result(OutputResponseShape::Strict);
 
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
@@ -733,7 +733,7 @@ fn health_check_scalar_summary_continues_to_synthesis() {
         "health_check",
         r#"{"clawd_process_count":1,"telegramd_process_count":0,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#,
     ));
-    let mut route = route_result(OutputResponseShape::Scalar);
+    let route = route_result(OutputResponseShape::Scalar);
     let actions = vec![AgentAction::CallSkill {
         skill: "health_check".to_string(),
         args: json!({}),
@@ -813,7 +813,7 @@ fn read_only_round_continues_planner_without_runtime_recipe() {
         "fs_basic",
         r#"{"extra":{"action":"list_dir","path":"/tmp/demo","entries":["calc_core.py"]}}"#,
     ));
-    let mut route = route_result(OutputResponseShape::Free);
+    let route = route_result(OutputResponseShape::Free);
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -855,7 +855,7 @@ fn strict_json_read_only_round_continues_planner_for_live_code_workspace() {
         "fs_basic",
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/test_calc_core.py","excerpt":"1|from calc_core import add, sub"}}"#,
     ));
-    let mut route = route_result(OutputResponseShape::Strict);
+    let route = route_result(OutputResponseShape::Strict);
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -922,7 +922,7 @@ fn fs_basic_capability_read_only_round_continues_planner() {
         "fs_basic",
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a,b): return a+b\n2|def sub(a,b): return a-b"}}"#,
     ));
-    let mut route = route_result(OutputResponseShape::FileToken);
+    let route = route_result(OutputResponseShape::FileToken);
     let actions = vec![AgentAction::CallCapability {
         capability: "fs_basic.read_text_range".to_string(),
         args: json!({"path":"/workspace/project/calc_core.py"}),

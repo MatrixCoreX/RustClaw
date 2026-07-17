@@ -531,7 +531,7 @@ fn requested_machine_kv_summary_final_guard_preserves_async_poll_report_fields()
 #[test]
 fn requested_machine_kv_summary_final_guard_ignores_internal_route_tokens() {
     let prompt = "Return async timeout policy fields.";
-    let mut route = route_result();
+    let route = route_result();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-internal", "ask", prompt);
     journal.record_context_bundle_summary(
