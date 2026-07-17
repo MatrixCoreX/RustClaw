@@ -21,6 +21,7 @@ CLAWD_BIN="${CLAWD_BIN:-}"
 RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-/home/guagua/runtime_env_filled.sh}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 LOG_DIR="${LOG_DIR:-}"
+PRINT_LLM_TRACE_VALUE="${PRINT_LLM_TRACE:-1}"
 
 TEMP_WORKSPACE=""
 CLAWD_PID=""
@@ -42,6 +43,24 @@ REPAIR_HTTP_INDEX_REL="${REPAIR_HTTP_DIR_REL}/index.html"
 PASS=0
 FAIL=0
 SKIP=0
+
+init_llm_trace_offset() {
+  local offset_file="$1"
+  python3 "${ROOT_DIR}/scripts/nl_tests/print_llm_raw_trace.py" \
+    --log "$TEMP_WORKSPACE/logs/model_io.log" \
+    --state-file "$offset_file" \
+    --init-state
+}
+
+print_new_llm_trace() {
+  local task_id="$1"
+  local offset_file="$2"
+  [[ "${PRINT_LLM_TRACE:-1}" == "1" ]] || return 0
+  python3 "${ROOT_DIR}/scripts/nl_tests/print_llm_raw_trace.py" \
+    --log "$TEMP_WORKSPACE/logs/model_io.log" \
+    --task-id "$task_id" \
+    --state-file "$offset_file"
+}
 
 usage() {
   cat <<'EOF'
@@ -966,10 +985,13 @@ run_nl_case() {
   fi
 
   echo "[ask][round ${round_no}] ${case_name}"
+  echo "[PROMPT]"
+  printf '%s\n' "$prompt"
   local submit_raw task_id final_raw status visible_text missing
   submit_raw="$(submit_task "$prompt")"
   task_id="$(extract_submit_task_id "$submit_raw")"
   final_raw="$(wait_task_until_terminal_with_limit "$task_id" "$WAIT_SECONDS")"
+  print_new_llm_trace "$task_id" "$LOG_DIR/llm_trace.offset"
   write_case_artifacts "ask" "$round_no" "$case_name" "$prompt" "$submit_raw" "$final_raw"
   status="$(extract_task_status "$final_raw")"
 
@@ -981,6 +1003,8 @@ run_nl_case() {
   fi
 
   visible_text="$(extract_visible_text "$final_raw")"
+  echo "[REPLY]"
+  printf '%s\n' "${visible_text:-<empty>}"
   case "$assertion" in
     text)
       if missing="$(missing_substrings "$visible_text" "$expected" 2>&1)"; then
@@ -1109,6 +1133,7 @@ REGULAR_USER_KEY="$(
 CLAWD_PID=$!
 
 wait_for_health
+init_llm_trace_offset "$LOG_DIR/llm_trace.offset"
 
 printf 'workspace_root=%s\nbase_url=%s\nhttp_port=%s\nhttp_dir=%s\nhttp_marker=%s\nhttp_repair_port=%s\nhttp_repair_dir=%s\nhttp_repair_marker=%s\nhttp_repair_bad_marker=%s\nadmin_key=%s\nuser_key=%s\nrounds=%s\ncase_file=%s\n' \
   "$TEMP_WORKSPACE" "$BASE_URL" "$HTTP_PORT" "$HTTP_DIR_REL" "$HTTP_MARKER" "$HTTP_REPAIR_PORT" "$REPAIR_HTTP_DIR_REL" "$REPAIR_HTTP_MARKER" "$REPAIR_HTTP_BAD_MARKER" "$ADMIN_USER_KEY" "$REGULAR_USER_KEY" "$ROUNDS" "$CASE_FILE" > "$LOG_DIR/meta.txt"
