@@ -19,6 +19,9 @@ pub(crate) struct ContextCompactionPlan {
     pub(crate) threshold_chars: usize,
     pub(crate) trigger_codes: Vec<&'static str>,
     source_refs: Vec<Value>,
+    source_task_ids: Vec<String>,
+    source_event_range: Value,
+    source_event_ranges: Vec<Value>,
 }
 
 impl ContextCompactionPlan {
@@ -31,6 +34,8 @@ impl ContextCompactionPlan {
             "threshold_chars": self.threshold_chars,
             "trigger_codes": self.trigger_codes,
             "source_ref_count": self.source_refs.len(),
+            "source_task_count": self.source_task_ids.len(),
+            "source_event_range": self.source_event_range,
         })
     }
 }
@@ -81,7 +86,134 @@ pub(crate) fn plan_agent_loop_context_compaction(
         threshold_chars: CONTEXT_COMPACTION_THRESHOLD_CHARS,
         trigger_codes,
         source_refs,
+        source_task_ids: bundle.context_source_task_ids.clone(),
+        source_event_range: json!({"start": Value::Null, "end": Value::Null}),
+        source_event_ranges: Vec::new(),
     })
+}
+
+pub(crate) fn hydrate_agent_loop_context_compaction_plan(
+    state: &AppState,
+    task: &ClaimedTask,
+    plan: &mut ContextCompactionPlan,
+) {
+    let Ok(db) = state.core.db.get() else {
+        return;
+    };
+    let mut max_generation = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            [&task.task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+        .as_deref()
+        .map(max_compaction_generation)
+        .unwrap_or(0);
+    if plan.source_task_ids.is_empty() {
+        plan.generation = plan.generation.max(max_generation.saturating_add(1));
+        return;
+    }
+    let event_stream_available = db
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'task_event_stream'
+            )",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|present| present != 0)
+        .unwrap_or(false);
+    let mut source_rows = Vec::new();
+    for task_id in &plan.source_task_ids {
+        let task_row = db.query_row(
+            "SELECT
+                CAST(created_at AS TEXT),
+                CAST(updated_at AS TEXT),
+                result_json
+             FROM tasks
+             WHERE task_id = ?1
+             LIMIT 1",
+            [task_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        );
+        let Ok((created_at, updated_at, result_json)) = task_row else {
+            continue;
+        };
+        if let Some(result_json) = result_json.as_deref() {
+            max_generation = max_generation.max(max_compaction_generation(result_json));
+        }
+        let (start_seq, end_seq) = if event_stream_available {
+            db.query_row(
+                "SELECT MIN(seq), MAX(seq)
+                 FROM task_event_stream
+                 WHERE task_id = ?1",
+                [task_id],
+                |row| Ok((row.get::<_, Option<u64>>(0)?, row.get::<_, Option<u64>>(1)?)),
+            )
+            .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
+        source_rows.push(json!({
+            "task_id": task_id,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "start_seq": start_seq,
+            "end_seq": end_seq,
+        }));
+    }
+    plan.generation = plan.generation.max(max_generation.saturating_add(1));
+    plan.source_event_ranges = source_rows.clone();
+    plan.source_event_range = json!({
+        "start": source_rows.first().map(source_range_start).unwrap_or(Value::Null),
+        "end": source_rows.last().map(source_range_end).unwrap_or(Value::Null),
+    });
+}
+
+fn source_range_start(source: &Value) -> Value {
+    json!({
+        "task_id": source.get("task_id"),
+        "timestamp": source.get("created_at"),
+        "event_seq": source.get("start_seq"),
+    })
+}
+
+fn source_range_end(source: &Value) -> Value {
+    json!({
+        "task_id": source.get("task_id"),
+        "timestamp": source.get("updated_at"),
+        "event_seq": source.get("end_seq"),
+    })
+}
+
+fn max_compaction_generation(result_json: &str) -> u64 {
+    let Ok(result) = serde_json::from_str::<Value>(result_json) else {
+        return 0;
+    };
+    const RECORD_POINTERS: [&str; 6] = [
+        "/task_journal/summary/transcript_compaction_records",
+        "/task_journal/trace/transcript_compaction_records",
+        "/result/task_journal/summary/transcript_compaction_records",
+        "/result/task_journal/trace/transcript_compaction_records",
+        "/final_result_json/task_journal/summary/transcript_compaction_records",
+        "/final_result_json/task_journal/trace/transcript_compaction_records",
+    ];
+    RECORD_POINTERS
+        .iter()
+        .filter_map(|pointer| result.pointer(pointer).and_then(Value::as_array))
+        .flat_map(|records| records.iter())
+        .filter_map(|record| record.get("generation").and_then(Value::as_u64))
+        .max()
+        .unwrap_or(0)
 }
 
 pub(crate) fn apply_agent_loop_context_compaction(
@@ -189,8 +321,9 @@ pub(super) fn apply_context_compaction_with_inputs(
         "schema_version": 1,
         "compaction_id": compaction_id,
         "generation": plan.generation,
-        "source_task_ids": [task_id],
-        "source_event_range": {"start": Value::Null, "end": Value::Null},
+        "source_task_ids": plan.source_task_ids,
+        "source_event_range": plan.source_event_range,
+        "source_event_ranges": plan.source_event_ranges,
         "summary_kind": "deterministic_context_budget",
         "compaction_source": if model_summary_attached { "model_assisted" } else { "deterministic_fallback" },
         "model_status_code": model_status_code,

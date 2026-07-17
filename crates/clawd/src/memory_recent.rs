@@ -568,6 +568,12 @@ fn query_recent_terminal_ask_turn_for_chat(
     Ok(None)
 }
 
+struct RecentTerminalAskTurn {
+    task_id: String,
+    user_text: String,
+    assistant_text: String,
+}
+
 fn query_recent_terminal_ask_turns_for_chat(
     state: &AppState,
     db: &Connection,
@@ -575,10 +581,10 @@ fn query_recent_terminal_ask_turns_for_chat(
     chat_id: i64,
     user_key: &str,
     limit: usize,
-) -> anyhow::Result<Vec<(String, String)>> {
+) -> anyhow::Result<Vec<RecentTerminalAskTurn>> {
     let limit = limit.max(1).min(64);
     let mut stmt = db.prepare(
-        "SELECT payload_json, result_json, error_text, status
+        "SELECT task_id, payload_json, result_json, error_text, status
          FROM tasks
          WHERE user_id = ?1
            AND chat_id = ?2
@@ -591,14 +597,15 @@ fn query_recent_terminal_ask_turns_for_chat(
     let rows = stmt.query_map(params![user_id, chat_id, user_key, limit as i64], |row| {
         Ok((
             row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?,
+            row.get::<_, String>(1)?,
             row.get::<_, Option<String>>(2)?,
-            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, String>(4)?,
         ))
     })?;
-    let mut out: Vec<(String, String)> = Vec::new();
+    let mut out = Vec::new();
     for row in rows {
-        let (payload_json, result_json, error_text, status) = row?;
+        let (task_id, payload_json, result_json, error_text, status) = row?;
         let Some(user_text) = extract_last_turn_user_text_from_payload(&payload_json) else {
             continue;
         };
@@ -619,7 +626,11 @@ fn query_recent_terminal_ask_turns_for_chat(
         if assistant_text.trim().is_empty() {
             continue;
         }
-        out.push((user_text, assistant_text));
+        out.push(RecentTerminalAskTurn {
+            task_id,
+            user_text,
+            assistant_text,
+        });
     }
     Ok(out)
 }
@@ -652,7 +663,7 @@ fn format_last_turn_full_context(
     }
 }
 
-pub(crate) fn build_recent_turns_full_context(
+pub(crate) fn build_recent_turns_full_context_with_sources(
     state: &AppState,
     user_key: Option<&str>,
     user_id: i64,
@@ -660,11 +671,11 @@ pub(crate) fn build_recent_turns_full_context(
     max_turns: usize,
     max_segment_chars: usize,
     max_total_chars: usize,
-) -> String {
+) -> (String, Vec<String>) {
     let user_key = effective_user_key(user_key, user_id, chat_id);
     let db = match state.core.db.get() {
         Ok(db) => db,
-        Err(_) => return "<none>".to_string(),
+        Err(_) => return ("<none>".to_string(), Vec::new()),
     };
     let max_turns = max_turns.max(1).min(64);
     let max_segment_chars = max_segment_chars.max(128);
@@ -674,13 +685,15 @@ pub(crate) fn build_recent_turns_full_context(
     )
     .unwrap_or_default();
     if turns.is_empty() {
-        return "<none>".to_string();
+        return ("<none>".to_string(), Vec::new());
     }
     let mut out = String::from("### RECENT_TURNS_FULL\n");
-    for (idx, (user_text, assistant_text)) in turns.iter().enumerate() {
+    let mut source_task_ids = Vec::new();
+    for (idx, turn) in turns.iter().enumerate() {
         let relative = -((idx as i64) + 1);
-        let user_view = utf8_safe_prefix(user_text.trim(), max_segment_chars).to_string();
-        let assistant_view = utf8_safe_prefix(assistant_text.trim(), max_segment_chars).to_string();
+        let user_view = utf8_safe_prefix(turn.user_text.trim(), max_segment_chars).to_string();
+        let assistant_view =
+            utf8_safe_prefix(turn.assistant_text.trim(), max_segment_chars).to_string();
         let turn_block = format!(
             "[TURN {}]\nUser: {}\nAssistant: {}\n[/TURN]\n",
             relative, user_view, assistant_view
@@ -689,11 +702,13 @@ pub(crate) fn build_recent_turns_full_context(
             break;
         }
         out.push_str(&turn_block);
+        source_task_ids.push(turn.task_id.clone());
     }
     if out.trim() == "### RECENT_TURNS_FULL" {
-        "<none>".to_string()
+        ("<none>".to_string(), Vec::new())
     } else {
-        out
+        source_task_ids.reverse();
+        (out, source_task_ids)
     }
 }
 

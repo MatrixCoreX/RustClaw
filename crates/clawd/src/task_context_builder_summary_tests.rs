@@ -18,10 +18,11 @@ fn empty_prompt_memory_context() -> crate::memory::service::PromptMemoryContext 
 }
 
 #[test]
-fn summary_projects_first_class_compaction_record() {
+fn summary_keeps_compaction_records_out_of_string_projection() {
     let bundle = TaskContextBundle {
         raw_sources: TaskContextRawSources::default(),
         planner_view: PlannerContextView::default(),
+        context_source_task_ids: Vec::new(),
         execution_view: Some(ExecutionContextView {
             budget_tier: ExecutionContextBudgetTier::Light,
             memory_ctx: empty_prompt_memory_context(),
@@ -50,14 +51,7 @@ fn summary_projects_first_class_compaction_record() {
     let (_, budget_tail) = summary
         .split_once("context_budget_report=")
         .expect("summary should include context budget report");
-    let (budget_json, _) = budget_tail
-        .split_once(" transcript_compaction_records=")
-        .expect("context budget should precede compaction records");
-    let budget: serde_json::Value = serde_json::from_str(budget_json).unwrap();
-    let (_, tail) = summary
-        .split_once("transcript_compaction_records=")
-        .expect("summary should include compaction records field");
-    let records: serde_json::Value = serde_json::from_str(tail.trim()).unwrap();
+    let budget: serde_json::Value = serde_json::from_str(budget_tail.trim()).unwrap();
 
     assert_eq!(
         budget["context_input_inventory"]["inputs"][1]["input_kind"],
@@ -72,11 +66,21 @@ fn summary_projects_first_class_compaction_record() {
         "goal_fields"
     );
     assert_eq!(budget["compaction_triggers"][0], "over_budget");
-    assert_eq!(records[0]["summary_kind"], "deterministic_context_budget");
-    assert_eq!(records[0]["active_goal_refs"][0], "goal_context");
-    assert_eq!(records[0]["source_refs"][0]["ref"], "recent_turns_full");
+    assert!(!summary.contains("transcript_compaction_records="));
     assert_eq!(
-        records[0]["risk_flags"][1],
+        bundle.compaction_records[0]["summary_kind"],
+        "deterministic_context_budget"
+    );
+    assert_eq!(
+        bundle.compaction_records[0]["active_goal_refs"][0],
+        "goal_context"
+    );
+    assert_eq!(
+        bundle.compaction_records[0]["source_refs"][0]["ref"],
+        "recent_turns_full"
+    );
+    assert_eq!(
+        bundle.compaction_records[0]["risk_flags"][1],
         "old_assistant_output_not_instruction"
     );
 }
@@ -86,6 +90,7 @@ fn summary_marks_long_session_context_compaction_trigger() {
     let bundle = TaskContextBundle {
         raw_sources: TaskContextRawSources::default(),
         planner_view: PlannerContextView::default(),
+        context_source_task_ids: Vec::new(),
         execution_view: Some(ExecutionContextView {
             budget_tier: ExecutionContextBudgetTier::Full,
             memory_ctx: empty_prompt_memory_context(),
@@ -108,10 +113,7 @@ fn summary_marks_long_session_context_compaction_trigger() {
     let (_, budget_tail) = summary
         .split_once("context_budget_report=")
         .expect("summary should include context budget report");
-    let (budget_json, _) = budget_tail
-        .split_once(" transcript_compaction_records=")
-        .expect("context budget should precede compaction records");
-    let budget: serde_json::Value = serde_json::from_str(budget_json).unwrap();
+    let budget: serde_json::Value = serde_json::from_str(budget_tail.trim()).unwrap();
 
     assert_eq!(budget["compaction_triggers"][0], "long_session");
     assert_eq!(budget["budget_tier"], "full");

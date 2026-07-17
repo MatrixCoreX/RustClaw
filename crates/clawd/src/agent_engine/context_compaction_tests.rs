@@ -9,6 +9,7 @@ fn source_bundle_fixture() -> crate::task_context_builder::TaskContextBundle {
     crate::task_context_builder::TaskContextBundle {
         raw_sources: crate::task_context_builder::TaskContextRawSources::default(),
         planner_view: crate::task_context_builder::PlannerContextView::default(),
+        context_source_task_ids: Vec::new(),
         execution_view: Some(crate::task_context_builder::ExecutionContextView {
             budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Full,
             memory_ctx: crate::memory::service::PromptMemoryContext {

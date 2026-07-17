@@ -36,6 +36,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         &prepared_flow.planner_user_request,
         agent_run_context,
         &claimed.task_checkpoint,
+        &prepared_flow.initial_task_observations,
     )
     .await;
 

@@ -72,6 +72,10 @@ const MAX_OBSERVED_MULTILINE_EXCERPT_LINES: usize = 12;
 const MAX_OBSERVED_ARRAY_SAMPLES: usize = 3;
 const MAX_OBSERVED_ARRAY_VALUE_SAMPLES: usize = 48;
 
+pub(crate) fn context_compaction_record_observation(record: Value) -> Value {
+    task_journal_context_compaction::record_observation(record)
+}
+
 pub(crate) fn agent_loop_round_plan_contract_envelope(plan: &crate::PlanResult) -> Value {
     agent_loop_round_plan_contract_envelope_json(plan)
 }
@@ -1010,7 +1014,7 @@ impl TaskJournal {
             "input_text": crate::truncate_for_log(&self.input_text),
             "context_bundle_summary": self.context_bundle_summary.as_deref().map(crate::truncate_for_log),
             "context_budget_report": task_journal_context_budget::context_budget_report_json(self.context_bundle_summary.as_deref()),
-            "transcript_compaction_records": task_journal_context_compaction::transcript_compaction_records_json(self.context_bundle_summary.as_deref()),
+            "transcript_compaction_records": task_journal_context_compaction::transcript_compaction_records_json(&self.task_observations),
             "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "output_contract": self.output_contract.as_ref().map(output_contract_json),
@@ -1052,7 +1056,7 @@ impl TaskJournal {
                 .map(rollout_attribution_json)
                 .collect::<Vec<_>>(),
             "memory_trace": self.memory_trace.clone(),
-            "transcript_compaction_records": task_journal_context_compaction::transcript_compaction_records_json(self.context_bundle_summary.as_deref()),
+            "transcript_compaction_records": task_journal_context_compaction::transcript_compaction_records_json(&self.task_observations),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "output_contract": self.output_contract.as_ref().map(output_contract_json),
             "evidence_policy": self

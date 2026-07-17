@@ -294,7 +294,7 @@ fn append_context_budget_events(seq: &mut u64, events: &mut Vec<Value>, journal:
         events.push(task_event_json(seq, "context_budget", report));
     }
     let Some(records) = super::task_journal_context_compaction::transcript_compaction_records_json(
-        journal.context_bundle_summary.as_deref(),
+        &journal.task_observations,
     ) else {
         return;
     };

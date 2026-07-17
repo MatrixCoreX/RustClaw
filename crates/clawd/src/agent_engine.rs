@@ -1058,6 +1058,7 @@ pub(crate) async fn run_agent_with_tools_seeded(
     user_request: &str,
     agent_run_context: Option<AgentRunContext>,
     resume_checkpoint: &crate::task_lifecycle::TaskCheckpoint,
+    initial_task_observations: &[Value],
 ) -> Result<AskReply, String> {
     info!(
         "run_agent_with_tools_seeded: task_id={} user_id={} chat_id={} checkpoint_id={} goal={}",
@@ -1076,6 +1077,7 @@ pub(crate) async fn run_agent_with_tools_seeded(
             user_text,
             agent_run_context.as_ref(),
             Some(resume_checkpoint),
+            initial_task_observations,
         )
         .await;
     }

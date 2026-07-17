@@ -137,6 +137,7 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
     let bundle = TaskContextBundle {
         raw_sources: TaskContextRawSources::default(),
         planner_view: PlannerContextView::default(),
+        context_source_task_ids: Vec::new(),
         execution_view: Some(ExecutionContextView {
             budget_tier: ExecutionContextBudgetTier::Full,
             memory_ctx: empty_prompt_memory_context(),
