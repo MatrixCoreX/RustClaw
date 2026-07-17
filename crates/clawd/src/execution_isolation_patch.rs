@@ -248,14 +248,7 @@ pub(crate) fn cleanup_child_worktree_artifacts(
         CapabilityIsolationProfile::LocalWorktree,
     )?;
     super::cleanup_execution_isolation(&plan)?;
-    let artifact_path =
-        super::isolation_artifact_dir(workspace_root).join(format!("{}.patch", plan.task_key));
-    let artifact_removed = if artifact_path.exists() {
-        fs::remove_file(&artifact_path).context("remove_child_patch_artifact")?;
-        true
-    } else {
-        false
-    };
+    let artifact_removed = super::remove_child_patch_artifact(&plan)?;
     Ok(json!({
         "status": "complete",
         "cleanup_ref": plan.cleanup_ref,

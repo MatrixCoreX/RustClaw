@@ -11,6 +11,8 @@ pub(super) struct ChildTaskExecutionScope {
     scoped_state: Option<AppState>,
     permission_profile: Option<String>,
     runtime: Option<ExecutionIsolationRuntime>,
+    child_task_id: Option<String>,
+    parent_owned: bool,
 }
 
 impl ChildTaskExecutionScope {
@@ -24,6 +26,8 @@ impl ChildTaskExecutionScope {
                 scoped_state: None,
                 permission_profile: None,
                 runtime: None,
+                child_task_id: None,
+                parent_owned: false,
             });
         }
         let permission_profile = payload
@@ -37,6 +41,8 @@ impl ChildTaskExecutionScope {
                 scoped_state: None,
                 permission_profile: Some(permission_profile.to_string()),
                 runtime: None,
+                child_task_id: None,
+                parent_owned: false,
             }),
             "local_worktree" => {
                 let plan = crate::execution_isolation::plan_execution_isolation(
@@ -58,6 +64,8 @@ impl ChildTaskExecutionScope {
                     scoped_state: Some(scoped_state),
                     permission_profile: Some(permission_profile.to_string()),
                     runtime: Some(runtime),
+                    child_task_id: Some(task.task_id.clone()),
+                    parent_owned: false,
                 })
             }
             _ => bail!("child_permission_profile_unsupported"),
@@ -121,9 +129,41 @@ impl ChildTaskExecutionScope {
         }))
     }
 
+    pub(super) fn retain_for_parent_decision(&mut self) {
+        if self.runtime.is_some() {
+            self.parent_owned = true;
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn plan(&self) -> Option<&ExecutionIsolationPlan> {
         self.runtime.as_ref().map(|runtime| &runtime.plan)
+    }
+}
+
+impl Drop for ChildTaskExecutionScope {
+    fn drop(&mut self) {
+        if self.parent_owned || self.runtime.is_none() {
+            return;
+        }
+        let Some(task_id) = self.child_task_id.as_deref() else {
+            return;
+        };
+        let workspace_root = &self
+            .runtime
+            .as_ref()
+            .expect("checked child runtime")
+            .plan
+            .workspace_root;
+        if let Err(error) =
+            crate::execution_isolation::cleanup_child_worktree_artifacts(workspace_root, task_id)
+        {
+            tracing::warn!(
+                task_id,
+                error = %error,
+                "child_scope_cleanup_failed"
+            );
+        }
     }
 }
 
