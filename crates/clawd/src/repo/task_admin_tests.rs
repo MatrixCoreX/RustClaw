@@ -293,11 +293,41 @@ fn resume_task_with_input_records_structured_resume_metadata() {
     assert_eq!(lifecycle["resume_input"]["user_message_present"], true);
     assert_eq!(lifecycle["resume_input"]["user_message_char_count"], 28);
     assert_eq!(
+        lifecycle["resume_input"]["user_message"],
+        "continue with tighter budget"
+    );
+    assert_eq!(
         lifecycle["resume_input"]["new_constraints"]["budget_profile"],
         "short"
     );
     assert!(lifecycle["resume_input"].get("text").is_none());
     assert!(lifecycle["resume_input"].get("error_text").is_none());
+}
+
+#[test]
+fn resume_task_with_input_rejects_oversized_steering_message() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_running_task(
+        &state,
+        &task_id,
+        &paused_checkpoint_result("ckpt-oversized-steering", 1),
+    );
+
+    let error = resume_task_with_input(
+        &state,
+        TaskResumeControlInput {
+            task_id,
+            checkpoint_id: Some("ckpt-oversized-steering".to_string()),
+            resume_trigger: crate::task_lifecycle::ResumeTrigger::UserFollowup,
+            resume_reason: Some("manual_resume".to_string()),
+            user_message: Some("x".repeat(8_001)),
+            new_constraints: None,
+        },
+    )
+    .expect_err("oversized steering input must fail");
+
+    assert_eq!(error.to_string(), "resume_user_message_too_large");
 }
 
 #[test]

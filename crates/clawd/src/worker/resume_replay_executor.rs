@@ -1,4 +1,6 @@
 use anyhow::Result;
+use rusqlite::OptionalExtension;
+use serde_json::json;
 use serde_json::Value;
 use tracing::info;
 
@@ -13,6 +15,11 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     }
 
     let mut payload: Value = serde_json::from_str(&claimed.task.payload_json)?;
+    if let Some(resume_input) =
+        load_resume_steering_input(state, &claimed.task_id, &claimed.checkpoint_id)?
+    {
+        apply_resume_steering_prompt(&mut payload, &resume_input);
+    }
     let prepared_input = super::prepare_ask_input(state, &claimed.task, &mut payload).await;
     let prompt = prepared_input.prompt;
     let source = prepared_input.source;
@@ -43,6 +50,78 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     Ok(super::runtime_support::seeded_agent_loop_terminal_dispatch_result_payload(claimed, result))
 }
 
+fn load_resume_steering_input(
+    state: &AppState,
+    task_id: &str,
+    checkpoint_id: &str,
+) -> Result<Option<Value>> {
+    let db = state.core.db.get()?;
+    let raw_result = db
+        .query_row(
+            "SELECT result_json
+             FROM tasks
+             WHERE task_id = ?1
+               AND status = 'running'
+             LIMIT 1",
+            rusqlite::params![task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(result) = raw_result
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+    else {
+        return Ok(None);
+    };
+    let input = result.pointer("/task_lifecycle/resume_input");
+    if input
+        .and_then(|value| value.get("checkpoint_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        != Some(checkpoint_id)
+    {
+        return Ok(None);
+    }
+    Ok(input
+        .filter(|value| value.is_object())
+        .filter(|value| {
+            value
+                .get("user_message")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty())
+                || value.get("new_constraints").is_some()
+        })
+        .cloned())
+}
+
+fn apply_resume_steering_prompt(payload: &mut Value, resume_input: &Value) {
+    let original_request = payload
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let mut envelope = json!({
+        "protocol": "rustclaw.resume_input.v1",
+        "original_request": original_request,
+    });
+    if let Some(object) = envelope.as_object_mut() {
+        if let Some(user_message) = resume_input
+            .get("user_message")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            object.insert("user_message".to_string(), json!(user_message));
+        }
+        if let Some(constraints) = resume_input.get("new_constraints") {
+            object.insert("new_constraints".to_string(), constraints.clone());
+        }
+    }
+    if let Some(payload) = payload.as_object_mut() {
+        payload.insert("text".to_string(), Value::String(envelope.to_string()));
+    }
+}
+
 fn claimed_seeded_agent_loop_dispatch_ready(
     claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
 ) -> bool {
@@ -64,3 +143,7 @@ fn claimed_seeded_agent_loop_dispatch_ready(
         && claimed.dispatch_claim.get("text").is_none()
         && claimed.dispatch_claim.get("error_text").is_none()
 }
+
+#[cfg(test)]
+#[path = "resume_replay_executor_tests.rs"]
+mod tests;

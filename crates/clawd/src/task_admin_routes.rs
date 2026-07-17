@@ -61,6 +61,13 @@ pub(super) struct PauseTaskByIdRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct RetryChildTaskByIdRequest {
+    parent_task_id: String,
+    child_task_id: String,
+    revised_goal: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct GoalByTaskIdRequest {
     task_id: String,
     operation: String,
@@ -448,6 +455,12 @@ pub(super) async fn resume_task_by_id(
         Ok(None) => super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_resumable"),
         Err(err) => {
             error!("task_resume_by_id_failed err={}", err);
+            if err.to_string() == "resume_user_message_too_large" {
+                return super::api_err::<serde_json::Value>(
+                    StatusCode::BAD_REQUEST,
+                    "resume_user_message_too_large",
+                );
+            }
             super::api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "task_resume_failed",
@@ -544,6 +557,93 @@ pub(super) async fn pause_task_by_id(
                 "task_pause_failed",
             )
         }
+    }
+}
+
+pub(super) async fn retry_child_task_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<RetryChildTaskByIdRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let parent = match authorized_task_admin_target_by_id(&state, &headers, &req.parent_task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    let child = match authorized_task_admin_target_by_id(&state, &headers, &req.child_task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    if parent.user_id != child.user_id || parent.chat_id != child.chat_id {
+        return super::api_err::<serde_json::Value>(
+            StatusCode::CONFLICT,
+            "child_parent_actor_mismatch",
+        );
+    }
+    match crate::repo::retry_child_task_with_revised_goal(
+        &state,
+        &parent.task_id,
+        &child.task_id,
+        &req.revised_goal,
+    ) {
+        Ok(Some(update)) => {
+            crate::task_event_transport::publish_task_status_projection(
+                &state,
+                &update.child_task_id,
+            );
+            crate::task_event_transport::publish_task_status_projection(
+                &state,
+                &update.parent_task_id,
+            );
+            super::api_ok(json!({
+                "status": "child_task_retry_queued",
+                "parent_task_id": update.parent_task_id,
+                "previous_child_task_id": update.previous_child_task_id,
+                "child_task_id": update.child_task_id,
+                "retry_index": update.retry_index,
+                "task_lifecycle": update.lifecycle,
+            }))
+        }
+        Ok(None) => {
+            super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "child_task_not_retryable")
+        }
+        Err(error) => {
+            let error_code = child_retry_error_code(&error);
+            let status = if matches!(
+                error_code,
+                "parent_task_id_invalid"
+                    | "child_task_id_invalid"
+                    | "revised_goal_required"
+                    | "revised_goal_too_large"
+            ) {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::CONFLICT
+            };
+            error!(
+                "child_task_retry_failed parent_task_id={} child_task_id={} error_code={}",
+                parent.task_id, child.task_id, error_code
+            );
+            super::api_err::<serde_json::Value>(status, error_code)
+        }
+    }
+}
+
+fn child_retry_error_code(error: &anyhow::Error) -> &'static str {
+    match error.to_string().as_str() {
+        "parent_task_id_invalid" => "parent_task_id_invalid",
+        "child_task_id_invalid" => "child_task_id_invalid",
+        "revised_goal_required" => "revised_goal_required",
+        "revised_goal_too_large" => "revised_goal_too_large",
+        "child_task_not_retryable" => "child_task_not_retryable",
+        "task_not_subagent_child" => "task_not_subagent_child",
+        "child_parent_mismatch" => "child_parent_mismatch",
+        "parent_task_missing" => "parent_task_missing",
+        "child_parent_actor_mismatch" => "child_parent_actor_mismatch",
+        "parent_task_not_active" => "parent_task_not_active",
+        "child_retry_limit_exceeded" => "child_retry_limit_exceeded",
+        "child_retry_history_limit_exceeded" => "child_retry_history_limit_exceeded",
+        "parent_task_retry_update_conflict" => "parent_task_retry_update_conflict",
+        _ => "child_task_retry_failed",
     }
 }
 

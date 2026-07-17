@@ -475,6 +475,14 @@ fn parent_child_task_ids(parent_result: &Value) -> Vec<String> {
         &mut child_task_ids,
     );
     append_nested_child_task_ids(parent_result, &mut child_task_ids, 0);
+    let superseded = parent_result
+        .get("superseded_child_task_ids")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    child_task_ids.retain(|task_id| !superseded.contains(task_id.as_str()));
     child_task_ids
 }
 
@@ -700,6 +708,9 @@ fn child_terminal_lifecycle_projection(status: &str, payload: &Value) -> Value {
             .unwrap_or(false),
         "can_poll": false,
         "can_cancel": false,
+        "can_pause": false,
+        "can_steer": false,
+        "can_retry": matches!(status, "failed" | "timeout" | "canceled"),
     })
 }
 
@@ -771,6 +782,9 @@ fn queued_child_task_result(spec: &ChildTaskSpec) -> Value {
             "required": spec.required,
             "can_poll": true,
             "can_cancel": true,
+            "can_pause": false,
+            "can_steer": false,
+            "can_retry": false,
         },
     })
 }

@@ -188,7 +188,7 @@ pub(crate) use system_health::{
 use task_admin_routes::{
     cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks, goal_by_task_id,
     list_active_tasks, list_approval_scope_grants, list_automation_runs, pause_task_by_id,
-    resume_task_by_id, revoke_approval_scope_grant,
+    resume_task_by_id, retry_child_task_by_id, revoke_approval_scope_grant,
 };
 pub(crate) use worker::task_payload_value;
 use worker::{
@@ -828,6 +828,10 @@ async fn main() -> anyhow::Result<()> {
             post(revoke_approval_scope_grant),
         )
         .route("/tasks/pause-by-task-id", post(pause_task_by_id))
+        .route(
+            "/tasks/retry-child-by-task-id",
+            post(retry_child_task_by_id),
+        )
         .route("/tasks/goal-by-task-id", post(goal_by_task_id))
         .route("/admin/reload-skills", post(reload_skills_handler))
         .route("/admin/hooks/status", get(get_hook_status))

@@ -17,6 +17,7 @@ const TASK_CONTROL_KIND_RESUME: &str = "resume";
 const TASK_CONTROL_STATUS_PENDING: &str = "pending";
 const TASK_PAUSED_MESSAGE_KEY: &str = "clawd.task.pause_requested";
 const TASK_RESUMED_MESSAGE_KEY: &str = "clawd.task.resume_requested";
+const MAX_RESUME_USER_MESSAGE_CHARS: usize = 8_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskAdminTarget {
@@ -174,6 +175,13 @@ pub(crate) fn resume_task_with_input(
     state: &AppState,
     input: TaskResumeControlInput,
 ) -> anyhow::Result<Option<TaskControlUpdate>> {
+    if input
+        .user_message
+        .as_deref()
+        .is_some_and(|value| value.trim().chars().count() > MAX_RESUME_USER_MESSAGE_CHARS)
+    {
+        anyhow::bail!("resume_user_message_too_large");
+    }
     let now_ts = crate::now_ts_u64() as i64;
     update_paused_checkpoint_schedule(
         state,
@@ -862,6 +870,14 @@ fn task_resume_control_input_json(input: &TaskResumeControlInput, checkpoint_id:
             .filter(|value| !value.is_empty())
         {
             obj.insert("resume_reason".to_string(), json!(reason));
+        }
+        if let Some(user_message) = input
+            .user_message
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            obj.insert("user_message".to_string(), json!(user_message));
         }
         if let Some(constraints) = input.new_constraints.as_ref() {
             obj.insert("new_constraints".to_string(), constraints.clone());
