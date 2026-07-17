@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "answer_verifier_runtime/compacted_machine_ref_gap.rs"]
+mod compacted_machine_ref_gap;
 #[path = "answer_verifier_runtime/compound_listing_gap.rs"]
 mod compound_listing_gap;
 #[path = "answer_verifier_runtime/prompt_evidence_blocks.rs"]
@@ -7,6 +9,7 @@ mod prompt_evidence_blocks;
 #[path = "answer_verifier_runtime/structured_read_scalar_gap.rs"]
 mod structured_read_scalar_gap;
 
+use compacted_machine_ref_gap::local_compacted_machine_ref_answer_verifier_gap;
 pub(crate) use compound_listing_gap::local_compound_listing_answer_verifier_gap;
 pub(super) use compound_listing_gap::{
     journal_has_content_excerpt_observation, latest_observed_directory_structure_names,
@@ -32,6 +35,18 @@ pub(crate) async fn verify_answer_observe_only(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
+    if let Some(local_gap) =
+        local_compacted_machine_ref_answer_verifier_gap(journal, candidate_answer)
+    {
+        tracing::warn!(
+            task_id = %task.task_id,
+            missing_evidence_fields = ?local_gap.missing_evidence_fields,
+            answer_incomplete_reason = %local_gap.answer_incomplete_reason,
+            retry_instruction = %local_gap.retry_instruction,
+            "answer_verifier_local_compacted_machine_ref_gap"
+        );
+        return Some(local_gap);
+    }
     if !should_verify_answer(route_result, journal, candidate_answer) {
         return None;
     }
@@ -187,6 +202,10 @@ pub(crate) async fn verify_answer_observe_only(
     }
     Some(validation)
 }
+
+#[cfg(test)]
+#[path = "answer_verifier_runtime/compacted_machine_ref_gap_tests.rs"]
+mod compacted_machine_ref_gap_tests;
 
 fn verifier_gap_requires_visible_answer_repair(validation: &AnswerVerifierOut) -> bool {
     validation.missing_evidence_fields.iter().any(|field| {
