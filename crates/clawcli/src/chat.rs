@@ -14,6 +14,7 @@ pub(super) enum ChatControl<'a> {
     Detach,
     Cancel,
     Status,
+    Continue,
     Approve,
     ApproveScope,
     Deny,
@@ -65,6 +66,9 @@ pub(crate) fn run_chat(
                     } else {
                         println!("error_code=chat_task_missing");
                     }
+                }
+                ChatControl::Continue => {
+                    continue_current_task(base_url, key, &mut thread, jsonl_output)?;
                 }
                 ChatControl::Approve => {
                     decide_current_task_approval(
@@ -233,6 +237,30 @@ fn decide_current_task_approval(
     }
 }
 
+fn continue_current_task(
+    base_url: &str,
+    key: &str,
+    thread: &mut commands::ChatThreadState,
+    jsonl_output: bool,
+) -> Result<()> {
+    let Some(task_id) = thread.current_task_id.clone() else {
+        println!("error_code=chat_task_missing");
+        return Ok(());
+    };
+    let body = task::resume_task_by_id(
+        base_url,
+        key,
+        &task_id,
+        task::TaskResumeRequest {
+            resume_reason: Some("user_continue"),
+            ..Default::default()
+        },
+    )?;
+    output::print_json_pretty(&body);
+    crate::interrupt::reset();
+    follow_and_render_task(base_url, key, thread, jsonl_output)
+}
+
 fn wait_with_poll_fallback(base_url: &str, key: &str, task_id: &str) -> Result<bool> {
     loop {
         if crate::interrupt::requested() {
@@ -262,6 +290,7 @@ pub(super) fn chat_control(input: &str) -> Option<ChatControl<'_>> {
         ("/detach", None) => ChatControl::Detach,
         ("/cancel", None) => ChatControl::Cancel,
         ("/status", None) => ChatControl::Status,
+        ("/continue", None) => ChatControl::Continue,
         ("/approve", None) => ChatControl::Approve,
         ("/approve-scope", None) => ChatControl::ApproveScope,
         ("/deny", None) => ChatControl::Deny,

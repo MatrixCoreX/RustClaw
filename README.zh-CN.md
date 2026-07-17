@@ -437,7 +437,7 @@ flowchart TD
 - `clawcli tui --user-id <id> --chat-id <id>` 是同一 task API 上的终端控制台；加 `--once` 可输出单次 snapshot，加 `--task-id <task_id>` 可展示 selected task 的 `selected_progress` 和 `selected_summary`。
 - `clawcli session list/show/resume/archive/delete/fork` 会维护本地 session navigation store，只保存 `session_id`、`task_ids`、`active_goal_id`、`workspace_root`、checkpoint、event sequence、archive status 和 fork source 等 operator metadata，不作为自然语言路由来源。
 - `clawcli goal start/status/pause/resume/edit/clear` 管理结构化长任务 goal contract，包含 `objective`、`done_conditions`、`verification_commands`、constraints、checkpoint resume 字段和脱敏 control response。
-- 交互式 chat 中，`/approve` 只批准当前待确认动作一次，`/approve-scope` 只批准服务端给出的当前会话、精确 capability/resource 作用域，`/deny` 关闭待确认请求。`clawcli permission grants` 列出服务端 scope grant，`clawcli permission revoke <grant_id>` 立即撤销指定授权；浏览器 Tasks 页面使用同一套结构化选择和撤销 API。
+- 交互式 chat 中，`/continue` 从持久化线程状态恢复当前 background/checkpoint 任务，不需要复制 task id；`/approve` 只批准当前待确认动作一次，`/approve-scope` 只批准服务端给出的当前会话、精确 capability/resource 作用域，`/deny` 关闭待确认请求。`clawcli permission grants` 列出服务端 scope grant，`clawcli permission revoke <grant_id>` 立即撤销指定授权；浏览器 Tasks 页面使用同一套结构化选择和撤销 API。
 
 ```bash
 clawcli session list --user-id 1 --chat-id 1 --json
