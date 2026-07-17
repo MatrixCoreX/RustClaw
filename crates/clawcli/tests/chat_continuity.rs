@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 #[test]
-fn pty_chat_reconnects_approves_and_keeps_four_turns_in_one_thread() {
+fn pty_chat_reconnects_scoped_approval_and_keeps_four_turns_in_one_thread() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock clawd");
     let address = listener.local_addr().expect("mock address");
     let server = thread::spawn(move || run_mock_clawd(listener));
@@ -43,7 +43,7 @@ fn pty_chat_reconnects_approves_and_keeps_four_turns_in_one_thread() {
     let mut stdin = child.stdin.take().expect("PTY stdin");
     for line in [
         "inspect workspace",
-        "/approve",
+        "/approve-scope",
         "update one file",
         "run focused tests",
         "review the diff",
@@ -86,8 +86,104 @@ fn pty_chat_reconnects_approves_and_keeps_four_turns_in_one_thread() {
     }
     assert!(stdout.contains("\"seq\":1"), "{stdout}");
     assert!(stdout.contains("\"seq\":3"), "{stdout}");
-    assert!(stdout.contains("approval_grant_approved"), "{stdout}");
+    assert!(stdout.contains("approval_scope_grant_created"), "{stdout}");
     assert!(stdout.contains("turn-4-complete"), "{stdout}");
+}
+
+#[test]
+fn permission_commands_list_and_revoke_backend_scope_grants() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock clawd");
+    let address = listener.local_addr().expect("mock address");
+    let server = thread::spawn(move || {
+        let list = accept_request(&listener);
+        assert_eq!(list.path, "/v1/tasks/approval-grants");
+        respond_json(
+            list.stream,
+            &json!({
+                "ok": true,
+                "data": {
+                    "schema_version": 1,
+                    "count": 1,
+                    "grants": [{
+                        "grant_id": "scope-grant-1",
+                        "scope_kind": "session",
+                        "scope_fingerprint": "sha256:scope",
+                        "scope": {"entries": []},
+                        "channel": "ui",
+                        "chat_id": 7,
+                        "issued_at": 100,
+                        "expires_at": 200,
+                        "revoked_at": null,
+                        "use_count": 0,
+                        "last_used_at": null,
+                        "source_task_id": "task-1"
+                    }]
+                }
+            }),
+        );
+
+        let revoke = accept_request(&listener);
+        assert_eq!(revoke.path, "/v1/tasks/approval-grants/revoke");
+        assert_eq!(
+            parse_json_body(&revoke)["grant_id"],
+            Value::String("scope-grant-1".to_string())
+        );
+        respond_json(
+            revoke.stream,
+            &json!({
+                "ok": true,
+                "data": {
+                    "schema_version": 1,
+                    "status": "approval_scope_grant_revoked",
+                    "grant_id": "scope-grant-1"
+                }
+            }),
+        );
+    });
+
+    let list = Command::new(env!("CARGO_BIN_EXE_clawcli"))
+        .args([
+            "--base-url",
+            &format!("http://{address}"),
+            "--key",
+            "test-key",
+            "permission",
+            "grants",
+            "--json",
+        ])
+        .output()
+        .expect("run permission grants");
+    assert!(
+        list.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&list.stdout),
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let list_body: Value = serde_json::from_slice(&list.stdout).expect("list JSON");
+    assert_eq!(list_body["grants"][0]["grant_id"], "scope-grant-1");
+
+    let revoke = Command::new(env!("CARGO_BIN_EXE_clawcli"))
+        .args([
+            "--base-url",
+            &format!("http://{address}"),
+            "--key",
+            "test-key",
+            "permission",
+            "revoke",
+            "scope-grant-1",
+            "--json",
+        ])
+        .output()
+        .expect("run permission revoke");
+    assert!(
+        revoke.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&revoke.stdout),
+        String::from_utf8_lossy(&revoke.stderr)
+    );
+    let revoke_body: Value = serde_json::from_slice(&revoke.stdout).expect("revoke JSON");
+    assert_eq!(revoke_body["status"], "approval_scope_grant_revoked");
+    server.join().expect("mock clawd");
 }
 
 #[test]
@@ -251,17 +347,24 @@ fn run_mock_clawd(listener: TcpListener) {
     );
     assert_eq!(
         approval_body["approval_decision"],
-        Value::String("approve_once".to_string())
+        Value::String("always_for_scope".to_string())
     );
     respond_json(
         approval.stream,
         &json!({
             "ok": true,
             "data": {
-                "status": "approval_grant_approved",
+                "status": "approval_scope_grant_created",
                 "task_id": "task-1",
                 "approval_request_id": "approval-1",
-                "approval_decision": "approve_once"
+                "approval_decision": "always_for_scope",
+                "scope_grant": {
+                    "grant_id": "scope-grant-1",
+                    "scope_kind": "session",
+                    "scope_fingerprint": "sha256:scope",
+                    "issued_at": 100,
+                    "expires_at": 200
+                }
             }
         }),
     );

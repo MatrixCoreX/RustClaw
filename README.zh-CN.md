@@ -194,6 +194,37 @@ flowchart TD
 - `run_cmd` 会在 `command_policy` 下输出 `policy_authority`、`literal_command_token`、`command_arg_present`、`unresolved_runtime_template_present` 和命令 effect 标记。
 - 显式用户命令用 `_clawd_literal_command` 表达；否则 `run_cmd` 作为 planner 结构化命令参数处理，继续受 contract 与媒体产物 blocker 约束。
 - 有风险的本地代码或文件变更能力应在 registry metadata 中声明 isolation profile。`local_temp_workspace` 用于一次性预览、dry-run 和可通过 artifact refs 清理的生成产物；`local_worktree` 用于明确写入当前工作区的开发任务，必须通过 task evidence、changed-file refs 和 verification commands 展示。UI 和 CLI 渲染 `permission_decision.steps[].sandbox`、`workspace_scope` 与 `registry_policy` 机器字段，不从本地化文本里推断权限状态。
+- 确认决策使用闭合机器协议 `approve_once|always_for_scope|deny`。只有 registry 声明的本地工作区变更能力才能提供 `always_for_scope`，且作用域必须精确绑定 capability、effect 和资源；`run_cmd`、网络访问、外部发布、凭据访问、包安装和提权操作不得使用持久作用域授权。授权由 `clawd` 使用 HMAC 签名，绑定已认证 actor 与 channel/chat 会话，最长一小时失效，并由服务端负责存储、匹配、列出和撤销；CLI 或 UI 的本地状态本身不产生授权。
+
+权限与策略决策流程：
+
+```mermaid
+flowchart TD
+    A[Planner/runtime step<br/>call_capability / call_tool / call_skill] --> B[CapabilityResolver]
+    B --> C[Registry metadata<br/>risk + effect + required args + idempotency + dedup]
+    C --> D[PlanVerifier]
+    D --> E[PermissionDecision<br/>allowed / needs_confirmation / denied / dry_run_required]
+    E -->|allowed| F[Pre-tool hooks]
+    E -->|needs_confirmation| G[待确认请求<br/>精确 action + args + 可选安全 scope]
+    E -->|denied| H[结构化 blocker<br/>policy token + evidence refs]
+    E -->|dry_run_required| I[Dry-run execution path]
+    F --> J[Adapter preflight<br/>contract args + command_policy]
+    I --> J
+    J -->|ok| K[Executor / skill dispatcher]
+    J -->|blocked| L[RepairEnvelope 或 checkpoint<br/>机器 issue codes]
+    K --> M[Observation + policy evidence]
+    L --> N[Task journal event]
+    M --> N
+    G --> GA{闭合 decision token}
+    GA -->|approve_once| GB[Task-bound one-shot grant]
+    GA -->|always_for_scope| GC[签名 actor + session + capability<br/>effect + 精确 resource + expiry]
+    GA -->|deny| H
+    GB --> F
+    GC --> F
+    GC --> GD[服务端 list / revoke]
+    N --> O[UI / CLI permission panes<br/>原始 JSON 放在二级详情]
+    GD --> O
+```
 
 ## 自然语言契约边界
 
@@ -406,6 +437,7 @@ flowchart TD
 - `clawcli tui --user-id <id> --chat-id <id>` 是同一 task API 上的终端控制台；加 `--once` 可输出单次 snapshot，加 `--task-id <task_id>` 可展示 selected task 的 `selected_progress` 和 `selected_summary`。
 - `clawcli session list/show/resume/archive/delete/fork` 会维护本地 session navigation store，只保存 `session_id`、`task_ids`、`active_goal_id`、`workspace_root`、checkpoint、event sequence、archive status 和 fork source 等 operator metadata，不作为自然语言路由来源。
 - `clawcli goal start/status/pause/resume/edit/clear` 管理结构化长任务 goal contract，包含 `objective`、`done_conditions`、`verification_commands`、constraints、checkpoint resume 字段和脱敏 control response。
+- 交互式 chat 中，`/approve` 只批准当前待确认动作一次，`/approve-scope` 只批准服务端给出的当前会话、精确 capability/resource 作用域，`/deny` 关闭待确认请求。`clawcli permission grants` 列出服务端 scope grant，`clawcli permission revoke <grant_id>` 立即撤销指定授权；浏览器 Tasks 页面使用同一套结构化选择和撤销 API。
 
 ```bash
 clawcli session list --user-id 1 --chat-id 1 --json
@@ -450,6 +482,7 @@ flowchart LR
     E -->|waiting/background| G[resume.json + resume_hint]
     G --> H[continue / resume-task / pause-task / cancel-task]
     D --> I[events / logs / subagents / permission inspect]
+    I --> IA[permission grants / revoke<br/>服务端 scope state]
 ```
 
 ## 主要组件

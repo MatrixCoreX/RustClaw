@@ -60,6 +60,37 @@ export interface TaskQueryResponse {
   lifecycle?: TaskLifecycleProjection | null;
 }
 
+export type TaskApprovalDecision = "approve_once" | "always_for_scope" | "deny";
+
+export interface ApprovalScopeGrantView {
+  grant_id: string;
+  scope_kind: string;
+  scope_fingerprint: string;
+  scope: {
+    entries?: Array<{
+      capability?: string;
+      action?: string;
+      effect?: string;
+      resource_kind?: string;
+      resources?: string[];
+    }>;
+  } | null;
+  channel: string;
+  chat_id: number;
+  issued_at: number;
+  expires_at: number;
+  revoked_at?: number | null;
+  use_count: number;
+  last_used_at?: number | null;
+  source_task_id: string;
+}
+
+export interface ApprovalScopeGrantListResponse {
+  schema_version: number;
+  count: number;
+  grants: ApprovalScopeGrantView[];
+}
+
 export interface TaskEventEnvelope {
   schema_version: number;
   seq?: number;

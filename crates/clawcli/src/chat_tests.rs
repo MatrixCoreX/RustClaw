@@ -10,6 +10,10 @@ fn chat_controls_are_explicit_slash_protocol_not_natural_language() {
     assert_eq!(chat_control("/cancel"), Some(ChatControl::Cancel));
     assert_eq!(chat_control("/status"), Some(ChatControl::Status));
     assert_eq!(chat_control("/approve"), Some(ChatControl::Approve));
+    assert_eq!(
+        chat_control("/approve-scope"),
+        Some(ChatControl::ApproveScope)
+    );
     assert_eq!(chat_control("/deny"), Some(ChatControl::Deny));
     assert_eq!(
         chat_control("/attach task-123"),

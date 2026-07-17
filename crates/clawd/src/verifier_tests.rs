@@ -83,7 +83,7 @@ input_schema = { type = "object", required = ["action"], properties = { action =
 planner_capabilities = [
   { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"] },
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"] },
-  { name = "filesystem.write_file", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high" },
+  { name = "filesystem.write_file", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, package_install = false, privilege_escalation = false },
   { name = "filesystem.make_dir", action = "make_dir", effect = "mutate", required = ["path"], risk_level = "high" },
   { name = "filesystem.remove_path", action = "remove_path", effect = "mutate", required = ["path"], risk_level = "high" },
 ]

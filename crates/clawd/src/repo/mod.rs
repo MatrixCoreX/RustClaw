@@ -1,3 +1,4 @@
+pub(crate) mod approval_scope;
 pub(crate) mod audit;
 pub(crate) mod auth;
 pub(crate) mod child_patch;
@@ -10,6 +11,9 @@ pub(crate) mod task_mutation_ledger;
 pub(crate) mod task_resume_execution;
 pub(crate) mod tasks;
 
+pub(crate) use approval_scope::{
+    list_approval_scope_grants, match_approval_scope_grant, revoke_approval_scope_grant,
+};
 pub(crate) use audit::{insert_audit_log, insert_audit_log_raw};
 pub(crate) use auth::{
     attach_pending_channel_bind_session_install_flow, bind_channel_identity, create_auth_key,
@@ -37,7 +41,7 @@ pub(crate) use task_admin::{
     TaskResumeControlInput,
 };
 pub(crate) use task_approval::{
-    consume_task_approval_grant, decide_task_approval_request, TaskApprovalConsumeOutcome,
+    consume_task_approval_grant, decide_task_approval_request_for_actor, TaskApprovalConsumeOutcome,
 };
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_mutation_ledger::{

@@ -1163,6 +1163,12 @@ pub(crate) fn verify_plan(
             if outcome == crate::repo::TaskApprovalConsumeOutcome::Consumed {
                 issues.retain(|issue| issue.kind != VerifyIssueKind::ConfirmationRequired);
                 needs_confirmation = false;
+            } else if let Ok(Some(scope_grant)) =
+                crate::repo::match_approval_scope_grant(state, task, &binding)
+            {
+                approval_grant_decision = Some(scope_grant.decision_json(&binding));
+                issues.retain(|issue| issue.kind != VerifyIssueKind::ConfirmationRequired);
+                needs_confirmation = false;
             }
         }
     }

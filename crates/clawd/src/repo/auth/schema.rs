@@ -4,6 +4,7 @@ use tracing::info;
 pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)?;
     db.execute_batch(crate::WEBD_LOGIN_SQL)?;
+    crate::repo::approval_scope::ensure_approval_scope_grant_schema(db)?;
     db.execute_batch(include_str!(
         "../../../../../migrations/006_pending_channel_bind_sessions.sql"
     ))?;

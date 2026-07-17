@@ -550,6 +550,10 @@ export default function App() {
     taskControlSubmittingId,
     taskControlMessage,
     taskControlError,
+    approvalScopeGrants,
+    approvalScopeGrantsLoading,
+    approvalScopeGrantsError,
+    approvalScopeGrantRevokingId,
     interactionKind,
     setInteractionKind,
     interactionChannel,
@@ -577,6 +581,8 @@ export default function App() {
     setResumeDraftValue,
     submitResumeForTask,
     decideTaskApprovalById,
+    fetchApprovalScopeGrants,
+    revokeApprovalScopeGrant,
     cancelActiveTask,
     controlTaskById,
     controlTaskGoalById,
@@ -1747,6 +1753,12 @@ export default function App() {
               onResumeDraftChange={setResumeDraftValue}
               onSubmitResume={submitResumeForTask}
               onDecideTaskApproval={decideTaskApprovalById}
+              grants={approvalScopeGrants}
+              loading={approvalScopeGrantsLoading}
+              error={approvalScopeGrantsError}
+              revokingGrantId={approvalScopeGrantRevokingId}
+              onRefresh={fetchApprovalScopeGrants}
+              onRevoke={revokeApprovalScopeGrant}
               interactionKind={interactionKind}
               interactionChannel={interactionChannel}
               interactionAdapter={interactionAdapter}

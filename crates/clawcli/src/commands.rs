@@ -32,7 +32,8 @@ pub(crate) use llm_trace::run_llm_trace;
 pub(crate) use mcp::run_mcp;
 pub(crate) use models::{run_models_catalog, run_models_readiness};
 pub(crate) use permission::{
-    run_permission_capability, run_permission_explain, run_permission_inspect,
+    run_permission_capability, run_permission_explain, run_permission_grants,
+    run_permission_inspect, run_permission_revoke,
 };
 pub(crate) use run_skill::run_skill;
 pub(crate) use session::{

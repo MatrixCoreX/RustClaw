@@ -67,6 +67,11 @@ pub(super) struct GoalByTaskIdRequest {
     goal: Option<Value>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct RevokeApprovalScopeGrantRequest {
+    grant_id: String,
+}
+
 fn task_admin_sensitive_field_name(field: &str) -> bool {
     let normalized = field.trim().to_ascii_lowercase().replace(['-', '.'], "_");
     normalized == "key"
@@ -360,11 +365,20 @@ pub(super) async fn resume_task_by_id(
                 "approval_grant_explicit_decision_required",
             );
         };
-        return match crate::repo::decide_task_approval_request(
+        let actor_key = if decision == crate::approval_grant::ApprovalDecision::AlwaysForScope {
+            match require_task_admin_identity(&state, &headers) {
+                Ok((_, key)) => Some(key),
+                Err(resp) => return resp,
+            }
+        } else {
+            None
+        };
+        return match crate::repo::decide_task_approval_request_for_actor(
             &state,
             &target.task_id,
             request_id,
             decision,
+            actor_key.as_deref(),
         ) {
             Ok(Some(update)) => {
                 crate::task_event_transport::publish_task_status_projection(
@@ -372,7 +386,9 @@ pub(super) async fn resume_task_by_id(
                     &update.task_id,
                 );
                 super::api_ok(json!({
-                    "status": if update.decision == crate::approval_grant::ApprovalDecision::ApproveOnce {
+                    "status": if update.decision == crate::approval_grant::ApprovalDecision::AlwaysForScope {
+                        "approval_scope_grant_created"
+                    } else if update.decision.grants_execution() {
                         "approval_grant_approved"
                     } else {
                         "approval_request_denied"
@@ -381,13 +397,16 @@ pub(super) async fn resume_task_by_id(
                     "approval_request_id": update.request_id,
                     "approval_decision": update.decision.as_token(),
                     "expires_at": update.expires_at,
+                    "scope_grant": update.scope_grant,
                     "task_lifecycle": {
-                        "state": if update.decision == crate::approval_grant::ApprovalDecision::ApproveOnce {
+                        "state": if update.decision.grants_execution() {
                             "queued"
                         } else {
                             "failed"
                         },
-                        "reason_code": if update.decision == crate::approval_grant::ApprovalDecision::ApproveOnce {
+                        "reason_code": if update.decision == crate::approval_grant::ApprovalDecision::AlwaysForScope {
+                            "approval_scope_grant_created"
+                        } else if update.decision.grants_execution() {
                             "approval_grant_approved"
                         } else {
                             "approval_request_denied"
@@ -432,6 +451,66 @@ pub(super) async fn resume_task_by_id(
             super::api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "task_resume_failed",
+            )
+        }
+    }
+}
+
+pub(super) async fn list_approval_scope_grants(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let (_, actor_key) = match require_task_admin_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    match crate::repo::list_approval_scope_grants(&state, &actor_key) {
+        Ok(grants) => super::api_ok(json!({
+            "schema_version": 1,
+            "count": grants.len(),
+            "grants": grants,
+        })),
+        Err(err) => {
+            error!("approval_scope_grant_list_failed err={}", err);
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "approval_scope_grant_list_failed",
+            )
+        }
+    }
+}
+
+pub(super) async fn revoke_approval_scope_grant(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<RevokeApprovalScopeGrantRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let (_, actor_key) = match require_task_admin_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let grant_id = req.grant_id.trim();
+    if grant_id.is_empty() {
+        return super::api_err::<serde_json::Value>(
+            StatusCode::BAD_REQUEST,
+            "approval_scope_grant_id_required",
+        );
+    }
+    match crate::repo::revoke_approval_scope_grant(&state, &actor_key, grant_id) {
+        Ok(true) => super::api_ok(json!({
+            "schema_version": 1,
+            "status": "approval_scope_grant_revoked",
+            "grant_id": grant_id,
+        })),
+        Ok(false) => super::api_err::<serde_json::Value>(
+            StatusCode::NOT_FOUND,
+            "approval_scope_grant_not_found",
+        ),
+        Err(err) => {
+            error!("approval_scope_grant_revoke_failed err={}", err);
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "approval_scope_grant_revoke_failed",
             )
         }
     }

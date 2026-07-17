@@ -3,7 +3,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::Json;
 use serde_json::{json, Value};
 
-use super::{goal_by_task_id, resume_task_by_id, GoalByTaskIdRequest, ResumeTaskByIdRequest};
+use super::{
+    goal_by_task_id, list_approval_scope_grants, resume_task_by_id, revoke_approval_scope_grant,
+    GoalByTaskIdRequest, ResumeTaskByIdRequest, RevokeApprovalScopeGrantRequest,
+};
 
 const USER_KEY: &str = "goal-route-test-key";
 
@@ -104,6 +107,41 @@ fn set_pending_approval(state: &crate::AppState, task_id: &str, request_id: &str
         rusqlite::params![task_id, result.to_string()],
     )
     .expect("set pending approval");
+}
+
+fn set_pending_scope_approval(state: &crate::AppState, task_id: &str, request_id: &str) {
+    let expires_at = crate::now_ts_u64().saturating_add(300);
+    let result = json!({
+        "resume_context": {
+            "approval_request": {
+                "schema_version": 1,
+                "request_id": request_id,
+                "task_id": task_id,
+                "status": "pending",
+                "action_fingerprint": "sha256:action",
+                "arguments_hash": "sha256:args",
+                "expires_at": expires_at,
+                "scope_grant": {
+                    "available": true,
+                    "scope_kind": "session",
+                    "scope_fingerprint": "sha256:scope",
+                    "entries": [{
+                        "capability": "filesystem.remove_path",
+                        "action": "remove_path",
+                        "effect": "mutate",
+                        "resource_kind": "workspace_path",
+                        "resources": ["run/example.txt"]
+                    }]
+                }
+            }
+        }
+    });
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "UPDATE tasks SET status = 'failed', result_json = ?2 WHERE task_id = ?1",
+        rusqlite::params![task_id, result.to_string()],
+    )
+    .expect("set pending scope approval");
 }
 
 #[tokio::test]
@@ -316,4 +354,59 @@ async fn resume_failed_task_can_deny_the_exact_approval_request() {
         stored_result["resume_context"]["approval_request"]["status"],
         "denied"
     );
+}
+
+#[tokio::test]
+async fn scoped_approval_can_be_listed_and_revoked_by_the_same_actor() {
+    let task_id = "approval-route-scope";
+    let request_id = "approval-route-scope-1";
+    let state = state_with_goal_task(task_id, json!({"text": "task"}));
+    set_pending_scope_approval(&state, task_id, request_id);
+
+    let (status, Json(resp)) = resume_task_by_id(
+        State(state.clone()),
+        auth_headers(),
+        Json(ResumeTaskByIdRequest {
+            task_id: task_id.to_string(),
+            checkpoint_id: None,
+            resume_reason: None,
+            user_message: None,
+            new_constraints: None,
+            approval_request_id: Some(request_id.to_string()),
+            approval_decision: Some("always_for_scope".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let data = resp.data.expect("scope response");
+    assert_eq!(data["status"], "approval_scope_grant_created");
+    assert_eq!(data["task_lifecycle"]["state"], "queued");
+    let grant_id = data["scope_grant"]["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_string();
+
+    let (list_status, Json(list_resp)) =
+        list_approval_scope_grants(State(state.clone()), auth_headers()).await;
+    assert_eq!(list_status, StatusCode::OK);
+    let list = list_resp.data.expect("grant list");
+    assert_eq!(list["count"], 1);
+    assert_eq!(list["grants"][0]["grant_id"], grant_id);
+
+    let (revoke_status, Json(revoke_resp)) = revoke_approval_scope_grant(
+        State(state.clone()),
+        auth_headers(),
+        Json(RevokeApprovalScopeGrantRequest {
+            grant_id: grant_id.clone(),
+        }),
+    )
+    .await;
+    assert_eq!(revoke_status, StatusCode::OK);
+    assert_eq!(
+        revoke_resp.data.expect("revoke response")["status"],
+        "approval_scope_grant_revoked"
+    );
+
+    let (_, Json(list_resp)) = list_approval_scope_grants(State(state), auth_headers()).await;
+    assert!(list_resp.data.expect("grant list")["grants"][0]["revoked_at"].is_number());
 }
