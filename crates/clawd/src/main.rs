@@ -424,10 +424,14 @@ async fn main() -> anyhow::Result<()> {
         now_ts_u64(),
         isolation_cleanup_age_seconds,
     );
-    if isolation_cleanup.removed > 0 || !isolation_cleanup.errors.is_empty() {
+    if isolation_cleanup.removed > 0
+        || isolation_cleanup.artifacts_removed > 0
+        || !isolation_cleanup.errors.is_empty()
+    {
         info!(
-            "startup isolation cleanup removed={} skipped={} errors={} older_than_seconds={}",
+            "startup isolation cleanup removed={} artifacts_removed={} skipped={} errors={} older_than_seconds={}",
             isolation_cleanup.removed,
+            isolation_cleanup.artifacts_removed,
             isolation_cleanup.skipped,
             isolation_cleanup.errors.len(),
             isolation_cleanup_age_seconds

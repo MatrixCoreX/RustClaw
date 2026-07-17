@@ -211,11 +211,16 @@ async fn process_claimed_task_by_kind(
 ) -> anyhow::Result<()> {
     match task.kind.as_str() {
         "ask" => {
-            let child_scope =
+            let mut child_scope =
                 child_task_execution_scope::ChildTaskExecutionScope::prepare(state, task, payload)?;
-            process_ask_task(child_scope.state(state), task, payload).await?;
-            if repo::child_tasks::is_child_subagent_payload(payload) {
+            let process_result = process_ask_task(child_scope.state(state), task, payload).await;
+            if process_result.is_ok() && repo::child_tasks::is_child_subagent_payload(payload) {
+                let mut parent_owned_patch = false;
                 if let Some(projection) = child_scope.projection(state) {
+                    parent_owned_patch = projection
+                        .pointer("/patch_artifact/status")
+                        .and_then(Value::as_str)
+                        .is_some_and(|status| matches!(status, "ready" | "empty"));
                     repo::child_tasks::record_child_task_execution_scope(
                         state,
                         &task.task_id,
@@ -227,7 +232,11 @@ async fn process_claimed_task_by_kind(
                     &task.task_id,
                     payload,
                 )?;
+                if parent_owned_patch {
+                    child_scope.retain_for_parent_decision();
+                }
             }
+            process_result?;
         }
         "run_skill" => {
             process_run_skill_task(state, task, payload).await?;

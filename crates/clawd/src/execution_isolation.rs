@@ -48,6 +48,7 @@ pub(crate) struct ExecutionIsolationRuntime {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub(crate) struct IsolationCleanupReport {
     pub removed: usize,
+    pub artifacts_removed: usize,
     pub skipped: usize,
     pub errors: Vec<String>,
 }
@@ -214,6 +215,7 @@ pub(crate) fn cleanup_abandoned_isolation_workspaces(
         older_than_seconds,
         &mut report,
     );
+    cleanup_abandoned_patch_artifacts(workspace_root, now_unix, older_than_seconds, &mut report);
     report
 }
 
@@ -437,9 +439,82 @@ fn cleanup_abandoned_family(
             requires_cleanup: true,
         };
         match cleanup_execution_isolation(&plan) {
-            Ok(()) => report.removed += 1,
+            Ok(()) => {
+                report.removed += 1;
+                if creation_kind == "create_local_git_worktree" {
+                    if let Err(err) = remove_child_patch_artifact(&plan) {
+                        report.errors.push(err.to_string());
+                    }
+                }
+            }
             Err(err) => report.errors.push(err.to_string()),
         }
+    }
+}
+
+fn cleanup_abandoned_patch_artifacts(
+    workspace_root: &Path,
+    now_unix: u64,
+    older_than_seconds: u64,
+    report: &mut IsolationCleanupReport,
+) {
+    let artifact_root = isolation_artifact_dir(workspace_root);
+    let Ok(entries) = fs::read_dir(&artifact_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            report.skipped += 1;
+            continue;
+        };
+        if path.extension().and_then(|value| value.to_str()) != Some("patch")
+            || !(metadata.file_type().is_file() || metadata.file_type().is_symlink())
+        {
+            report.skipped += 1;
+            continue;
+        }
+        let Some(task_key) = path.file_stem().and_then(|value| value.to_str()) else {
+            report.skipped += 1;
+            continue;
+        };
+        if isolation_base(workspace_root)
+            .join(WORKTREE_DIR)
+            .join(task_key)
+            .exists()
+        {
+            report.skipped += 1;
+            continue;
+        }
+        let modified_at = metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|value| value.as_secs())
+            .unwrap_or(u64::MAX);
+        if now_unix.saturating_sub(modified_at) < older_than_seconds {
+            report.skipped += 1;
+            continue;
+        }
+        match fs::remove_file(&path) {
+            Ok(()) => report.artifacts_removed += 1,
+            Err(err) => report
+                .errors
+                .push(format!("remove_abandoned_patch_artifact:{err}")),
+        }
+    }
+}
+
+pub(super) fn remove_child_patch_artifact(plan: &ExecutionIsolationPlan) -> Result<bool> {
+    let artifact_path =
+        isolation_artifact_dir(&plan.workspace_root).join(format!("{}.patch", plan.task_key));
+    match fs::symlink_metadata(&artifact_path) {
+        Ok(_) => {
+            fs::remove_file(&artifact_path).context("remove_child_patch_artifact")?;
+            Ok(true)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).context("inspect_child_patch_artifact"),
     }
 }
 

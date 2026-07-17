@@ -68,7 +68,7 @@ fn local_worktree_child_binds_and_reuses_task_scoped_workspace() {
     state.skill_rt.default_locator_search_dir = repo.path.clone();
     let (task, payload) = child_task("local_worktree");
 
-    let first =
+    let mut first =
         ChildTaskExecutionScope::prepare(&state, &task, &payload).expect("prepare first scope");
     let plan = first.plan().expect("worktree plan").clone();
     assert_ne!(first.state(&state).skill_rt.workspace_root, repo.path);
@@ -80,8 +80,9 @@ fn local_worktree_child_binds_and_reuses_task_scoped_workspace() {
         first.projection(&state).expect("projection")["allocation_reused"],
         false
     );
+    first.retain_for_parent_decision();
 
-    let second =
+    let mut second =
         ChildTaskExecutionScope::prepare(&state, &task, &payload).expect("reuse child scope");
     assert_eq!(
         second.state(&state).skill_rt.workspace_root,
@@ -91,6 +92,7 @@ fn local_worktree_child_binds_and_reuses_task_scoped_workspace() {
         second.projection(&state).expect("projection")["allocation_reused"],
         true
     );
+    second.retain_for_parent_decision();
 
     crate::execution_isolation::cleanup_execution_isolation(&plan).expect("cleanup child worktree");
 }
@@ -114,6 +116,36 @@ fn read_only_child_keeps_primary_root_without_allocation() {
         "primary_workspace_read_only"
     );
     assert_eq!(projection["artifact_refs"], json!([]));
+}
+
+#[test]
+fn dropped_unretained_child_scope_cleans_worktree_and_patch_artifact() {
+    let repo = TempRepo::new();
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = repo.path.clone();
+    state.skill_rt.default_locator_search_dir = repo.path.clone();
+    let (task, payload) = child_task("local_worktree");
+
+    let (worktree_root, artifact_path) = {
+        let scope =
+            ChildTaskExecutionScope::prepare(&state, &task, &payload).expect("prepare child scope");
+        let plan = scope.plan().expect("worktree plan").clone();
+        std::fs::write(plan.execution_root.join("README.md"), "partial\n")
+            .expect("write partial child change");
+        let artifact = crate::execution_isolation::build_child_worktree_patch_artifact(&plan)
+            .expect("build partial patch");
+        (
+            plan.execution_root,
+            PathBuf::from(
+                artifact["artifact_path"]
+                    .as_str()
+                    .expect("partial artifact path"),
+            ),
+        )
+    };
+
+    assert!(!worktree_root.exists());
+    assert!(!artifact_path.exists());
 }
 
 #[test]

@@ -98,6 +98,83 @@ fn abandoned_temp_cleanup_removes_only_stale_marked_dirs() {
 }
 
 #[test]
+fn abandoned_worktree_cleanup_removes_matching_patch_artifact() {
+    let root = TempRoot::new("worktree_cleanup");
+    init_git_repo(&root.path);
+    let stale = plan_execution_isolation(
+        &root.path,
+        "task-stale-writer",
+        CapabilityIsolationProfile::LocalWorktree,
+    )
+    .expect("stale worktree plan");
+    create_execution_isolation(&stale, 10).expect("create stale worktree");
+    fs::write(
+        stale.execution_root.join("README.md"),
+        "stale child change\n",
+    )
+    .expect("modify stale worktree");
+    let artifact =
+        build_child_worktree_patch_artifact(&stale).expect("build stale child patch artifact");
+    let artifact_path = PathBuf::from(
+        artifact["artifact_path"]
+            .as_str()
+            .expect("stale artifact path"),
+    );
+
+    let report = cleanup_abandoned_isolation_workspaces(&root.path, 100, 60);
+
+    assert_eq!(report.removed, 1);
+    assert!(report.errors.is_empty());
+    assert!(!stale.execution_root.exists());
+    assert!(!artifact_path.exists());
+}
+
+#[test]
+fn abandoned_cleanup_removes_stale_orphan_patch_artifact() {
+    let root = TempRoot::new("orphan_patch_cleanup");
+    let artifact_root = isolation_artifact_dir(&root.path);
+    fs::create_dir_all(&artifact_root).expect("create artifact root");
+    let stale = artifact_root.join("task-stale.patch");
+    fs::write(&stale, "stale patch\n").expect("write stale patch");
+    let modified_at = fs::metadata(&stale)
+        .expect("stale patch metadata")
+        .modified()
+        .expect("stale patch modified time")
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("stale patch unix time")
+        .as_secs();
+
+    let report = cleanup_abandoned_isolation_workspaces(&root.path, modified_at + 61, 60);
+
+    assert_eq!(report.removed, 0);
+    assert_eq!(report.artifacts_removed, 1);
+    assert!(report.errors.is_empty());
+    assert!(!stale.exists());
+}
+
+#[test]
+fn abandoned_cleanup_retains_fresh_orphan_patch_artifact() {
+    let root = TempRoot::new("fresh_orphan_patch_cleanup");
+    let artifact_root = isolation_artifact_dir(&root.path);
+    fs::create_dir_all(&artifact_root).expect("create artifact root");
+    let fresh = artifact_root.join("task-fresh.patch");
+    fs::write(&fresh, "fresh patch\n").expect("write fresh patch");
+    let modified_at = fs::metadata(&fresh)
+        .expect("fresh patch metadata")
+        .modified()
+        .expect("fresh patch modified time")
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("fresh patch unix time")
+        .as_secs();
+
+    let report = cleanup_abandoned_isolation_workspaces(&root.path, modified_at + 59, 60);
+
+    assert_eq!(report.artifacts_removed, 0);
+    assert!(report.errors.is_empty());
+    assert!(fresh.exists());
+}
+
+#[test]
 fn local_worktree_plan_uses_isolated_cleanup_ref() {
     let root = TempRoot::new("worktree_plan");
 

@@ -189,6 +189,9 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "execution_isolation_root_profile",
         '"allocation_state"',
         "build_child_worktree_patch_artifact",
+        "cleanup_abandoned_patch_artifacts",
+        "artifacts_removed",
+        "remove_child_patch_artifact",
     ),
     "crates/clawd/src/execution_isolation_patch.rs": (
         "build_child_worktree_patch_artifact",
@@ -240,6 +243,9 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         '"patch_artifact"',
         '"child_worktree_patch_artifact_failed"',
         '"artifact_refs"',
+        "retain_for_parent_decision",
+        "impl Drop for ChildTaskExecutionScope",
+        '"child_scope_cleanup_failed"',
     ),
     "crates/clawd/src/worker/mod.rs": (
         "ChildTaskExecutionScope::prepare",
@@ -267,7 +273,13 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     "crates/clawd/src/worker/child_task_execution_scope_tests.rs": (
         "local_worktree_child_binds_and_reuses_task_scoped_workspace",
         "read_only_child_keeps_primary_root_without_allocation",
+        "dropped_unretained_child_scope_cleans_worktree_and_patch_artifact",
         "unsupported_child_profile_fails_closed",
+    ),
+    "crates/clawd/src/execution_isolation_tests.rs": (
+        "abandoned_worktree_cleanup_removes_matching_patch_artifact",
+        "abandoned_cleanup_removes_stale_orphan_patch_artifact",
+        "abandoned_cleanup_retains_fresh_orphan_patch_artifact",
     ),
     "crates/clawd/src/skills_tests/task_scoped_worktree.rs": (
         "task_scoped_worktree_reuses_root_across_multiple_skill_calls",
