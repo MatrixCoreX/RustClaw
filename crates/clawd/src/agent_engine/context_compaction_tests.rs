@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use super::{
-    compaction_summary_provenance_valid, context_source_bundle,
+    compaction_summary_provenance_valid, context_compaction_timeout_seconds, context_source_bundle,
     normalize_model_assisted_compaction_output,
 };
 
@@ -110,6 +110,14 @@ fn context_compaction_source_bundle_enforces_total_budget() {
         .unwrap()
         .iter()
         .any(|item| item["ref"] == "recent_turns_full"));
+}
+
+#[test]
+fn context_compaction_timeout_tracks_provider_budget_with_bounds() {
+    assert_eq!(context_compaction_timeout_seconds(None), 150);
+    assert_eq!(context_compaction_timeout_seconds(Some(30)), 120);
+    assert_eq!(context_compaction_timeout_seconds(Some(180)), 210);
+    assert_eq!(context_compaction_timeout_seconds(Some(600)), 300);
 }
 
 #[test]

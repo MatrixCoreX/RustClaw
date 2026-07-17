@@ -461,10 +461,15 @@ if assert_continuity:
     )
     namespace_pattern = "|".join(re.escape(item) for item in namespaces)
     pattern = re.compile(
-        rf"(?<![a-z0-9_.:-])(?:{namespace_pattern}):[A-Za-z0-9_./:-]+"
+        rf"(?<![a-z0-9_.:-])(?:{namespace_pattern}):"
+        rf"[A-Za-z0-9_./:-]*[A-Za-z0-9_/:_-]"
+        rf"(?=$|[.\s,;!?，。；！？)\]}}])"
     )
     for prompt in prompts:
-        for machine_ref in pattern.findall(prompt):
+        for match in pattern.finditer(prompt):
+            if prompt[match.end():].startswith(("...", "…")):
+                continue
+            machine_ref = match.group(0)
             if machine_ref not in required:
                 required.append(machine_ref)
 

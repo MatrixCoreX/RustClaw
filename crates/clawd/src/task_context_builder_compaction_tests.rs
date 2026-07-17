@@ -331,8 +331,8 @@ fn model_summary_receives_deterministic_continuity_references() {
 fn deterministic_reference_extraction_rejects_truncated_tokens() {
     let mut bundle = context_bundle(13_000);
     bundle.execution_view.as_mut().unwrap().recent_turns_full = format!(
-        "constraint:no_duplicate_tool_call. decision:canary_b... fact:build_green…\n{}",
-        "x".repeat(13_000)
+        "constraint:no_duplicate_tool_call. decision:canary_b... fact:build_green…\n{}decision:ca",
+        "x".repeat(13_000),
     );
     let plan = plan_agent_loop_context_compaction(&bundle).unwrap();
 
@@ -354,4 +354,5 @@ fn deterministic_reference_extraction_rejects_truncated_tokens() {
     assert!(values.contains(&"constraint:no_duplicate_tool_call"));
     assert!(!values.contains(&"decision:canary_b"));
     assert!(!values.contains(&"fact:build_green"));
+    assert!(!values.contains(&"decision:ca"));
 }

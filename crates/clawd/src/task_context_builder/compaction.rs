@@ -498,6 +498,7 @@ fn extract_machine_refs(value: &str, namespaces: &[&str]) -> Vec<String> {
         if token_end == value_start
             || trailing_dot_count >= 3
             || is_truncation_marker_at(value, index)
+            || (index == bytes.len() && trailing_dot_count == 0)
         {
             continue;
         }
