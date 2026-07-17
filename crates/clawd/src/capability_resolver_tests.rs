@@ -274,6 +274,74 @@ fn registry_resolves_bare_skill_capability_by_machine_action() {
 }
 
 #[test]
+fn registry_resolves_bare_skill_capability_by_registered_action_alias() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "fs_basic",
+        json!({
+            "action": "create_directory",
+            "path": "run/example",
+            "create_parents": true
+        }),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected fs_basic tool action, got {action:?}");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("make_dir"));
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("run/example")
+    );
+}
+
+#[test]
+fn selected_registry_capability_cannot_be_rewritten_by_args_action() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.write_text",
+        json!({
+            "action": "remove_path",
+            "path": "notes/memo.txt",
+            "content": "safe"
+        }),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected fs_basic tool action, got {action:?}");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("write_text")
+    );
+}
+
+#[test]
+fn bare_skill_capability_rejects_unregistered_action_alias() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "fs_basic",
+        json!({"action": "invent_directory", "path": "run/example"}),
+    );
+
+    assert!(action.is_none());
+    assert_eq!(record.reason_code, "capability_unavailable");
+}
+
+#[test]
 fn config_read_fields_capability_normalizes_machine_field_aliases() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
