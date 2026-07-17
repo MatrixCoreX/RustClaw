@@ -269,6 +269,7 @@ fn resume_task_with_input_records_structured_resume_metadata() {
         TaskResumeControlInput {
             task_id: task_id.clone(),
             checkpoint_id: Some("ckpt-resume".to_string()),
+            resume_trigger: crate::task_lifecycle::ResumeTrigger::UserFollowup,
             resume_reason: Some("manual_resume".to_string()),
             user_message: Some("continue with tighter budget".to_string()),
             new_constraints: Some(json!({"budget_profile": "short"})),
@@ -280,10 +281,11 @@ fn resume_task_with_input_records_structured_resume_metadata() {
     assert_eq!(update.checkpoint_id, "ckpt-resume");
     let result = stored_result_json(&state, &task_id);
     let lifecycle = &result["task_lifecycle"];
-    assert_eq!(lifecycle["source"], "task_admin_control");
+    assert_eq!(lifecycle["source"], "task_control");
     assert_eq!(lifecycle["message_key"], "clawd.task.resume_requested");
-    assert_eq!(lifecycle["manual_control_kind"], "resume");
-    assert_eq!(lifecycle["manual_control_status"], "pending");
+    assert_eq!(lifecycle["control_request"]["kind"], "resume");
+    assert_eq!(lifecycle["control_request"]["status"], "pending");
+    assert_eq!(lifecycle["control_request"]["trigger"], "user_followup");
     assert_eq!(lifecycle["resume_due"], true);
     assert_eq!(lifecycle["resume_input"]["task_id"], task_id);
     assert_eq!(lifecycle["resume_input"]["checkpoint_id"], "ckpt-resume");
@@ -309,6 +311,7 @@ fn resume_task_with_input_rejects_checkpoint_mismatch() {
         TaskResumeControlInput {
             task_id,
             checkpoint_id: Some("ckpt-other".to_string()),
+            resume_trigger: crate::task_lifecycle::ResumeTrigger::UserFollowup,
             resume_reason: Some("manual_resume".to_string()),
             user_message: None,
             new_constraints: None,
@@ -343,6 +346,7 @@ fn concurrent_duplicate_resume_requests_have_one_accepted_owner() {
                 TaskResumeControlInput {
                     task_id,
                     checkpoint_id: Some("ckpt-concurrent-resume".to_string()),
+                    resume_trigger: crate::task_lifecycle::ResumeTrigger::UserFollowup,
                     resume_reason: Some("manual_resume".to_string()),
                     user_message: None,
                     new_constraints: None,

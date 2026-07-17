@@ -879,6 +879,7 @@ fn paused_checkpoint_resume_work_item_is_machine_payload() {
         checkpoint_id: checkpoint.checkpoint_id.clone(),
         task_checkpoint: checkpoint.clone(),
         resume_entrypoint: "next_planner_round".to_string(),
+        resume_trigger: crate::task_lifecycle::ResumeTrigger::WorkerRecovery,
         resume_wait_seconds: 0,
         completed_side_effect_count: 1,
         requires_idempotency_guard: true,
