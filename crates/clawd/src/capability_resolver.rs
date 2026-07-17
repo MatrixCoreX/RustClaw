@@ -294,22 +294,46 @@ fn registry_mapping_for_action<'a>(
     requested_action: &str,
 ) -> Option<&'a PlannerCapabilityMapping> {
     let requested_action = normalize_capability_name(requested_action);
-    mappings.iter().find(|mapping| {
+    if let Some(mapping) = mappings.iter().find(|mapping| {
         mapping
             .action
             .as_deref()
             .map(normalize_capability_name)
             .as_deref()
             == Some(requested_action.as_str())
-    })
+    }) {
+        return Some(mapping);
+    }
+
+    let mut aliases = mappings.iter().filter(|mapping| {
+        mapping
+            .name
+            .rsplit_once('.')
+            .map(|(_, action)| normalize_capability_name(action))
+            .as_deref()
+            == Some(requested_action.as_str())
+    });
+    let first = aliases.next()?;
+    let canonical_action = first.action.as_deref().map(normalize_capability_name)?;
+    aliases
+        .all(|mapping| {
+            mapping
+                .action
+                .as_deref()
+                .map(normalize_capability_name)
+                .as_deref()
+                == Some(canonical_action.as_str())
+        })
+        .then_some(first)
 }
 
 fn resolve_candidate_action(candidate: ResolverCandidate, args: Value) -> AgentAction {
     let mut resolved_args = args.as_object().cloned().unwrap_or_default();
     if let Some(action) = candidate.action.as_deref() {
-        resolved_args
-            .entry("action".to_string())
-            .or_insert_with(|| Value::String(action.to_string()));
+        resolved_args.insert(
+            "action".to_string(),
+            Value::String(normalize_capability_name(action)),
+        );
     }
     sanitize_optional_enum_args_for_schema(
         &mut resolved_args,

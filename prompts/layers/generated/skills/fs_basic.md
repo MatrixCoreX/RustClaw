@@ -1,6 +1,6 @@
 ## fs_basic — planner-facing filesystem tool
 
-Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks that match the structured actions below. `fs_basic` is a virtual planner tool: runtime maps its actions to stable backing tools such as `system_basic`, `fs_search`, and file builtins.
+Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.make_dir`, and `filesystem.read_text_range` through `{"type":"call_capability","capability":"<leaf>","args":{...}}`. A lower-level `{"type":"call_tool","tool":"fs_basic","args":{"action":"<canonical-action>",...}}` remains available when the plan already owns an exact canonical action. `fs_basic` is a virtual planner tool: runtime maps its actions to stable backing tools such as `system_basic`, `fs_search`, and file builtins.
 
 ## Capability
 - Inspect explicit path facts.
