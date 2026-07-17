@@ -153,3 +153,28 @@ idempotent = false
         Some("risk=high,requires_confirmation=true,side_effect=true,auto_invocable=false,once_per_task=true,dedup_scope=action,idempotent=false")
     );
 }
+
+#[test]
+fn compact_capability_map_omits_registry_skill_detail_duplication() {
+    let state =
+        crate::AppState::test_default_with_fixture_provider().with_minimal_builtin_registry();
+    let task = crate::ClaimedTask {
+        task_id: "compact-capability-map".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+
+    let full = build_capability_map_for_task_with_detail(&state, &task, true);
+    let compact = build_compact_capability_map_for_task(&state, &task);
+
+    assert!(compact.contains("Current capability map"));
+    assert!(compact.contains("agent_runtime_protocols="));
+    assert!(!compact.contains("Registry skill hints:"));
+    assert!(compact.len() < full.len());
+}

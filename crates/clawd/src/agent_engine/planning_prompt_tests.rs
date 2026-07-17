@@ -2,6 +2,51 @@ use super::build_incremental_plan_prompt;
 use crate::agent_engine::{attempt_ledger::build_attempt_ledger_compact, LoopState};
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use serde_json::json;
+use std::path::Path;
+
+#[test]
+fn planner_overlays_expand_high_cardinality_placeholders_once() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    let contracts = [
+        (
+            "single_plan_execution_prompt.md",
+            [
+                "__GOAL__",
+                "__USER_REQUEST__",
+                "__TOOL_SPEC__",
+                "__SKILL_PLAYBOOKS__",
+                "__RECENT_ASSISTANT_REPLIES__",
+            ]
+            .as_slice(),
+        ),
+        (
+            "loop_incremental_plan_prompt.md",
+            [
+                "__GOAL__",
+                "__USER_REQUEST__",
+                "__TOOL_SPEC__",
+                "__SKILL_PLAYBOOKS__",
+                "__RECENT_ASSISTANT_REPLIES__",
+                "__HISTORY_COMPACT__",
+                "__ATTEMPT_LEDGER__",
+                "__LAST_ROUND_OUTPUT__",
+            ]
+            .as_slice(),
+        ),
+    ];
+
+    for (relative_path, placeholders) in contracts {
+        let prompt =
+            std::fs::read_to_string(overlays.join(relative_path)).expect("read prompt overlay");
+        for placeholder in placeholders {
+            assert_eq!(
+                prompt.matches(placeholder).count(),
+                1,
+                "{relative_path} must expand {placeholder} exactly once"
+            );
+        }
+    }
+}
 
 #[test]
 fn incremental_prompt_carries_structured_failed_attempt_for_planner_repair() {
