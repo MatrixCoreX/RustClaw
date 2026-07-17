@@ -1,4 +1,6 @@
 use serde_json::{json, Value};
+use std::collections::HashSet;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use claw_core::skill_registry::SkillsRegistry;
@@ -19,6 +21,24 @@ fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
         registry: Some(registry),
         skills_list: Arc::new(skills.iter().map(|skill| (*skill).to_string()).collect()),
     })));
+    state
+}
+
+fn state_with_runtime_registry() -> crate::AppState {
+    let registry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../configs/skills_registry.toml")
+        .canonicalize()
+        .expect("canonicalize registry path");
+    let registry = SkillsRegistry::load_from_path(&registry_path).expect("load registry");
+    let enabled: HashSet<String> = registry.enabled_names().into_iter().collect();
+    let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(crate::SkillViewsSnapshot {
+        registry: Some(Arc::new(registry)),
+        skills_list: Arc::new(enabled),
+    })));
+    let mut tools = claw_core::config::ToolsConfig::default();
+    tools.allow = vec!["skill:run_cmd".to_string()];
+    state.skill_rt.tools_policy = Arc::new(crate::ToolsPolicy::from_config(&tools).unwrap());
     state
 }
 
@@ -245,9 +265,22 @@ async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
         })),
     };
 
-    super::finalize_run_skill_result(&state, &task, &payload, "run_cmd", Ok(outcome))
-        .await
-        .expect("finalize");
+    let verification = super::super::run_skill_permission::verify_direct_run_skill(
+        &state,
+        &task,
+        "run_cmd",
+        payload.get("args").cloned().unwrap_or_else(|| json!({})),
+    );
+    super::finalize_run_skill_result(
+        &state,
+        &task,
+        &payload,
+        "run_cmd",
+        &verification,
+        Ok(outcome),
+    )
+    .await
+    .expect("finalize");
 
     let (status, result) = task_status_and_result(&state, &task.task_id);
     assert_eq!(status, "running");
@@ -277,6 +310,95 @@ async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
         result["task_journal"]["summary"]["final_stop_signal"],
         "async_job_checkpoint_waiting"
     );
+}
+
+#[tokio::test]
+async fn direct_run_skill_confirmation_persists_and_consumes_exact_grant() {
+    let state = state_with_runtime_registry();
+    let task_id = "task-direct-skill-confirmation";
+    let task = crate::ClaimedTask {
+        task_id: task_id.to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("anon:42:7".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "run_skill".to_string(),
+        payload_json: json!({
+            "skill_name": "run_cmd",
+            "args": {"command": "rm -rf target/direct-skill-confirmation-fixture"}
+        })
+        .to_string(),
+    };
+    insert_running_task(&state, &task);
+    let payload: Value = serde_json::from_str(&task.payload_json).expect("payload");
+    let args = payload.get("args").cloned().unwrap_or_else(|| json!({}));
+    let verification = super::super::run_skill_permission::verify_direct_run_skill(
+        &state,
+        &task,
+        "run_cmd",
+        args.clone(),
+    );
+    assert!(verification.needs_confirmation());
+
+    super::finalize_run_skill_confirmation_required(
+        &state,
+        &task,
+        &payload,
+        "run_cmd",
+        &verification,
+    )
+    .await
+    .expect("finalize confirmation");
+
+    let (status, result) = task_status_and_result(&state, task_id);
+    assert_eq!(status, "failed");
+    assert_eq!(
+        result["resume_context"]["approval_request"]["status"],
+        "pending"
+    );
+    assert_eq!(
+        result["task_journal"]["summary"]["verify_result"]["permission_decision"]["decision"],
+        crate::policy_decision::PolicyDecision::RequireConfirmation.as_token()
+    );
+    let request_id = result["resume_context"]["approval_request"]["request_id"]
+        .as_str()
+        .expect("request id");
+    crate::repo::decide_task_approval_request(
+        &state,
+        task_id,
+        request_id,
+        crate::approval_grant::ApprovalDecision::ApproveOnce,
+    )
+    .expect("approve request")
+    .expect("approval update");
+    state
+        .core
+        .db
+        .get()
+        .expect("db")
+        .execute(
+            "UPDATE tasks SET status = 'running' WHERE task_id = ?1",
+            rusqlite::params![task_id],
+        )
+        .expect("simulate worker claim");
+
+    let resumed =
+        super::super::run_skill_permission::verify_direct_run_skill(&state, &task, "run_cmd", args);
+    assert!(resumed.allowed(), "{:?}", resumed.verify.issues);
+    assert_eq!(
+        resumed.verify.permission_decision["approval_grant"]["status"],
+        crate::repo::TaskApprovalConsumeOutcome::Consumed.as_token()
+    );
+
+    let repeated = super::super::run_skill_permission::verify_direct_run_skill(
+        &state,
+        &task,
+        "run_cmd",
+        payload.get("args").cloned().unwrap_or_else(|| json!({})),
+    );
+    assert!(repeated.needs_confirmation());
 }
 
 #[test]
