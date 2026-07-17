@@ -122,7 +122,9 @@ pub(crate) use log_utils::{
     append_act_plan_log, append_subtask_result, highlight_tag, truncate_for_agent_trace,
     truncate_for_log,
 };
-use mcp_admin_routes::{list_mcp_servers, list_mcp_tools, test_mcp_server};
+use mcp_admin_routes::{
+    get_mcp_config, list_mcp_servers, list_mcp_tools, test_mcp_server, update_mcp_config,
+};
 pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 #[cfg(test)]
@@ -816,6 +818,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/tasks/pause-by-task-id", post(pause_task_by_id))
         .route("/tasks/goal-by-task-id", post(goal_by_task_id))
         .route("/admin/reload-skills", post(reload_skills_handler))
+        .route(
+            "/admin/mcp/config",
+            get(get_mcp_config).post(update_mcp_config),
+        )
         .route("/admin/mcp/servers", get(list_mcp_servers))
         .route("/admin/mcp/tools", get(list_mcp_tools))
         .route("/admin/mcp/servers/:server_id/test", post(test_mcp_server))

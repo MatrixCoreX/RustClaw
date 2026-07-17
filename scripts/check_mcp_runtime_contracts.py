@@ -105,6 +105,13 @@ REQUIRED_FILE_TOKENS = {
         "require_mcp_admin",
         "mcp_lifecycle_snapshots",
         "probe_mcp_server",
+        "get_mcp_config",
+        "update_mcp_config",
+        "validate_configuration",
+        "auth_token_env",
+        "oauth_client_secret_env",
+        "env_refs",
+        "write_mcp_config",
     ),
     "crates/clawcli/src/commands/mcp.rs": (
         '"/admin/mcp/servers"',
@@ -129,6 +136,21 @@ REQUIRED_FILE_TOKENS = {
         '"call_capability"',
         '"mcp_tool_call"',
         "mcp.tool_call",
+    ),
+    "crates/clawd/src/mcp_admin_routes_tests.rs": (
+        "config_update_preserves_unmanaged_fields_and_redacts_static_environment",
+        "config_update_rejects_literal_secret_reference_and_duplicate_server_ids",
+        "config_writer_preserves_distinct_workspace_and_mounted_content",
+    ),
+    "UI/src/components/McpConfigSection.tsx": (
+        "Environment references (optional)",
+        "Token environment variable",
+        "Test protocol",
+        "hasAdvancedPolicy",
+    ),
+    "UI/src/lib/mcp-config.test.ts": (
+        "saves only secret reference names",
+        "rejects incomplete lines",
     ),
     "crates/clawcli/tests/mcp_commands.rs": (
         "mcp_commands_use_authenticated_machine_endpoints",

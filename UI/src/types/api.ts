@@ -459,6 +459,55 @@ export interface LlmTestResponse {
   response_text?: string;
 }
 
+export interface McpServerConfigItem {
+  server_id: string;
+  enabled: boolean;
+  trusted: boolean;
+  transport: "stdio" | "streamable_http" | string;
+  command?: string | null;
+  args: string[];
+  env_refs: Record<string, string>;
+  url?: string | null;
+  auth_token_env?: string | null;
+  oauth_client_id_env?: string | null;
+  oauth_client_secret_env?: string | null;
+  oauth_scopes: string[];
+  oauth_resource?: string | null;
+  allowed_tools: string[];
+  has_static_env: boolean;
+  has_advanced_policy: boolean;
+}
+
+export interface McpConfigResponse {
+  config_path: string;
+  enabled: boolean;
+  restart_required: boolean;
+  servers: McpServerConfigItem[];
+}
+
+export interface McpLifecycleSnapshot {
+  server_id: string;
+  state: "disabled" | "starting" | "ready" | "degraded" | "stopped" | string;
+  transport: string;
+  auth_mode: string;
+  tool_count: number;
+  last_error_code?: string | null;
+}
+
+export interface McpToolSummary {
+  capability: string;
+  server_id: string;
+  tool_name: string;
+  required_args: string[];
+  optional_args: string[];
+}
+
+export interface McpProbeOutcome {
+  server_id: string;
+  status: string;
+  latency_ms: number;
+}
+
 export interface NniDeviceMeta {
   slot?: number | null;
   i2c_bus?: number | null;
