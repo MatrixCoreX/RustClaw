@@ -1,12 +1,12 @@
 use serde_json::Value;
 
 use super::shared::{
-    handler_observation, pre_tool_hook_event, safe_handler_id, ExecutedHook, HandlerRunResult,
-    HookFailurePolicy, HookHandlerConfig, LoadedHookConfiguration,
+    handler_observation, lifecycle_hook_event, pre_tool_hook_event, safe_handler_id, ExecutedHook,
+    HandlerRunResult, HookFailurePolicy, HookHandlerConfig, LoadedHookConfiguration,
 };
 use super::{
     command, evaluate_pre_tool_use, http, mcp, merge_hook_decision, normalize_machine_token,
-    HookEvaluation, HookPolicy, HookStage,
+    HookEvaluation, HookOutcome, HookPolicy, HookStage,
 };
 use crate::{policy_decision::PolicyDecision, AppState};
 
@@ -18,7 +18,75 @@ pub(crate) async fn pre_tool_use_outcome_for_state(
 ) -> HookEvaluation {
     let action_ref = super::tool_action_ref(tool_or_skill, args);
     let loaded = load_hook_configuration(state);
-    let mut outcome = evaluate_pre_tool_use(&loaded.policy, &action_ref);
+    let outcome = evaluate_pre_tool_use(&loaded.policy, &action_ref);
+    let event = pre_tool_hook_event(task_id, tool_or_skill, args, &action_ref);
+    evaluate_loaded_handlers(
+        state,
+        task_id,
+        HookStage::PreToolUse,
+        action_ref,
+        outcome,
+        event,
+        loaded,
+    )
+    .await
+}
+
+pub(crate) async fn lifecycle_stage_outcome_for_state(
+    state: &AppState,
+    task_id: &str,
+    stage: HookStage,
+    action_ref: &str,
+    metadata: Value,
+) -> HookEvaluation {
+    let action_ref = normalize_machine_token(action_ref);
+    let outcome = HookOutcome {
+        stage: stage.as_token(),
+        decision: PolicyDecision::Allow.as_token(),
+        reason_code: lifecycle_reason_code(stage, &metadata),
+        action_ref: action_ref.clone(),
+    };
+    let event = lifecycle_hook_event(stage, task_id, &action_ref, metadata);
+    evaluate_loaded_handlers(
+        state,
+        task_id,
+        stage,
+        action_ref,
+        outcome,
+        event,
+        load_hook_configuration(state),
+    )
+    .await
+}
+
+fn lifecycle_reason_code(stage: HookStage, metadata: &Value) -> String {
+    match stage {
+        HookStage::SessionStart => "session_start".to_string(),
+        HookStage::UserPromptSubmit => "user_prompt_submitted".to_string(),
+        HookStage::PostToolUse => match metadata.get("step_status").and_then(Value::as_str) {
+            Some("ok") => "post_tool_use_ok".to_string(),
+            _ => "post_tool_use_error".to_string(),
+        },
+        HookStage::Stop | HookStage::SessionEnd => metadata
+            .get("final_status")
+            .and_then(Value::as_str)
+            .map(normalize_machine_token)
+            .filter(|status| !status.is_empty())
+            .map(|status| format!("{}_{status}", stage.as_token()))
+            .unwrap_or_else(|| format!("{}_unknown", stage.as_token())),
+        _ => format!("{}_observed", stage.as_token()),
+    }
+}
+
+async fn evaluate_loaded_handlers(
+    state: &AppState,
+    task_id: &str,
+    stage: HookStage,
+    action_ref: String,
+    mut outcome: HookOutcome,
+    event: Value,
+    loaded: LoadedHookConfiguration,
+) -> HookEvaluation {
     let mut handler_observations = Vec::new();
     if let Some(error_code) = loaded.error_code {
         merge_hook_decision(
@@ -29,7 +97,7 @@ pub(crate) async fn pre_tool_use_outcome_for_state(
         handler_observations.push(handler_observation(
             "hook_config",
             "configuration",
-            HookStage::PreToolUse,
+            stage,
             &action_ref,
             &HandlerRunResult::validation_failure(error_code),
             true,
@@ -48,7 +116,6 @@ pub(crate) async fn pre_tool_use_outcome_for_state(
             handler_observations,
         };
     }
-    let event = pre_tool_hook_event(task_id, tool_or_skill, args, &action_ref);
     let cancellation = state
         .worker
         .task_cancellation_token(task_id)
@@ -58,21 +125,21 @@ pub(crate) async fn pre_tool_use_outcome_for_state(
         .into_iter()
         .filter(|handler| handler.enabled)
     {
-        let stage = match HookStage::parse_token(&handler.stage) {
-            Some(stage) => stage,
+        let configured_stage = match HookStage::parse_token(&handler.stage) {
+            Some(configured_stage) => configured_stage,
             None => {
                 record_validation_failure(
                     &mut outcome,
                     &mut handler_observations,
                     &handler,
-                    HookStage::PreToolUse,
+                    stage,
                     &action_ref,
                     "hook_handler_stage_invalid",
                 );
                 continue;
             }
         };
-        if stage != HookStage::PreToolUse {
+        if configured_stage != stage {
             continue;
         }
         let invalid_handler = handler.clone();
@@ -130,7 +197,7 @@ pub(crate) async fn pre_tool_use_outcome_for_state(
 }
 
 fn record_execution(
-    outcome: &mut super::HookOutcome,
+    outcome: &mut HookOutcome,
     observations: &mut Vec<Value>,
     action_ref: &str,
     executed: ExecutedHook,
@@ -154,7 +221,7 @@ fn record_execution(
 }
 
 fn record_validation_failure(
-    outcome: &mut super::HookOutcome,
+    outcome: &mut HookOutcome,
     observations: &mut Vec<Value>,
     handler: &HookHandlerConfig,
     stage: HookStage,

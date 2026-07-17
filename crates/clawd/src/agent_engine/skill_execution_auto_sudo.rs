@@ -7,8 +7,9 @@ use super::skill_execution_preflight::{
 };
 use super::{
     compose_policy_block_delivery, handle_skill_step_success, log_step_journal_summary,
-    record_hook_evaluation_observation, record_post_tool_use_observation,
-    register_failed_step_output, AppState, ClaimedTask, LoopState,
+    record_hook_evaluation_observation, record_permission_request_hook,
+    record_post_tool_use_hook_observations, register_failed_step_output, AppState, ClaimedTask,
+    LoopState,
 };
 use crate::agent_engine::{
     append_delivery_message, append_progress_hint, build_safe_skill_args_summary,
@@ -451,6 +452,30 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
         &pre_tool_use_evaluation,
     );
     if pre_tool_use_evaluation.requires_confirmation() {
+        let permission_evaluation = record_permission_request_hook(
+            state,
+            task,
+            loop_state,
+            "run_cmd",
+            &pre_tool_use_evaluation.outcome.action_ref,
+            global_step,
+            step_in_round,
+        )
+        .await;
+        if permission_evaluation.requires_background_wait() {
+            support::publish_agent_loop_checkpoint_progress(
+                state,
+                task,
+                loop_state,
+                "hook_background_wait",
+            );
+            return Ok(Some(Some("hook_background_wait".to_string())));
+        }
+        if permission_evaluation.outcome.decision_kind()
+            == Some(crate::policy_decision::PolicyDecision::Deny)
+        {
+            return Ok(Some(Some("hook_permission_denied".to_string())));
+        }
         publish_agent_loop_user_input_checkpoint_progress(
             state,
             task,
@@ -519,14 +544,17 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
         },
     )
     .await;
-    record_post_tool_use_observation(
+    record_post_tool_use_hook_observations(
+        state,
+        task,
         loop_state,
         "run_cmd",
         &retry_args,
         global_step,
         step_in_round,
         retry_step.status,
-    );
+    )
+    .await;
 
     match retry_step.output.as_deref() {
         Some(out) => {

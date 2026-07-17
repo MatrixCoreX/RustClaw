@@ -36,6 +36,30 @@ impl Drop for TempDirGuard {
     }
 }
 
+fn write_command_hook(
+    temp: &TempDirGuard,
+    name: &str,
+    decision: &str,
+    reason_code: &str,
+) -> String {
+    std::fs::create_dir_all(temp.path.join("hooks")).expect("create hooks dir");
+    let body = format!(
+        "#!/bin/sh\nIFS= read -r _event\nprintf '%s\\n' '{{\"schema_version\":1,\"decision\":\"{decision}\",\"reason_code\":\"{reason_code}\"}}'\n"
+    );
+    let hook_path = temp.path.join("hooks").join(name);
+    std::fs::write(&hook_path, &body).expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&hook_path)
+            .expect("hook metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&hook_path, permissions).expect("make hook executable");
+    }
+    format!("sha256:{:x}", Sha256::digest(body.as_bytes()))
+}
+
 fn claimed_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
         task_id: "task-skill-exec".to_string(),
@@ -197,20 +221,7 @@ fn post_tool_hook_records_safe_run_cmd_machine_args() {
 #[tokio::test]
 async fn trusted_command_hook_blocks_through_production_pre_tool_path() {
     let temp = TempDirGuard::new_in_repository("trusted_command_hook");
-    std::fs::create_dir_all(temp.path.join("hooks")).expect("create hooks dir");
-    let body = "#!/bin/sh\nIFS= read -r _event\nprintf '%s\\n' '{\"schema_version\":1,\"decision\":\"deny\",\"reason_code\":\"fixture_policy_denied\"}'\n";
-    let hook_path = temp.path.join("hooks/policy-guard.sh");
-    std::fs::write(&hook_path, body).expect("write hook");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&hook_path)
-            .expect("hook metadata")
-            .permissions();
-        permissions.set_mode(0o700);
-        std::fs::set_permissions(&hook_path, permissions).expect("make hook executable");
-    }
-    let hash = format!("sha256:{:x}", Sha256::digest(body.as_bytes()));
+    let hash = write_command_hook(&temp, "policy-guard.sh", "deny", "fixture_policy_denied");
     std::fs::write(
         temp.path.join("configs/agent_guard.toml"),
         format!(
@@ -294,4 +305,128 @@ failure_policy = "deny"
     assert_eq!(handler["reason_code"], "fixture_policy_denied");
     assert_eq!(handler["trust_status"], "trusted");
     assert_eq!(handler["content_sha256"], hash);
+}
+
+#[tokio::test]
+async fn configured_post_tool_hook_runs_through_production_owner() {
+    let temp = TempDirGuard::new_in_repository("post_tool_hook");
+    let hash = write_command_hook(
+        &temp,
+        "post-tool-observer.sh",
+        "allow",
+        "fixture_post_tool_observed",
+    );
+    std::fs::write(
+        temp.path.join("configs/agent_guard.toml"),
+        format!(
+            r#"
+[agent.hooks]
+
+[[agent.hooks.handlers]]
+id = "fixture_post_tool"
+stage = "post_tool_use"
+kind = "command"
+enabled = true
+trusted = true
+blocking = false
+path = "hooks/post-tool-observer.sh"
+content_sha256 = "{hash}"
+timeout_ms = 1000
+max_input_bytes = 4096
+max_output_bytes = 4096
+max_attempts = 1
+failure_policy = "deny"
+"#
+        ),
+    )
+    .expect("write agent guard");
+    let mut state = super::tests::test_state();
+    state.skill_rt.workspace_root = temp.path.clone();
+    let task = claimed_task();
+    let mut loop_state = super::LoopState::new(2);
+
+    super::record_post_tool_use_hook_observations(
+        &state,
+        &task,
+        &mut loop_state,
+        "fs_basic",
+        &json!({"action": "read_text", "path": "README.md"}),
+        2,
+        1,
+        crate::executor::StepExecutionStatus::Ok,
+    )
+    .await;
+
+    let handler = loop_state
+        .task_observations
+        .iter()
+        .find(|observation| observation["handler_id"] == "fixture_post_tool")
+        .expect("post-tool handler observation");
+    assert_eq!(handler["stage"], "post_tool_use");
+    assert_eq!(handler["decision"], "allow");
+    assert_eq!(handler["reason_code"], "fixture_post_tool_observed");
+    assert_eq!(handler["blocking"], false);
+}
+
+#[tokio::test]
+async fn configured_permission_hook_can_deny_at_production_owner() {
+    let temp = TempDirGuard::new_in_repository("permission_hook");
+    let hash = write_command_hook(
+        &temp,
+        "permission-guard.sh",
+        "deny",
+        "fixture_permission_denied",
+    );
+    std::fs::write(
+        temp.path.join("configs/agent_guard.toml"),
+        format!(
+            r#"
+[agent.hooks]
+
+[[agent.hooks.handlers]]
+id = "fixture_permission_guard"
+stage = "permission_request"
+kind = "command"
+enabled = true
+trusted = true
+blocking = true
+path = "hooks/permission-guard.sh"
+content_sha256 = "{hash}"
+timeout_ms = 1000
+max_input_bytes = 4096
+max_output_bytes = 4096
+max_attempts = 1
+failure_policy = "deny"
+"#
+        ),
+    )
+    .expect("write agent guard");
+    let mut state = super::tests::test_state();
+    state.skill_rt.workspace_root = temp.path.clone();
+    let task = claimed_task();
+    let mut loop_state = super::LoopState::new(2);
+
+    let evaluation = super::record_permission_request_hook(
+        &state,
+        &task,
+        &mut loop_state,
+        "fs_basic",
+        "fs_basic.write_text",
+        3,
+        2,
+    )
+    .await;
+
+    assert_eq!(
+        evaluation.outcome.decision_kind(),
+        Some(crate::policy_decision::PolicyDecision::Deny)
+    );
+    let handler = loop_state
+        .task_observations
+        .iter()
+        .find(|observation| observation["handler_id"] == "fixture_permission_guard")
+        .expect("permission handler observation");
+    assert_eq!(handler["stage"], "permission_request");
+    assert_eq!(handler["reason_code"], "fixture_permission_denied");
+    assert_eq!(handler["blocking"], true);
 }
