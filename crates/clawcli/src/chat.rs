@@ -15,6 +15,7 @@ pub(super) enum ChatControl<'a> {
     Cancel,
     Status,
     Approve,
+    ApproveScope,
     Deny,
     Attach(&'a str),
     Unknown(&'a str),
@@ -71,6 +72,15 @@ pub(crate) fn run_chat(
                         key,
                         &mut thread,
                         "approve_once",
+                        jsonl_output,
+                    )?;
+                }
+                ChatControl::ApproveScope => {
+                    decide_current_task_approval(
+                        base_url,
+                        key,
+                        &mut thread,
+                        "always_for_scope",
                         jsonl_output,
                     )?;
                 }
@@ -213,7 +223,7 @@ fn decide_current_task_approval(
         },
     )?;
     output::print_json_pretty(&body);
-    if decision == "approve_once" {
+    if matches!(decision, "approve_once" | "always_for_scope") {
         crate::interrupt::reset();
         follow_and_render_task(base_url, key, thread, jsonl_output)
     } else {
@@ -253,6 +263,7 @@ pub(super) fn chat_control(input: &str) -> Option<ChatControl<'_>> {
         ("/cancel", None) => ChatControl::Cancel,
         ("/status", None) => ChatControl::Status,
         ("/approve", None) => ChatControl::Approve,
+        ("/approve-scope", None) => ChatControl::ApproveScope,
         ("/deny", None) => ChatControl::Deny,
         ("/attach", Some(task_id)) => ChatControl::Attach(task_id),
         _ => ChatControl::Unknown(command),

@@ -43,6 +43,18 @@ test("builds a task-bound approval request from structured resume context", () =
           reversible: false,
           effect: "mutating_or_external_action",
           reason_code: "explicit_approval_required",
+          allowed_decisions: ["approve_once", "always_for_scope", "deny"],
+          scope_grant: {
+            available: true,
+            scope_kind: "session",
+            max_ttl_seconds: 3600,
+            entries: [{
+              capability: "filesystem.write_file",
+              action: "write_text",
+              resource_kind: "workspace_path",
+              resources: ["run/example.txt"],
+            }],
+          },
         },
       },
     },
@@ -57,6 +69,18 @@ test("builds a task-bound approval request from structured resume context", () =
     reversible: false,
     effect: "mutating_or_external_action",
     reasonCode: "explicit_approval_required",
+    allowedDecisions: ["approve_once", "always_for_scope", "deny"],
+    scopeGrant: {
+      available: true,
+      scopeKind: "session",
+      maxTtlSeconds: 3600,
+      entries: [{
+        capability: "filesystem.write_file",
+        action: "write_text",
+        resourceKind: "workspace_path",
+        resources: ["run/example.txt"],
+      }],
+    },
   });
 
   result.task_id = "another-task";

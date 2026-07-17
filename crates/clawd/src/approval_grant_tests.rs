@@ -88,6 +88,7 @@ fn pending_request_is_task_bound_and_expiring() {
         arguments_hash: "sha256:args".to_string(),
         action_count: 1,
         targets: vec!["write_file".to_string()],
+        scope: None,
     };
     let request = pending_approval_request_json("task-1", &binding, 100);
 
@@ -109,6 +110,10 @@ fn approval_decision_protocol_is_closed_to_machine_tokens() {
     assert_eq!(
         ApprovalDecision::parse_token("approve_once"),
         Some(ApprovalDecision::ApproveOnce)
+    );
+    assert_eq!(
+        ApprovalDecision::parse_token("always_for_scope"),
+        Some(ApprovalDecision::AlwaysForScope)
     );
     assert_eq!(
         ApprovalDecision::parse_token("deny"),

@@ -20,7 +20,7 @@ import {
   type TaskOutcomeView,
   type TaskPermissionView,
 } from "../lib/task-result";
-import type { TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
+import type { TaskApprovalDecision, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 
 type Translate = (zh: string, en: string) => string;
@@ -49,7 +49,7 @@ export interface TaskResultPanelProps {
   onDecideTaskApproval: (
     taskId: string,
     approvalRequestId: string,
-    decision: "approve_once" | "deny",
+    decision: TaskApprovalDecision,
   ) => unknown | Promise<unknown>;
   onControlTask: (control: "pause" | "resume", taskId: string) => unknown | Promise<unknown>;
   onControlTaskGoal: (
@@ -125,6 +125,9 @@ export function TaskResultPanel({
     : false;
   const approvalDenySubmitting = taskResult
     ? taskControlSubmittingId === `deny:${taskResult.task_id}`
+    : false;
+  const approvalScopeSubmitting = taskResult
+    ? taskControlSubmittingId === `always_for_scope:${taskResult.task_id}`
     : false;
   const approvalExpired = approvalRequest ? approvalRequest.expiresAt * 1000 <= Date.now() : false;
   const approvalPending = approvalRequest?.status === "pending" && !approvalExpired;
@@ -349,21 +352,54 @@ export function TaskResultPanel({
               <p className="mt-1 text-xs text-amber-50/60">
                 {t("授权有效期至", "Approval expires at")}: {new Date(approvalRequest.expiresAt * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US")}
               </p>
+              {approvalRequest.scopeGrant.available ? (
+                <div className="mt-3 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs">
+                  <p className="font-medium">
+                    {t("可限定授权范围", "Bounded approval is available")}
+                  </p>
+                  <p className="mt-1 text-amber-50/70">
+                    {t(
+                      "仅适用于当前会话中相同操作和相同资源，最长一小时，可随时撤销。",
+                      "Only the same operation and resources in this session are covered, for up to one hour, and it can be revoked at any time.",
+                    )}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {approvalRequest.scopeGrant.entries.flatMap((entry) =>
+                      entry.resources.map((resource) => (
+                        <span key={`${entry.capability}:${resource}`} className="rounded-md border border-white/10 px-2 py-1 font-mono text-[11px]">
+                          {entry.capability}: {resource}
+                        </span>
+                      )),
+                    )}
+                  </div>
+                </div>
+              ) : null}
               {approvalPending ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => void onDecideTaskApproval(taskResult.task_id, approvalRequest.requestId, "approve_once")}
-                    disabled={approvalSubmitting || approvalDenySubmitting || approvalExpired}
+                    disabled={approvalSubmitting || approvalScopeSubmitting || approvalDenySubmitting || approvalExpired}
                     className="theme-accent-btn text-xs disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {approvalSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
                     {t("仅授权这一次", "Approve once")}
                   </button>
+                  {approvalRequest.scopeGrant.available ? (
+                    <button
+                      type="button"
+                      onClick={() => void onDecideTaskApproval(taskResult.task_id, approvalRequest.requestId, "always_for_scope")}
+                      disabled={approvalSubmitting || approvalScopeSubmitting || approvalDenySubmitting || approvalExpired}
+                      className="inline-flex items-center justify-center gap-2 rounded-md border border-amber-200/25 bg-amber-100/10 px-3 py-2 text-xs font-medium transition hover:bg-amber-100/15 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {approvalScopeSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                      {t("本会话相同范围", "Same scope in session")}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => void onDecideTaskApproval(taskResult.task_id, approvalRequest.requestId, "deny")}
-                    disabled={approvalSubmitting || approvalDenySubmitting || approvalExpired}
+                    disabled={approvalSubmitting || approvalScopeSubmitting || approvalDenySubmitting || approvalExpired}
                     className="inline-flex items-center justify-center gap-2 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs font-medium transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {approvalDenySubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldX className="h-3.5 w-3.5" />}

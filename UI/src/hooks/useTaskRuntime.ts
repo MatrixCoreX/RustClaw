@@ -4,11 +4,14 @@ import { followTaskEventStream } from "../lib/task-event-stream";
 import type {
   ActiveTaskItem,
   ActiveTasksResponse,
+  ApprovalScopeGrantListResponse,
+  ApprovalScopeGrantView,
   ApiResponse,
   ChannelName,
   ConsolePage,
   SubmitTaskResponse,
   TaskLlmDebugResponse,
+  TaskApprovalDecision,
   TaskQueryResponse,
 } from "../types/api";
 
@@ -71,6 +74,10 @@ export function useTaskRuntime({
   const [taskControlSubmittingId, setTaskControlSubmittingId] = useState<string | null>(null);
   const [taskControlMessage, setTaskControlMessage] = useState<string | null>(null);
   const [taskControlError, setTaskControlError] = useState<string | null>(null);
+  const [approvalScopeGrants, setApprovalScopeGrants] = useState<ApprovalScopeGrantView[]>([]);
+  const [approvalScopeGrantsLoading, setApprovalScopeGrantsLoading] = useState(false);
+  const [approvalScopeGrantsError, setApprovalScopeGrantsError] = useState<string | null>(null);
+  const [approvalScopeGrantRevokingId, setApprovalScopeGrantRevokingId] = useState<string | null>(null);
 
   const [interactionKind, setInteractionKind] = useState<TaskSubmitKind>("ask");
   const [interactionChannel, setInteractionChannel] = useState<ChannelName>("ui");
@@ -355,7 +362,7 @@ export function useTaskRuntime({
   const decideTaskApprovalById = async (
     controlTaskId: string,
     approvalRequestId: string,
-    approvalDecision: "approve_once" | "deny",
+    approvalDecision: TaskApprovalDecision,
   ) => {
     const normalizedTaskId = controlTaskId.trim();
     const normalizedRequestId = approvalRequestId.trim();
@@ -378,10 +385,18 @@ export function useTaskRuntime({
         throw new Error(body.error || `task approval failed (${res.status})`);
       }
       setTaskControlMessage(
-        approvalDecision === "approve_once"
-          ? t("已授权这一次操作，任务正在重新排队。", "This action was approved once and the task is queued again.")
-          : t("已拒绝这一次操作，任务不会继续执行。", "This action was denied and the task will not continue."),
+        approvalDecision === "deny"
+          ? t("已拒绝这一次操作，任务不会继续执行。", "This action was denied and the task will not continue.")
+          : approvalDecision === "always_for_scope"
+            ? t(
+                "已为当前会话的相同操作和资源授权，任务正在重新排队。",
+                "The same operation and resources are approved for this session, and the task is queued again.",
+              )
+            : t("已授权这一次操作，任务正在重新排队。", "This action was approved once and the task is queued again."),
       );
+      if (approvalDecision === "always_for_scope") {
+        void fetchApprovalScopeGrants(true);
+      }
       await fetchActiveTasks(true);
       void queryTaskById(normalizedTaskId, false);
     } catch (err) {
@@ -389,6 +404,56 @@ export function useTaskRuntime({
       setTaskControlError(message);
     } finally {
       setTaskControlSubmittingId(null);
+    }
+  };
+
+  const fetchApprovalScopeGrants = async (silent = false): Promise<ApprovalScopeGrantView[]> => {
+    if (!silent) {
+      setApprovalScopeGrantsLoading(true);
+      setApprovalScopeGrantsError(null);
+    }
+    try {
+      const res = await apiFetch("/v1/tasks/approval-grants");
+      const body = (await res.json()) as ApiResponse<ApprovalScopeGrantListResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `approval scope grants fetch failed (${res.status})`);
+      }
+      const grants = body.data.grants ?? [];
+      setApprovalScopeGrants(grants);
+      setApprovalScopeGrantsError(null);
+      return grants;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setApprovalScopeGrantsError(message);
+      return [];
+    } finally {
+      if (!silent) {
+        setApprovalScopeGrantsLoading(false);
+      }
+    }
+  };
+
+  const revokeApprovalScopeGrant = async (grantId: string) => {
+    const normalizedGrantId = grantId.trim();
+    if (!normalizedGrantId) return;
+    setApprovalScopeGrantRevokingId(normalizedGrantId);
+    setApprovalScopeGrantsError(null);
+    try {
+      const res = await apiFetch("/v1/tasks/approval-grants/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grant_id: normalizedGrantId }),
+      });
+      const body = (await res.json()) as ApiResponse<{ status?: string; grant_id?: string }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `approval scope grant revoke failed (${res.status})`);
+      }
+      await fetchApprovalScopeGrants(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setApprovalScopeGrantsError(message);
+    } finally {
+      setApprovalScopeGrantRevokingId(null);
     }
   };
 
@@ -552,6 +617,7 @@ export function useTaskRuntime({
     if (currentPage !== "tasks") return;
     if (interactionUserId == null || interactionChatId == null) return;
     void fetchActiveTasks(true);
+    void fetchApprovalScopeGrants(true);
     const interval = window.setInterval(() => {
       void fetchActiveTasks(true);
     }, 5000);
@@ -583,6 +649,10 @@ export function useTaskRuntime({
     taskControlSubmittingId,
     taskControlMessage,
     taskControlError,
+    approvalScopeGrants,
+    approvalScopeGrantsLoading,
+    approvalScopeGrantsError,
+    approvalScopeGrantRevokingId,
     interactionKind,
     setInteractionKind,
     interactionChannel,
@@ -614,6 +684,8 @@ export function useTaskRuntime({
     cancelActiveTask,
     controlTaskById,
     decideTaskApprovalById,
+    fetchApprovalScopeGrants,
+    revokeApprovalScopeGrant,
     controlTaskGoalById,
     submitInteractionTask,
     markTaskSubmitted,

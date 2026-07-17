@@ -1,4 +1,4 @@
-import type { TaskQueryResponse } from "../types/api";
+import type { TaskApprovalDecision, TaskQueryResponse } from "../types/api";
 import type { TaskLifecycleLang } from "./task-lifecycle";
 
 export interface TaskOutcomeView {
@@ -64,6 +64,18 @@ export interface TaskApprovalRequestView {
   reversible: boolean;
   effect: string;
   reasonCode: string;
+  allowedDecisions: TaskApprovalDecision[];
+  scopeGrant: {
+    available: boolean;
+    scopeKind?: string;
+    maxTtlSeconds?: number;
+    entries: Array<{
+      capability: string;
+      action: string;
+      resourceKind: string;
+      resources: string[];
+    }>;
+  };
 }
 
 export interface TaskTraceEventView {
@@ -129,6 +141,30 @@ export function buildTaskApprovalRequest(result: TaskQueryResponse): TaskApprova
   const targets = Array.isArray(request.targets)
     ? request.targets.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     : [];
+  const allowedDecisions: TaskApprovalDecision[] = Array.isArray(request.allowed_decisions)
+    ? request.allowed_decisions.filter(
+        (value): value is TaskApprovalDecision =>
+          value === "approve_once" || value === "always_for_scope" || value === "deny",
+      )
+    : ["approve_once", "deny"];
+  const rawScope = asRecord(request.scope_grant);
+  const entries = Array.isArray(rawScope?.entries)
+    ? rawScope.entries.flatMap((value) => {
+        const entry = asRecord(value);
+        const capability = primitiveKeyValue(entry?.capability);
+        const action = primitiveKeyValue(entry?.action);
+        const resourceKind = primitiveKeyValue(entry?.resource_kind);
+        const resources = Array.isArray(entry?.resources)
+          ? entry.resources.filter(
+              (resource): resource is string =>
+                typeof resource === "string" && resource.trim().length > 0,
+            )
+          : [];
+        return capability && action && resourceKind
+          ? [{ capability, action, resourceKind, resources }]
+          : [];
+      })
+    : [];
   return {
     requestId,
     status,
@@ -138,6 +174,19 @@ export function buildTaskApprovalRequest(result: TaskQueryResponse): TaskApprova
     reversible: request.reversible === true,
     effect: primitiveKeyValue(request.effect) ?? "unknown",
     reasonCode: primitiveKeyValue(request.reason_code) ?? "unknown",
+    allowedDecisions,
+    scopeGrant: {
+      available:
+        rawScope?.available === true &&
+        allowedDecisions.includes("always_for_scope") &&
+        entries.length > 0,
+      scopeKind: primitiveKeyValue(rawScope?.scope_kind) ?? undefined,
+      maxTtlSeconds:
+        typeof rawScope?.max_ttl_seconds === "number"
+          ? rawScope.max_ttl_seconds
+          : undefined,
+      entries,
+    },
   };
 }
 

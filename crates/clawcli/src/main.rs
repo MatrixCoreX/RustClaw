@@ -319,7 +319,7 @@ enum Command {
             value_enum,
             requires = "approval_request_id"
         )]
-        approval_decision: Option<ApprovalDecisionArg>,
+        approval_decision: Option<task::ApprovalDecisionArg>,
         #[arg(long = "approval-request-id", requires = "approval_decision")]
         approval_request_id: Option<String>,
     },
@@ -425,6 +425,17 @@ enum PermissionCommand {
         skill: Option<String>,
         #[arg(long)]
         capability: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List durable scoped approval grants owned by the authenticated actor.
+    Grants {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Revoke one durable scoped approval grant.
+    Revoke {
+        grant_id: String,
         #[arg(long)]
         json: bool,
     },
@@ -729,21 +740,6 @@ enum ReplayView {
     Llm,
     Tools,
     Checkpoints,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum ApprovalDecisionArg {
-    ApproveOnce,
-    Deny,
-}
-
-impl ApprovalDecisionArg {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ApproveOnce => "approve_once",
-            Self::Deny => "deny",
-        }
-    }
 }
 
 impl ReplayView {
@@ -1275,6 +1271,14 @@ fn main() -> Result<()> {
                     capability.as_deref(),
                     *json,
                 )
+            }
+            PermissionCommand::Grants { json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_permission_grants(base_url, k, *json)
+            }
+            PermissionCommand::Revoke { grant_id, json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_permission_revoke(base_url, k, grant_id, *json)
             }
         },
         Command::Models { command } => match command {
@@ -1927,6 +1931,32 @@ mod tests {
             "--approval-request-id",
             "approval-1",
             "--approval-decision",
+            "always-for-scope",
+        ])
+        .expect("parse scoped approval")
+        .cmd
+        {
+            Some(Command::ResumeTask {
+                approval_request_id,
+                approval_decision,
+                ..
+            }) => {
+                assert_eq!(approval_request_id.as_deref(), Some("approval-1"));
+                assert!(matches!(
+                    approval_decision,
+                    Some(task::ApprovalDecisionArg::AlwaysForScope)
+                ));
+            }
+            _ => panic!("expected scoped resume-task approval decision"),
+        }
+
+        match Cli::try_parse_from([
+            "clawcli",
+            "resume-task",
+            "task-1",
+            "--approval-request-id",
+            "approval-1",
+            "--approval-decision",
             "deny",
         ])
         .expect("parse approval denial")
@@ -1938,7 +1968,10 @@ mod tests {
                 ..
             }) => {
                 assert_eq!(approval_request_id.as_deref(), Some("approval-1"));
-                assert!(matches!(approval_decision, Some(ApprovalDecisionArg::Deny)));
+                assert!(matches!(
+                    approval_decision,
+                    Some(task::ApprovalDecisionArg::Deny)
+                ));
             }
             _ => panic!("expected resume-task approval decision"),
         }

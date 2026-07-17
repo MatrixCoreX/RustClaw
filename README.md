@@ -196,6 +196,7 @@ The permission plane is a structured execution boundary, not a second semantic r
 - Explicit user command preservation is represented by `_clawd_literal_command`; otherwise `run_cmd` is treated as planner-structured command args and remains subject to contract and media-artifact blockers.
 - Recovery paths such as non-interactive sudo retry are still adapter calls: they must reuse the same contract, hook, policy, and audit machinery as the original planner step.
 - Risky local coding or file-mutation capabilities should declare an isolation profile in registry metadata. `local_temp_workspace` is for disposable previews, dry runs, and generated artifacts that can be cleaned through artifact refs; `local_worktree` is for deliberate workspace edits that must be visible through task evidence, changed-file refs, and verification commands. UI and CLI surfaces read `permission_decision.steps[].sandbox`, `workspace_scope`, and `registry_policy` instead of interpreting localized text.
+- Confirmation decisions use the closed machine protocol `approve_once|always_for_scope|deny`. `always_for_scope` is exposed only for registry-declared local workspace mutations with an exact capability/effect/resource scope; it excludes `run_cmd`, network access, external publish, credential access, package installation, and privilege escalation. Grants are HMAC-signed, bound to the authenticated actor plus channel/chat session, expire after at most one hour, and are stored, matched, listed, and revoked by `clawd`. CLI/UI state never grants permission by itself.
 
 ## Natural Language Contract Boundary
 
@@ -452,6 +453,7 @@ Important lifecycle details:
 - `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl` and machine filters such as `--event-type`, `--checkpoint-id`, `--policy-decision`, `--subagent-id`, and `--async-job-id`.
 - `clawcli tui --user-id <id> --chat-id <id>` is a terminal task console over the same task APIs; add `--once` for a single snapshot and `--task-id <task_id>` for selected task details. Selected-task snapshots include raw task data plus `selected_progress` and `selected_summary` machine fields for checkpoint/resume, goal/outcome state, LLM budget/calls, coding verification, side effects, and artifacts. Interactive key tokens are stable machine commands: `r` refresh, `w` watch, `p` pause, `c` cancel, `u` resume, `n` continue, `e` export, `1` report, `2` review, `3` subagents, `4` permission, and `q` quit.
 - `clawcli session list/show/resume/archive/delete/fork` keeps a local session navigation store for `session_id`, `task_ids`, `active_goal_id`, `workspace_root`, checkpoint, event sequence, archive status, and fork source. This store is operator metadata under `RUSTCLAW_CLAWCLI_SESSION_STORE`, `$XDG_STATE_HOME/rustclaw/`, or `~/.local/state/rustclaw/`; it is not used as a natural-language route source.
+- In interactive chat, `/approve` approves the exact pending action once, `/approve-scope` approves only the backend-provided exact capability/resource scope for the current session, and `/deny` closes the pending request. `clawcli permission grants` lists server-side scope grants and `clawcli permission revoke <grant_id>` revokes one immediately. The browser Tasks page exposes the same structured choices and revocation API.
 
 ```bash
 clawcli session list --user-id 1 --chat-id 1 --json
@@ -490,6 +492,7 @@ flowchart LR
     E -->|waiting/background| G[resume.json + resume_hint]
     G --> H[continue / resume-task / pause-task / cancel-task]
     D --> I[events / logs / subagents / permission inspect]
+    I --> IA[permission grants / revoke<br/>server-side scope state]
     D --> J[tui selected task<br/>pause / resume / continue / panes]
     C --> K[session list/show<br/>local metadata store]
     K --> L[session archive / delete / fork]
@@ -650,7 +653,7 @@ flowchart TD
     C --> D[PlanVerifier]
     D --> E[PermissionDecision<br/>allowed / needs_confirmation / denied / dry_run_required]
     E -->|allowed| F[Pre-tool hooks]
-    E -->|needs_confirmation| G[needs_user / confirmation UI<br/>machine prompt key + refs]
+    E -->|needs_confirmation| G[Pending approval request<br/>exact action + args + optional safe scope]
     E -->|denied| H[Structured blocker<br/>policy token + evidence refs]
     E -->|dry_run_required| I[Dry-run execution path]
     F --> J[Adapter preflight<br/>contract args + command_policy]
@@ -660,7 +663,15 @@ flowchart TD
     K --> M[Observation + policy evidence]
     L --> N[Task journal event]
     M --> N
+    G --> GA{Closed decision token}
+    GA -->|approve_once| GB[Task-bound one-shot grant]
+    GA -->|always_for_scope| GC[Signed actor + session + capability<br/>effect + exact resource + expiry]
+    GA -->|deny| H
+    GB --> F
+    GC --> F
+    GC --> GD[Server-side list / revoke]
     N --> O[UI / CLI permission panes<br/>raw JSON secondary detail]
+    GD --> O
 ```
 
 Skill registry and runner protocol flow:

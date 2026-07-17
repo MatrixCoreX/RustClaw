@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use clap::ValueEnum;
 use serde_json::{json, Value};
 
 use crate::client;
@@ -21,6 +22,23 @@ pub(crate) struct TaskResumeRequest<'a> {
     pub(crate) new_constraints: Option<Value>,
     pub(crate) approval_request_id: Option<&'a str>,
     pub(crate) approval_decision: Option<&'a str>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum ApprovalDecisionArg {
+    ApproveOnce,
+    AlwaysForScope,
+    Deny,
+}
+
+impl ApprovalDecisionArg {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::ApproveOnce => "approve_once",
+            Self::AlwaysForScope => "always_for_scope",
+            Self::Deny => "deny",
+        }
+    }
 }
 
 impl TaskStatusView {

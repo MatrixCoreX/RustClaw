@@ -365,11 +365,12 @@ async fn direct_run_skill_confirmation_persists_and_consumes_exact_grant() {
     let request_id = result["resume_context"]["approval_request"]["request_id"]
         .as_str()
         .expect("request id");
-    crate::repo::decide_task_approval_request(
+    crate::repo::decide_task_approval_request_for_actor(
         &state,
         task_id,
         request_id,
         crate::approval_grant::ApprovalDecision::ApproveOnce,
+        None,
     )
     .expect("approve request")
     .expect("approval update");

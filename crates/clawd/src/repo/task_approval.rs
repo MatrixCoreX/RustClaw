@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
-use crate::approval_grant::{ApprovalBinding, ApprovalDecision};
+use crate::approval_grant::{ApprovalBinding, ApprovalDecision, ApprovalScopeBinding};
 use crate::AppState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +10,7 @@ pub(crate) struct TaskApprovalUpdate {
     pub(crate) request_id: String,
     pub(crate) expires_at: i64,
     pub(crate) decision: ApprovalDecision,
+    pub(crate) scope_grant: Option<super::approval_scope::ApprovalScopeGrantRecord>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,11 +46,12 @@ impl TaskApprovalConsumeOutcome {
     }
 }
 
-pub(crate) fn decide_task_approval_request(
+pub(crate) fn decide_task_approval_request_for_actor(
     state: &AppState,
     task_id: &str,
     request_id: &str,
     decision: ApprovalDecision,
+    actor_user_key: Option<&str>,
 ) -> anyhow::Result<Option<TaskApprovalUpdate>> {
     let db = state
         .core
@@ -61,6 +63,7 @@ pub(crate) fn decide_task_approval_request(
         task_id,
         request_id,
         decision,
+        actor_user_key,
         crate::now_ts_u64() as i64,
     )
 }
@@ -83,6 +86,7 @@ fn decide_task_approval_request_in_db(
     task_id: &str,
     request_id: &str,
     decision: ApprovalDecision,
+    actor_user_key: Option<&str>,
     now_ts: i64,
 ) -> anyhow::Result<Option<TaskApprovalUpdate>> {
     let task_id = task_id.trim();
@@ -90,14 +94,26 @@ fn decide_task_approval_request_in_db(
     if task_id.is_empty() || request_id.is_empty() {
         return Ok(None);
     }
-    let record = db
+    let tx = db.unchecked_transaction()?;
+    let record = tx
         .query_row(
-            "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            "SELECT status, result_json, user_id, chat_id, user_key, channel
+             FROM tasks WHERE task_id = ?1 LIMIT 1",
             params![task_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((status, Some(raw_result_json))) = record else {
+    let Some((status, Some(raw_result_json), user_id, chat_id, task_user_key, channel)) = record
+    else {
         return Ok(None);
     };
     if status != "failed" {
@@ -123,19 +139,59 @@ fn decide_task_approval_request_in_db(
     if expires_at <= now_ts {
         approval.insert("status".to_string(), json!("expired"));
         approval.insert("expired_at".to_string(), json!(now_ts));
-        let _ = update_approval_result_cas(db, task_id, &raw_result_json, &result, now_ts)?;
+        let _ = update_approval_result_cas(&tx, task_id, &raw_result_json, &result, now_ts)?;
+        tx.commit()?;
         return Ok(None);
     }
     let (request_status, reason_code, next_task_status) = match decision {
         ApprovalDecision::ApproveOnce => ("approved", "approval_grant_approved", "queued"),
+        ApprovalDecision::AlwaysForScope => ("approved", "approval_scope_grant_created", "queued"),
         ApprovalDecision::Deny => ("denied", "approval_request_denied", "failed"),
+    };
+    let scope_grant = if decision == ApprovalDecision::AlwaysForScope {
+        let Some(actor_user_key) = actor_user_key
+            .map(crate::normalize_user_key)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(None);
+        };
+        if task_user_key
+            .as_deref()
+            .map(crate::normalize_user_key)
+            .as_deref()
+            != Some(actor_user_key.as_str())
+        {
+            return Ok(None);
+        }
+        let Some(scope) = approval_scope_binding(approval) else {
+            return Ok(None);
+        };
+        Some(super::approval_scope::insert_approval_scope_grant(
+            &tx,
+            task_id,
+            user_id,
+            chat_id,
+            &channel,
+            &actor_user_key,
+            &scope,
+            now_ts,
+        )?)
+    } else {
+        None
     };
     approval.insert("status".to_string(), json!(request_status));
     approval.insert("decision".to_string(), json!(decision.as_token()));
     approval.insert("decided_at".to_string(), json!(now_ts));
+    if let Some(grant) = scope_grant.as_ref() {
+        approval.insert("scope_grant_id".to_string(), json!(grant.grant_id));
+        approval.insert(
+            "scope_grant_expires_at".to_string(),
+            json!(grant.expires_at),
+        );
+    }
     result["task_lifecycle"] = json!({
         "schema_version": 1,
-        "state": if decision == ApprovalDecision::ApproveOnce { "queued" } else { "failed" },
+        "state": if decision.grants_execution() { "queued" } else { "failed" },
         "reason_code": reason_code,
         "terminal_reason": if decision == ApprovalDecision::Deny {
             Value::String("approval_request_denied".to_string())
@@ -145,8 +201,8 @@ fn decide_task_approval_request_in_db(
         "approval_request_id": request_id,
         "approval_decision": decision.as_token(),
     });
-    let changed = if decision == ApprovalDecision::ApproveOnce {
-        db.execute(
+    let changed = if decision.grants_execution() {
+        tx.execute(
             "UPDATE tasks
              SET status = ?2, result_json = ?3, error_text = NULL, updated_at = ?4,
                  lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
@@ -160,7 +216,7 @@ fn decide_task_approval_request_in_db(
             ],
         )?
     } else {
-        db.execute(
+        tx.execute(
             "UPDATE tasks SET result_json = ?2, error_text = NULL, updated_at = ?3
              WHERE task_id = ?1 AND status = 'failed' AND result_json = ?4",
             params![
@@ -174,12 +230,40 @@ fn decide_task_approval_request_in_db(
     if changed == 0 {
         return Ok(None);
     }
+    tx.commit()?;
     Ok(Some(TaskApprovalUpdate {
         task_id: task_id.to_string(),
         request_id: request_id.to_string(),
         expires_at,
         decision,
+        scope_grant,
     }))
+}
+
+fn approval_scope_binding(
+    approval: &serde_json::Map<String, Value>,
+) -> Option<ApprovalScopeBinding> {
+    let scope = approval.get("scope_grant")?;
+    if scope.get("available").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let binding = ApprovalScopeBinding {
+        scope_kind: scope
+            .get("scope_kind")
+            .and_then(Value::as_str)?
+            .trim()
+            .to_string(),
+        scope_fingerprint: scope
+            .get("scope_fingerprint")
+            .and_then(Value::as_str)?
+            .trim()
+            .to_string(),
+        entries: serde_json::from_value(scope.get("entries")?.clone()).ok()?,
+    };
+    (binding.scope_kind == "session"
+        && !binding.scope_fingerprint.is_empty()
+        && !binding.entries.is_empty())
+    .then_some(binding)
 }
 
 fn consume_task_approval_grant_in_db(

@@ -1,8 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 
-use crate::{output, task};
+use crate::{client, output, task};
 
 use super::common::get_v1_json;
 
@@ -48,6 +48,85 @@ pub(crate) fn run_permission_capability(
         for line in capability_permission_text_lines(&report) {
             println!("{line}");
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn run_permission_grants(base_url: &str, key: &str, json_output: bool) -> Result<()> {
+    let body = get_v1_json(
+        base_url,
+        key,
+        "/tasks/approval-grants",
+        "approval_scope_grants",
+    )?;
+    let data = body.get("data").cloned().unwrap_or(Value::Null);
+    if json_output {
+        output::print_json_pretty(&data);
+        return Ok(());
+    }
+    println!(
+        "approval_scope_grant_count={}",
+        data.get("count").and_then(Value::as_u64).unwrap_or(0)
+    );
+    if let Some(grants) = data.get("grants").and_then(Value::as_array) {
+        for (index, grant) in grants.iter().enumerate() {
+            println!(
+                "approval_scope_grant#{} id={} scope_kind={} channel={} chat_id={} expires_at={} revoked_at={} use_count={}",
+                index + 1,
+                value_token(grant.get("grant_id")),
+                value_token(grant.get("scope_kind")),
+                value_token(grant.get("channel")),
+                value_token(grant.get("chat_id")),
+                value_token(grant.get("expires_at")),
+                value_token(grant.get("revoked_at")),
+                value_token(grant.get("use_count")),
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn run_permission_revoke(
+    base_url: &str,
+    key: &str,
+    grant_id: &str,
+    json_output: bool,
+) -> Result<()> {
+    let grant_id = grant_id.trim();
+    if grant_id.is_empty() {
+        anyhow::bail!("approval_scope_grant_id_required");
+    }
+    let url = format!(
+        "{}{}",
+        client::base_v1(base_url),
+        "/tasks/approval-grants/revoke"
+    );
+    let response = client::make_client()?
+        .post(&url)
+        .header("x-rustclaw-key", key)
+        .json(&json!({"grant_id": grant_id}))
+        .send()
+        .context("request approval_scope_grant_revoke failed")?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .context("parse approval_scope_grant_revoke response")?;
+    if !status.is_success() {
+        anyhow::bail!(
+            "approval_scope_grant_revoke returned {}: {:?}",
+            status,
+            body.get("error")
+        );
+    }
+    let data = body.get("data").cloned().unwrap_or(Value::Null);
+    if json_output {
+        output::print_json_pretty(&data);
+    } else {
+        println!(
+            "approval_scope_grant_status={} grant_id={}",
+            value_token(data.get("status")),
+            value_token(data.get("grant_id")),
+        );
     }
     Ok(())
 }
