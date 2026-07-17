@@ -667,6 +667,7 @@ pub(super) async fn start_async_command(
     cwd: &Path,
     command: &str,
     max_cmd_length: usize,
+    max_runtime_seconds: u64,
     allow_sudo: bool,
     job_id: &str,
     job_dir: &Path,
@@ -709,9 +710,14 @@ pub(super) async fn start_async_command(
     let started_path = job_dir.join("started_at");
     let finished_path = job_dir.join("finished_at");
     let run_script_path = job_dir.join("run.sh");
+    let max_runtime_seconds = max_runtime_seconds.clamp(1, 86_400);
     let script = format!(
-        "#!/usr/bin/env bash\nset +e\nprintf '%s\\n' \"$(date +%s)\" > {}\nbash -lc {} > {} 2> {}\ncode=$?\nprintf '%s\\n' \"$code\" > {}\nprintf '%s\\n' \"$(date +%s)\" > {}\n",
+        "#!/usr/bin/env bash\nset +e\nprintf '%s\\n' \"$(date +%s)\" > {}\nif command -v timeout >/dev/null 2>&1; then\n  timeout -k 5 {} bash -lc {} > {} 2> {}\nelse\n  bash -lc {} > {} 2> {}\nfi\ncode=$?\nprintf '%s\\n' \"$code\" > {}\nprintf '%s\\n' \"$(date +%s)\" > {}\n",
         shell_single_quote(&started_path.display().to_string()),
+        max_runtime_seconds,
+        shell_single_quote(command),
+        shell_single_quote(&stdout_path.display().to_string()),
+        shell_single_quote(&stderr_path.display().to_string()),
         shell_single_quote(command),
         shell_single_quote(&stdout_path.display().to_string()),
         shell_single_quote(&stderr_path.display().to_string()),
@@ -724,7 +730,7 @@ pub(super) async fn start_async_command(
             format!("{}:{err}", "async_job_script_write_failed"),
         ))
     })?;
-    let mut cmd = prepare_run_cmd_process(cwd, sandbox_mode, workspace_root)?;
+    let mut cmd = prepare_durable_run_cmd_process(cwd, sandbox_mode, workspace_root)?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     cmd.arg(&run_script_path)
         .current_dir(cwd)
@@ -756,16 +762,35 @@ fn prepare_run_cmd_process(
     sandbox_mode: claw_core::config::ToolSandboxMode,
     workspace_root: &Path,
 ) -> Result<Command, RunSafeCommandError> {
-    let prepared = crate::process_sandbox::prepare_process_command(
-        "bash",
-        crate::process_sandbox::ProcessSandboxRequest {
-            mode: sandbox_mode,
-            workspace_root,
-            execution_root: cwd,
-            network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
-            additional_writable_paths: &[],
-        },
-    )
+    prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, workspace_root, false)
+}
+
+fn prepare_durable_run_cmd_process(
+    cwd: &Path,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    workspace_root: &Path,
+) -> Result<Command, RunSafeCommandError> {
+    prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, workspace_root, true)
+}
+
+fn prepare_run_cmd_process_for_lifetime(
+    cwd: &Path,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    workspace_root: &Path,
+    durable_async: bool,
+) -> Result<Command, RunSafeCommandError> {
+    let request = crate::process_sandbox::ProcessSandboxRequest {
+        mode: sandbox_mode,
+        workspace_root,
+        execution_root: cwd,
+        network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
+        additional_writable_paths: &[],
+    };
+    let prepared = if durable_async {
+        crate::process_sandbox::prepare_durable_process_command("bash", request)
+    } else {
+        crate::process_sandbox::prepare_process_command("bash", request)
+    }
     .map_err(|reason_code| {
         RunSafeCommandError::Policy(crate::skills::policy_block_error(
             reason_code,

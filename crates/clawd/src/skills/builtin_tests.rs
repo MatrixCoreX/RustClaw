@@ -9,7 +9,7 @@ use std::fs;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct TempDirGuard {
     path: PathBuf,
@@ -554,6 +554,50 @@ async fn run_cmd_async_start_uses_dedicated_process_group() {
         .arg("-TERM")
         .arg(format!("-{pid}"))
         .status();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn run_cmd_async_job_stops_at_checkpoint_expiry() {
+    let root = TempDirGuard::new("run_cmd_async_expiry");
+    let state = test_state(root.path.clone());
+    let job_dir = root.path.join("async-job");
+    let started = Instant::now();
+    let output = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "exec sleep 30",
+            "async_start": true,
+            "_clawd_async_job_id": "local_process:test-expiry",
+            "_clawd_async_job_dir": job_dir.display().to_string(),
+            "_clawd_async_expires_at": crate::now_ts_u64().saturating_add(1)
+        }),
+    )
+    .await
+    .expect("async run_cmd should start");
+    assert!(output.contains("\"status\":\"accepted\""));
+
+    let exit_code_path = job_dir.join("exit_code");
+    for _ in 0..60 {
+        if exit_code_path.is_file() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let exit_code = fs::read_to_string(&exit_code_path)
+        .expect("expiry should publish an exit code")
+        .trim()
+        .parse::<i32>()
+        .expect("numeric exit code");
+    // GNU coreutils reports 124; the supported uutils build reports 125 after sending TERM.
+    assert!(
+        matches!(exit_code, 124 | 125),
+        "unsupported timeout exit code: {exit_code}"
+    );
+    assert!(started.elapsed() >= Duration::from_millis(800));
+    assert!(started.elapsed() < Duration::from_secs(4));
+    assert!(job_dir.join("finished_at").is_file());
 }
 
 #[cfg(unix)]
