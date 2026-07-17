@@ -11,6 +11,7 @@ base64.workspace = true
 claw-core = { path = "../claw-core" }
 wechat-ilink = { path = "../wechat-ilink" }
 reqwest.workspace = true
+reqwest-mcp.workspace = true
 rmcp.workspace = true
 rusqlite.workspace = true
 r2d2 = "0.8"

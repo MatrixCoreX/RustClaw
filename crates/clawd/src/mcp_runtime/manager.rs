@@ -4,10 +4,11 @@ use std::time::Duration;
 use std::time::Instant;
 
 use claw_core::config::{McpConfig, McpServerConfig, McpTransportConfig};
+use rmcp::transport::auth::OAuthState;
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
-use rmcp::transport::TokioChildProcess;
+use rmcp::transport::{AuthClient, ClientCredentialsConfig, TokioChildProcess};
 use rmcp::ServiceExt;
 use serde_json::{json, Map, Value};
 use tokio::process::Command;
@@ -39,6 +40,7 @@ pub(crate) struct McpRuntime {
 struct ReconnectState {
     attempt: u32,
     next_retry_at: Option<Instant>,
+    retry_blocked: bool,
 }
 
 impl McpRuntime {
@@ -56,6 +58,7 @@ impl McpRuntime {
                         McpLifecycleState::Disabled
                     },
                     transport: server.transport.as_token().to_string(),
+                    auth_mode: server.auth_mode_token().to_string(),
                     tool_count: 0,
                     last_error_code: None,
                 },
@@ -81,6 +84,15 @@ impl McpRuntime {
     #[cfg(test)]
     pub(crate) fn disabled() -> Self {
         Self::new(McpConfig::default())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reconnect_retry_blocked(&self, server_id: &str) -> bool {
+        self.reconnect_state
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(server_id)
+            .is_some_and(|state| state.retry_blocked)
     }
 
     pub(crate) async fn start(&self) {
@@ -305,6 +317,10 @@ impl McpRuntime {
                 0,
                 Some("mcp_transport_closed"),
             );
+            self.schedule_reconnect(
+                &descriptor.server_id,
+                &McpRuntimeError::new("mcp_transport_closed"),
+            );
             return Err(McpRuntimeError::new("mcp_transport_closed"));
         }
         let result = client
@@ -525,7 +541,17 @@ impl McpRuntime {
                     self.reconnect_server(&server_id).await;
                     continue;
                 }
+                let error = McpRuntimeError::new("mcp_transport_closed");
+                self.set_lifecycle(
+                    &server_id,
+                    McpLifecycleState::Degraded,
+                    0,
+                    Some(error.code()),
+                );
                 self.disconnect_server(&server_id).await;
+                self.clear_reconnect_state(&server_id);
+                self.reconnect_server(&server_id).await;
+                continue;
             }
             if self.reconnect_due(&server_id) {
                 self.reconnect_server(&server_id).await;
@@ -593,14 +619,15 @@ impl McpRuntime {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(server_id)
-            .and_then(|state| state.next_retry_at)
-            .is_none_or(|next_retry_at| Instant::now() >= next_retry_at)
+            .is_some_and(|state| {
+                !state.retry_blocked
+                    && state
+                        .next_retry_at
+                        .is_some_and(|next_retry_at| Instant::now() >= next_retry_at)
+            })
     }
 
     fn schedule_reconnect(&self, server_id: &str, error: &McpRuntimeError) {
-        if !retryable_connection_error(error.code()) {
-            return;
-        }
         let Some(server) = self.config.servers.get(server_id) else {
             return;
         };
@@ -609,6 +636,12 @@ impl McpRuntime {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let state = states.entry(server_id.to_string()).or_default();
+        if !retryable_connection_error(error.code()) {
+            state.retry_blocked = true;
+            state.next_retry_at = None;
+            return;
+        }
+        state.retry_blocked = false;
         state.attempt = state.attempt.saturating_add(1).min(31);
         let base = server.reconnect_base_seconds.max(1);
         let maximum = server.reconnect_max_seconds.max(base);
@@ -661,6 +694,12 @@ impl McpRuntime {
             .get(server_id)
             .map(|server| server.transport.as_token())
             .unwrap_or("unknown");
+        let auth_mode = self
+            .config
+            .servers
+            .get(server_id)
+            .map(McpServerConfig::auth_mode_token)
+            .unwrap_or("none");
         self.lifecycle
             .write()
             .expect("mcp lifecycle lock poisoned")
@@ -670,6 +709,7 @@ impl McpRuntime {
                     server_id: server_id.to_string(),
                     state,
                     transport: transport.to_string(),
+                    auth_mode: auth_mode.to_string(),
                     tool_count,
                     last_error_code: last_error_code.map(str::to_string),
                 },
@@ -715,8 +755,12 @@ async fn connect_http(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| McpRuntimeError::new("mcp_http_url_missing"))?;
-    let mut transport_config = StreamableHttpClientTransportConfig::with_uri(url.to_string())
+    let transport_config = StreamableHttpClientTransportConfig::with_uri(url.to_string())
         .reinit_on_expired_session(true);
+    if server.uses_oauth_client_credentials() {
+        return connect_http_oauth_client_credentials(server, url, timeout, transport_config).await;
+    }
+    let mut transport_config = transport_config;
     if let Some(env_ref) = server
         .auth_token_env
         .as_deref()
@@ -729,6 +773,57 @@ async fn connect_http(
         transport_config = transport_config.auth_header(token);
     }
     let transport = StreamableHttpClientTransport::from_config(transport_config);
+    tokio::time::timeout(timeout, ().serve(transport))
+        .await
+        .map_err(|_| McpRuntimeError::new("mcp_initialize_timeout"))?
+        .map_err(|_| McpRuntimeError::new("mcp_initialize_failed"))
+}
+
+async fn connect_http_oauth_client_credentials(
+    server: &McpServerConfig,
+    url: &str,
+    timeout: Duration,
+    transport_config: StreamableHttpClientTransportConfig,
+) -> Result<rmcp::service::RunningService<rmcp::RoleClient, ()>, McpRuntimeError> {
+    let client_id_env = server
+        .oauth_client_id_env
+        .as_deref()
+        .ok_or_else(|| McpRuntimeError::new("mcp_oauth_client_id_ref_missing"))?;
+    let client_secret_env = server
+        .oauth_client_secret_env
+        .as_deref()
+        .ok_or_else(|| McpRuntimeError::new("mcp_oauth_client_secret_ref_missing"))?;
+    let client_id = std::env::var(client_id_env).map_err(|_| {
+        McpRuntimeError::with_context("mcp_secret_reference_unavailable", client_id_env)
+    })?;
+    let client_secret = std::env::var(client_secret_env).map_err(|_| {
+        McpRuntimeError::with_context("mcp_secret_reference_unavailable", client_secret_env)
+    })?;
+    let mut oauth_state = tokio::time::timeout(timeout, OAuthState::new(url, None))
+        .await
+        .map_err(|_| McpRuntimeError::new("mcp_oauth_initialize_timeout"))?
+        .map_err(|_| McpRuntimeError::new("mcp_oauth_initialize_failed"))?;
+    let oauth_config = ClientCredentialsConfig::ClientSecret {
+        client_id,
+        client_secret,
+        scopes: server.oauth_scopes.clone(),
+        resource: server
+            .oauth_resource
+            .clone()
+            .or_else(|| Some(url.to_string())),
+    };
+    tokio::time::timeout(
+        timeout,
+        oauth_state.authenticate_client_credentials(oauth_config),
+    )
+    .await
+    .map_err(|_| McpRuntimeError::new("mcp_oauth_exchange_timeout"))?
+    .map_err(|_| McpRuntimeError::new("mcp_oauth_exchange_failed"))?;
+    let auth_manager = oauth_state
+        .into_authorization_manager()
+        .ok_or_else(|| McpRuntimeError::new("mcp_oauth_state_invalid"))?;
+    let auth_client = AuthClient::new(reqwest_mcp::Client::default(), auth_manager);
+    let transport = StreamableHttpClientTransport::with_client(auth_client, transport_config);
     tokio::time::timeout(timeout, ().serve(transport))
         .await
         .map_err(|_| McpRuntimeError::new("mcp_initialize_timeout"))?
@@ -764,6 +859,23 @@ fn validate_server_config(
             return Err(McpRuntimeError::new("mcp_allowed_tool_invalid"));
         }
     }
+    if server.auth_token_env.is_some() && server.uses_oauth_client_credentials() {
+        return Err(McpRuntimeError::new("mcp_http_auth_conflict"));
+    }
+    if server.oauth_client_id_env.is_some() != server.oauth_client_secret_env.is_some() {
+        return Err(McpRuntimeError::new("mcp_oauth_secret_refs_incomplete"));
+    }
+    if server.uses_oauth_client_credentials()
+        && (!valid_env_reference(server.oauth_client_id_env.as_deref().unwrap_or_default())
+            || !valid_env_reference(
+                server
+                    .oauth_client_secret_env
+                    .as_deref()
+                    .unwrap_or_default(),
+            ))
+    {
+        return Err(McpRuntimeError::new("mcp_oauth_secret_ref_invalid"));
+    }
     match server.transport {
         McpTransportConfig::Stdio if server.command.as_deref().is_none_or(str::is_empty) => {
             Err(McpRuntimeError::new("mcp_stdio_command_missing"))
@@ -774,6 +886,14 @@ fn validate_server_config(
         McpTransportConfig::Sse => Err(McpRuntimeError::new("mcp_transport_unsupported")),
         _ => Ok(()),
     }
+}
+
+fn valid_env_reference(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 fn build_tool_descriptors(
