@@ -6,6 +6,7 @@ pub(crate) mod google_gemini;
 pub(crate) mod openai_compat;
 pub(crate) mod output;
 pub(crate) mod pricing;
+pub(crate) mod routing;
 pub(crate) mod usage;
 
 #[cfg(test)]
@@ -15,7 +16,7 @@ mod pricing_tests;
 pub(crate) use circuit::{AttemptDecision, CircuitBreaker, CircuitBreakerSnapshot};
 pub(crate) use client::{
     build_llm_http_client, call_provider_with_retry, call_provider_with_retry_with_hints,
-    ChatRequestHints,
+    ChatRequestHints, LlmRoutingPreference,
 };
 pub(crate) use output::{
     append_model_io_log, log_color_enabled, maybe_sanitize_llm_text_output,
@@ -25,4 +26,5 @@ pub(crate) use pricing::{
     build_cost_record, resolve_model_pricing, summarize_task_cost, LlmCallCostRecord,
     LlmTaskCostSummary,
 };
+pub(crate) use routing::{route_providers, LlmProviderLatencyTracker, LlmProviderRouteEvaluation};
 pub(crate) use usage::{anthropic_usage_snapshot, gemini_usage_snapshot, openai_usage_snapshot};

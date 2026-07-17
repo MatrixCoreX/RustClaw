@@ -178,6 +178,9 @@ fn build_llm_test_runtime(
         api_key: vendor_api_key.trim().to_string(),
         model: selected_model.trim().to_string(),
         context_window_tokens: None,
+        input_modalities: vec!["text".to_string()],
+        supports_tools: true,
+        expected_latency_ms: None,
         priority: 1,
         timeout_seconds: 20,
         max_concurrency: 1,
@@ -188,6 +191,7 @@ fn build_llm_test_runtime(
     Ok(Arc::new(LlmProviderRuntime {
         config,
         pricing: None,
+        latency: Arc::new(crate::providers::LlmProviderLatencyTracker::default()),
         client,
         semaphore: Arc::new(Semaphore::new(1)),
         breaker: Arc::new(crate::providers::CircuitBreaker::new()),

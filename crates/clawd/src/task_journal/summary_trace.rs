@@ -860,6 +860,7 @@ pub(super) fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
                         "provider_last_retry_error_kinds": bucket.provider_last_retry_error_kinds,
                         "provider_final_error_kinds": bucket.provider_final_error_kinds,
                         "provider_breaker_snapshots": bucket.provider_breaker_snapshots,
+                        "provider_route_evaluations": bucket.provider_route_evaluations,
                         "prompt_truncation_count": bucket.prompt_truncation_count,
                         "prompt_bytes_before_max": bucket.prompt_bytes_before_max,
                         "prompt_bytes_budget_min": bucket.prompt_bytes_budget_min,

@@ -1019,6 +1019,12 @@ pub struct LlmVendorConfig {
     pub context_window_tokens: Option<usize>,
     #[serde(default)]
     pub models: Vec<String>,
+    #[serde(default = "default_llm_input_modalities")]
+    pub input_modalities: Vec<String>,
+    #[serde(default = "default_llm_supports_tools")]
+    pub supports_tools: bool,
+    #[serde(default)]
+    pub expected_latency_ms: Option<u64>,
     #[serde(default = "default_llm_timeout_seconds")]
     pub timeout_seconds: u64,
     #[serde(default = "default_llm_max_concurrency")]
@@ -1041,6 +1047,14 @@ pub struct LlmVendorConfig {
     pub params: LlmProviderParams,
 }
 
+fn default_llm_input_modalities() -> Vec<String> {
+    vec!["text".to_string()]
+}
+
+fn default_llm_supports_tools() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct LlmProviderConfig {
     pub name: String,
@@ -1052,6 +1066,12 @@ pub struct LlmProviderConfig {
     /// Optional resolved context window for prompt budgeting.
     #[serde(default)]
     pub context_window_tokens: Option<usize>,
+    #[serde(default = "default_llm_input_modalities")]
+    pub input_modalities: Vec<String>,
+    #[serde(default = "default_llm_supports_tools")]
+    pub supports_tools: bool,
+    #[serde(default)]
+    pub expected_latency_ms: Option<u64>,
     pub priority: i32,
     pub timeout_seconds: u64,
     pub max_concurrency: usize,

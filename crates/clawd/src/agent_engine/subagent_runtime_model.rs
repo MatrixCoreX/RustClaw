@@ -26,6 +26,8 @@ pub(super) async fn maybe_run_model_assisted_subagent(
         crate::ChatRequestHints {
             temperature: Some(0.0),
             max_tokens: Some(CHILD_MODEL_MAX_TOKENS),
+            requires_tool_support: true,
+            ..Default::default()
         },
     )
     .await

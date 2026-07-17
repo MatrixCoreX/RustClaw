@@ -88,6 +88,7 @@ pub(crate) async fn run_model_assisted_context_compaction(
         crate::ChatRequestHints {
             temperature: Some(0.0),
             max_tokens: Some(CONTEXT_COMPACTION_MAX_TOKENS),
+            ..Default::default()
         },
     );
     let timeout_seconds = context_compaction_timeout_seconds(

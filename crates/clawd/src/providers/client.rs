@@ -330,10 +330,35 @@ pub(crate) fn is_quota_exhausted_response(body_text: &str) -> bool {
 ///
 /// 旧调用点（plan/normalizer 等）走默认 `ChatRequestHints::default()`：
 /// 不主动设置 temperature/max_tokens，让 provider 走自己的默认值，与原行为一致。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum LlmRoutingPreference {
+    #[default]
+    Balanced,
+    LowCost,
+    LowLatency,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct ChatRequestHints {
     pub(crate) temperature: Option<f64>,
     pub(crate) max_tokens: Option<u64>,
+    pub(crate) required_input_modalities: Vec<String>,
+    pub(crate) minimum_context_window_tokens: Option<usize>,
+    pub(crate) requires_tool_support: bool,
+    pub(crate) routing_preference: LlmRoutingPreference,
+}
+
+impl Default for ChatRequestHints {
+    fn default() -> Self {
+        Self {
+            temperature: None,
+            max_tokens: None,
+            required_input_modalities: vec!["text".to_string()],
+            minimum_context_window_tokens: None,
+            requires_tool_support: false,
+            routing_preference: LlmRoutingPreference::Balanced,
+        }
+    }
 }
 
 pub(crate) async fn call_provider_with_retry(
