@@ -8,6 +8,8 @@ use crate::task_lifecycle::{
 use crate::{repo, AppState};
 use claw_core::skill_registry::{OutputKind, PlannerCapabilityEffect, SkillRiskLevel};
 
+use super::run_skill_permission::DirectRunSkillVerification;
+
 const DIRECT_RUN_SKILL_ASYNC_SOURCE: &str = "direct_run_skill_async_start_adapter";
 const DIRECT_RUN_SKILL_ASYNC_ERROR_PREFIX: &str = "direct_run_skill_async_job_invalid";
 
@@ -116,6 +118,22 @@ fn run_skill_trace_safe_json(value: &Value) -> Value {
         Value::String(text) => Value::String(crate::visible_text::sanitize_user_visible_text(text)),
         Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
     }
+}
+
+fn run_skill_trace_safe_args_summary(payload: &Value) -> String {
+    let args = payload
+        .get("args")
+        .map(run_skill_trace_safe_json)
+        .unwrap_or(Value::Null);
+    format!("args={}", crate::truncate_for_log(&args.to_string()))
+}
+
+fn record_direct_run_skill_verification(
+    journal: &mut crate::task_journal::TaskJournal,
+    verification: &DirectRunSkillVerification,
+) {
+    journal.record_plan_result(&verification.plan);
+    journal.record_verify_result(&verification.verify);
 }
 
 fn run_skill_capability_contract(state: &AppState, payload: &Value, skill_name: &str) -> Value {
@@ -487,6 +505,7 @@ async fn finalize_run_skill_success(
     task: &crate::ClaimedTask,
     payload: &Value,
     skill_name: &str,
+    verification: &DirectRunSkillVerification,
     outcome: crate::skills::SkillRunOutcome,
 ) -> Result<()> {
     let clean_text = crate::intercept_response_text_for_delivery(&outcome.text);
@@ -498,16 +517,8 @@ async fn finalize_run_skill_success(
     journal.record_task_goal_spec_from_payload_json(&task.payload_json);
     journal.record_runtime_llm_metrics(state, &task.task_id);
     journal.record_used_evidence_ids_count(0);
-    journal.record_context_bundle_summary(format!(
-        "args={}",
-        crate::truncate_for_log(
-            &payload
-                .get("args")
-                .cloned()
-                .unwrap_or(Value::Null)
-                .to_string()
-        )
-    ));
+    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
+    record_direct_run_skill_verification(&mut journal, verification);
     journal.push_step_result(&build_run_skill_step_result(
         skill_name,
         crate::executor::StepExecutionStatus::Ok,
@@ -552,7 +563,8 @@ async fn finalize_run_skill_success(
     ) {
         Ok(result) => result,
         Err(err) => {
-            finalize_run_skill_failure(state, task, payload, skill_name, &err).await?;
+            finalize_run_skill_failure(state, task, payload, skill_name, verification, &err)
+                .await?;
             return Ok(());
         }
     };
@@ -654,6 +666,7 @@ async fn finalize_run_skill_failure(
     task: &crate::ClaimedTask,
     payload: &Value,
     skill_name: &str,
+    verification: &DirectRunSkillVerification,
     err_text: &str,
 ) -> Result<()> {
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -664,16 +677,8 @@ async fn finalize_run_skill_failure(
     journal.record_task_goal_spec_from_payload_json(&task.payload_json);
     journal.record_runtime_llm_metrics(state, &task.task_id);
     journal.record_used_evidence_ids_count(0);
-    journal.record_context_bundle_summary(format!(
-        "args={}",
-        crate::truncate_for_log(
-            &payload
-                .get("args")
-                .cloned()
-                .unwrap_or(Value::Null)
-                .to_string()
-        )
-    ));
+    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
+    record_direct_run_skill_verification(&mut journal, verification);
     journal.push_step_result(&build_run_skill_step_result(
         skill_name,
         crate::executor::StepExecutionStatus::Error,
@@ -747,11 +752,88 @@ async fn finalize_run_skill_failure(
     Ok(())
 }
 
-pub(crate) async fn finalize_run_skill_result(
+pub(super) async fn finalize_run_skill_confirmation_required(
     state: &AppState,
     task: &crate::ClaimedTask,
     payload: &Value,
     skill_name: &str,
+    verification: &DirectRunSkillVerification,
+) -> Result<()> {
+    let confirmation_step_ids =
+        crate::approval_grant::confirmation_step_ids(&verification.verify.issues);
+    let detail = verification
+        .verify
+        .blocked_reason
+        .as_deref()
+        .unwrap_or("explicit_approval_required");
+    let (user_error, resume_context) =
+        crate::agent_engine::build_confirmation_required_resume_context(
+            state,
+            task,
+            &verification.plan.steps,
+            &verification.request_envelope,
+            &verification.plan.goal,
+            &[],
+            &[],
+            detail,
+            &confirmation_step_ids,
+        )
+        .await;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        &task.task_id,
+        "run_skill",
+        format!("run_skill:{skill_name}"),
+    );
+    journal.record_task_goal_spec_from_payload_json(&task.payload_json);
+    journal.record_runtime_llm_metrics(state, &task.task_id);
+    journal.record_used_evidence_ids_count(0);
+    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
+    record_direct_run_skill_verification(&mut journal, verification);
+    journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
+        &user_error,
+        &[],
+    ));
+    journal.record_final_answer(&user_error);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.record_final_failure_attribution_from_error("permission_denied");
+    let notify_outcome =
+        super::maybe_notify_schedule_result(state, task, payload, false, &user_error).await;
+    super::record_schedule_notify_outcome(&mut journal, notify_outcome);
+    let result = journal.attach_to_result(json!({
+        "text": user_error,
+        "resume_context": resume_context,
+    }));
+    repo::update_task_failure_with_result(
+        state,
+        &task.task_id,
+        &result.to_string(),
+        "explicit_approval_required",
+    )?;
+    let _ = repo::insert_audit_log(
+        state,
+        Some(task.user_id),
+        "run_skill",
+        Some(
+            &json!({
+                "task_id": task.task_id,
+                "chat_id": task.chat_id,
+                "skill_name": skill_name,
+                "status": "approval_required",
+            })
+            .to_string(),
+        ),
+        None,
+    );
+    state.clear_task_llm_call_count(&task.task_id);
+    Ok(())
+}
+
+pub(super) async fn finalize_run_skill_result(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    payload: &Value,
+    skill_name: &str,
+    verification: &DirectRunSkillVerification,
     result: Result<crate::skills::SkillRunOutcome, String>,
 ) -> Result<()> {
     match result {
@@ -760,14 +842,16 @@ pub(crate) async fn finalize_run_skill_result(
                 state.clear_task_llm_call_count(&task.task_id);
                 return finalize_run_skill_canceled(task, skill_name).await;
             }
-            finalize_run_skill_success(state, task, payload, skill_name, outcome).await?;
+            finalize_run_skill_success(state, task, payload, skill_name, verification, outcome)
+                .await?;
         }
         Err(err_text) => {
             if !repo::is_task_still_running(state, &task.task_id)? {
                 state.clear_task_llm_call_count(&task.task_id);
                 return finalize_run_skill_canceled(task, skill_name).await;
             }
-            finalize_run_skill_failure(state, task, payload, skill_name, &err_text).await?;
+            finalize_run_skill_failure(state, task, payload, skill_name, verification, &err_text)
+                .await?;
         }
     }
     Ok(())

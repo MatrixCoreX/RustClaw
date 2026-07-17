@@ -15,6 +15,7 @@ mod locator;
 mod resume_replay_executor;
 pub(crate) mod run_capability;
 mod run_skill_finalize;
+mod run_skill_permission;
 mod runtime_support;
 
 // Phase 3.3 Stage 2.2：ask_finalize.rs 已物理搬移到 `crate::finalize::task`，
@@ -29,7 +30,7 @@ pub(crate) use channels::{
     task_payload_value, task_runtime_channel,
 };
 pub(super) use locator::{has_concrete_locator_hint, has_explicit_path_or_url_locator_hint};
-pub(super) use run_skill_finalize::finalize_run_skill_result;
+use run_skill_finalize::{finalize_run_skill_confirmation_required, finalize_run_skill_result};
 pub(crate) use runtime_support::spawn_long_term_summary_refresh;
 pub(crate) use runtime_support::{
     maybe_recover_stale_running_tasks_runtime, recover_stale_running_tasks_on_startup,
@@ -430,21 +431,46 @@ pub(crate) async fn process_run_skill_task(
         task.user_id,
         task.chat_id,
         prepared_input.skill_name,
-        crate::truncate_for_log(&prepared_input.args.to_string())
+        crate::truncate_for_log(&crate::visible_text::sanitize_user_visible_text(
+            &prepared_input.args.to_string()
+        ))
     );
 
-    finalize_run_skill_result(
+    let verification = run_skill_permission::verify_direct_run_skill(
         state,
         task,
-        payload,
         &prepared_input.skill_name,
+        prepared_input.args.clone(),
+    );
+    if verification.needs_confirmation() {
+        return finalize_run_skill_confirmation_required(
+            state,
+            task,
+            payload,
+            &prepared_input.skill_name,
+            &verification,
+        )
+        .await;
+    }
+    let result = if verification.allowed() {
         crate::run_skill_with_runner_outcome(
             state,
             task,
             &prepared_input.skill_name,
             prepared_input.args,
         )
-        .await,
+        .await
+    } else {
+        Err(verification.denial_error(&prepared_input.skill_name))
+    };
+
+    finalize_run_skill_result(
+        state,
+        task,
+        payload,
+        &prepared_input.skill_name,
+        &verification,
+        result,
     )
     .await
 }

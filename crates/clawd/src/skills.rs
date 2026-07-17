@@ -1463,7 +1463,9 @@ pub(crate) async fn run_skill_with_runner_outcome(
         tracing::info!(
             "skill_virtual_args_rewrite skill={} args={}",
             skill_name,
-            crate::truncate_for_log(&args.to_string())
+            crate::truncate_for_log(&crate::visible_text::sanitize_user_visible_text(
+                &args.to_string()
+            ))
         );
     }
     if let Some(rewrite) =
@@ -1473,7 +1475,9 @@ pub(crate) async fn run_skill_with_runner_outcome(
             "skill_virtual_dispatch requested_skill={} runtime_skill={} args={}",
             skill_name,
             rewrite.runtime_tool,
-            crate::truncate_for_log(&rewrite.runtime_args.to_string())
+            crate::truncate_for_log(&crate::visible_text::sanitize_user_visible_text(
+                &rewrite.runtime_args.to_string()
+            ))
         );
         skill_name = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
         args = rewrite.runtime_args;
