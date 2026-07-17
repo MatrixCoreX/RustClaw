@@ -15,10 +15,11 @@ pub(super) use list_projection::{
 use tracing::info;
 
 use crate::agent_engine::{AgentRunContext, LoopState};
+use crate::finalize::build_from_loop_state;
 use crate::{AppState, ClaimedTask};
 
 use super::{
-    build_loop_journal, direct_created_archive_path_from_observed_archive_pack,
+    direct_created_archive_path_from_observed_archive_pack,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_generated_file_path_report_from_dry_run_payload,
@@ -118,7 +119,7 @@ pub(super) fn evidence_policy_candidate_satisfies_final_shape(
         return true;
     }
     let delivery_messages = vec![candidate.to_string()];
-    let journal = build_loop_journal(
+    let journal = build_from_loop_state(
         task,
         user_text,
         loop_state,

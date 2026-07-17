@@ -430,3 +430,64 @@ failure_policy = "deny"
     assert_eq!(handler["reason_code"], "fixture_permission_denied");
     assert_eq!(handler["blocking"], true);
 }
+
+#[tokio::test]
+async fn verifier_confirmation_runs_permission_hook_before_approval_creation() {
+    let temp = TempDirGuard::new_in_repository("verifier_permission_hook");
+    let hash = write_command_hook(
+        &temp,
+        "verifier-permission-guard.sh",
+        "deny",
+        "fixture_verifier_permission_denied",
+    );
+    std::fs::write(
+        temp.path.join("configs/agent_guard.toml"),
+        format!(
+            r#"
+[agent.hooks]
+
+[[agent.hooks.handlers]]
+id = "fixture_verifier_permission_guard"
+stage = "permission_request"
+kind = "command"
+enabled = true
+trusted = true
+blocking = true
+path = "hooks/verifier-permission-guard.sh"
+content_sha256 = "{hash}"
+timeout_ms = 1000
+max_input_bytes = 4096
+max_output_bytes = 4096
+max_attempts = 1
+failure_policy = "deny"
+"#
+        ),
+    )
+    .expect("write agent guard");
+    let mut state = super::tests::test_state();
+    state.skill_rt.workspace_root = temp.path.clone();
+    let task = claimed_task();
+
+    let (_text, resume_context) = crate::agent_engine::build_confirmation_required_resume_context(
+        &state,
+        &task,
+        &[],
+        "inspect",
+        "inspect",
+        &[],
+        &[],
+        "verification_confirmation_required",
+        &[],
+    )
+    .await;
+
+    assert_eq!(resume_context["required_decision"], "deny");
+    assert_eq!(resume_context["permission_hook_decision"], "deny");
+    assert!(resume_context.get("approval_request").is_none());
+    assert!(resume_context["agent_hook_events"]
+        .as_array()
+        .is_some_and(|events| events.iter().any(|event| {
+            event["handler_id"] == "fixture_verifier_permission_guard"
+                && event["reason_code"] == "fixture_verifier_permission_denied"
+        })));
+}

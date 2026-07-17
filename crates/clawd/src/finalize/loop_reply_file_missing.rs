@@ -523,7 +523,7 @@ pub(super) async fn missing_file_delivery_reply_from_loop(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
-    loop_state: &crate::agent_engine::LoopState,
+    loop_state: &mut crate::agent_engine::LoopState,
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> Option<AskReply> {
@@ -554,6 +554,7 @@ pub(super) async fn missing_file_delivery_reply_from_loop(
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
     let journal = build_loop_journal(
+        state,
         task,
         user_text,
         loop_state,
@@ -562,7 +563,8 @@ pub(super) async fn missing_file_delivery_reply_from_loop(
         delivery_consistent,
         &message,
         crate::task_journal::TaskJournalFinalStatus::Success,
-    );
+    )
+    .await;
     Some(
         AskReply::non_llm(message.clone())
             .with_messages(delivery_messages)

@@ -285,8 +285,12 @@ pub(super) fn lifecycle_hook_event(
         .map(|object| {
             object
                 .iter()
-                .filter(|(key, _)| lifecycle_metadata_key_allowed(key))
-                .map(|(key, value)| (key.clone(), value.clone()))
+                .filter_map(|(key, value)| {
+                    lifecycle_metadata_key_allowed(key)
+                        .then(|| sanitize_lifecycle_metadata_value(value, 0))
+                        .flatten()
+                        .map(|value| (key.clone(), value))
+                })
                 .collect::<serde_json::Map<_, _>>()
         })
         .unwrap_or_default();
@@ -297,6 +301,36 @@ pub(super) fn lifecycle_hook_event(
         "action_ref": action_ref,
         "metadata": metadata,
     })
+}
+
+fn sanitize_lifecycle_metadata_value(value: &Value, depth: usize) -> Option<Value> {
+    if depth > 2 {
+        return None;
+    }
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => Some(value.clone()),
+        Value::String(value) if is_machine_token(value, 256) => Some(Value::String(value.clone())),
+        Value::Array(values) if values.len() <= 64 => {
+            let sanitized = values
+                .iter()
+                .filter_map(|value| sanitize_lifecycle_metadata_value(value, depth + 1))
+                .collect::<Vec<_>>();
+            (!sanitized.is_empty() || values.is_empty()).then(|| Value::Array(sanitized))
+        }
+        Value::Object(object) if object.len() <= 64 => {
+            let sanitized = object
+                .iter()
+                .filter_map(|(key, value)| {
+                    lifecycle_metadata_key_allowed(key)
+                        .then(|| sanitize_lifecycle_metadata_value(value, depth + 1))
+                        .flatten()
+                        .map(|value| (key.clone(), value))
+                })
+                .collect::<serde_json::Map<_, _>>();
+            (!sanitized.is_empty() || object.is_empty()).then(|| Value::Object(sanitized))
+        }
+        _ => None,
+    }
 }
 
 fn lifecycle_metadata_key_allowed(key: &str) -> bool {

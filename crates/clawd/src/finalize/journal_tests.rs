@@ -100,28 +100,7 @@ fn build_from_loop_state_records_finalizer_recovered_terminal_stop_signal() {
         journal.final_stop_signal.as_deref(),
         Some("finalizer_recovered_terminal_answer")
     );
-    let stop_observation = journal
-        .task_observations
-        .iter()
-        .find(|observation| {
-            observation
-                .pointer("/stage")
-                .and_then(serde_json::Value::as_str)
-                == Some("stop")
-        })
-        .expect("stop observation");
-    assert_eq!(
-        stop_observation
-            .pointer("/loop_stop_signal")
-            .and_then(serde_json::Value::as_str),
-        Some("synthesize_answer_failed")
-    );
-    assert_eq!(
-        stop_observation
-            .pointer("/final_stop_signal")
-            .and_then(serde_json::Value::as_str),
-        Some("finalizer_recovered_terminal_answer")
-    );
+    assert!(journal.task_observations.is_empty());
 }
 
 #[test]
@@ -211,24 +190,52 @@ fn build_from_loop_state_records_task_observations() {
         TaskJournalFinalStatus::Success,
     );
 
-    assert_eq!(journal.task_observations.len(), 3);
+    assert_eq!(journal.task_observations.len(), 1);
     assert_eq!(
         journal.task_observations[0]
             .pointer("/owner_layer")
             .and_then(serde_json::Value::as_str),
         Some("agent_hooks")
     );
+}
+
+#[tokio::test]
+async fn terminal_builder_executes_stop_and_session_end_at_real_owner() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = ClaimedTask {
+        task_id: "task-terminal-hooks".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut loop_state = LoopState::new(2);
+    loop_state.last_stop_signal = Some("completed".to_string());
+
+    let journal = build_terminal_from_loop_state(
+        &state,
+        &task,
+        "test",
+        &mut loop_state,
+        None,
+        None,
+        true,
+        "ok",
+        TaskJournalFinalStatus::Success,
+    )
+    .await;
+
+    assert_eq!(journal.task_observations.len(), 2);
+    assert_eq!(journal.task_observations[0]["stage"], "stop");
+    assert_eq!(journal.task_observations[0]["reason_code"], "stop_success");
+    assert_eq!(journal.task_observations[1]["stage"], "session_end");
     assert_eq!(
-        journal.task_observations[1]
-            .pointer("/stage")
-            .and_then(serde_json::Value::as_str),
-        Some("stop")
-    );
-    assert_eq!(
-        journal.task_observations[2]
-            .pointer("/stage")
-            .and_then(serde_json::Value::as_str),
-        Some("session_end")
+        journal.task_observations[1]["reason_code"],
+        "session_end_success"
     );
 }
 

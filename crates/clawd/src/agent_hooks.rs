@@ -169,6 +169,7 @@ pub(crate) fn post_tool_use_outcome(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn stop_outcome(final_status: &str) -> HookOutcome {
     let reason_code = match final_status {
         "success" => "stop_success",
@@ -195,6 +196,7 @@ pub(crate) fn session_start_outcome() -> HookOutcome {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn session_end_outcome(final_status: &str) -> HookOutcome {
     let reason_code = match final_status {
         "success" => "session_end_success",
