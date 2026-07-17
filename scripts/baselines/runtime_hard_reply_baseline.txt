@@ -14,7 +14,6 @@ crates/claw-core/src/channel_commands.rs	read channel command config failed: {er
 crates/claw-core/src/channel_commands.rs	skill channel command `{}` is missing skill_name	"skill channel command `{}` is missing skill_name",
 crates/claw-core/src/channel_i18n.rs	time before unix epoch	.expect("time before unix epoch")
 crates/claw-core/src/config.rs	不主动设置	/// 全部 `Option`，缺省即"不主动设置"，**完全向后兼容**。
-crates/claw-core/src/config.rs	未配置即默认全开	// 显式设为 true 时才启用，避免"未配置即默认全开"的权限面过大问题。
 crates/claw-core/src/config.rs	硬编码默认值	/// 完全一致——目的是把以前散落在 provider 实现里的"硬编码默认值"（OpenAI compat
 crates/claw-core/src/hard_rules/voice_mode.rs	voice_mode_intent schema must be valid JSON	.expect("voice_mode_intent schema must be valid JSON")
 crates/claw-core/src/secrets.rs	`<usage>_<vendor>_api_key`	/// §P4.4 E3.a：把 "`<usage>_<vendor>_api_key`" 命名规则集中成函数，
@@ -65,9 +64,7 @@ crates/claw-core/src/skill_registry.rs	必须存在且 kind=builtin	/// §P4.1 �
 crates/claw-core/src/skill_registry.rs	未声明任何能力	/// 未注册的技能返回空切片（与"未声明任何能力"语义同 — 都不应放行任何
 crates/claw-core/src/skill_registry.rs	纯计算 + 标准库	/// 排序）。空表示"纯计算 + 标准库"，不需要任何特权资源。
 crates/claw-core/src/skill_registry.rs	裸 vendor 名	// §P4.1 ↔ image/text 配置独立性：拦截"裸 vendor 名"反模式。
-crates/clawcli/src/chat.rs	\rWaiting for clawd reply{dots:<3}	print!("\\rWaiting for clawd reply{dots:<3}");
-crates/clawcli/src/chat.rs	clawcli chat mode (type a message, empty line or 'exit' to quit)	println!("clawcli chat mode (type a message, empty line or 'exit' to quit)");
-crates/clawcli/src/chat.rs	rustyline init (is stdin a TTY?)	let mut rl = rustyline::DefaultEditor::new().context("rustyline init (is stdin a TTY?)")?;
+crates/clawcli/src/auth.rs	key_required: {}; {reason_code}: {}	"key_required: {}; {reason_code}: {}",
 crates/clawcli/src/commands/common.rs	parse {context_label} response	.with_context(|| format!("parse {context_label} response"))?;
 crates/clawcli/src/commands/common.rs	request {context_label} failed	.with_context(|| format!("request {context_label} failed"))?;
 crates/clawcli/src/commands/report.rs	coding_changed_file_count: {}	"coding_changed_file_count: {}",
@@ -118,12 +115,10 @@ crates/clawcli/src/task.rs	parse cancel task response	let body: serde_json::Valu
 crates/clawcli/src/task.rs	parse get task response	let body: serde_json::Value = resp.json().context("parse get task response")?;
 crates/clawcli/src/task.rs	response missing data.task_id	.ok_or_else(|| anyhow::anyhow!("response missing data.task_id"))?;
 crates/clawd/src/agent_engine.rs	LLM should infer continuation from resume context and user follow-up.	"hint": "LLM should infer continuation from resume context and user follow-up."
-crates/clawd/src/agent_engine.rs	User must explicitly confirm before executing the remaining actions.	"hint": "User must explicitly confirm before executing the remaining actions."
 crates/clawd/src/agent_engine.rs	check task running state failed: {err}	Err(err) => Err(format!("check task running state failed: {err}")),
 crates/clawd/src/agent_engine.rs	error_summary: {safe_err}	format!("error_summary: {safe_err}"),
 crates/clawd/src/agent_engine.rs	failed_action: {failed_action}	format!("failed_action: {failed_action}"),
 crates/clawd/src/agent_engine.rs	failed_step_index: {failed_index}	format!("failed_step_index: {failed_index}"),
-crates/clawd/src/agent_engine.rs	remaining_steps_count: {remaining_steps_count}	format!("remaining_steps_count: {remaining_steps_count}"),
 crates/clawd/src/agent_engine/arg_resolver.rs	double brace placeholder regex	Regex::new(r"\\{\\{\\s*([^{}]+?)\\s*\\}\\}").expect("double brace placeholder regex")
 crates/clawd/src/agent_engine/arg_resolver.rs	默认 path 兜底	// AUTO_LOCATOR 只是 turn 级"默认 path 兜底"，仅当 LLM 给的 path 看起来是
 crates/clawd/src/agent_engine/async_start_checkpoint.rs	agent-loop:{}:round-{}:step-{}:async-job:{}	"agent-loop:{}:round-{}:step-{}:async-job:{}",
@@ -135,11 +130,8 @@ crates/clawd/src/agent_engine/attempt_ledger.rs	do_not_repeat_same_tool_and_same
 crates/clawd/src/agent_engine/attempt_ledger.rs	do_not_retry_same_target; broaden_or_clarify_only_if_user_goal_requires_it	"do_not_retry_same_target; broaden_or_clarify_only_if_user_goal_requires_it"
 crates/clawd/src/agent_engine/attempt_ledger.rs	stop_and_report_confirmed_absence; do_not_retry_without_new_user_input	"stop_and_report_confirmed_absence; do_not_retry_without_new_user_input"
 crates/clawd/src/agent_engine/attempt_ledger.rs	stop_and_report_credential_problem; do_not_retry_until_credentials_change	"stop_and_report_credential_problem; do_not_retry_until_credentials_change"
-crates/clawd/src/agent_engine/concrete_respond_structural_observation.rs	non-empty checked above	let respond = rewritten.pop().expect("non-empty checked above");
 crates/clawd/src/agent_engine/dispatch_support.rs	invalid file delivery token: runtime observation was embedded into FILE path	let error = "invalid file delivery token: runtime observation was embedded into FILE path";
-crates/clawd/src/agent_engine/explicit_observed_paths.rs	last_output indexed placeholder regex	.expect("last_output indexed placeholder regex")
 crates/clawd/src/agent_engine/loop_control_post_write_evidence_guard.rs	collect the missing structured machine evidence from tools before publishing the final local-code JSON	"collect the missing structured machine evidence from tools before publishing the final local-code JSON"
-crates/clawd/src/agent_engine/observed_output.rs	### multi_count_quantity_comparison_guard	"### multi_count_quantity_comparison_guard".to_string(),
 crates/clawd/src/agent_engine/observed_output.rs	LLM 过保守错判为不可发	// 保留"LLM 过保守错判为不可发"的救回链路。
 crates/clawd/src/agent_engine/observed_output.rs	observed answer fallback LLM failed: {err}	.map_err(|err| format!("observed answer fallback LLM failed: {err}"))?;
 crates/clawd/src/agent_engine/observed_output.rs	observed answer fallback prompt missing: {err}	return Err(format!("observed answer fallback prompt missing: {err}"));
@@ -159,51 +151,19 @@ crates/clawd/src/agent_engine/observed_output_success.rs	# Test Workspace\nThis 
 crates/clawd/src/agent_engine/observed_output_success.rs	skill(run_cmd): success	assert!(observed.action_label.contains("skill(run_cmd): success"));
 crates/clawd/src/agent_engine/observed_output_transform.rs	referenced transform step should produce formatted output	.expect("referenced transform step should produce formatted output");
 crates/clawd/src/agent_engine/observed_output_transform.rs	| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |	"| name | score |\\n| --- | --- |\\n| beta | 12 |\\n| gamma | 9 |\\n| alpha | 7 |"
-crates/clawd/src/agent_engine/planner_abort_recovery.rs	compact retry should return actions	panic!("compact retry should return actions");
-crates/clawd/src/agent_engine/planner_abort_recovery.rs	compact retry should run	.expect("compact retry should run") else {
-crates/clawd/src/agent_engine/planner_abort_recovery.rs	create compact retry fixture dir	std::fs::create_dir_all(&case_dir).expect("create compact retry fixture dir");
-crates/clawd/src/agent_engine/planner_abort_recovery.rs	expected call_tool action, got {other:?}	other => panic!("expected call_tool action, got {other:?}"),
-crates/clawd/src/agent_engine/planner_abort_recovery.rs	rustclaw_planner_abort_recovery_{}	"rustclaw_planner_abort_recovery_{}",
-crates/clawd/src/agent_engine/planner_abort_recovery.rs	write compact retry fixture	.expect("write compact retry fixture");
 crates/clawd/src/agent_engine/planning.rs	Last round output: (none)	// 写入这里。结果是 round N+1 的 loop planner 看到 "Last round output: (none)"，
-crates/clawd/src/agent_engine/planning.rs	repair plan still non-actionable after second repair	"repair plan still non-actionable after second repair"
-crates/clawd/src/agent_engine/planning_prompt.rs	- Do not inspect unrelated files, repository history, or extra skills unless the user explicitly asks for that scope.	"- Do not inspect unrelated files, repository history, or extra skills unless the user explicitly asks for that scope.".to_string(),
-crates/clawd/src/agent_engine/planning_prompt.rs	- Prefer one bounded local observation or direct runtime-owned step over broad multi-step planning.	"- Prefer one bounded local observation or direct runtime-owned step over broad multi-step planning.".to_string(),
-crates/clawd/src/agent_engine/planning_prompt.rs	No skill playbooks configured.	return "No skill playbooks configured.".to_string();
-crates/clawd/src/agent_engine/planning_prompt.rs	natural-language intent mapping	|| heading.contains("natural-language intent mapping")
-crates/clawd/src/agent_engine/planning_prompt.rs	requires_confirmation: {requires_confirmation}	parts.push(format!("requires_confirmation: {requires_confirmation}"));
-crates/clawd/src/agent_engine/planning_prompt.rs	use when the request matches this skill's interface	.unwrap_or_else(|| "use when the request matches this skill's interface".to_string())
-crates/clawd/src/agent_engine/planning_structured_field_exact.rs	valid dotted selector regex	.expect("valid dotted selector regex")
+crates/clawd/src/agent_engine/planning.rs	runtime_capability_map_v2\n{capability_map}	Ok(format!("runtime_capability_map_v2\\n{capability_map}"))
 crates/clawd/src/agent_engine/prepare_round.rs	needs_clarification: {needs_clarify}	format!("needs_clarification: {needs_clarify}"),
 crates/clawd/src/agent_engine/prepare_round.rs	needs_confirmation: {needs_confirmation}	format!("needs_confirmation: {needs_confirmation}"),
 crates/clawd/src/agent_engine/prepare_round.rs	verification_issue_kind: {first_issue_kind}	format!("verification_issue_kind: {first_issue_kind}"),
-crates/clawd/src/agent_engine/scalar_count_deterministic_plan.rs	for m in apt-get apt dnf yum brew pacman zypper apk; do if command -v 	r#"for m in apt-get apt dnf yum brew pacman zypper apk; do if command -v "$m" >/dev/null 2>&1; then printf 'manager=%s\\nbasis=command_path:%s\\n' "$m" "$m"; exit 0; fi; done; printf 'manager=unknown\\nbasis=path_scan_none\\n'"#.to_string()
-crates/clawd/src/agent_engine/scalar_count_deterministic_plan.rs	ps -eo pid,comm,args | grep -F {} | grep -v grep || true	"ps -eo pid,comm,args | grep -F {} | grep -v grep || true",
-crates/clawd/src/agent_engine/shell_sequence_part.rs	short step output regex	.get_or_init(|| Regex::new(r"^s(\\d+)_output$").expect("short step output regex"));
-crates/clawd/src/agent_engine/shell_sequence_part.rs	step output placeholder regex	Regex::new(r"^step_?(\\d+)_output$").expect("step output placeholder regex")
-crates/clawd/src/agent_engine/shell_sequence_part.rs	valid text token regex	Regex::new(r"[A-Za-z0-9][A-Za-z0-9._/-]{1,63}").expect("valid text token regex")
-crates/clawd/src/agent_engine/skill_execution.rs	call_skill(auto_sudo_retry)	"call_skill(auto_sudo_retry)",
-crates/clawd/src/agent_engine/skill_execution.rs	skill(run_cmd:auto_sudo_retry)	"skill(run_cmd:auto_sudo_retry)",
-crates/clawd/src/agent_engine/skill_execution.rs	skill(run_cmd:auto_sudo_retry)	"skill(run_cmd:auto_sudo_retry)",
-crates/clawd/src/agent_engine/skill_execution.rs	skill:run_cmd:auto_sudo_retry:{}	&format!("skill:run_cmd:auto_sudo_retry:{}", retry_args),
-crates/clawd/src/agent_engine/skill_execution.rs	sudo -n sh -c {} sh {} | sort | head -n {}	"sudo -n sh -c {} sh {} | sort | head -n {}",
-crates/clawd/src/agent_engine/skill_execution.rs	sudo -n tail -n {n} {quoted_path}	"tail" => Some(format!("sudo -n tail -n {n} {quoted_path}")),
 crates/clawd/src/agent_engine/skill_execution.rs	validation result was inconclusive	"validation result was inconclusive",
 crates/clawd/src/agent_engine/skill_execution.rs	validation result was inconclusive	"validation result was inconclusive",
-crates/clawd/src/agent_engine/skill_execution_preflight.rs	action `{}` is missing target binding required by contract `{}`	"action `{}` is missing target binding required by contract `{}`",
-crates/clawd/src/agent_engine/skill_execution_preflight.rs	action `{}` is rejected by contract `{}` ({})	"action `{}` is rejected by contract `{}` ({})",
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	execution argument still contains an unresolved runtime placeholder; replan with concrete observed values or use a single command pipeline	"execution argument still contains an unresolved runtime placeholder; replan with concrete observed values or use a single command pipeline",
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	expected type `{expected_type}`	return Err(format!("expected type `{expected_type}`"));
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	field `{key}` expected type `{field_type}`	return Err(format!("field `{key}` expected type `{field_type}`"));
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	missing required field `{key}`	return Err(format!("missing required field `{key}`"));
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	path argument contains a structured observation instead of one concrete path; select a single path from observed fields or ask for clarification when multiple candidates exist	"path argument contains a structured observation instead of one concrete path; select a single path from observed fields or ask for clarification when multiple candidates exist",
-crates/clawd/src/agent_engine/sqlite_table_listing_rewrite.rs	SELECT DISTINCT {} FROM {} WHERE {} IS NOT NULL LIMIT {}	"SELECT DISTINCT {} FROM {} WHERE {} IS NOT NULL LIMIT {}",
-crates/clawd/src/agent_engine/sqlite_table_listing_rewrite.rs	sqlite count query regex	.expect("sqlite count query regex")
-crates/clawd/src/agent_engine/structured_multi_field_read_rewrite.rs	valid dotted selector regex	.expect("valid dotted selector regex")
 crates/clawd/src/agent_engine/support.rs	agent-loop:{}:round-{}:step-{}:{}	"agent-loop:{}:round-{}:step-{}:{}",
-crates/clawd/src/agent_runtime_contract.rs	hook_stages:pre_tool_use|post_tool_use|stop|session_start|session_end|user_prompt_submit	"hook_stages:pre_tool_use|post_tool_use|stop|session_start|session_end|user_prompt_submit"
-crates/clawd/src/answer_verifier_runtime.rs	Use the already observed listing items and content excerpt to produce one combined final answer in the requested shape.	retry_instruction: "Use the already observed listing items and content excerpt to produce one combined final answer in the requested shape.".to_string(),
-crates/clawd/src/answer_verifier_runtime.rs	answer omitted observed listing item(s): {}	"answer omitted observed listing item(s): {}",
 crates/clawd/src/app_helpers.rs	PRAGMA table_info({table_name})	let pragma = format!("PRAGMA table_info({table_name})");
 crates/clawd/src/bootstrap/config_loaders.rs	An identical scheduled job already exists: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}	"An identical scheduled job already exists: {job_id}\\nType: {type}\\nTimezone: {timezone}\\nNext run: {next_run_human}\\nTask content: {task_content}".to_string()
 crates/clawd/src/bootstrap/config_loaders.rs	Create failed: cannot compute next run time; please check the time format.	"Create failed: cannot compute next run time; please check the time format.".to_string()
@@ -228,19 +188,21 @@ crates/clawd/src/bootstrap/prompts.rs	Persona profile: executor. Be direct and e
 crates/clawd/src/bootstrap/prompts.rs	Persona profile: expert. Be rigorous and concise. Explain key trade-offs, assumptions, and verification steps. Prefer correctness and safety over speed.	"Persona profile: expert. Be rigorous and concise. Explain key trade-offs, assumptions, and verification steps. Prefer correctness and safety over speed."
 crates/clawd/src/bootstrap/prompts.rs	Persona profile: reviewer. Be critical, precise, and risk-aware. Surface the most important issues first, distinguish severity clearly, and avoid softening concrete problems.	"Persona profile: reviewer. Be critical, precise, and risk-aware. Surface the most important issues first, distinguish severity clearly, and avoid softening concrete problems."
 crates/clawd/src/bootstrap/prompts.rs	Persona profile: teacher. Be patient, beginner-friendly, and clear. Explain in simple steps, define necessary terms briefly, and help the user build understanding without unnecessary jargon.	"Persona profile: teacher. Be patient, beginner-friendly, and clear. Explain in simple steps, define necessary terms briefly, and help the user build understanding without unnecessary jargon."
+crates/clawd/src/bootstrap/prompts.rs	active execution anchor projection (task_context_builder)	"active execution anchor projection (task_context_builder)",
+crates/clawd/src/bootstrap/prompts.rs	active task context projection (task_context_builder)	"active task context projection (task_context_builder)",
 crates/clawd/src/bootstrap/prompts.rs	agent_tool_spec (agent_engine)	"agent_tool_spec (agent_engine)",
 crates/clawd/src/bootstrap/prompts.rs	answer_verifier (finalize.answer)	"answer_verifier (finalize.answer)",
 crates/clawd/src/bootstrap/prompts.rs	chat_response (ask_flow)	"chat_response (ask_flow)",
-crates/clawd/src/bootstrap/prompts.rs	contract_repair_judge (routing)	"contract_repair_judge (routing)",
 crates/clawd/src/bootstrap/prompts.rs	delivery_text_classifier (semantic_judge.finalize)	"delivery_text_classifier (semantic_judge.finalize)",
-crates/clawd/src/bootstrap/prompts.rs	lightweight_execution (agent_engine.planning)	"lightweight_execution (agent_engine.planning)",
 crates/clawd/src/bootstrap/prompts.rs	long_term_summary (memory.service)	"long_term_summary (memory.service)",
 crates/clawd/src/bootstrap/prompts.rs	loop_incremental_plan (agent_engine.planning)	"loop_incremental_plan (agent_engine.planning)",
 crates/clawd/src/bootstrap/prompts.rs	observed_answer_fallback (finalize.observed)	"observed_answer_fallback (finalize.observed)",
 crates/clawd/src/bootstrap/prompts.rs	observed_answer_fallback_compact (finalize.observed)	"observed_answer_fallback_compact (finalize.observed)",
 crates/clawd/src/bootstrap/prompts.rs	plan_repair (agent_engine.planning)	"plan_repair (agent_engine.planning)",
-crates/clawd/src/bootstrap/prompts.rs	resume_continue_execute (ask_flow)	"resume_continue_execute (ask_flow)",
+crates/clawd/src/bootstrap/prompts.rs	recent execution context projection (task_context_builder)	"recent execution context projection (task_context_builder)",
+crates/clawd/src/bootstrap/prompts.rs	runtime context projection (task_context_builder)	"runtime context projection (task_context_builder)",
 crates/clawd/src/bootstrap/prompts.rs	schedule_intent (schedule_service)	"schedule_intent (schedule_service)",
+crates/clawd/src/bootstrap/prompts.rs	session alias context projection (task_context_builder)	"session alias context projection (task_context_builder)",
 crates/clawd/src/bootstrap/prompts.rs	single_plan_execution (agent_engine.planning)	"single_plan_execution (agent_engine.planning)",
 crates/clawd/src/bootstrap/prompts.rs	user_response_composer (fallback.response)	"user_response_composer (fallback.response)",
 crates/clawd/src/bootstrap/prompts.rs	user_response_contract_validator (fallback.response)	"user_response_contract_validator (fallback.response)",
@@ -276,12 +238,7 @@ crates/clawd/src/channel_send.rs	whatsapp access_token is empty	return Err("what
 crates/clawd/src/channel_send.rs	whatsapp api_base is empty	return Err("whatsapp api_base is empty".to_string());
 crates/clawd/src/channel_send.rs	whatsapp phone_number_id is empty	return Err("whatsapp phone_number_id is empty".to_string());
 crates/clawd/src/channel_send.rs	whatsapp_web.bridge_base_url is empty	return Err("whatsapp_web.bridge_base_url is empty".to_string());
-crates/clawd/src/clarify_followup.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
-crates/clawd/src/clarify_followup.rs	上一轮要 clarify 什么	//   1. "上一轮要 clarify 什么" 已经写在 last_turn_full / [clarification_requested]
-crates/clawd/src/clarify_followup.rs	用户回了什么	//   2. "用户回了什么" 只做 locator/path/filename 形态判断，不做语义路由
-crates/clawd/src/clarify_followup.rs	那个文件	//   - 不 resolve alias-deictic（"那个文件"指 X 已绑定）；alias bindings 已作为
 crates/clawd/src/clarify_state.rs	acquire db for clarify state clear: {err}	.map_err(|err| anyhow::anyhow!("acquire db for clarify state clear: {err}"))?;
-crates/clawd/src/clarify_state.rs	{source}\n{CLARIFY_STATE_RESOLVED_INTENT_MARKER}\n{resolved}	format!("{source}\\n{CLARIFY_STATE_RESOLVED_INTENT_MARKER}\\n{resolved}")
 crates/clawd/src/contract_matrix.rs	contract `{key}` declares semantic_kind `{declared}`	"contract `{key}` declares semantic_kind `{declared}`"
 crates/clawd/src/contract_matrix.rs	contract `{key}` has unknown evidence_expression token `{token}`	"contract `{key}` has unknown evidence_expression token `{token}`"
 crates/clawd/src/contract_matrix.rs	contract `{key}` has unknown final_answer_shape `{}`	"contract `{key}` has unknown final_answer_shape `{}`",
@@ -310,15 +267,6 @@ crates/clawd/src/contract_matrix.rs	trace_policy.raw_excerpt_policy must be no_f
 crates/clawd/src/contract_matrix.rs	unknown semantic contract `{key}`	errors.push(format!("unknown semantic contract `{key}`"));
 crates/clawd/src/contract_matrix_runtime.rs	contract matrix parse failed: {err}	toml::from_str(source).map_err(|err| format!("contract matrix parse failed: {err}"))?;
 crates/clawd/src/contract_matrix_runtime.rs	contract matrix shape invalid: {}	"contract matrix shape invalid: {}",
-crates/clawd/src/contract_matrix_runtime.rs	{context} delivery artifact final_answer_shape must be user_visible	"{context} delivery artifact final_answer_shape must be user_visible"
-crates/clawd/src/contract_matrix_runtime.rs	{context} delivery artifact final_answer_shape must declare non-text artifact_kind	"{context} delivery artifact final_answer_shape must declare non-text artifact_kind"
-crates/clawd/src/contract_matrix_runtime.rs	{context} has duplicate observation_extractor source `{}` extractor_kind `{}`	"{context} has duplicate observation_extractor source `{}` extractor_kind `{}`",
-crates/clawd/src/contract_matrix_runtime.rs	{context} has invalid evidence_profile `{evidence_profile}`	"{context} has invalid evidence_profile `{evidence_profile}`"
-crates/clawd/src/contract_matrix_runtime.rs	{context} has invalid {field} `{raw}`	errors.push(format!("{context} has invalid {field} `{raw}`"));
-crates/clawd/src/contract_matrix_runtime.rs	{context} has observation_extractor without source	"{context} has observation_extractor without source"
-crates/clawd/src/contract_matrix_runtime.rs	{context} observation_extractor source `{}` has invalid extractor_kind `{}`	"{context} observation_extractor source `{}` has invalid extractor_kind `{}`",
-crates/clawd/src/contract_matrix_runtime.rs	{context} observation_extractor source `{}` is not in observation_sources	"{context} observation_extractor source `{}` is not in observation_sources",
-crates/clawd/src/contract_matrix_runtime.rs	{context} observation_extractor source `{}` with extractor_kind `{}` is not declared in the evidence extractor registry	"{context} observation_extractor source `{}` with extractor_kind `{}` is not declared in the evidence extractor registry",
 crates/clawd/src/conversation_state.rs	Task so far:\n{prior}\n\n{label}: {current_prompt}{patch}	format!("Task so far:\\n{prior}\\n\\n{label}: {current_prompt}{patch}")
 crates/clawd/src/conversation_state.rs	acquire db for conversation state persist: {err}	.map_err(|err| anyhow::anyhow!("acquire db for conversation state persist: {err}"))?;
 crates/clawd/src/conversation_state.rs	{prior}\n\n{label}: {current_prompt}{patch}	format!("{prior}\\n\\n{label}: {current_prompt}{patch}")
@@ -404,7 +352,6 @@ crates/clawd/src/finalize/loop_reply_missing_delivery.rs	finalizer could not con
 crates/clawd/src/finalize/loop_reply_missing_delivery.rs	no publishable final answer was produced from the execution result	None => "no publishable final answer was produced from the execution result".to_string(),
 crates/clawd/src/finalize/loop_reply_missing_delivery.rs	no publishable final answer was produced; {}	"no publishable final answer was produced; {}",
 crates/clawd/src/finalize/loop_reply_route_helpers.rs	clarify_case: {clarify_case}	format!("clarify_case: {clarify_case}"),
-crates/clawd/src/finalize/task.rs	Unfinished goal\nUser request: {}\nCurrent blocker: {}	"Unfinished goal\\nUser request: {}\\nCurrent blocker: {}",
 crates/clawd/src/finalize/task.rs	上一次状态	// from = None 因为 dispatch 内部各分支态没向调用面回传"上一次状态"；
 crates/clawd/src/finalize/task_machine_kv_summary.rs	Return target, status, manager_type.	"Return target, status, manager_type.",
 crates/clawd/src/finalize/task_terminal_clarify.rs	Which file do you want me to read?	args: json!({"content": "Which file do you want me to read?"}),
@@ -442,7 +389,6 @@ crates/clawd/src/fixture_replay_e2e.rs	幽灵命中	//!          下一条测试
 crates/clawd/src/fixture_replay_e2e.rs	抽取	/// 业务可观察值快照。是 [`diff_outcome_against_expected`] 的输入，让"抽取"和
 crates/clawd/src/fixture_replay_e2e.rs	按顺序	///     未来若需要"按顺序"断言，需在 `state.metrics` 加事件序列字段 —— 当前
 crates/clawd/src/fixture_replay_e2e.rs	断言	/// "断言"两步分离 —— 前者依赖 process_ask_task 真跑过，后者是纯函数可单测。
-crates/clawd/src/fixture_replay_e2e.rs	日志 → fixture → 回放	//!       5. **"日志 → fixture → 回放"** 闭环：把一条合成的 `model_io.log` 喂给
 crates/clawd/src/fixture_replay_e2e.rs	有没有	///     "幻觉文案"或老版本的固定坏话术（如：旧回复链把"有没有"答成
 crates/clawd/src/fixture_replay_e2e.rs	未实现的预期断言	///     [`diff_outcome_against_expected`] 会把它当成"未实现的预期断言"
 crates/clawd/src/fixture_replay_e2e.rs	目录占位但还没录	// case 目录里没有 calls.jsonl —— 视为"目录占位但还没录"，跳过而不报错。
@@ -452,10 +398,13 @@ crates/clawd/src/fixture_replay_e2e.rs	真 case	/// §7.5 Step 4.a：扫描 fixt
 crates/clawd/src/fixture_replay_e2e.rs	端到端跑完后业务层面应该看到什么	/// `expected.json` 描述"端到端跑完后业务层面应该看到什么"。
 crates/clawd/src/fixture_replay_e2e.rs	自家人	///     allowlist 里的"自家人"约定俗成保持一致；`user_id < 0` 留给 webd 用户
 crates/clawd/src/fixture_replay_e2e.rs	这是 systemd 文件…	///     "这是 systemd 文件…"段落式描述）。
-crates/clawd/src/followup_frame.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
-crates/clawd/src/followup_frame.rs	Continue the previous resolved request by applying the same operation to the provided target or content.\nPrevious user request: {}\nProvided target or content: {}	"Continue the previous resolved request by applying the same operation to the provided target or content.\\nPrevious user request: {}\\nProvided target or content: {}",
 crates/clawd/src/followup_frame.rs	acquire db for followup frame clear: {err}	.map_err(|err| anyhow::anyhow!("acquire db for followup frame clear: {err}"))?;
 crates/clawd/src/followup_frame.rs	acquire db for followup frame persist: {err}	.map_err(|err| anyhow::anyhow!("acquire db for followup frame persist: {err}"))?;
+crates/clawd/src/http/task_events.rs	no-cache, no-transform	HeaderValue::from_static("no-cache, no-transform"),
+crates/clawd/src/http/task_events.rs	read task for event artifact failed: {}	tracing::error!("read task for event artifact failed: {}", error);
+crates/clawd/src/http/task_events.rs	read task for event stream failed: {}	tracing::error!("read task for event stream failed: {}", error);
+crates/clawd/src/http/task_events.rs	resolve task event artifact viewer failed: {}	tracing::error!("resolve task event artifact viewer failed: {}", source);
+crates/clawd/src/http/task_events.rs	resolve task event viewer failed: {}	tracing::error!("resolve task event viewer failed: {}", source);
 crates/clawd/src/http/ui_routes.rs	Reply with OK only.	const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	Missing X-RustClaw-Key header	return Err(ui_auth_error("Missing X-RustClaw-Key header"));
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	auth key not found	error: Some("auth key not found".to_string()),
@@ -584,10 +533,7 @@ crates/clawd/src/http/ui_routes/logs_usage_debug.rs	load usage task meta failed:
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	open usage log failed: {err}	error: Some(format!("open usage log failed: {err}")),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	read log failed: {err}	error: Some(format!("read log failed: {err}")),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	read recent robot tasks failed: {err}	error: Some(format!("read recent robot tasks failed: {err}")),
-crates/clawd/src/http/ui_routes/logs_usage_debug.rs	read task debug failed: {err}	error: Some(format!("read task debug failed: {err}")),
-crates/clawd/src/http/ui_routes/logs_usage_debug.rs	read task owner failed: {err}	error: Some(format!("read task owner failed: {err}")),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	read usage chain failed: {err}	error: Some(format!("read usage chain failed: {err}")),
-crates/clawd/src/http/ui_routes/logs_usage_debug.rs	task_id is required	error: Some("task_id is required".to_string()),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	usage record access denied	error: Some("usage record access denied".to_string()),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	usage record detail not found	error: Some("usage record detail not found".to_string()),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	usage record not found	error: Some("usage record not found".to_string()),
@@ -681,7 +627,6 @@ crates/clawd/src/http/ui_routes/skill_import_config.rs	reload skill views failed
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write downloaded SKILL.md failed: {err}	.map_err(|err| format!("write downloaded SKILL.md failed: {err}"))?;
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write prompt file failed: {err}	error: Some(format!("write prompt file failed: {err}")),
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write skills registry failed: {err}	error: Some(format!("write skills registry failed: {err}")),
-crates/clawd/src/http/ui_routes/workspace_update.rs	... output truncated ...	if raw.starts_with("... output truncated ...") {
 crates/clawd/src/http/ui_routes/workspace_update.rs	; fi; cargo build -p clawd --release	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
 crates/clawd/src/http/ui_routes/workspace_update.rs	cargo build -p clawd --release failed	"cargo build -p clawd --release failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to capture {program} stderr	.ok_or_else(|| format!("failed to capture {program} stderr"))?;
@@ -693,7 +638,6 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	failed to schedule clawd res
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to schedule clawd restart: {err}	format!("failed to schedule clawd restart: {err}"),
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to wait for {program}: {err}	Ok(Err(err)) => return Err(format!("failed to wait for {program}: {err}")),
 crates/clawd/src/http/ui_routes/workspace_update.rs	git clean conflict files failed: {}	"git clean conflict files failed: {}",
-crates/clawd/src/http/ui_routes/workspace_update.rs	git path list output is too large to process safely	return Err("git path list output is too large to process safely".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	git pull --ff-only failed	"git pull --ff-only failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	git pull --ff-only failed after resolving conflicts	"git pull --ff-only failed after resolving conflicts",
 crates/clawd/src/http/ui_routes/workspace_update.rs	git restore conflict files failed: {}	"git restore conflict files failed: {}",
@@ -704,20 +648,6 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	set -euo pipefail; if [[ -f 
 crates/clawd/src/http/ui_routes/workspace_update.rs	workspace update canceled by user	guard.error = Some("workspace update canceled by user".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {timeout_seconds}s	.map_err(|_| format!("{program} timed out after {timeout_seconds}s"))?
 crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {timeout_seconds}s	return Err(format!("{program} timed out after {timeout_seconds}s"));
-crates/clawd/src/intent/continuation_resolver.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
-crates/clawd/src/intent/continuation_resolver.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
-crates/clawd/src/intent/continuation_resolver.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
-crates/clawd/src/intent/resume_policy.rs	resume_runtime_prompt prompt_missing: {err}	warn!("resume_runtime_prompt prompt_missing: {err}");
-crates/clawd/src/intent_router_clarify.rs	我现在为什么走 SafeFallback	// 上游必须显式声明"我现在为什么走 SafeFallback"。
-crates/clawd/src/intent_router_execution_contract.rs	这不是 ops loop	//   - `out == Some` 且 kind == none → normalizer 显式说"这不是 ops loop"，
-crates/clawd/src/intent_router_missing_target.rs	semantic_contract_requires_evidence; clarify_reason_code:missing_read_target	"semantic_contract_requires_evidence; clarify_reason_code:missing_read_target",
-crates/clawd/src/intent_router_normalizer_run.rs	route context bundle should include route_view	.expect("route context bundle should include route_view");
-crates/clawd/src/intent_router_route_output.rs	current_auth_role: {auth_role}\nallow_path_outside_workspace_for_task: {}\nallow_sudo_for_task: {}\nworkspace_root: {}\ncurrent_process_cwd: {}	"current_auth_role: {auth_role}\\nallow_path_outside_workspace_for_task: {}\\nallow_sudo_for_task: {}\\nworkspace_root: {}\\ncurrent_process_cwd: {}",
-crates/clawd/src/intent_router_test_support.rs	rustclaw_intent_router_{test_name}_{}_{}	"rustclaw_intent_router_{test_name}_{}_{}",
-crates/clawd/src/intent_router_workspace_locator.rs	Read README and AGENTS	workspace_direct_child_stem_locator_from_text("Read README and AGENTS", &root.path);
-crates/clawd/src/intent_router_workspace_locator.rs	Read README and summarize it	"Read README and summarize it",
-crates/clawd/src/intent_router_workspace_locator.rs	clawd_intent_router_workspace_locator_{prefix}_{}_{}	"clawd_intent_router_workspace_locator_{prefix}_{}_{}",
-crates/clawd/src/intent_router_workspace_locator.rs	time before unix epoch	.expect("time before unix epoch")
 crates/clawd/src/llm_gateway.rs	HTTP 请求总量	/// （流程异常放大），不是挡"HTTP 请求总量"（那是 retry/circuit-breaker 的职责）。
 crates/clawd/src/llm_gateway.rs	No available LLM provider configured	return Err("No available LLM provider configured".to_string());
 crates/clawd/src/llm_gateway.rs	Provider override not found in config: {}	warn!("Provider override not found in config: {}", name);
@@ -777,6 +707,13 @@ crates/clawd/src/main.rs	user_id is required when user_key is absent	"user_id is
 crates/clawd/src/main.rs	write startup recovery audit log failed: {err}	warn!("write startup recovery audit log failed: {err}");
 crates/clawd/src/main.rs	留够空间但不让单行失控	///      -f` / `docker logs` 会有可见卡顿；128K 是"留够空间但不让单行失控"的
 crates/clawd/src/main.rs	，又要防	/// follow"，又要防"model_io.log 总量爆磁盘"；后者已被
+crates/clawd/src/mcp_runtime/manager.rs	mcp catalog lock poisoned	.expect("mcp catalog lock poisoned")
+crates/clawd/src/mcp_runtime/manager.rs	mcp catalog lock poisoned	.expect("mcp catalog lock poisoned")
+crates/clawd/src/mcp_runtime/manager.rs	mcp catalog lock poisoned	.expect("mcp catalog lock poisoned")
+crates/clawd/src/mcp_runtime/manager.rs	mcp catalog lock poisoned	let catalog = self.catalog.read().expect("mcp catalog lock poisoned");
+crates/clawd/src/mcp_runtime/manager.rs	mcp catalog lock poisoned	let mut catalog = self.catalog.write().expect("mcp catalog lock poisoned");
+crates/clawd/src/mcp_runtime/manager.rs	mcp lifecycle lock poisoned	.expect("mcp lifecycle lock poisoned")
+crates/clawd/src/mcp_runtime/manager.rs	mcp lifecycle lock poisoned	.expect("mcp lifecycle lock poisoned")
 crates/clawd/src/memory.rs	[safety_signal content omitted]	out.push((role, "[safety_signal content omitted]".to_string()));
 crates/clawd/src/memory.rs	[safety_signal content omitted]	out.push((role, "[safety_signal content omitted]".to_string()));
 crates/clawd/src/memory.rs	where did this retrieval row come from?	// `source_kind` answers "where did this retrieval row come from?"
@@ -801,10 +738,6 @@ crates/clawd/src/memory/service.rs	write long-term summary failed: {err}	.map_er
 crates/clawd/src/memory/service.rs	{role}: [safety_signal content omitted]	convo_lines.push(format!("{role}: [safety_signal content omitted]"));
 crates/clawd/src/memory/use_policy.rs	### MEMORY_USE_POLICY\nprofile: {}\nreason: {}	"### MEMORY_USE_POLICY\\nprofile: {}\\nreason: {}",
 crates/clawd/src/memory_recent.rs	[provider_unavailable_reply_omitted]	"[provider_unavailable_reply_omitted]"
-crates/clawd/src/memory_recent.rs	[safety_signal content omitted]	"[safety_signal content omitted]".to_string()
-crates/clawd/src/memory_recent.rs	[safety_signal content omitted]	"[safety_signal content omitted]".to_string()
-crates/clawd/src/memory_recent.rs	[safety_signal content omitted]	"[safety_signal content omitted]".to_string()
-crates/clawd/src/memory_recent.rs	[safety_signal content omitted]	"[safety_signal content omitted]".to_string()
 crates/clawd/src/observed_facts.rs	acquire db for observed facts clear: {err}	.map_err(|err| anyhow::anyhow!("acquire db for observed facts clear: {err}"))?;
 crates/clawd/src/output_contract_verifier.rs	directory_names: candidate contains file entries matching requested extension	"directory_names: candidate contains file entries matching requested extension",
 crates/clawd/src/output_contract_verifier.rs	directory_names: candidate mostly contains file-like entries	"directory_names: candidate mostly contains file-like entries",
@@ -820,17 +753,10 @@ crates/clawd/src/output_contract_verifier.rs	scalar_path_only: extracted first p
 crates/clawd/src/output_contract_verifier.rs	scalar_path_only: non-scalar candidate does not contain a path or locator token	"scalar_path_only: non-scalar candidate does not contain a path or locator token",
 crates/clawd/src/output_contract_verifier.rs	shape 整形	//! [`crate::delivery_utils::output_contract::enforce_output_contract`] "shape 整形"之上的 guard。
 crates/clawd/src/output_contract_verifier.rs	明显违反 contract	//! - 只拦"明显违反 contract"的结构性 anti-pattern，宁可漏拦也不要误拦合规答案。
-crates/clawd/src/post_route_policy.rs	\n\n[AUTO_LOCATOR]\nResolved concrete path from default locator directory: {path}\nUse this path as the target unless user explicitly overrides it.\n	"\\n\\n[AUTO_LOCATOR]\\nResolved concrete path from default locator directory: {path}\\nUse this path as the target unless user explicitly overrides it.\\n"
-crates/clawd/src/post_route_policy.rs	\n\n[AUTO_LOCATOR]\nResolved present workspace scope to: {path}\nUse this path as the target unless user explicitly overrides it.\n	"\\n\\n[AUTO_LOCATOR]\\nResolved present workspace scope to: {path}\\nUse this path as the target unless user explicitly overrides it.\\n"
-crates/clawd/src/prompt_utils.rs	duplicate field ...	/// `Error("duplicate field ...")`，导致整个 JSON 解析失败。
 crates/clawd/src/prompt_utils.rs	initial parse error: {first_err}; repaired parse error: {second_err}	"initial parse error: {first_err}; repaired parse error: {second_err}"
 crates/clawd/src/prompt_utils.rs	prompt schema must be valid JSON	serde_json::from_str(raw).expect("prompt schema must be valid JSON")
 crates/clawd/src/prompt_utils.rs	unable to parse repaired JSON candidate	details: vec!["unable to parse repaired JSON candidate".to_string()],
 crates/clawd/src/prompt_utils.rs	技能未开启 respond	// executor 看到 skill="respond" 直接报"技能未开启 respond"。这里检测
-crates/clawd/src/prompt_utils.rs	根据上下文：...	// 围栏前/后还会带 prose（"根据上下文：..."、"需要先读取..."）。原生
-crates/clawd/src/prompt_utils.rs	需要先读取...	// 围栏前/后还会带 prose（"根据上下文：..."、"需要先读取..."）。原生
-crates/clawd/src/prompt_utils_output_contract.rs	default output contract is object	.expect("default output contract is object");
-crates/clawd/src/prompt_utils_output_contract.rs	default self_extension is object	.expect("default self_extension is object");
 crates/clawd/src/prompt_utils_schema.rs	{path}: does not match any allowed schema variant (got {})	"{path}: does not match any allowed schema variant (got {})",
 crates/clawd/src/prompt_utils_schema.rs	{path}: expected const {}, got {}	"{path}: expected const {}, got {}",
 crates/clawd/src/prompt_utils_schema.rs	{path}: expected one of [{allowed}], got {}	"{path}: expected one of [{allowed}], got {}",
@@ -843,7 +769,6 @@ crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inn
 crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
 crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
 crates/clawd/src/providers/circuit.rs	持续失败	//! 目标：在 fallback 循环里避免对一个已知"持续失败"的 provider 反复施压。
-crates/clawd/src/providers/client.rs	exceeded your current quota	"exceeded your current quota",
 crates/clawd/src/providers/client.rs	unsupported provider type: {provider_type}	format!("unsupported provider type: {provider_type}"),
 crates/clawd/src/providers/client.rs	首次失败 + 再 retry	/// 或中间网关静默断链导致的"首次失败 + 再 retry"开销。
 crates/clawd/src/providers/fixture_replay.rs	fixture_replay load failed: {e}	format!("fixture_replay load failed: {e}"),
@@ -870,6 +795,8 @@ crates/clawd/src/providers/output.rs	open model io log file failed: {err}	warn!(
 crates/clawd/src/providers/output.rs	read model io archives dir failed: {err}	warn!("read model io archives dir failed: {err}");
 crates/clawd/src/providers/output.rs	write model io log failed: {err}	warn!("write model io log failed: {err}");
 crates/clawd/src/providers/output.rs	按日归档 + 旧档过期	// 完成"按日归档 + 旧档过期"，append 侧保持 O(1)。
+crates/clawd/src/providers/routing.rs	provider latency mutex poisoned	let inner = self.inner.lock().expect("provider latency mutex poisoned");
+crates/clawd/src/providers/routing.rs	provider latency mutex poisoned	let mut inner = self.inner.lock().expect("provider latency mutex poisoned");
 crates/clawd/src/repo/audit.rs	INSERT INTO audit_logs (ts, user_id, action, detail_json, error_text) VALUES (?1, ?2, ?3, ?4, ?5)	"INSERT INTO audit_logs (ts, user_id, action, detail_json, error_text) VALUES (?1, ?2, ?3, ?4, ?5)",
 crates/clawd/src/repo/auth.rs	DELETE FROM audit_logs	conn.execute("DELETE FROM audit_logs", [])
 crates/clawd/src/repo/auth.rs	DELETE FROM {table_name}	let sql = format!("DELETE FROM {table_name}");
@@ -933,6 +860,17 @@ crates/clawd/src/repo/auth_webd.rs	invalid stored password hash: {e}	.map_err(|e
 crates/clawd/src/repo/auth_webd.rs	user_key does not exist or is disabled in auth_keys	anyhow::bail!("user_key does not exist or is disabled in auth_keys");
 crates/clawd/src/repo/auth_webd.rs	username already assigned to another key	anyhow::bail!("username already assigned to another key");
 crates/clawd/src/repo/auth_webd.rs	username and user_key required	anyhow::bail!("username and user_key required");
+crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT	"ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT",
+crates/clawd/src/repo/task_mutation_ledger.rs	parse task mutation outcome projection	.context("parse task mutation outcome projection")
+crates/clawd/src/repo/task_mutation_ledger.rs	serialize task mutation outcome projection	.context("serialize task mutation outcome projection")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation lease was not completable	Err(anyhow!("task mutation lease was not completable"))
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let db = pool.get().context("task mutation ledger db pool")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let db = pool.get().context("task mutation ledger db pool")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let db = pool.get().context("task mutation ledger db pool")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let mut db = pool.get().context("task mutation ledger db pool")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger insert was not observable	.ok_or_else(|| anyhow!("task mutation ledger insert was not observable"))?;
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger missing {field}	return Err(anyhow!("task mutation ledger missing {field}"));
+crates/clawd/src/repo/task_mutation_ledger.rs	unsupported task mutation ledger status: {status}	status => Err(anyhow!("unsupported task mutation ledger status: {status}")),
 crates/clawd/src/runtime/policy.rs	invalid tools pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')	"invalid tools pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
 crates/clawd/src/runtime/policy.rs	invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')	"invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
 crates/clawd/src/runtime/policy.rs	tools.by_provider contains empty key	return Err("tools.by_provider contains empty key".to_string());
@@ -974,14 +912,6 @@ crates/clawd/src/schedule_service.rs	skills registry not available	.ok_or_else(|
 crates/clawd/src/schedule_service.rs	unknown skill: {raw_skill}	.ok_or_else(|| format!("unknown skill: {raw_skill}"))?;
 crates/clawd/src/schedule_service.rs	unknown skill: {raw_skill}	.ok_or_else(|| format!("unknown skill: {raw_skill}"))?;
 crates/clawd/src/schedule_service.rs	{param} (required: {required}) - {desc}	rows.push(format!("{param} (required: {required}) - {desc}"));
-crates/clawd/src/schedule_service.rs	现在	/// §7.5: 计算 normalizer prompt 用的"现在"，可被 [`TEST_FREEZE_NOW_ENV`] 冻结。
-crates/clawd/src/schedule_service.rs	看似稳定其实漂移	/// 炸出来，避免静默 fallback 到 `Utc::now()` 让 fixture 跑出"看似稳定其实漂移"
-crates/clawd/src/self_extension.rs	Reusable capability scaffold.	"capability_summary": plan.get("capability_summary").and_then(|v| v.as_str()).unwrap_or("Reusable capability scaffold."),
-crates/clawd/src/self_extension.rs	Reusable capability scaffold.	"capability_summary": plan.get("capability_summary").and_then(|v| v.as_str()).unwrap_or("Reusable capability scaffold."),
-crates/clawd/src/self_extension.rs	Reusable capability scaffold.	.unwrap_or("Reusable capability scaffold.");
-crates/clawd/src/self_extension.rs	missing permanent extension plan	let detail = "missing permanent extension plan";
-crates/clawd/src/self_extension.rs	missing temporary fix plan	let detail = "missing temporary fix plan";
-crates/clawd/src/self_extension.rs	skill semaphore closed: {err}	.map_err(|err| format!("skill semaphore closed: {err}"))?;
 crates/clawd/src/semantic_judge.rs	最终文本是否对外发布	//! - finalize 层是"最终文本是否对外发布"的唯一仲裁点；planning / skill_execution
 crates/clawd/src/skills.rs	policy_token: {policy_token}	format!("policy_token: {policy_token}"),
 crates/clawd/src/skills.rs	private exchange account access failed	"private exchange account access failed".to_string()
@@ -993,38 +923,15 @@ crates/clawd/src/skills.rs	假装 registry 没加载	/// - 直接调本函数等
 crates/clawd/src/skills.rs	双来源真相	/// 是典型的"双来源真相"。现在已经把那张表里的所有别名（包括拼写错容错 `fs_rearch`）
 crates/clawd/src/skills.rs	哪些 skill 是 builtin（in-process）	/// 用这个常量名单兜底"哪些 skill 是 builtin（in-process）"。**真正生效的是
 crates/clawd/src/skills.rs	清空 + 白名单注入	/// 只做"清空 + 白名单注入"，不碰任何后续 `.env(K, V)` 调用 —— 那部分仍是 clawd 显式
-crates/clawd/src/skills/builtin.rs	- Avoid destructive commands (rm -rf, mkfs, reboot, shutdown, kill -9).\n	prompt.push_str("- Avoid destructive commands (rm -rf, mkfs, reboot, shutdown, kill -9).\\n");
-crates/clawd/src/skills/builtin.rs	- Do not use sudo by default.\n	prompt.push_str("- Do not use sudo by default.\\n");
-crates/clawd/src/skills/builtin.rs	- If one command may be missing, use shell fallback in ONE line (e.g. cmd1 || cmd2).\n	"- If one command may be missing, use shell fallback in ONE line (e.g. cmd1 || cmd2).\\n",
-crates/clawd/src/skills/builtin.rs	- Output only a single-line command.\n\n	prompt.push_str("- Output only a single-line command.\\n\\n");
-crates/clawd/src/skills/builtin.rs	- Prefer read-only and low-risk commands.\n	prompt.push_str("- Prefer read-only and low-risk commands.\\n");
-crates/clawd/src/skills/builtin.rs	Command failed with exit code {}	format!("Command failed with exit code {}", exit_code),
-crates/clawd/src/skills/builtin.rs	Command failed with exit code {}\n{}	format!("Command failed with exit code {}\\n{}", exit_code, detail),
-crates/clawd/src/skills/builtin.rs	Command idle timed out after {} seconds without output	"Command idle timed out after {} seconds without output",
-crates/clawd/src/skills/builtin.rs	Command timed out after {} seconds	format!("Command timed out after {} seconds", soft_timeout),
-crates/clawd/src/skills/builtin.rs	Return strict JSON only: {"command":"...","confidence":0.0-1.0,"reason":"..."}\n	prompt.push_str("Return strict JSON only: {\\"command\\":\\"...\\",\\"confidence\\":0.0-1.0,\\"reason\\":\\"...\\"}\\n");
-crates/clawd/src/skills/builtin.rs	You map a natural-language request to ONE executable bash command for Linux.\n	.push_str("You map a natural-language request to ONE executable bash command for Linux.\\n");
 crates/clawd/src/skills/builtin.rs	command must be string (or provide request_text for NL2CMD)	"command must be string (or provide request_text for NL2CMD)".to_string(),
 crates/clawd/src/skills/builtin.rs	content too large: {} bytes	format!("content too large: {} bytes", content.len()),
 crates/clawd/src/skills/builtin.rs	directory locator matched multiple candidates: {}	"directory locator matched multiple candidates: {}",
 crates/clawd/src/skills/builtin.rs	directory not found under system root and project root: {path}	format!("directory not found under system root and project root: {path}"),
 crates/clawd/src/skills/builtin.rs	empty command after sanitize	return Err("empty command after sanitize".to_string());
-crates/clawd/src/skills/builtin.rs	inspect file before append	"inspect file before append",
 crates/clawd/src/skills/builtin.rs	list_dir requires a directory: {}	format!("list_dir requires a directory: {}", real_path.display()),
-crates/clawd/src/skills/builtin.rs	open file for append	"open file for append",
 crates/clawd/src/skills/builtin.rs	policy_token: {policy_token}	format!("policy_token: {policy_token}"),
-crates/clawd/src/skills/builtin.rs	read command {stream:?} failed: {error}	Err(format!("read command {stream:?} failed: {error}"))
 crates/clawd/src/skills/builtin.rs	read_file requires a file, but target is a directory: {}	"read_file requires a file, but target is a directory: {}",
 crates/clawd/src/skills/builtin.rs	remove_file only supports files, but target is a directory: {}	"remove_file only supports files, but target is a directory: {}",
-crates/clawd/src/skills/builtin.rs	run command failed: {err}	format!("run command failed: {err}"),
-crates/clawd/src/skills/builtin.rs	run command failed: {err}	format!("run command failed: {err}"),
-crates/clawd/src/skills/builtin.rs	run command status unavailable	"run command status unavailable",
-crates/clawd/src/skills/builtin.rs	run_cmd NL2CMD provider failed: {e}	.map_err(|e| format!("run_cmd NL2CMD provider failed: {e}"))?
-crates/clawd/src/skills/builtin.rs	run_cmd NL2CMD provider failed: {e}	.map_err(|e| format!("run_cmd NL2CMD provider failed: {e}"))?;
-crates/clawd/src/skills/builtin.rs	run_cmd NL2CMD returned empty command	return Err("run_cmd NL2CMD returned empty command".to_string());
-crates/clawd/src/skills/builtin.rs	run_cmd NL2CMD schema validation failed: {err}	.map_err(|err| format!("run_cmd NL2CMD schema validation failed: {err}"))
-crates/clawd/src/skills/builtin.rs	run_cmd NL2CMD unavailable: no llm provider configured	"run_cmd NL2CMD unavailable: no llm provider configured".to_string()
-crates/clawd/src/skills/builtin.rs	schedule intent not detected	.ok_or_else(|| "schedule intent not detected".to_string())?
 crates/clawd/src/skills/builtin.rs	serialize schedule intent failed: {e}	serde_json::to_string(&intent).map_err(|e| format!("serialize schedule intent failed: {e}"))
 crates/clawd/src/skills/builtin.rs	skill args must be a JSON object	.ok_or_else(|| "skill args must be a JSON object".to_string())
 crates/clawd/src/skills/builtin.rs	unknown skill: {skill_name}	_ => Err(format!("unknown skill: {skill_name}")),
@@ -1032,8 +939,6 @@ crates/clawd/src/skills/builtin.rs	{key} must be string	.ok_or_else(|| format!("
 crates/clawd/src/skills/builtin.rs	{operation} failed for {target}: {err}	format!("{operation} failed for {target}: {err}"),
 crates/clawd/src/skills/external.rs	Imported external skill completed with no output.	"Imported external skill completed with no output.".to_string()
 crates/clawd/src/skills/external.rs	Imported shell skill failed: {err}	"error_text": format!("Imported shell skill failed: {err}"),
-crates/clawd/src/skills/external.rs	checking Python dependencies failed: {err}	.map_err(|err| format!("checking Python dependencies failed: {err}"))?;
-crates/clawd/src/skills/external.rs	checking Python dependencies timed out	.map_err(|_| "checking Python dependencies timed out".to_string())?
 crates/clawd/src/skills/external.rs	external bundle directory must stay inside workspace_root	return Err("external bundle directory must stay inside workspace_root".to_string());
 crates/clawd/src/skills/external.rs	external bundle directory not found: {err}	.map_err(|err| format!("external bundle directory not found: {err}"))?;
 crates/clawd/src/skills/external.rs	external entry file must stay inside the imported bundle	return Err("external entry file must stay inside the imported bundle".to_string());
@@ -1062,12 +967,10 @@ crates/clawd/src/skills/external.rs	external_auth_ref unsupported type: {:?}, on
 crates/clawd/src/skills/external.rs	external_kind not supported by local_script executor: {}	"external_kind not supported by local_script executor: {}",
 crates/clawd/src/skills/external.rs	external_kind not supported by local_shell_recipe executor: {}	"external_kind not supported by local_shell_recipe executor: {}",
 crates/clawd/src/skills/external.rs	external_kind not supported: {}, only http_json is supported	"external_kind not supported: {}, only http_json is supported",
-crates/clawd/src/skills/external.rs	imported external skill timed out after {}s	.map_err(|_| format!("imported external skill timed out after {}s", timeout_secs))?
 crates/clawd/src/skills/external.rs	missing Python dependencies for imported skill: {}{}	"missing Python dependencies for imported skill: {}{}",
 crates/clawd/src/skills/external.rs	missing required local command for imported skill: {}	"missing required local command for imported skill: {}",
 crates/clawd/src/skills/external.rs	missing required local command for imported skill: {}	"missing required local command for imported skill: {}",
 crates/clawd/src/skills/external.rs	process exited with code {}	detail = format!("process exited with code {}", exit_code);
-crates/clawd/src/skills/external.rs	run imported external skill failed: {err}	.map_err(|err| format!("run imported external skill failed: {err}"))?;
 crates/clawd/src/skills/runner.rs	empty skill-runner output	return Err("empty skill-runner output".to_string());
 crates/clawd/src/skills/runner.rs	empty skill-runner output: {detail}	return Err(format!("empty skill-runner output: {detail}"));
 crates/clawd/src/skills/runner.rs	flush skill-runner stdin failed: {err}	.map_err(|err| format!("flush skill-runner stdin failed: {err}"))?;
@@ -1075,8 +978,6 @@ crates/clawd/src/skills/runner.rs	invalid skill-runner json: {err}	serde_json::f
 crates/clawd/src/skills/runner.rs	read skill-runner stdout failed: {err}	Ok(Err(err)) => return Err(format!("read skill-runner stdout failed: {err}")),
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)	"skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)",
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` failed to issue internal LLM token: {err}	"skill `{canonical_skill_name}` failed to issue internal LLM token: {err}"
-crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` failed to issue short-lived secret tokens: {err}	"skill `{canonical_skill_name}` failed to issue short-lived secret tokens: {err}"
-crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` failed to mint OPENAI_API_KEY token: {err}	"skill `{canonical_skill_name}` failed to mint OPENAI_API_KEY token: {err}"
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` secret `{name}` lookup failed via broker `{}`: {source}	"skill `{canonical_skill_name}` secret `{name}` lookup failed via broker `{}`: {source}",
 crates/clawd/src/skills/runner.rs	skill-runner exit wait timeout	return Err("skill-runner exit wait timeout".to_string());
 crates/clawd/src/skills/runner.rs	skill-runner exit wait timeout: {detail}	return Err(format!("skill-runner exit wait timeout: {detail}"));
@@ -1097,20 +998,18 @@ crates/clawd/src/task_admin_routes.rs	List active tasks failed: {}	error!("List 
 crates/clawd/src/task_admin_routes.rs	Resolve task admin actor failed: {}	error!("Resolve task admin actor failed: {}", err);
 crates/clawd/src/task_admin_routes.rs	Resolve task admin identity failed: {}	error!("Resolve task admin identity failed: {}", err);
 crates/clawd/src/task_admin_routes.rs	Target task is no longer active	"Target task is no longer active",
-crates/clawd/src/task_context_builder.rs	Current-turn structural hints extracted from the user message. These are locator and parameter hints only; semantic planning and response meaning must come from the planner contract, not local phrase classifiers.	"Current-turn structural hints extracted from the user message. These are locator and parameter hints only; semantic planning and response meaning must come from the planner contract, not local phrase classifiers.".to_string(),
-crates/clawd/src/task_context_builder.rs	Temporary user-defined references for this session. Use them only when the current message explicitly mentions one of these aliases or updates a mapping. They are not durable memory and not execution evidence by themselves.	"Temporary user-defined references for this session. Use them only when the current message explicitly mentions one of these aliases or updates a mapping. They are not durable memory and not execution evidence by themselves.".to_string(),
-crates/clawd/src/task_context_builder.rs	Use this as authoritative semantic context for short follow-ups, corrections, scope updates, and output-shape refinements on the current active task. It is not a filesystem locator or execution target by itself.	"Use this as authoritative semantic context for short follow-ups, corrections, scope updates, and output-shape refinements on the current active task. It is not a filesystem locator or execution target by itself.".to_string(),
-crates/clawd/src/task_context_builder.rs	\n\nAttached image analysis context:\n{}	format!("\\n\\nAttached image analysis context:\\n{}", image_context);
-crates/clawd/src/task_context_builder.rs	\n\n{}\nAlias execution rule: when the current goal or request mentions more than one alias, treat each alias target as an independent authoritative concrete target. Do not rebuild a file alias under another directory alias unless that exact alias target says it is inside that directory.	"\\n\\n{}\\nAlias execution rule: when the current goal or request mentions more than one alias, treat each alias target as an independent authoritative concrete target. Do not rebuild a file alias under another directory alias unless that exact alias target says it is inside that directory.",
-crates/clawd/src/task_context_builder.rs	locator_target_pair: {left} | {right}	lines.push(format!("locator_target_pair: {left} | {right}"));
-crates/clawd/src/task_journal.rs	哪个 prompt 把额度烧光了	// 按 count 降序输出，方便人眼一眼看到"哪个 prompt 把额度烧光了"。
+crates/clawd/src/task_context_builder.rs	\n\n### ATTACHED_IMAGE_ANALYSIS_CONTEXT\n{image_context}	format!("\\n\\n### ATTACHED_IMAGE_ANALYSIS_CONTEXT\\n{image_context}");
+crates/clawd/src/task_context_builder/compaction.rs	### COMPACTED_HISTORY_CONTEXT\n{envelope}	format!("### COMPACTED_HISTORY_CONTEXT\\n{envelope}")
+crates/clawd/src/task_event_transport.rs	invalid task event kind	let event_kind = normalize_machine_token(event_kind).context("invalid task event kind")?;
+crates/clawd/src/task_event_transport.rs	task event artifact db pool	let db = state.core.db.get().context("task event artifact db pool")?;
+crates/clawd/src/task_event_transport.rs	task event artifact db pool	let db = state.core.db.get().context("task event artifact db pool")?;
+crates/clawd/src/task_event_transport.rs	task event db pool	let db = state.core.db.get().context("task event db pool")?;
+crates/clawd/src/task_event_transport.rs	task event db pool	let mut db = state.core.db.get().context("task event db pool")?;
 crates/clawd/src/task_journal_event_stream.rs	coding_checkpoint:verification_command:{}	let checkpoint_ref = format!("coding_checkpoint:verification_command:{}", index + 1);
 crates/clawd/src/task_journal_evidence_coverage.rs	all llm providers in circuit_breaker cooldown	if normalized.contains("all llm providers in circuit_breaker cooldown")
 crates/clawd/src/task_journal_evidence_registry.rs	evidence extractor registry contains all built-in extractor specs	.expect("evidence extractor registry contains all built-in extractor specs")
 crates/clawd/src/ui_attachments.rs	ui_attachment_create_dir_failed: {err}	.map_err(|err| format!("ui_attachment_create_dir_failed: {err}"))?;
 crates/clawd/src/ui_attachments.rs	ui_attachment_write_failed: {err}	.map_err(|err| format!("ui_attachment_write_failed: {err}"))?;
-crates/clawd/src/verifier.rs	action `{}` is allowed by contract `{}` but preferred action(s) are `{}`	"action `{}` is allowed by contract `{}` but preferred action(s) are `{}`",
-crates/clawd/src/verifier.rs	action `{}` is rejected by contract `{}` ({}) with final answer shape `{}`	"action `{}` is rejected by contract `{}` ({}) with final answer shape `{}`",
 crates/clawd/src/verifier.rs	both primary and fallback steps are present in the same plan	"both primary and fallback steps are present in the same plan".to_string(),
 crates/clawd/src/verifier.rs	capability `{}` was not resolved to an executable tool or skill	"capability `{}` was not resolved to an executable tool or skill",
 crates/clawd/src/verifier.rs	depends_on references missing step `{dep}`	detail: format!("depends_on references missing step `{dep}`"),
@@ -1118,7 +1017,6 @@ crates/clawd/src/verifier.rs	group `{group}` skill `{normalized_skill}` conflict
 crates/clawd/src/verifier.rs	multiple fallback steps are present in the same group	"multiple fallback steps are present in the same group".to_string(),
 crates/clawd/src/verifier.rs	multiple primary steps are present in the same group	"multiple primary steps are present in the same group".to_string(),
 crates/clawd/src/verifier.rs	planner step skill `{}` could not be converted to a contract action reference	"planner step skill `{}` could not be converted to a contract action reference",
-crates/clawd/src/verifier.rs	skill `{normalized_skill}` action risk `{:?}` exceeds route risk ceiling	"skill `{normalized_skill}` action risk `{:?}` exceeds route risk ceiling",
 crates/clawd/src/verifier.rs	skill `{normalized_skill}` args must be an object	detail: format!("skill `{normalized_skill}` args must be an object"),
 crates/clawd/src/verifier.rs	skill `{normalized_skill}` has unresolved template placeholder in args	"skill `{normalized_skill}` has unresolved template placeholder in args"
 crates/clawd/src/verifier.rs	skill `{normalized_skill}` is not in planner visible skills	detail: format!("skill `{normalized_skill}` is not in planner visible skills"),
@@ -1136,50 +1034,19 @@ crates/clawd/src/verifier_structured_fields.rs	structured_field_selector `{selec
 crates/clawd/src/verifier_structured_fields.rs	structured_field_target_path was enforced on config_basic.{action}	"structured_field_target_path was enforced on config_basic.{action}"
 crates/clawd/src/verifier_structured_fields.rs	time before unix epoch	.expect("time before unix epoch")
 crates/clawd/src/virtual_tools.rs	unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config	"unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config",
-crates/clawd/src/virtual_tools.rs	unsupported fs_basic action `{}`; allowed: stat_paths|list_dir|count_entries|read_text_range|find_entries|grep_text|compare_paths|write_text|append_text|make_dir|remove_path	"unsupported fs_basic action `{}`; allowed: stat_paths|list_dir|count_entries|read_text_range|find_entries|grep_text|compare_paths|write_text|append_text|make_dir|remove_path",
 crates/clawd/src/virtual_tools.rs	{tool} args must be a JSON object	.ok_or_else(|| format!("{tool} args must be a JSON object"))
 crates/clawd/src/visible_text.rs	valid JSON escaped CSI regex	Regex::new(r"\\\\u001[bB]\\[[0-?]*[ -/]*[@-~]").expect("valid JSON escaped CSI regex")
 crates/clawd/src/visible_text.rs	valid JSON string field regex	.expect("valid JSON string field regex")
 crates/clawd/src/visible_text.rs	valid key-value regex	.expect("valid key-value regex")
 crates/clawd/src/visible_text.rs	valid query param regex	.expect("valid query param regex")
-crates/clawd/src/worker/ask_pipeline_test_support.rs	rustclaw_ask_pipeline_{label}_{}_{}	"rustclaw_ask_pipeline_{label}_{}_{}",
-crates/clawd/src/worker/ask_pipeline_test_support.rs	读取 README 开头并总结	resolved_intent: "读取 README 开头并总结".to_string(),
-crates/clawd/src/worker/ask_prepare.rs	; active_clarify_archive_unpack_pair_repaired	.push_str("; active_clarify_archive_unpack_pair_repaired");
-crates/clawd/src/worker/ask_prepare.rs	; active_clarify_fast_path_scalar_field_value_contract_repair	.push_str("; active_clarify_fast_path_scalar_field_value_contract_repair");
-crates/clawd/src/worker/ask_prepare.rs	; drop_untrusted_locator_reply_semantic_kind	.push_str("; drop_untrusted_locator_reply_semantic_kind");
-crates/clawd/src/worker/ask_prepare.rs	; keep_current_file_delivery_over_weak_active_clarify_shape	.push_str("; keep_current_file_delivery_over_weak_active_clarify_shape");
-crates/clawd/src/worker/ask_prepare.rs	; normalize_active_clarify_structured_field_selector	.push_str("; normalize_active_clarify_structured_field_selector");
-crates/clawd/src/worker/ask_prepare.rs	; preserve_active_clarify_output_contract	.push_str("; preserve_active_clarify_output_contract");
-crates/clawd/src/worker/ask_prepare.rs	; preserve_active_clarify_structured_field_selector	.push_str("; preserve_active_clarify_structured_field_selector");
-crates/clawd/src/worker/ask_prepare.rs	; preserve_locator_reply_runtime_intent	.push_str("; preserve_locator_reply_runtime_intent");
-crates/clawd/src/worker/ask_prepare.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
-crates/clawd/src/worker/ask_prepare.rs	Current task:\n{prior}{recent_output_block}{continuity_rules}\n\nStructured task updates:\n{patch}\n\n{merge_instruction}\nNew user instruction:\n{current}	"Current task:\\n{prior}{recent_output_block}{continuity_rules}\\n\\nStructured task updates:\\n{patch}\\n\\n{merge_instruction}\\nNew user instruction:\\n{current}"
-crates/clawd/src/worker/ask_prepare.rs	Current task:\n{prior}{recent_output_block}{continuity_rules}\n\n{merge_instruction}\nNew user instruction:\n{current}	"Current task:\\n{prior}{recent_output_block}{continuity_rules}\\n\\n{merge_instruction}\\nNew user instruction:\\n{current}"
-crates/clawd/src/worker/ask_prepare.rs	Keep the same task and append this new instruction.	"Keep the same task and append this new instruction.",
-crates/clawd/src/worker/ask_prepare.rs	Keep the same task, but treat the new instruction as a correction that overrides conflicting earlier details. Return the corrected deliverable itself, not a description of what should change.	"Keep the same task, but treat the new instruction as a correction that overrides conflicting earlier details. Return the corrected deliverable itself, not a description of what should change.",
-crates/clawd/src/worker/ask_prepare.rs	Previous request is waiting for clarification:\n{source_request}\n\nMissing information to confirm:\n{pending_question}\n\nCandidate targets from that clarification only:\n{candidate_targets}\n\nThe new user instruction changes this into a chat-only response and asks not to execute or deliver anything:\n{current_prompt}\n\nAnswer in the user's language by restating the missing information to confirm. Do not select a concrete file, alias, or path unless it is listed under Candidate targets from that clarification only.	"Previous request is waiting for clarification:\\n{source_request}\\n\\nMissing information to confirm:\\n{pending_question}\\n\\nCandidate targets from that clarification only:\\n{candidate_targets}\\n\\nThe new user instruction changes this into a chat-only response and asks not to execute or deliver anything:\\n{current_prompt}\\n\\nAnswer in the user's language by restating the missing information to confirm. Do not select a concrete file, alias, or path unless it is listed under Candidate targets from that clarification only."
-crates/clawd/src/worker/ask_prepare.rs	\n\nMost recent generated output:\n{output}	.map(|output| format!("\\n\\nMost recent generated output:\\n{output}"))
-crates/clawd/src/worker/ask_prepare.rs	\n\nMost recent generated output:\n{output}	.map(|output| format!("\\n\\nMost recent generated output:\\n{output}"))
-crates/clawd/src/worker/ask_prepare.rs	execution context bundle should include execution_view	.expect("execution context bundle should include execution_view");
-crates/clawd/src/worker/ask_prepare_field_contract.rs	; multi_locator_structured_field_preserves_summary_contract	.push_str("; multi_locator_structured_field_preserves_summary_contract");
-crates/clawd/src/worker/ask_prepare_field_contract.rs	; scalar_field_pair_contract_repair	.push_str("; scalar_field_pair_contract_repair");
-crates/clawd/src/worker/ask_prepare_field_contract.rs	; scalar_field_value_contract_repair	.push_str("; scalar_field_value_contract_repair");
-crates/clawd/src/worker/ask_prepare_field_contract.rs	; scalar_field_value_contract_repair	.push_str("; scalar_field_value_contract_repair");
-crates/clawd/src/worker/ask_prepare_field_contract.rs	; structured_field_selector_exact_target_repair	.push_str("; structured_field_selector_exact_target_repair");
-crates/clawd/src/worker/ask_prepare_field_contract.rs	; structured_field_target_from_prompt_repair	.push_str("; structured_field_target_from_prompt_repair");
-crates/clawd/src/worker/ask_prepare_file_delivery.rs	; directory_file_delivery_requires_structured_selection	.push_str("; directory_file_delivery_requires_structured_selection");
-crates/clawd/src/worker/ask_prepare_file_delivery.rs	; filename_locator_preserved_as_existing_file_delivery	.push_str("; filename_locator_preserved_as_existing_file_delivery");
-crates/clawd/src/worker/ask_prepare_file_delivery.rs	; filename_only_output_clears_file_delivery_contract	.push_str("; filename_only_output_clears_file_delivery_contract");
-crates/clawd/src/worker/ask_prepare_file_delivery.rs	; generated_file_delivery_allows_runtime_target	.push_str("; generated_file_delivery_allows_runtime_target");
 crates/clawd/src/worker/channels.rs	missing external_chat_id for feishu task	.ok_or_else(|| "missing external_chat_id for feishu task".to_string())?;
 crates/clawd/src/worker/channels.rs	missing external_chat_id for lark task	.ok_or_else(|| "missing external_chat_id for lark task".to_string())?;
 crates/clawd/src/worker/channels.rs	missing external_chat_id for wechat task	.ok_or_else(|| "missing external_chat_id for wechat task".to_string())?;
 crates/clawd/src/worker/channels.rs	missing external_chat_id for whatsapp task	.ok_or_else(|| "missing external_chat_id for whatsapp task".to_string())?;
-crates/clawd/src/worker/locator.rs	{raw_text}\n{resolved_text}	let query_text = format!("{raw_text}\\n{resolved_text}");
 crates/clawd/src/worker/mod.rs	Scheduled job executed successfully	"Scheduled job executed successfully",
 crates/clawd/src/worker/mod.rs	Scheduled job execution failed	"Scheduled job execution failed",
 crates/clawd/src/worker/mod.rs	Unsupported task kind: {other}	let err = format!("Unsupported task kind: {other}");
-crates/clawd/src/worker/mod.rs	invalid payload_json for task {}: {err}	.map_err(|err| anyhow!("invalid payload_json for task {}: {err}", task.task_id))?;
+crates/clawd/src/worker/mod.rs	invalid payload_json for task {}: {error}	let error = anyhow!("invalid payload_json for task {}: {error}", task.task_id);
 crates/clawd/src/worker/mod.rs	worker_once: no queued tasks, idle tick	debug!("worker_once: no queued tasks, idle tick");
 crates/clawd/src/worker/mod.rs	{prefix}\n{job_id_label}: {job_id}	let status_block = format!("{prefix}\\n{job_id_label}: {job_id}");
 crates/clawd/src/worker/mod.rs	{text_trimmed}\n\n{status_block}	format!("{text_trimmed}\\n\\n{status_block}")

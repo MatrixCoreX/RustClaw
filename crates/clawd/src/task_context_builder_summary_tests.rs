@@ -8,12 +8,7 @@ fn empty_prompt_memory_context() -> crate::memory::service::PromptMemoryContext 
         prompt_with_memory: "memory".to_string(),
         chat_prompt_context: String::new(),
         memory_trace: None,
-        long_term_summary: None,
-        preferences: Vec::new(),
         recalled: Vec::new(),
-        similar_triggers: Vec::new(),
-        relevant_facts: Vec::new(),
-        recent_related_events: Vec::new(),
     }
 }
 

@@ -13,7 +13,7 @@ pub(super) fn requested_machine_kv_request_surfaces(
     }
     if let Some(selector) = ctx
         .output_contract()
-        .and_then(|contract| contract.self_extension.structured_field_selector.as_deref())
+        .and_then(|contract| contract.selection.structured_field_selector.as_deref())
     {
         crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, selector);
     }

@@ -501,7 +501,7 @@ fn scalar_route_result() -> IntentOutputContract {
         delivery_intent: Default::default(),
         semantic_kind: Default::default(),
         locator_hint: "package.json".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     }
 }
 

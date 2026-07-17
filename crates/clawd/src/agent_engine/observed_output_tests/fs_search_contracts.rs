@@ -676,7 +676,7 @@ fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::FileNames,
             locator_hint: "scripts/nl_tests/fixtures/locator_smart/stem_unique".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -836,7 +836,7 @@ fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -961,7 +961,7 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let mut agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1296,7 +1296,7 @@ fn route_observation_facts_pin_resolved_path_for_existence_summary() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPathSummary,
             locator_hint: "rustclaw.service".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let ctx = AgentRunContext {
         output_contract: Some(route_result.clone()),

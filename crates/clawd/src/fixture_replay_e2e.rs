@@ -138,10 +138,11 @@ pub(crate) struct LoadedCase {
 ///   * `expected_prompt_sources`：**集合（无序）** 断言 —— 每个列出的
 ///     [`crate::llm_gateway::classify_prompt_source`] 标签必须在本次任务里
 ///     至少被调用过一次。来源是 `state.task_llm_by_prompt(task_id)` 的 key
-///     集（HashMap，无调用顺序）。允许值：`normalizer` / `plan` /
-///     `plan_repair` / `delivery_classifier` / `observed` / `clarify` /
-///     `intent_meta` / `schedule` / `nl2cmd` / `self_extension` / `memory` /
-///     `verifier` / `chat` / `semantic_judge` / `router_legacy` / `other`。
+///     集（HashMap，无调用顺序）。允许值：`context_compaction` / `plan` /
+///     `plan_repair` / `delivery_classifier` / `direct_classifier` /
+///     `observed` / `user_response_composer` / `user_response_validator` /
+///     `clarify` / `schedule` / `nl2cmd` / `memory` / `verifier` / `chat` /
+///     `semantic_judge` / `other`。
 ///     未来若需要"按顺序"断言，需在 `state.metrics` 加事件序列字段 —— 当前
 ///     不支持。
 ///   * `expected_fallback_source`：断言 finalizer 收尾使用的 fallback 标签，

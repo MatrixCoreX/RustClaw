@@ -219,7 +219,7 @@ fn latest_recent_artifact_inventory(loop_state: &LoopState) -> Option<RecentArti
 
 fn recent_artifacts_selector_limit(route: &crate::IntentOutputContract) -> Option<usize> {
     route
-        .self_extension
+        .selection
         .list_selector
         .limit
         .and_then(|limit| usize::try_from(limit).ok())
@@ -246,7 +246,7 @@ fn apply_recent_artifacts_selector_target_kind(
 fn recent_artifacts_selector_target_kind(
     route: &crate::IntentOutputContract,
 ) -> crate::OutputScalarCountTargetKind {
-    let selector = &route.self_extension.list_selector;
+    let selector = &route.selection.list_selector;
     if selector.target_kind_specified {
         return selector.target_kind;
     }

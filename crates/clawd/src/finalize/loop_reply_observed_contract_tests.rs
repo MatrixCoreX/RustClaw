@@ -819,8 +819,7 @@ fn loop_contract_observed_answer_preserves_publishable_terminal_summary_for_free
 
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut step_contract = scalar_route_result();
-    step_contract.self_extension.structured_field_selector =
-        Some("fs_basic.planner_kind".to_string());
+    step_contract.selection.structured_field_selector = Some("fs_basic.planner_kind".to_string());
     loop_state.output_contract = Some(step_contract);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",

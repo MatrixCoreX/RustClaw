@@ -551,7 +551,7 @@ fn requested_machine_kv_summary_restores_service_status_terminal_delivery() {
     route.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.self_extension.structured_field_selector = Some("docker.version".to_string());
+    route.selection.structured_field_selector = Some("docker.version".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -593,7 +593,7 @@ fn requested_machine_kv_summary_restores_service_contract_terminal_delivery() {
     route.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.self_extension.structured_field_selector = Some("service.status".to_string());
+    route.selection.structured_field_selector = Some("service.status".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1330,7 +1330,7 @@ fn requested_machine_kv_summary_restores_config_guard_payload_for_summary_route(
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
-    route.self_extension.structured_field_selector = Some("risk_count".to_string());
+    route.selection.structured_field_selector = Some("risk_count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

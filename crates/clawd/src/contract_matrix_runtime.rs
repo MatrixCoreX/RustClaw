@@ -234,7 +234,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
         "requires_content_evidence": output_contract.requires_content_evidence,
         "delivery_required": output_contract.delivery_required,
         "structured_field_selector": output_contract
-            .self_extension
+            .selection
             .structured_field_selector
             .as_deref(),
         "contract_match": matched.match_name(),

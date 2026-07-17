@@ -106,14 +106,14 @@ pub(crate) fn run_permission_revoke(
         .header("x-rustclaw-key", key)
         .json(&json!({"grant_id": grant_id}))
         .send()
-        .context("request approval_scope_grant_revoke failed")?;
+        .context("approval_scope_grant_revoke_request_failed")?;
     let status = response.status();
     let body: Value = response
         .json()
-        .context("parse approval_scope_grant_revoke response")?;
+        .context("approval_scope_grant_revoke_response_parse_failed")?;
     if !status.is_success() {
         anyhow::bail!(
-            "approval_scope_grant_revoke returned {}: {:?}",
+            "approval_scope_grant_revoke_http_error:status={}:error={:?}",
             status,
             body.get("error")
         );

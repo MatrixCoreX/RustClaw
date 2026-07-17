@@ -211,7 +211,7 @@ where
         .header("accept", "text/event-stream")
         .header("last-event-id", cursor.to_string())
         .send()
-        .context("open task event stream failed")?;
+        .context("task_event_stream_open_failed")?;
     let status = response.status();
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
@@ -230,7 +230,7 @@ impl fmt::Display for TaskEventHttpStatusError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "task event stream returned {}: {}",
+            "task_event_stream_http_error:status={}:body={}",
             self.status, self.body
         )
     }
@@ -343,7 +343,7 @@ where
     let data = data_lines.join("\n");
     data_lines.clear();
     let value: serde_json::Value =
-        serde_json::from_str(&data).context("parse task SSE event JSON")?;
+        serde_json::from_str(&data).context("task_event_sse_json_parse_failed")?;
     on_event(&value)
 }
 

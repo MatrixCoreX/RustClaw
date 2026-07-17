@@ -15,7 +15,6 @@ Primary entry point:
 - `bash scripts/nl_tests/run_suite.sh task_updates4`
 - `bash scripts/nl_tests/run_suite.sh multistep_mixed`
 - `bash scripts/nl_tests/run_suite.sh manual trace clarify`
-- `bash scripts/nl_tests/run_suite.sh self_extension`
 - `bash scripts/nl_tests/run_suite.sh sensitive_flows`
 - `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
@@ -735,18 +734,6 @@ Run the 2,100-row safe aggregate only for major route/provider migrations,
 physical deletion of old compat paths, or final release gates. Keep X/Twitter
 posting cases dry-run unless a live publish test is explicitly approved.
 
-Self-extension regressions:
-
-- `bash scripts/nl_tests/run_suite.sh self_extension`
-- `bash scripts/nl_tests/run_full_suite.sh --with-self-extension`
-- `bash scripts/nl_tests/run_suite.sh full --with-self-extension`
-
-Notes for `self_extension`:
-
-- Stage 1 is local backend validation and does not depend on provider availability.
-- Stage 2 verifies natural-language `ask -> self_extension` handoff.
-- If the provider is unavailable, stage 2 is reported as `SKIP` instead of a product failure.
-
 Sensitive-flow regressions:
 
 - `bash scripts/nl_tests/run_suite.sh sensitive_flows`
@@ -754,7 +741,7 @@ Sensitive-flow regressions:
 
 Notes for `sensitive_flows`:
 
-- Covers high-risk config mutation guard, crypto unbound hints, and self-extension NL trigger.
+- Covers high-risk config mutation guard and crypto unbound hints.
 - Keeps source-controlled NL examples in `scripts/nl_tests/cases/nl_cases_sensitive_flows.txt`.
 - Logs are written under `scripts/nl_suite_logs/sensitive_flows/<timestamp>/`.
 
@@ -792,7 +779,6 @@ Notes for `ops_http_repair`:
 - `bash scripts/nl_tests/run_multistep_mixed_suite.sh`
 - `bash scripts/nl_tests/run_full_suite.sh`
 - `bash scripts/nl_tests/run_multi_turn_suite.sh`
-- `bash scripts/regression_self_extension_suite.sh`
 - `bash scripts/regression_sensitive_nl_flows.sh`
 - `bash scripts/regression_ops_http_repair_nl_flows.sh`
 - `bash scripts/regression_ops_closed_loop.sh`
@@ -852,7 +838,6 @@ suite|name|tags|prompt|expect=<substring>
 - `scripts/nl_suite_logs/full/<timestamp>/`
 - `scripts/nl_suite_logs/trace/<timestamp>/`
 - `scripts/nl_suite_logs/resume/<timestamp>/`
-- `scripts/nl_suite_logs/self_extension/<timestamp>/`
 - `scripts/nl_suite_logs/text_match/<timestamp>/`
 - `scripts/nl_suite_logs/clarify/<timestamp>/`
 - `scripts/nl_suite_logs/context_chain/<timestamp>/`

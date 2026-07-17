@@ -250,10 +250,7 @@ pub(super) fn task_machine_kv_request_surfaces(
     for value in [
         Some(prompt),
         Some(journal.input_text.as_str()),
-        route_result
-            .self_extension
-            .structured_field_selector
-            .as_deref(),
+        route_result.selection.structured_field_selector.as_deref(),
     ]
     .into_iter()
     .flatten()

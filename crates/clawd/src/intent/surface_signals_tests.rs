@@ -37,7 +37,7 @@ fn detects_empty_prompt_as_default_signals() {
     assert!(!signals.has_concrete_locator_hint());
     assert!(!signals.is_structural_locator_only_reply());
     assert_eq!(signals.field_selector_count, 0);
-    assert!(signals.filename_candidates.is_empty());
+    assert!(signals.single_filename_candidate().is_none());
     assert!(!signals.has_delivery_token_reference());
 }
 
@@ -58,21 +58,7 @@ fn detects_explicit_path_locator() {
     assert!(signals.has_explicit_path_or_url());
     assert!(signals.has_concrete_locator_hint());
     assert_eq!(signals.field_selector_count, 0);
-    assert!(!signals.filename_candidates.is_empty());
-}
-
-#[test]
-fn detects_multiple_english_filename_targets() {
-    let signals = analyze_prompt_surface(
-        "read the opening section of README.md, then read the opening section of AGENTS.md, and say in one short English sentence which one is for end users versus contributors",
-    );
-
-    assert_eq!(
-        signals.filename_candidates_excluding_field_selectors(),
-        vec!["README.md".to_string(), "AGENTS.md".to_string()]
-    );
-    assert!(signals.dotted_field_selector.is_none());
-    assert!(signals.field_selector_mentions.is_empty());
+    assert_eq!(signals.single_filename_candidate(), Some("package.json"));
 }
 
 #[test]
@@ -262,10 +248,6 @@ fn locator_target_pair_ignores_contract_test_hint_metadata() {
             "tmp/contract_matrix_unpacked".to_string()
         ))
     );
-    assert!(!signals
-        .filename_candidates
-        .iter()
-        .any(|candidate| candidate.contains("candidate_wrong_action_ref")));
 }
 
 #[test]
@@ -279,5 +261,5 @@ fn dotted_version_numbers_are_not_field_or_filename_signals() {
     let signals = analyze_prompt_surface("Correction: mention Python 3.11, not Python 3.10.");
     assert_eq!(signals.field_selector_count, 0);
     assert!(signals.dotted_field_selector.is_none());
-    assert!(signals.filename_candidates.is_empty());
+    assert!(signals.single_filename_candidate().is_none());
 }

@@ -539,9 +539,9 @@ fn recent_artifacts_inventory_can_stop_before_content_read_round() {
     route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs".to_string();
-    route.self_extension.list_selector.limit = Some(2);
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.target_kind_specified = true;
+    route.selection.list_selector.limit = Some(2);
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: json!({"action":"list_dir","path":"logs","sort_by":"mtime_desc","files_only":true,"max_entries":2}),
@@ -571,8 +571,8 @@ fn recent_artifacts_inventory_stop_respects_file_selector() {
     route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "tmp".to_string();
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.target_kind_specified = true;
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: json!({"action":"list_dir","path":"tmp","sort_by":"mtime_desc","files_only":true}),

@@ -27,7 +27,6 @@ pub(crate) struct PromptSurfaceSignals {
     pub(crate) field_selector_mentions: Vec<String>,
     pub(crate) field_selector_count: usize,
     pub(crate) dotted_field_selector: Option<String>,
-    pub(crate) filename_candidates: Vec<String>,
     pub(crate) single_filename_candidate: Option<String>,
     pub(crate) delivery_token_reference: bool,
     pub(crate) locator_target_pair: Option<(String, String)>,
@@ -61,13 +60,6 @@ impl PromptSurfaceSignals {
         )
     }
 
-    #[cfg(test)]
-    pub(crate) fn has_filename_candidates(&self) -> bool {
-        !self
-            .filename_candidates_excluding_field_selectors()
-            .is_empty()
-    }
-
     pub(crate) fn single_filename_candidate(&self) -> Option<&str> {
         self.single_filename_candidate.as_deref()
     }
@@ -79,30 +71,6 @@ impl PromptSurfaceSignals {
 
     pub(crate) fn has_deictic_reference(&self) -> bool {
         self.deictic_reference
-    }
-
-    pub(crate) fn filename_candidates_excluding_field_selectors(&self) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for candidate in &self.filename_candidates {
-            if self.dotted_field_selector.as_ref().is_some_and(|selector| {
-                selector.eq_ignore_ascii_case(candidate)
-                    && !filename_candidate_should_survive_field_selector_filter(candidate)
-            }) {
-                continue;
-            }
-            if self.field_selector_mentions.iter().any(|selector| {
-                selector.eq_ignore_ascii_case(candidate)
-                    && !filename_candidate_should_survive_field_selector_filter(candidate)
-            }) {
-                continue;
-            }
-            let normalized = candidate.to_ascii_lowercase();
-            if seen.insert(normalized) {
-                out.push(candidate.clone());
-            }
-        }
-        out
     }
 }
 
@@ -143,7 +111,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         field_selector_mentions,
         field_selector_count,
         dotted_field_selector,
-        filename_candidates,
         single_filename_candidate,
         delivery_token_reference,
         locator_target_pair,

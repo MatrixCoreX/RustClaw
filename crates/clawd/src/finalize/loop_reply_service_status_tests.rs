@@ -124,7 +124,7 @@ async fn finalize_loop_reply_honors_system_health_selector() {
     route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
-    route.self_extension.structured_field_selector = Some("system_health.*".to_string());
+    route.selection.structured_field_selector = Some("system_health.*".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         user_request: Some("show host OS health fields only".to_string()),

@@ -120,9 +120,9 @@ fn recent_artifacts_verifier_gap_recovery_respects_selector_limit_and_target_kin
     route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.locator_kind = OutputLocatorKind::Path;
     route.requires_content_evidence = true;
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.target_kind_specified = true;
-    route.self_extension.list_selector.limit = Some(1);
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
+    route.selection.list_selector.limit = Some(1);
 
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-recent-artifacts-limit",

@@ -141,17 +141,10 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
     // 顺序很重要：更具体的匹配放前面，避免被宽泛规则吃掉。
     if s.contains("context_compaction") {
         "context_compaction"
-    } else if s.contains("intent_normalizer") || s.contains("normalizer") {
-        "normalizer"
-    } else if s.contains("contract_repair") {
-        "contract_repair"
-    } else if s.contains("intent_router") {
-        "router_legacy"
     } else if s.contains("plan_repair") {
         "plan_repair"
     } else if s.contains("single_step_planner")
         || s.contains("single_plan_execution")
-        || s.contains("lightweight_execution")
         || s.contains("loop_incremental_plan")
         || s.contains("plan_")
     {
@@ -168,14 +161,10 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
         "user_response_validator"
     } else if s.contains("clarify_question") {
         "clarify"
-    } else if s.contains("intent_meta_summary") || s.contains("meta_summary") {
-        "intent_meta"
     } else if s.contains("schedule_intent") {
         "schedule"
     } else if s.contains("command_intent") || s.contains("nl2cmd") {
         "nl2cmd"
-    } else if s.contains("self_extension") {
-        "self_extension"
     } else if s.contains("memory_") || s.contains("memory_extract") || s.contains("memory_judge") {
         "memory"
     } else if s.contains("verifier") || s.contains("verify_") {

@@ -248,7 +248,7 @@ pub(super) fn apply_structured_field_selector_repair(
         return;
     };
     let Some(selector) = output_contract
-        .self_extension
+        .selection
         .structured_field_selector
         .as_deref()
         .map(str::trim)
@@ -386,7 +386,7 @@ mod tests {
 
     fn contract_with_selector(selector: &str) -> crate::IntentOutputContract {
         let mut contract = structured_scalar_contract();
-        contract.self_extension.structured_field_selector = Some(selector.to_string());
+        contract.selection.structured_field_selector = Some(selector.to_string());
         contract
     }
 

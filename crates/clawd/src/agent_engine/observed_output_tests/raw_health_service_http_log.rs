@@ -20,7 +20,7 @@ fn direct_answer_preserves_run_cmd_directory_entry_names() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -51,7 +51,7 @@ fn direct_answer_preserves_run_cmd_semantic_directory_path_list() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::DirectoryNames,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -87,7 +87,7 @@ fn direct_answer_preserves_run_cmd_directory_entry_names_without_request_text_li
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -128,7 +128,7 @@ fn direct_answer_formats_run_cmd_exists_probe_with_resolved_path() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "rustclaw.service".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -159,7 +159,7 @@ fn direct_answer_formats_run_cmd_not_found_probe_as_no() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "rustclaw.service".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -190,7 +190,7 @@ fn direct_answer_defers_health_check_json_for_act_free_shape() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -218,7 +218,7 @@ fn direct_answer_defers_health_check_service_status_contract_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -267,7 +267,7 @@ fn direct_answer_defers_wrapped_health_check_service_status_free_shape() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -297,7 +297,7 @@ fn direct_answer_defers_health_check_diagnostic_summary_for_system_health_fields
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -326,7 +326,7 @@ fn direct_answer_defers_health_check_summary_for_act_free_shape() {
                 delivery_intent: OutputDeliveryIntent::None,
                 semantic_kind: Default::default(),
                 locator_hint: String::new(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -354,7 +354,7 @@ fn direct_answer_passes_health_check_json_only_for_raw_output_contract() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -388,7 +388,7 @@ fn direct_answer_defers_health_check_summary_over_later_steps_to_llm() {
                 delivery_intent: OutputDeliveryIntent::None,
                 semantic_kind: Default::default(),
                 locator_hint: String::new(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -417,7 +417,7 @@ fn direct_answer_defers_health_check_one_sentence_summary_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -446,7 +446,7 @@ fn direct_answer_defers_health_check_unhealthy_summary_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -475,7 +475,7 @@ fn direct_answer_defers_health_check_telegramd_stopped_summary_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -504,7 +504,7 @@ fn direct_answer_defers_health_check_language_sensitive_summary_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -537,7 +537,7 @@ fn direct_answer_defers_health_check_os_summary_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -570,7 +570,7 @@ fn direct_answer_defers_health_check_os_warning_summary_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -603,7 +603,7 @@ fn direct_answer_defers_process_basic_port_summary_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -632,7 +632,7 @@ fn direct_answer_formats_process_basic_port_status_contract_without_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -733,7 +733,7 @@ fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -860,7 +860,7 @@ fn direct_answer_keeps_wrapped_process_basic_port_status_scalar_count() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -889,7 +889,7 @@ fn direct_answer_defers_process_basic_service_status_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -991,7 +991,7 @@ fn direct_answer_prefers_process_basic_status_over_later_system_info() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: "telegramd".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

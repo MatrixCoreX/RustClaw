@@ -219,7 +219,7 @@ fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "docs".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -263,7 +263,7 @@ fn single_listing_entry_passthrough_is_dropped_for_content_evidence() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
         locator_hint: "docs".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

@@ -334,7 +334,7 @@ fn observed_markdown_heading_scalar_strips_heading_marker_for_title_selector() {
     route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "service_notes.md".to_string();
-    route.self_extension.structured_field_selector = Some("title".to_string());
+    route.selection.structured_field_selector = Some("title".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
@@ -449,7 +449,7 @@ fn direct_scalar_observed_answer_prefers_observed_heading_for_title_selector() {
     route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "release_checklist.md".to_string();
-    route.self_extension.structured_field_selector = Some("title".to_string());
+    route.selection.structured_field_selector = Some("title".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()

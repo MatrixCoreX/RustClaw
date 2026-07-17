@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
-use claw_core::config::{
-    AppConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, SelfExtensionConfig,
-};
+use claw_core::config::{AppConfig, MaintenanceConfig, MemoryConfig, RoutingConfig};
 use claw_core::skill_registry::{
     OutputKind, SkillKind, SkillManifest, SkillRiskLevel, SkillsRegistry,
 };
@@ -226,7 +224,6 @@ pub(crate) struct PolicyConfig {
     pub(crate) maintenance: MaintenanceConfig,
     pub(crate) memory: MemoryConfig,
     pub(crate) routing: RoutingConfig,
-    pub(crate) self_extension: SelfExtensionConfig,
     pub(crate) llm_cost_governance: claw_core::config::LlmCostGovernanceConfig,
     pub(crate) rate_limiter: Arc<Mutex<RateLimiter>>,
     pub(crate) allow_path_outside_workspace: bool,
@@ -261,7 +258,6 @@ impl PolicyConfig {
             maintenance: MaintenanceConfig::default(),
             memory: MemoryConfig::default(),
             routing: RoutingConfig::default(),
-            self_extension: SelfExtensionConfig::default(),
             llm_cost_governance: claw_core::config::LlmCostGovernanceConfig::default(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
             allow_path_outside_workspace: false,
@@ -922,7 +918,6 @@ impl AppState {
             maintenance: config.maintenance.clone(),
             memory: memory_runtime,
             routing: config.routing.clone(),
-            self_extension: config.self_extension.clone(),
             llm_cost_governance: config.llm.cost_governance.clone(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
                 config.limits.global_rpm,
@@ -1235,42 +1230,6 @@ impl AppState {
             .or_default()
             .provider_breaker_snapshots
             .insert(provider.to_string(), breaker);
-    }
-
-    pub(crate) fn note_task_prompt_truncation_with_label(
-        &self,
-        task_id: &str,
-        label: &str,
-        bytes_before: usize,
-        bytes_budget: usize,
-        bytes_after: usize,
-    ) {
-        let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
-        let bucket = guard
-            .entry(task_id.to_string())
-            .or_default()
-            .entry(label.to_string())
-            .or_default();
-        bucket.prompt_truncation_count = bucket.prompt_truncation_count.saturating_add(1);
-        bucket.prompt_bytes_before_max = Some(
-            bucket
-                .prompt_bytes_before_max
-                .map_or(bytes_before, |current| current.max(bytes_before)),
-        );
-        bucket.prompt_bytes_budget_min = Some(
-            bucket
-                .prompt_bytes_budget_min
-                .map_or(bytes_budget, |current| current.min(bytes_budget)),
-        );
-        bucket.prompt_bytes_after_max = Some(
-            bucket
-                .prompt_bytes_after_max
-                .map_or(bytes_after, |current| current.max(bytes_after)),
-        );
-        let truncated_bytes = bytes_before.saturating_sub(bytes_after) as u64;
-        bucket.prompt_truncated_bytes_total = bucket
-            .prompt_truncated_bytes_total
-            .saturating_add(truncated_bytes);
     }
 
     pub(crate) fn task_llm_elapsed_ms(&self, task_id: &str) -> u64 {

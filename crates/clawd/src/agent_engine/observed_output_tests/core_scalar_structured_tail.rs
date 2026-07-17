@@ -285,7 +285,7 @@ fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentenc
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ScalarCount,
             locator_hint: ".".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

@@ -44,7 +44,7 @@ fn multiline_read_range_passthrough_guard_ignores_visible_text_json_payload() {
             delivery_intent: crate::OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "/tmp/notes.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         }),
         ..AgentRunContext::default()
     };

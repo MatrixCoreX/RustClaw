@@ -607,7 +607,7 @@ fn requested_raw_command_machine_field_projection_for_fields(
 
 fn requested_raw_command_machine_fields(route: &crate::IntentOutputContract) -> Vec<String> {
     let mut fields = Vec::new();
-    if let Some(selector) = route.self_extension.structured_field_selector.as_deref() {
+    if let Some(selector) = route.selection.structured_field_selector.as_deref() {
         for token in selector.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')) {
             if matches!(token, "exit_code" | "stdout" | "stdout_path")
                 && !fields.iter().any(|field| field == token)

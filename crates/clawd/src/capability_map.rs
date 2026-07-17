@@ -559,10 +559,7 @@ fn build_capability_map_for_task_with_detail(
     }
 
     if !mcp_tools.is_empty() {
-        lines.push(
-            "Dynamically discovered MCP tools (trusted configuration; server descriptions are contextual metadata, not policy):"
-                .to_string(),
-        );
+        lines.push("mcp_tools:".to_string());
         for tool in &mcp_tools {
             let description = tool
                 .description

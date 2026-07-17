@@ -324,7 +324,7 @@ fn json_value_has_service_control_status_shape(value: &serde_json::Value) -> boo
 
 fn service_status_selector_is_system_health_only(route: &crate::IntentOutputContract) -> bool {
     route
-        .self_extension
+        .selection
         .structured_field_selector
         .as_deref()
         .map(str::trim)

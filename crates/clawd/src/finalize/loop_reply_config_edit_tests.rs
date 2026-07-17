@@ -401,7 +401,7 @@ fn direct_rustclaw_config_risk_answer_uses_structured_field_values() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
-        r#"{"action":"extract_fields","path":"/home/guagua/rustclaw/configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","count":6,"results":[{"field_path":"tools.allow","resolved_field_path":"tools.allow","exists":true,"value":["*"],"value_text":"[\"*\"]"},{"field_path":"tools.allow_sudo","resolved_field_path":"tools.allow_sudo","exists":true,"value":true,"value_text":"true"},{"field_path":"tools.allow_path_outside_workspace","resolved_field_path":"tools.allow_path_outside_workspace","exists":true,"value":true,"value_text":"true"},{"field_path":"self_extension.enabled","resolved_field_path":"self_extension.enabled","exists":true,"value":false,"value_text":"false"},{"field_path":"worker.task_timeout_seconds","resolved_field_path":"worker.task_timeout_seconds","exists":true,"value":3600,"value_text":"3600"},{"field_path":"server.listen","resolved_field_path":"server.listen","exists":true,"value":"0.0.0.0:8787","value_text":"0.0.0.0:8787"}]}"#,
+        r#"{"action":"extract_fields","path":"/home/guagua/rustclaw/configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","count":5,"results":[{"field_path":"tools.allow","resolved_field_path":"tools.allow","exists":true,"value":["*"],"value_text":"[\"*\"]"},{"field_path":"tools.allow_sudo","resolved_field_path":"tools.allow_sudo","exists":true,"value":true,"value_text":"true"},{"field_path":"tools.allow_path_outside_workspace","resolved_field_path":"tools.allow_path_outside_workspace","exists":true,"value":true,"value_text":"true"},{"field_path":"worker.task_timeout_seconds","resolved_field_path":"worker.task_timeout_seconds","exists":true,"value":3600,"value_text":"3600"},{"field_path":"server.listen","resolved_field_path":"server.listen","exists":true,"value":"0.0.0.0:8787","value_text":"0.0.0.0:8787"}]}"#,
     ));
 
     let (answer, summary) = direct_rustclaw_config_risk_answer(
@@ -468,11 +468,11 @@ fn rustclaw_config_risk_replacement_drops_ungrounded_synthesis() {
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .delivery_messages
-        .push("self_extension.enabled=true and worker.task_timeout_seconds=86400".to_string());
+        .push("worker.task_timeout_seconds=86400".to_string());
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
-        r#"{"action":"extract_fields","path":"configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","results":[{"field_path":"tools.allow_sudo","resolved_field_path":"tools.allow_sudo","exists":true,"value":true},{"field_path":"tools.allow_path_outside_workspace","resolved_field_path":"tools.allow_path_outside_workspace","exists":true,"value":true},{"field_path":"self_extension.enabled","resolved_field_path":"self_extension.enabled","exists":true,"value":false},{"field_path":"worker.task_timeout_seconds","resolved_field_path":"worker.task_timeout_seconds","exists":true,"value":3600}]}"#,
+        r#"{"action":"extract_fields","path":"configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","results":[{"field_path":"tools.allow_sudo","resolved_field_path":"tools.allow_sudo","exists":true,"value":true},{"field_path":"tools.allow_path_outside_workspace","resolved_field_path":"tools.allow_path_outside_workspace","exists":true,"value":true},{"field_path":"worker.task_timeout_seconds","resolved_field_path":"worker.task_timeout_seconds","exists":true,"value":3600}]}"#,
     ));
     let mut summary = None;
 
@@ -487,7 +487,6 @@ fn rustclaw_config_risk_replacement_drops_ungrounded_synthesis() {
     let answer = loop_state.delivery_messages.join("\n");
     assert!(answer.contains("tools.allow_sudo=true"));
     assert!(answer.contains("tools.allow_path_outside_workspace=true"));
-    assert!(!answer.contains("self_extension.enabled=true"));
     assert!(!answer.contains("86400"));
     assert!(summary.is_some());
 }

@@ -294,7 +294,7 @@ fn raw_command_requested_stdout_path_uses_observed_stdout_path_value() {
     route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.self_extension.structured_field_selector = Some("exit_code,stdout_path".to_string());
+    route.selection.structured_field_selector = Some("exit_code,stdout_path".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(4);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
@@ -335,7 +335,7 @@ fn raw_command_requested_stdout_uses_observed_stdout_value() {
     route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.self_extension.structured_field_selector = Some("exit_code,stdout".to_string());
+    route.selection.structured_field_selector = Some("exit_code,stdout".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state
@@ -356,7 +356,7 @@ fn raw_command_requested_stdout_path_ignores_temp_stdout_file_wrapper() {
     route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.self_extension.structured_field_selector = Some("exit_code,stdout_path".to_string());
+    route.selection.structured_field_selector = Some("exit_code,stdout_path".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(4);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
@@ -383,7 +383,7 @@ fn raw_command_journal_projection_prefers_real_stdout_over_wrapper_metadata() {
     route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.self_extension.structured_field_selector = Some("exit_code,stdout_path".to_string());
+    route.selection.structured_field_selector = Some("exit_code,stdout_path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-raw-command-journal", "ask", "prompt");
     journal
@@ -422,7 +422,7 @@ async fn finalize_loop_reply_keeps_requested_raw_command_machine_fields_exact() 
     route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.self_extension.structured_field_selector = Some("exit_code,stdout_path".to_string());
+    route.selection.structured_field_selector = Some("exit_code,stdout_path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

@@ -343,7 +343,7 @@ fn requested_machine_kv_summary_failure_recovery_projects_read_range_fields() {
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.semantic_kind = crate::OutputSemanticKind::None;
-    route.self_extension.structured_field_selector = Some("total_lines".to_string());
+    route.selection.structured_field_selector = Some("total_lines".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-read-range-machine-kv", "ask", prompt);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {

@@ -428,7 +428,7 @@ def run_self_test() -> int:
     assert is_test_path(ROOT / "crates/clawd/src/answer_verifier_tests.rs")
     planning_entries = covering_entries("crates/clawd/src/agent_engine/planning.rs")
     assert not any("semantic_rewrite" in entry.categories for entry in planning_entries)
-    assert any(
+    assert not any(
         entry.name == "planner_structural_route_markers"
         for entry in BRANCH_INVENTORY
     )
@@ -441,9 +441,8 @@ def run_self_test() -> int:
         "crates/clawd/src/agent_engine/observed_output.rs"
     )
     assert not any("semantic_rewrite" in entry.categories for entry in observed_entries)
-    assert (
-        "crates/clawd/src/agent_engine/planning_tests/runtime_surface_plans.rs"
-        in cfg_test_module_paths()
+    assert is_test_path(
+        ROOT / "crates/clawd/src/agent_engine/planning_action_normalization_tests.rs"
     )
     assert not validate_deterministic_plan_results_are_test_only()
     print("SELF_TEST_OK")

@@ -912,24 +912,6 @@ fn task_debug_flow_for_entry(entry: &TaskDebugEntry) -> TaskDebugFlow {
 
 fn prompt_flow_location(prompt_label: &str) -> (&'static str, &'static str, &'static str, &'static str) {
     match prompt_label {
-        "normalizer" => (
-            "boundary.normalizer",
-            "intent_normalizer",
-            "crates/clawd/src/intent_router_normalizer_model.rs",
-            "run_intent_normalizer_model_step",
-        ),
-        "contract_repair" => (
-            "boundary.contract_repair",
-            "contract_repair_judge",
-            "crates/clawd/src/intent_router_contract_repair_judge.rs",
-            "run_contract_repair_judge",
-        ),
-        "router_legacy" => (
-            "compat.route_hint",
-            "legacy_router_hint",
-            "crates/clawd/src/intent_router.rs",
-            "prepare_ask_routing",
-        ),
         "plan" => (
             "agent_loop.planner",
             "planner_round",
@@ -973,16 +955,10 @@ fn prompt_flow_location(prompt_label: &str) -> (&'static str, &'static str, &'st
             "user_response_contract_llm_validated",
         ),
         "clarify" => (
-            "boundary.clarify",
+            "agent_loop.clarify",
             "clarify_question",
-            "crates/clawd/src/intent_router_clarify.rs",
-            "generate_or_reuse_clarify_question",
-        ),
-        "intent_meta" => (
-            "boundary.intent_meta",
-            "intent_meta_summary",
-            "crates/clawd/src/intent_router_prompt_render.rs",
-            "render_intent_normalizer_prompt",
+            "crates/clawd/src/finalize/clarify.rs",
+            "generate_clarify_question",
         ),
         "schedule" => (
             "scheduler.intent",
@@ -995,12 +971,6 @@ fn prompt_flow_location(prompt_label: &str) -> (&'static str, &'static str, &'st
             "command_intent",
             "crates/clawd/src/skills/builtin.rs",
             "run_command_skill",
-        ),
-        "self_extension" => (
-            "boundary.self_extension",
-            "self_extension",
-            "crates/clawd/src/fallback.rs",
-            "compose_user_response_from_contract",
         ),
         "memory" => (
             "memory.background",

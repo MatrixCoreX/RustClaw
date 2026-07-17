@@ -1060,7 +1060,7 @@ mod tests {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         }
     }
 

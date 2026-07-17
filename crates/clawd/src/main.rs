@@ -130,7 +130,7 @@ use mcp_admin_routes::{
 pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 #[cfg(test)]
-pub(crate) use pipeline_types::SelfExtensionContract;
+pub(crate) use pipeline_types::OutputSelectionContract;
 pub(crate) use pipeline_types::{
     plan_step_from_agent_action, IntentOutputContract, MachineTokenMarkers, OutputDeliveryIntent,
     OutputLocatorKind, OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind,
@@ -705,7 +705,6 @@ async fn main() -> anyhow::Result<()> {
             maintenance: config.maintenance.clone(),
             memory: memory_runtime,
             routing,
-            self_extension: config.self_extension.clone(),
             llm_cost_governance: config.llm.cost_governance.clone(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
                 config.limits.global_rpm,

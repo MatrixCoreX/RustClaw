@@ -15,7 +15,7 @@ fn direct_answer_formats_structured_keys_result_without_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/package.json".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -44,7 +44,7 @@ fn direct_answer_formats_structured_keys_presence_without_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::StructuredKeys,
             locator_hint: "/tmp/en-US.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         original_user_request: Some(
@@ -77,7 +77,7 @@ fn direct_answer_formats_structured_array_identity_presence_without_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::StructuredKeys,
             locator_hint: "/tmp/skills_registry.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         original_user_request: Some(
@@ -109,7 +109,7 @@ fn structured_keys_one_sentence_defers_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/package.json".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -138,7 +138,7 @@ fn direct_answer_formats_extract_fields_result_without_llm() {
                 delivery_intent: OutputDeliveryIntent::None,
                 semantic_kind: OutputSemanticKind::None,
                 locator_hint: "/tmp/config.toml".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -167,7 +167,7 @@ fn direct_answer_uses_inventory_dir_names_for_system_basic() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::FileNames,
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -196,7 +196,7 @@ fn direct_answer_uses_inventory_dir_names_for_fs_basic() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::FileNames,
             locator_hint: "document".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -225,7 +225,7 @@ fn direct_answer_uses_inventory_dir_entry_sizes_when_names_only_is_false() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::FileNames,
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -254,7 +254,7 @@ fn direct_answer_does_not_apply_listing_limit_from_resolved_intent_text() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -283,7 +283,7 @@ fn direct_answer_does_not_apply_listing_limit_from_current_turn_request_text() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -311,7 +311,7 @@ fn scalar_listing_gate_does_not_repair_count_from_request_text_limit() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ScalarCount,
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -340,7 +340,7 @@ fn direct_answer_uses_latest_list_dir_entries_for_act_free_shape() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "archive".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -372,7 +372,7 @@ fn direct_answer_uses_latest_list_dir_even_after_synthesis_step() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::FileNames,
             locator_hint: "document".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -400,7 +400,7 @@ fn direct_answer_preserves_list_dir_entries_without_request_text_limit() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -429,7 +429,7 @@ fn direct_answer_defers_hidden_entries_explanation_shape_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -457,7 +457,7 @@ fn direct_answer_formats_hidden_entries_check_scalar_from_listing() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
             locator_hint: ".".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -486,7 +486,7 @@ fn direct_answer_formats_hidden_entries_check_strict_shape_from_listing() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
             locator_hint: ".".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -515,10 +515,10 @@ fn direct_answer_formats_hidden_entries_check_strict_shape_from_wrapped_inventor
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
             locator_hint: ".".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     route_result
-        .self_extension
+        .selection
         .list_selector
         .limit = Some(3);
     let agent_run_context = AgentRunContext {
@@ -620,7 +620,7 @@ fn direct_answer_defers_hidden_entries_check_free_shape_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
             locator_hint: ".".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -648,7 +648,7 @@ fn direct_answer_defers_hidden_entries_check_one_sentence_from_system_basic_inve
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
             locator_hint: ".".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -676,7 +676,7 @@ fn direct_answer_formats_existence_with_path_from_system_basic_path_batch_facts(
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "rustclaw.service".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -799,7 +799,7 @@ fn direct_answer_formats_scalar_existence_without_path_from_system_basic_path_ba
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "configs/config.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -855,7 +855,7 @@ fn direct_answer_formats_missing_path_batch_facts_with_reason() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "/tmp/missing.txt".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -901,7 +901,7 @@ fn direct_answer_formats_existence_with_path_from_run_cmd_yes_output() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "rustclaw.service".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -946,7 +946,7 @@ fn direct_answer_formats_existence_with_path_from_run_cmd_exists_output() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "rustclaw.service".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -993,7 +993,7 @@ fn direct_answer_formats_existence_with_path_from_system_basic_find_name_output(
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "rustclaw.service".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

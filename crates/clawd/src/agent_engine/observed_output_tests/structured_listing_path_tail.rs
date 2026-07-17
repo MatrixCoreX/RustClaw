@@ -15,7 +15,7 @@ fn direct_answer_can_passthrough_listing_when_planner_does_not_request_synthesis
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "docs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -44,7 +44,7 @@ fn direct_answer_can_passthrough_inventory_when_planner_does_not_request_synthes
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "docs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -78,7 +78,7 @@ fn direct_answer_does_not_passthrough_run_cmd_listing_when_content_evidence_is_r
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "docs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -106,7 +106,7 @@ fn direct_answer_blocks_contract_forbidden_observation_action() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "docs/guide.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -136,7 +136,7 @@ fn directory_purpose_summary_is_not_hard_classified_by_observed_output() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
             locator_hint: "docs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -159,7 +159,7 @@ fn directory_purpose_summary_style_hint_uses_listing_evidence() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
             locator_hint: "docs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -184,7 +184,7 @@ fn excerpt_kind_judgment_style_hint_preserves_listing_and_excerpt_deliverables()
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExcerptKindJudgment,
             locator_hint: "docs/release_checklist.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

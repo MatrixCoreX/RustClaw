@@ -72,7 +72,7 @@ fn route_result(shape: OutputResponseShape) -> IntentOutputContract {
         delivery_intent: OutputDeliveryIntent::None,
         semantic_kind: Default::default(),
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     }
 }
 
@@ -1086,7 +1086,7 @@ fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
-    route.self_extension.list_selector.limit = Some(3);
+    route.selection.list_selector.limit = Some(3);
     let first_three = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md";
     let all_four =
         format!("{first_three}\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt");

@@ -42,7 +42,6 @@ POST_PLANNER_PROMPTS = {
     "clarify",
     "chat",
     "memory",
-    "self_extension",
 }
 COUNTER_FIELDS = (
     "status_counts",

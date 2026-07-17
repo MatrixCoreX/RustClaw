@@ -1203,7 +1203,7 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1243,7 +1243,7 @@ fn contract_matrix_synthesis_prefers_observed_answer_over_step_status() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ArchiveUnpack,
         locator_hint: "/tmp/test_bundle.zip | tmp/contract_matrix_unpacked".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1283,7 +1283,7 @@ fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::QuantityComparison,
         locator_hint: "docs | logs".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1321,7 +1321,7 @@ fn synthesize_direct_fallback_defers_multi_count_quantity_comparison_to_model() 
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::QuantityComparison,
         locator_hint: "docs | logs".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1354,7 +1354,7 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1388,7 +1388,7 @@ fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model()
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
         locator_hint: "/tmp/model_io.log".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1423,7 +1423,7 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::CommandOutputSummary,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1460,7 +1460,7 @@ fn deterministic_scalar_markdown_heading_uses_structural_read_evidence() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/release_checklist.md".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1497,7 +1497,7 @@ fn deterministic_scalar_markdown_heading_defers_when_read_evidence_has_body() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/release_checklist.md".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1518,7 +1518,7 @@ fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "README.md".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1539,7 +1539,7 @@ fn synthesize_route_blocks_direct_fallback_for_failed_step_language_contract() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1563,7 +1563,7 @@ fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::FileNames,
         locator_hint: "document".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1584,7 +1584,7 @@ fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ConfigValidation,
         locator_hint: "configs/config.toml".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1620,7 +1620,7 @@ fn synthesize_route_allows_observed_fallback_for_unclassified_delivery() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1641,7 +1641,7 @@ fn synthesize_route_allows_direct_fallback_for_strict_plain_observation() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "logs".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1662,7 +1662,7 @@ fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1690,7 +1690,7 @@ fn strict_raw_tail_read_uses_direct_observed_fallback_before_composer() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
         locator_hint: "/tmp/clawd-dev.log".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
