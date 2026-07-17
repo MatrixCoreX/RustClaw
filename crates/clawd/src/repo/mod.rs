@@ -2,6 +2,7 @@ pub(crate) mod approval_scope;
 pub(crate) mod audit;
 pub(crate) mod auth;
 pub(crate) mod child_patch;
+pub(crate) mod child_task_control;
 pub(crate) mod child_tasks;
 pub(crate) mod submit;
 pub(crate) mod task_admin;
@@ -28,6 +29,7 @@ pub(crate) use auth::{
     upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
     FactoryResetDbResult, PendingChannelBindSession,
 };
+pub(crate) use child_task_control::retry_child_task_with_revised_goal;
 pub(crate) use submit::{
     build_conversation_chat_id, build_submit_task_payload, check_submit_task_access,
     check_submit_task_limits, insert_submitted_task, is_user_allowed, maybe_find_submit_task_dedup,

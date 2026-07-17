@@ -89,6 +89,23 @@ impl ChildPatchFixture {
                 "child_task_execution_scope": {
                     "patch_artifact": artifact
                 },
+                "task_journal": {
+                    "summary": {
+                        "coding_workflow": {
+                            "verification_status": "verified",
+                            "verification_command_count": 1,
+                            "verification_commands": ["cargo test -p fixture"],
+                            "failure_kind_count": 0,
+                            "failure_kinds": [],
+                            "changed_file_count": 2,
+                            "changed_files": ["README.md", "src/new.txt"],
+                            "validation_gate": {
+                                "gate_status": "satisfied",
+                                "can_report_fully_verified": true
+                            }
+                        }
+                    }
+                },
                 "child_task_result": {
                     "verification_artifact": {
                         "schema_version": 1,
@@ -309,6 +326,167 @@ fn overlapping_child_patches_require_parent_resolution() {
 }
 
 #[test]
+fn writer_tester_reviewer_worktree_flow_applies_verified_patch_once() {
+    let fixture = ChildPatchFixture::new("team-flow");
+    let tester_task_id = "child-team-flow-tester";
+    let explorer_task_ids = ["child-team-flow-explorer-a", "child-team-flow-explorer-b"];
+    let tester_plan = plan_execution_isolation(
+        &fixture._repo.path,
+        tester_task_id,
+        CapabilityIsolationProfile::LocalWorktree,
+    )
+    .expect("plan tester worktree");
+    create_execution_isolation(&tester_plan, 102).expect("create tester worktree");
+    let patch_path = fixture
+        .artifact_path
+        .to_str()
+        .expect("UTF-8 patch artifact path");
+    assert!(git_status(
+        &tester_plan.execution_root,
+        &["apply", "--check", patch_path]
+    )
+    .success());
+    assert!(git_status(&tester_plan.execution_root, &["apply", patch_path]).success());
+    assert!(git_status(&tester_plan.execution_root, &["diff", "--check"]).success());
+    assert_eq!(
+        fs::read_to_string(tester_plan.execution_root.join("README.md"))
+            .expect("read tester README"),
+        "child change\n"
+    );
+    assert_eq!(
+        fs::read_to_string(tester_plan.execution_root.join("src/new.txt"))
+            .expect("read tester new file"),
+        "child file\n"
+    );
+
+    let tester_payload = child_payload_with_contract(
+        &fixture.parent.task_id,
+        tester_task_id,
+        "tester",
+        "local_worktree",
+        true,
+        &["filesystem.read_text", "terminal.run_command"],
+    );
+    insert_task(
+        &fixture.state,
+        tester_task_id,
+        "succeeded",
+        &tester_payload,
+        &json!({
+            "task_journal": {
+                "summary": {
+                    "coding_workflow": {
+                        "verification_status": "verified",
+                        "verification_command_count": 2,
+                        "verification_commands": ["git apply --check", "git diff --check"],
+                        "failure_kind_count": 0,
+                        "failure_kinds": [],
+                        "changed_file_count": 2,
+                        "changed_files": ["README.md", "src/new.txt"],
+                        "validation_gate": {
+                            "gate_status": "satisfied",
+                            "can_report_fully_verified": true
+                        }
+                    }
+                }
+            }
+        }),
+    );
+    for explorer_task_id in explorer_task_ids {
+        let payload = child_payload_with_contract(
+            &fixture.parent.task_id,
+            explorer_task_id,
+            "explorer",
+            "read_only",
+            false,
+            &["filesystem.read_text"],
+        );
+        insert_task(
+            &fixture.state,
+            explorer_task_id,
+            "succeeded",
+            &payload,
+            &json!({"status_code": "inspection_complete"}),
+        );
+        assert!(
+            crate::repo::child_tasks::record_child_task_terminal_projection(
+                &fixture.state,
+                explorer_task_id,
+                &payload,
+            )
+            .expect("record explorer projection")
+        );
+    }
+    {
+        let db = fixture.state.core.db.get().expect("get db");
+        db.execute(
+            "UPDATE tasks SET result_json = ?2 WHERE task_id = ?1",
+            rusqlite::params![
+                fixture.parent.task_id,
+                json!({
+                    "child_task_ids": [
+                        fixture.child_task_id,
+                        tester_task_id,
+                        explorer_task_ids[0],
+                        explorer_task_ids[1]
+                    ]
+                })
+                .to_string()
+            ],
+        )
+        .expect("record parent child ids");
+    }
+    assert!(
+        crate::repo::child_tasks::record_child_task_terminal_projection(
+            &fixture.state,
+            &fixture.child_task_id,
+            &child_payload(&fixture.parent.task_id, &fixture.child_task_id),
+        )
+        .expect("record writer projection")
+    );
+    assert!(
+        crate::repo::child_tasks::record_child_task_terminal_projection(
+            &fixture.state,
+            tester_task_id,
+            &tester_payload,
+        )
+        .expect("record tester projection")
+    );
+    let merge = crate::repo::child_tasks::refresh_parent_child_task_merge(
+        &fixture.state,
+        &fixture.parent.task_id,
+    )
+    .expect("refresh parent merge")
+    .expect("parent merge");
+    assert_eq!(merge["parent_continuation"]["status"], "ready");
+    assert_eq!(merge["merge"]["completed_count"], 4);
+    assert_eq!(merge["merge"]["required_failed_count"], 0);
+
+    let review = fixture
+        .run("review_child_patch")
+        .expect("review writer patch");
+    assert_eq!(
+        review["verification_artifact"]["verification_status"],
+        "verified"
+    );
+    let applied = fixture
+        .run("apply_child_patch")
+        .expect("apply writer patch");
+    assert_eq!(applied["disposition"], "applied");
+    assert_eq!(
+        fs::read_to_string(fixture._repo.path.join("README.md")).expect("read primary README"),
+        "child change\n"
+    );
+    let repeated = fixture
+        .run("apply_child_patch")
+        .expect("repeat parent decision");
+    assert_eq!(repeated["disposition"], "applied");
+
+    crate::execution_isolation::cleanup_execution_isolation(&tester_plan)
+        .expect("cleanup tester worktree");
+}
+
+#[test]
 fn unrelated_parent_cannot_review_or_decide_child_patch() {
     let fixture = ChildPatchFixture::new("ownership");
     let mut unrelated_parent = fixture.parent.clone();
@@ -331,6 +509,24 @@ fn unrelated_parent_cannot_review_or_decide_child_patch() {
 }
 
 fn child_payload(parent_task_id: &str, child_task_id: &str) -> Value {
+    child_payload_with_contract(
+        parent_task_id,
+        child_task_id,
+        "writer",
+        "local_worktree",
+        true,
+        &["filesystem.write_text"],
+    )
+}
+
+fn child_payload_with_contract(
+    parent_task_id: &str,
+    child_task_id: &str,
+    role: &str,
+    permission_profile: &str,
+    required: bool,
+    allowed_capabilities: &[&str],
+) -> Value {
     json!({
         "text": "child",
         "task_role": "subagent_child",
@@ -340,12 +536,13 @@ fn child_payload(parent_task_id: &str, child_task_id: &str) -> Value {
             "schema_version": 1,
             "parent_task_id": parent_task_id,
             "child_task_id": child_task_id,
-            "role": "writer",
-            "permission_profile": "local_worktree",
+            "role": role,
+            "permission_profile": permission_profile,
             "scope": {
-                "allowed_capabilities": ["filesystem.write_text"]
+                "objective": "bounded child objective",
+                "allowed_capabilities": allowed_capabilities
             },
-            "required": true,
+            "required": required,
             "merge_policy": "structured_findings"
         }
     })

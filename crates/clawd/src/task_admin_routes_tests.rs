@@ -4,8 +4,9 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use super::{
-    goal_by_task_id, list_approval_scope_grants, resume_task_by_id, revoke_approval_scope_grant,
-    GoalByTaskIdRequest, ResumeTaskByIdRequest, RevokeApprovalScopeGrantRequest,
+    goal_by_task_id, list_approval_scope_grants, resume_task_by_id, retry_child_task_by_id,
+    revoke_approval_scope_grant, GoalByTaskIdRequest, ResumeTaskByIdRequest,
+    RetryChildTaskByIdRequest, RevokeApprovalScopeGrantRequest,
 };
 
 const USER_KEY: &str = "goal-route-test-key";
@@ -86,6 +87,68 @@ fn stored_payload(state: &crate::AppState, task_id: &str) -> Value {
     serde_json::from_str(&raw).expect("payload json")
 }
 
+fn insert_child_task(
+    state: &crate::AppState,
+    parent_task_id: &str,
+    child_task_id: &str,
+    status: &str,
+) {
+    let payload = json!({
+        "text": "original objective",
+        "task_role": "subagent_child",
+        "parent_task_id": parent_task_id,
+        "child_task_id": child_task_id,
+        "child_task_contract": {
+            "schema_version": 1,
+            "parent_task_id": parent_task_id,
+            "child_task_id": child_task_id,
+            "role": "writer",
+            "scope": {
+                "objective": "original objective",
+                "allowed_capabilities": ["filesystem.read_text_range", "workspace.apply_patch"]
+            },
+            "permission_profile": "local_worktree",
+            "required": true,
+            "budget": {
+                "max_rounds": 4,
+                "max_tool_calls": 16,
+                "timeout_ms": 300000
+            },
+            "result_contract": {
+                "output_format": "machine_json"
+            },
+            "merge_policy": "structured_findings"
+        }
+    });
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, result_json, error_text, created_at, updated_at
+        )
+        VALUES (?1, ?2, 7, ?3, 'ui', 'ask', ?4, ?5, ?6, NULL, '1', '1')",
+        rusqlite::params![
+            child_task_id,
+            crate::stable_i64_from_key(USER_KEY),
+            USER_KEY,
+            payload.to_string(),
+            status,
+            json!({"status_code": "verification_failed"}).to_string(),
+        ],
+    )
+    .expect("insert child task");
+    db.execute(
+        "UPDATE tasks
+         SET result_json = ?2
+         WHERE task_id = ?1",
+        rusqlite::params![
+            parent_task_id,
+            json!({"child_task_ids": [child_task_id]}).to_string()
+        ],
+    )
+    .expect("link child task");
+}
+
 fn set_pending_approval(state: &crate::AppState, task_id: &str, request_id: &str) {
     let expires_at = crate::now_ts_u64().saturating_add(300);
     let result = json!({
@@ -142,6 +205,69 @@ fn set_pending_scope_approval(state: &crate::AppState, task_id: &str, request_id
         rusqlite::params![task_id, result.to_string()],
     )
     .expect("set pending scope approval");
+}
+
+#[tokio::test]
+async fn retry_child_task_route_queues_revised_attempt_for_same_actor() {
+    let parent_task_id = "retry-route-parent";
+    let child_task_id = "retry-route-child";
+    let state = state_with_goal_task(parent_task_id, json!({"text": "parent"}));
+    insert_child_task(&state, parent_task_id, child_task_id, "failed");
+
+    let (status, Json(response)) = retry_child_task_by_id(
+        State(state.clone()),
+        auth_headers(),
+        Json(RetryChildTaskByIdRequest {
+            parent_task_id: parent_task_id.to_string(),
+            child_task_id: child_task_id.to_string(),
+            revised_goal: "preserve the public contract while fixing verification".to_string(),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(response.ok);
+    let data = response.data.expect("response data");
+    assert_eq!(data["status"], "child_task_retry_queued");
+    assert_eq!(data["previous_child_task_id"], child_task_id);
+    assert_eq!(data["retry_index"], 1);
+    let retry_task_id = data["child_task_id"].as_str().expect("retry task id");
+    let payload = stored_payload(&state, retry_task_id);
+    assert_eq!(
+        payload["text"],
+        "preserve the public contract while fixing verification"
+    );
+    assert_eq!(
+        payload["child_task_contract"]["child_task_id"],
+        retry_task_id
+    );
+    assert_eq!(
+        payload["child_task_contract"]["permission_profile"],
+        "local_worktree"
+    );
+}
+
+#[tokio::test]
+async fn retry_child_task_route_rejects_nonterminal_child() {
+    let parent_task_id = "retry-route-active-parent";
+    let child_task_id = "retry-route-active-child";
+    let state = state_with_goal_task(parent_task_id, json!({"text": "parent"}));
+    insert_child_task(&state, parent_task_id, child_task_id, "running");
+
+    let (status, Json(response)) = retry_child_task_by_id(
+        State(state),
+        auth_headers(),
+        Json(RetryChildTaskByIdRequest {
+            parent_task_id: parent_task_id.to_string(),
+            child_task_id: child_task_id.to_string(),
+            revised_goal: "replacement objective".to_string(),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(!response.ok);
+    assert_eq!(response.error.as_deref(), Some("child_task_not_retryable"));
 }
 
 #[tokio::test]
