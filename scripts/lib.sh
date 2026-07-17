@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUSTCLAW_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "${SCRIPT_DIR}/shell_compat.sh"
+source "${RUSTCLAW_SCRIPTS_DIR}/shell_compat.sh"
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8787}"
 USER_ID="${USER_ID:-1985996990}"
