@@ -166,6 +166,10 @@ def compare_with_baseline(
     max_verifier_block_rate: float,
     max_avg_llm_calls_rise: float,
     max_avg_elapsed_rise: float,
+    max_avg_tool_calls_rise: float,
+    max_duplicate_tool_call_rate_rise: float,
+    max_prompt_bytes_after_rise: float,
+    max_prompt_truncation_rate_rise: float,
 ) -> dict[str, Any]:
     candidate_turns = safe_int(candidate.get("turns_total"))
     baseline_turns = safe_int(baseline.get("turns_total"))
@@ -194,6 +198,32 @@ def compare_with_baseline(
     baseline_avg_elapsed = float(
         get_path(baseline, "llm", "avg_elapsed_ms_per_turn") or 0.0
     )
+    candidate_avg_tool_calls = float(
+        get_path(candidate, "execution", "avg_tool_calls_per_turn") or 0.0
+    )
+    baseline_avg_tool_calls = float(
+        get_path(baseline, "execution", "avg_tool_calls_per_turn") or 0.0
+    )
+    candidate_duplicate_tool_call_rate = float(
+        get_path(candidate, "execution", "duplicate_tool_call_rate") or 0.0
+    )
+    baseline_duplicate_tool_call_rate = float(
+        get_path(baseline, "execution", "duplicate_tool_call_rate") or 0.0
+    )
+    candidate_prompt_bytes_after = float(
+        get_path(candidate, "llm", "prompt_bytes_after_max") or 0.0
+    )
+    baseline_prompt_bytes_after = float(
+        get_path(baseline, "llm", "prompt_bytes_after_max") or 0.0
+    )
+    candidate_prompt_truncation_rate = ratio(
+        safe_int(get_path(candidate, "llm", "prompt_truncation_count")),
+        candidate_turns,
+    )
+    baseline_prompt_truncation_rate = ratio(
+        safe_int(get_path(baseline, "llm", "prompt_truncation_count")),
+        baseline_turns,
+    )
 
     pass_rate_drop = round(baseline_pass_rate - candidate_pass_rate, 6)
     clarification_rate_rise = round(
@@ -205,6 +235,22 @@ def compare_with_baseline(
         baseline_avg_llm_calls,
     )
     avg_elapsed_rise = relative_increase(candidate_avg_elapsed, baseline_avg_elapsed)
+    avg_tool_calls_rise = relative_increase(
+        candidate_avg_tool_calls,
+        baseline_avg_tool_calls,
+    )
+    duplicate_tool_call_rate_rise = round(
+        candidate_duplicate_tool_call_rate - baseline_duplicate_tool_call_rate,
+        6,
+    )
+    prompt_bytes_after_rise = relative_increase(
+        candidate_prompt_bytes_after,
+        baseline_prompt_bytes_after,
+    )
+    prompt_truncation_rate_rise = round(
+        candidate_prompt_truncation_rate - baseline_prompt_truncation_rate,
+        6,
+    )
     comparisons = {
         "pass_rate_drop": threshold_result(
             pass_rate_drop <= max_pass_rate_drop,
@@ -240,6 +286,36 @@ def compare_with_baseline(
             candidate_avg_elapsed,
             avg_elapsed_rise,
             max_avg_elapsed_rise,
+        ),
+        "avg_tool_calls_relative_increase": threshold_result(
+            avg_tool_calls_rise is not None
+            and avg_tool_calls_rise <= max_avg_tool_calls_rise,
+            baseline_avg_tool_calls,
+            candidate_avg_tool_calls,
+            avg_tool_calls_rise,
+            max_avg_tool_calls_rise,
+        ),
+        "duplicate_tool_call_rate_rise": threshold_result(
+            duplicate_tool_call_rate_rise <= max_duplicate_tool_call_rate_rise,
+            baseline_duplicate_tool_call_rate,
+            candidate_duplicate_tool_call_rate,
+            duplicate_tool_call_rate_rise,
+            max_duplicate_tool_call_rate_rise,
+        ),
+        "prompt_bytes_after_relative_increase": threshold_result(
+            prompt_bytes_after_rise is not None
+            and prompt_bytes_after_rise <= max_prompt_bytes_after_rise,
+            baseline_prompt_bytes_after,
+            candidate_prompt_bytes_after,
+            prompt_bytes_after_rise,
+            max_prompt_bytes_after_rise,
+        ),
+        "prompt_truncation_rate_rise": threshold_result(
+            prompt_truncation_rate_rise <= max_prompt_truncation_rate_rise,
+            baseline_prompt_truncation_rate,
+            candidate_prompt_truncation_rate,
+            prompt_truncation_rate_rise,
+            max_prompt_truncation_rate_rise,
         ),
     }
     failures = [
@@ -278,6 +354,7 @@ def compare_with_absolute_thresholds(
     max_provider_final_errors: int | None,
     max_provider_retryable_errors: int | None,
     max_verifier_calls: int | None,
+    max_duplicate_tool_calls: int | None,
 ) -> dict[str, Any]:
     comparisons: dict[str, Any] = {}
     if min_pass_rate is not None:
@@ -328,6 +405,13 @@ def compare_with_absolute_thresholds(
             observed <= max_verifier_calls,
             float(observed),
             float(max_verifier_calls),
+        )
+    if max_duplicate_tool_calls is not None:
+        observed = safe_int(get_path(result, "execution", "duplicate_tool_call_count"))
+        comparisons["max_duplicate_tool_calls"] = optional_threshold_result(
+            observed <= max_duplicate_tool_calls,
+            float(observed),
+            float(max_duplicate_tool_calls),
         )
     failures = [
         key for key, value in comparisons.items() if value.get("passed") is not True
@@ -740,9 +824,12 @@ def repeat_action_guard_count(counts: Counter[str] | dict[str, int]) -> int:
     return sum(safe_int(counts.get(signal)) for signal in REPEAT_GUARD_SIGNALS)
 
 
-def count_tool_calls(steps: list[dict[str, Any]]) -> tuple[int, int]:
+def count_tool_calls(steps: list[dict[str, Any]]) -> tuple[int, int, int, int]:
     tool_calls = 0
     external_tool_calls = 0
+    fingerprint_coverage = 0
+    duplicate_tool_calls = 0
+    seen_fingerprints: set[str] = set()
     for step in steps:
         skill = str(step.get("skill") or "").strip()
         if not skill or skill in {"synthesize_answer", "respond", "think"}:
@@ -750,7 +837,22 @@ def count_tool_calls(steps: list[dict[str, Any]]) -> tuple[int, int]:
         tool_calls += 1
         if skill in EXTERNAL_SKILL_HINTS:
             external_tool_calls += 1
-    return tool_calls, external_tool_calls
+        args_fingerprint = normalized_signal(step.get("args_fingerprint"))
+        action_ref = normalized_signal(step.get("requested_action_ref"))
+        if not args_fingerprint or not action_ref:
+            continue
+        fingerprint_coverage += 1
+        fingerprint = f"{action_ref}:{args_fingerprint}"
+        if fingerprint in seen_fingerprints:
+            duplicate_tool_calls += 1
+        else:
+            seen_fingerprints.add(fingerprint)
+    return (
+        tool_calls,
+        external_tool_calls,
+        fingerprint_coverage,
+        duplicate_tool_calls,
+    )
 
 
 def update_by_prompt_totals(
@@ -935,6 +1037,8 @@ def summarize_run(
     total_steps = 0
     total_tool_calls = 0
     total_external_tool_calls = 0
+    total_tool_call_fingerprint_coverage = 0
+    total_duplicate_tool_calls = 0
     total_verifier_calls = 0
     total_background_states = 0
     total_checkpoint_events = 0
@@ -1093,9 +1197,16 @@ def summarize_run(
             if checkpoint_kind:
                 checkpoint_kind_counts[checkpoint_kind] += 1
                 total_checkpoint_events += 1
-        tool_calls, external_tool_calls = count_tool_calls(steps)
+        (
+            tool_calls,
+            external_tool_calls,
+            fingerprint_coverage,
+            duplicate_tool_calls,
+        ) = count_tool_calls(steps)
         total_tool_calls += tool_calls
         total_external_tool_calls += external_tool_calls
+        total_tool_call_fingerprint_coverage += fingerprint_coverage
+        total_duplicate_tool_calls += duplicate_tool_calls
 
     total_turns = len(paths)
     succeeded = status_counts.get("succeeded", 0)
@@ -1202,6 +1313,15 @@ def summarize_run(
             "step_count": total_steps,
             "tool_call_count": total_tool_calls,
             "external_tool_call_count": total_external_tool_calls,
+            "tool_call_fingerprint_coverage_count": total_tool_call_fingerprint_coverage,
+            "duplicate_tool_call_count": total_duplicate_tool_calls,
+            "duplicate_tool_call_rate": ratio(
+                total_duplicate_tool_calls,
+                total_tool_call_fingerprint_coverage,
+            ),
+            "avg_tool_calls_per_turn": round(total_tool_calls / total_turns, 3)
+            if total_turns
+            else 0.0,
             "verifier_call_count": total_verifier_calls,
             "background_state_count": total_background_states,
             "checkpoint_event_count": total_checkpoint_events,
@@ -1328,6 +1448,20 @@ def summarize_run_dirs(
         safe_int(get_path(summary, "execution", "external_tool_call_count"))
         for summary in summaries
     )
+    total_tool_call_fingerprint_coverage = sum(
+        safe_int(
+            get_path(
+                summary,
+                "execution",
+                "tool_call_fingerprint_coverage_count",
+            )
+        )
+        for summary in summaries
+    )
+    total_duplicate_tool_calls = sum(
+        safe_int(get_path(summary, "execution", "duplicate_tool_call_count"))
+        for summary in summaries
+    )
     total_verifier_calls = sum(
         safe_int(get_path(summary, "execution", "verifier_call_count"))
         for summary in summaries
@@ -1393,6 +1527,15 @@ def summarize_run_dirs(
             "step_count": total_steps,
             "tool_call_count": total_tool_calls,
             "external_tool_call_count": total_external_tool_calls,
+            "tool_call_fingerprint_coverage_count": total_tool_call_fingerprint_coverage,
+            "duplicate_tool_call_count": total_duplicate_tool_calls,
+            "duplicate_tool_call_rate": ratio(
+                total_duplicate_tool_calls,
+                total_tool_call_fingerprint_coverage,
+            ),
+            "avg_tool_calls_per_turn": round(total_tool_calls / turns_total, 3)
+            if turns_total
+            else 0.0,
             "verifier_call_count": total_verifier_calls,
             "background_state_count": total_background_states,
             "checkpoint_event_count": total_checkpoint_events,
@@ -1438,6 +1581,88 @@ def run_self_test() -> int:
     if portable_path_ref("multiple") != "multiple":
         print("SELF_TEST_FAIL multiple_ref")
         return 1
+    tool_counts = count_tool_calls(
+        [
+            {
+                "skill": "fs_basic",
+                "requested_action_ref": "fs_basic.read_file",
+                "args_fingerprint": "a1",
+            },
+            {
+                "skill": "fs_basic",
+                "requested_action_ref": "fs_basic.read_file",
+                "args_fingerprint": "a1",
+            },
+            {
+                "skill": "fs_basic",
+                "requested_action_ref": "fs_basic.read_file",
+                "args_fingerprint": "a2",
+            },
+            {"skill": "respond"},
+        ]
+    )
+    if tool_counts != (3, 0, 3, 1):
+        print(f"SELF_TEST_FAIL tool_counts:{tool_counts}")
+        return 1
+    baseline = {
+        "source_run_dir": "baseline",
+        "turns_total": 2,
+        "pass_rate": 1.0,
+        "final_status_counts": {"success": 2},
+        "verifier_pass_counts": {"true": 2},
+        "llm": {
+            "avg_calls_per_turn": 2.0,
+            "avg_elapsed_ms_per_turn": 100.0,
+            "prompt_bytes_after_max": 1000,
+            "prompt_truncation_count": 0,
+        },
+        "execution": {
+            "avg_tool_calls_per_turn": 2.0,
+            "duplicate_tool_call_rate": 0.0,
+        },
+    }
+    comparison = compare_with_baseline(
+        dict(baseline, source_run_dir="candidate"),
+        baseline,
+        max_pass_rate_drop=0.0,
+        max_clarification_rate_rise=0.0,
+        max_verifier_block_rate=0.0,
+        max_avg_llm_calls_rise=0.0,
+        max_avg_elapsed_rise=0.0,
+        max_avg_tool_calls_rise=0.0,
+        max_duplicate_tool_call_rate_rise=0.0,
+        max_prompt_bytes_after_rise=0.0,
+        max_prompt_truncation_rate_rise=0.0,
+    )
+    if not comparison["passed"]:
+        print(f"SELF_TEST_FAIL baseline_comparison:{comparison['failures']}")
+        return 1
+    duplicate_regression = dict(baseline)
+    duplicate_regression["source_run_dir"] = "duplicate_regression"
+    duplicate_regression["execution"] = dict(
+        baseline["execution"],
+        duplicate_tool_call_rate=0.5,
+    )
+    regression_comparison = compare_with_baseline(
+        duplicate_regression,
+        baseline,
+        max_pass_rate_drop=0.0,
+        max_clarification_rate_rise=0.0,
+        max_verifier_block_rate=0.0,
+        max_avg_llm_calls_rise=0.0,
+        max_avg_elapsed_rise=0.0,
+        max_avg_tool_calls_rise=0.0,
+        max_duplicate_tool_call_rate_rise=0.0,
+        max_prompt_bytes_after_rise=0.0,
+        max_prompt_truncation_rate_rise=0.0,
+    )
+    if (
+        regression_comparison["passed"]
+        or "duplicate_tool_call_rate_rise"
+        not in regression_comparison["failures"]
+    ):
+        print("SELF_TEST_FAIL duplicate_regression_not_blocked")
+        return 1
     print("ROLLOUT_METRICS_SELF_TEST ok")
     return 0
 
@@ -1473,6 +1698,10 @@ def main() -> int:
     parser.add_argument("--max-verifier-block-rate", type=float, default=0.01)
     parser.add_argument("--max-avg-llm-calls-rise", type=float, default=0.15)
     parser.add_argument("--max-avg-elapsed-rise", type=float, default=0.20)
+    parser.add_argument("--max-avg-tool-calls-rise", type=float, default=0.15)
+    parser.add_argument("--max-duplicate-tool-call-rate-rise", type=float, default=0.0)
+    parser.add_argument("--max-prompt-bytes-after-rise", type=float, default=0.10)
+    parser.add_argument("--max-prompt-truncation-rate-rise", type=float, default=0.0)
     parser.add_argument(
         "--min-pass-rate",
         type=float,
@@ -1507,6 +1736,11 @@ def main() -> int:
         "--max-verifier-calls",
         type=int,
         help="Absolute gate: fail when verifier-call count exceeds this value.",
+    )
+    parser.add_argument(
+        "--max-duplicate-tool-calls",
+        type=int,
+        help="Absolute gate: fail when fingerprinted duplicate tool calls exceed this value.",
     )
     parser.add_argument(
         "--dedupe-latest-case",
@@ -1562,6 +1796,10 @@ def main() -> int:
             max_verifier_block_rate=args.max_verifier_block_rate,
             max_avg_llm_calls_rise=args.max_avg_llm_calls_rise,
             max_avg_elapsed_rise=args.max_avg_elapsed_rise,
+            max_avg_tool_calls_rise=args.max_avg_tool_calls_rise,
+            max_duplicate_tool_call_rate_rise=args.max_duplicate_tool_call_rate_rise,
+            max_prompt_bytes_after_rise=args.max_prompt_bytes_after_rise,
+            max_prompt_truncation_rate_rise=args.max_prompt_truncation_rate_rise,
         )
     result["metric_gate"] = compare_with_absolute_thresholds(
         result,
@@ -1572,12 +1810,20 @@ def main() -> int:
         max_provider_final_errors=args.max_provider_final_errors,
         max_provider_retryable_errors=args.max_provider_retryable_errors,
         max_verifier_calls=args.max_verifier_calls,
+        max_duplicate_tool_calls=args.max_duplicate_tool_calls,
     )
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     if args.print_json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         print(rollout_metrics_ok_line(output, result))
+    rollout_gate = result.get("rollout_gate")
+    if isinstance(rollout_gate, dict) and not rollout_gate.get("passed"):
+        print(
+            "ROLLOUT_METRICS_BASELINE_GATE_FAIL "
+            f"failures={','.join(rollout_gate.get('failures') or [])}",
+        )
+        return 1
     if result["metric_gate"]["configured"] and not result["metric_gate"]["passed"]:
         print(
             "ROLLOUT_METRICS_GATE_FAIL "

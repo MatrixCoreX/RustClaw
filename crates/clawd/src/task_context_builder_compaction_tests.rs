@@ -202,6 +202,72 @@ fn compacted_permission_and_child_state_reaches_the_next_planner_prompt() {
 }
 
 #[test]
+fn compacted_coding_continuity_reaches_the_next_planner_prompt() {
+    let state =
+        crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
+    let mut bundle = context_bundle(13_000);
+    let plan = plan_agent_loop_context_compaction(&bundle).unwrap();
+    let model_summary = serde_json::json!({
+        "schema_version": 1,
+        "summary_kind": "model_assisted_context_compaction",
+        "facts": [],
+        "decisions": ["decision:keep_public_api"],
+        "open_questions": [],
+        "active_goal_refs": ["goal:finish_context_compaction"],
+        "constraint_refs": ["constraint:no_external_publish"],
+        "evidence_refs": ["evidence:cargo_test_failed"],
+        "artifact_refs": ["artifact:src/lib.rs"],
+        "completed_side_effect_refs": ["side_effect:write:src/lib.rs"],
+        "failure_refs": ["failure:verification:cargo_test"],
+        "permission_state_refs": [],
+        "child_task_refs": [],
+        "resume_entrypoint": "repair_failed_verification",
+        "source_refs": [{
+            "ref": "recent_execution_context",
+            "provenance": "untrusted_conversation_evidence"
+        }],
+        "risk_flags": []
+    });
+
+    apply_context_compaction_with_inputs(
+        "task-context-compaction-coding-continuity",
+        &mut bundle,
+        &plan,
+        empty_prompt_memory_context(),
+        "last_turn".to_string(),
+        Some(model_summary),
+        "context_compaction_model_completed",
+    );
+    let mut chat_prompt = String::new();
+    let mut execution_prompt = String::new();
+    let mut memory_prompt = String::new();
+    super::apply_execution_context_to_prompts(
+        &state,
+        &bundle,
+        &mut chat_prompt,
+        &mut execution_prompt,
+        &mut memory_prompt,
+    )
+    .expect("apply compacted coding continuity context");
+
+    for prompt in [&execution_prompt, &memory_prompt] {
+        assert!(prompt.contains(r#""instruction_authority": "none""#));
+        for machine_ref in [
+            "decision:keep_public_api",
+            "goal:finish_context_compaction",
+            "constraint:no_external_publish",
+            "evidence:cargo_test_failed",
+            "artifact:src/lib.rs",
+            "side_effect:write:src/lib.rs",
+            "failure:verification:cargo_test",
+            "repair_failed_verification",
+        ] {
+            assert!(prompt.contains(machine_ref), "{machine_ref} missing");
+        }
+    }
+}
+
+#[test]
 fn deterministic_fallback_preserves_stable_machine_references() {
     let mut bundle = context_bundle(13_000);
     {
