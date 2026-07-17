@@ -9,6 +9,9 @@ use report_coding::coding_report_json;
 use super::report_budget_health::{
     llm_budget_health_json, llm_budget_text_lines, LlmBudgetMetrics,
 };
+#[path = "report_cost.rs"]
+mod report_cost;
+use report_cost::{llm_cost_governance_json, llm_cost_text_lines};
 
 fn exec_event_summary(task: &task::TaskStatusView) -> Vec<Value> {
     task.events
@@ -106,6 +109,13 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
     for line in report
         .get("llm")
         .map(llm_budget_text_lines)
+        .unwrap_or_default()
+    {
+        lines.push(line);
+    }
+    for line in report
+        .pointer("/llm/cost_governance")
+        .map(llm_cost_text_lines)
         .unwrap_or_default()
     {
         lines.push(line);
@@ -768,6 +778,7 @@ pub(super) fn llm_report_json(task: &task::TaskStatusView) -> Value {
         prompt_bytes_before_max: total.prompt_bytes_before_max,
         prompt_truncated_bytes_total: total.prompt_truncated_bytes_total,
     });
+    let cost_governance = llm_cost_governance_json(&task.raw_data);
     json!({
         "schema_version": 1,
         "provider_call_event_count": task
@@ -788,6 +799,7 @@ pub(super) fn llm_report_json(task: &task::TaskStatusView) -> Value {
         "prompt_bytes_after_max": total.prompt_bytes_after_max,
         "prompt_truncated_bytes_total": total.prompt_truncated_bytes_total,
         "budget_health": budget_health,
+        "cost_governance": cost_governance,
         "by_prompt": by_prompt,
     })
 }

@@ -107,3 +107,7 @@ mod llm_trace_tests;
 #[cfg(test)]
 #[path = "commands_models_tests.rs"]
 mod models_tests;
+
+#[cfg(test)]
+#[path = "commands_cost_tests.rs"]
+mod cost_tests;
