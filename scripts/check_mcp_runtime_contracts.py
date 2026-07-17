@@ -124,6 +124,12 @@ REQUIRED_FILE_TOKENS = {
         "mcp_execution_records_auditable_teaching_observation",
         "mcp_transport_failure_records_machine_error_without_raw_detail",
     ),
+    "crates/clawd/src/mcp_runtime/agent_loop_tests.rs": (
+        "ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence",
+        '"call_capability"',
+        '"mcp_tool_call"',
+        "mcp.tool_call",
+    ),
     "crates/clawcli/tests/mcp_commands.rs": (
         "mcp_commands_use_authenticated_machine_endpoints",
     ),
@@ -157,6 +163,7 @@ def production_mcp_files(root: Path) -> list[Path]:
         path
         for path in source.glob("*.rs")
         if path.name not in {"tests.rs", "test_support.rs"}
+        and not path.name.endswith("_tests.rs")
     )
 
 

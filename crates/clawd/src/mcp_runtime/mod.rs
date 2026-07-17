@@ -10,5 +10,9 @@ pub(crate) use types::{McpLifecycleSnapshot, McpProbeOutcome, McpToolDescriptor}
 mod tests;
 
 #[cfg(test)]
+#[path = "agent_loop_tests.rs"]
+mod agent_loop_tests;
+
+#[cfg(test)]
 #[path = "test_support.rs"]
 pub(crate) mod test_support;
