@@ -21,8 +21,6 @@ Supported fields:
 - `route_gate_any`
 - `routed_mode`
 - `routed_mode_any`
-- `first_layer` (legacy compatibility assertion)
-- `first_layer_any` (legacy compatibility assertion)
 - `capability_any`
 - `planned_action_any`
 - `planned_action_all`
