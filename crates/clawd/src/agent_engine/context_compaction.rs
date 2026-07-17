@@ -8,7 +8,9 @@ use crate::{llm_gateway, AppState, ClaimedTask};
 
 const CONTEXT_COMPACTION_PROMPT_LOGICAL_PATH: &str = "prompts/context_compaction_prompt.md";
 const CONTEXT_COMPACTION_MAX_TOKENS: u64 = 8_192;
-const CONTEXT_COMPACTION_TIMEOUT_SECONDS: u64 = 90;
+const CONTEXT_COMPACTION_MIN_TIMEOUT_SECONDS: u64 = 120;
+const CONTEXT_COMPACTION_MAX_TIMEOUT_SECONDS: u64 = 300;
+const CONTEXT_COMPACTION_TIMEOUT_GRACE_SECONDS: u64 = 30;
 const MAX_COMPACTION_ITEMS: usize = 64;
 const MAX_CONTEXT_SOURCE_TOTAL_CHARS: usize = 48_000;
 const MAX_CONTEXT_SOURCE_ITEM_CHARS: usize = 24_000;
@@ -88,12 +90,14 @@ pub(crate) async fn run_model_assisted_context_compaction(
             max_tokens: Some(CONTEXT_COMPACTION_MAX_TOKENS),
         },
     );
-    let raw = match tokio::time::timeout(
-        Duration::from_secs(CONTEXT_COMPACTION_TIMEOUT_SECONDS),
-        call,
-    )
-    .await
-    {
+    let timeout_seconds = context_compaction_timeout_seconds(
+        state
+            .task_llm_providers(task)
+            .iter()
+            .map(|provider| provider.config.timeout_seconds)
+            .max(),
+    );
+    let raw = match tokio::time::timeout(Duration::from_secs(timeout_seconds), call).await {
         Ok(Ok(raw)) => raw,
         Ok(Err(error)) => {
             warn!(
@@ -103,7 +107,13 @@ pub(crate) async fn run_model_assisted_context_compaction(
             );
             return (None, "context_compaction_provider_failed");
         }
-        Err(_) => return (None, "context_compaction_provider_timeout"),
+        Err(_) => {
+            warn!(
+                "context_compaction_provider_timeout task_id={} timeout_seconds={}",
+                task.task_id, timeout_seconds
+            );
+            return (None, "context_compaction_provider_timeout");
+        }
     };
     let validated = match crate::prompt_utils::validate_against_schema::<Value>(
         &raw,
@@ -130,6 +140,16 @@ pub(crate) async fn run_model_assisted_context_compaction(
         normalized.to_string().chars().count()
     );
     (Some(normalized), "context_compaction_model_completed")
+}
+
+fn context_compaction_timeout_seconds(provider_timeout_seconds: Option<u64>) -> u64 {
+    provider_timeout_seconds
+        .unwrap_or(CONTEXT_COMPACTION_MIN_TIMEOUT_SECONDS)
+        .saturating_add(CONTEXT_COMPACTION_TIMEOUT_GRACE_SECONDS)
+        .clamp(
+            CONTEXT_COMPACTION_MIN_TIMEOUT_SECONDS,
+            CONTEXT_COMPACTION_MAX_TIMEOUT_SECONDS,
+        )
 }
 
 fn context_source_bundle(bundle: &TaskContextBundle, plan: &ContextCompactionPlan) -> Value {
