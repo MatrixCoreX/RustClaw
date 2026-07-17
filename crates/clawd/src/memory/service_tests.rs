@@ -31,6 +31,7 @@ fn test_provider_with_context_window(
             max_concurrency: 1,
             params: LlmProviderParams::default(),
         },
+        pricing: None,
         client: reqwest::Client::new(),
         semaphore: Arc::new(Semaphore::new(1)),
         breaker: Arc::new(crate::providers::CircuitBreaker::new()),

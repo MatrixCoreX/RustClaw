@@ -878,6 +878,8 @@ pub(super) fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
             .unwrap_or(0),
         "frontdoor_llm": frontdoor_llm_metrics_json(metrics),
         "by_prompt": by_prompt_value,
+        "llm_cost": metrics.llm_cost_summary,
+        "llm_cost_records": metrics.llm_cost_records,
     })
 }
 
@@ -1002,6 +1004,16 @@ pub(super) fn cost_budget_json(journal: &TaskJournal) -> Value {
             "provider_attempts": provider_attempt_count,
             "provider_retries": provider_retry_count,
             "prompt_truncations": prompt_truncation_count,
+            "llm_cost_status": journal
+                .task_metrics
+                .llm_cost_summary
+                .as_ref()
+                .map(|summary| summary.status.as_str()),
+            "estimated_cost_usd_nanos": journal
+                .task_metrics
+                .llm_cost_summary
+                .as_ref()
+                .map(|summary| summary.estimated_cost_usd_nanos),
         },
         "signals": signals,
     })

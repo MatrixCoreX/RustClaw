@@ -21,6 +21,7 @@ fn make_provider(name: &str, api_key: &str) -> LlmProviderRuntime {
             max_concurrency: 1,
             params: LlmProviderParams::default(),
         },
+        pricing: None,
         client: reqwest::Client::new(),
         semaphore: Arc::new(Semaphore::new(1)),
         breaker: Arc::new(crate::providers::CircuitBreaker::new()),

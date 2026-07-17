@@ -8,6 +8,7 @@ use tokio::sync::Semaphore;
 #[derive(Debug, Clone)]
 pub(crate) struct LlmProviderRuntime {
     pub(crate) config: claw_core::config::LlmProviderConfig,
+    pub(crate) pricing: Option<claw_core::config::LlmModelPricingConfig>,
     pub(crate) client: Client,
     pub(crate) semaphore: Arc<Semaphore>,
     /// Phase 2.1: 每 provider 一个 circuit breaker，避免坏 provider 在 fallback

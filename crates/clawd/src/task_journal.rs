@@ -584,6 +584,9 @@ pub(crate) struct TaskJournalTaskMetrics {
     pub(crate) by_prompt: Option<std::collections::HashMap<String, crate::LlmPromptBucket>>,
     /// Ordered machine metadata only; prompt and response text are excluded.
     pub(crate) llm_call_sequence: Option<Vec<crate::LlmCallSequenceEntry>>,
+    /// Provider-call usage and cost records contain machine metadata only.
+    pub(crate) llm_cost_records: Option<Vec<crate::providers::LlmCallCostRecord>>,
+    pub(crate) llm_cost_summary: Option<crate::providers::LlmTaskCostSummary>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -810,6 +813,8 @@ impl TaskJournal {
         self.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(task_id));
         self.record_llm_by_prompt(state.task_llm_by_prompt(task_id));
         self.record_llm_call_sequence(state.task_llm_call_sequence(task_id));
+        self.task_metrics.llm_cost_records = Some(state.task_llm_cost_records(task_id));
+        self.task_metrics.llm_cost_summary = Some(state.task_llm_cost_summary(task_id));
     }
 
     pub(crate) fn record_task_lifecycle(&mut self, lifecycle: Value) {
@@ -945,6 +950,12 @@ impl TaskJournal {
         }
         if self.task_metrics.llm_call_sequence.is_none() {
             self.task_metrics.llm_call_sequence = other.task_metrics.llm_call_sequence.clone();
+        }
+        if self.task_metrics.llm_cost_records.is_none() {
+            self.task_metrics.llm_cost_records = other.task_metrics.llm_cost_records.clone();
+        }
+        if self.task_metrics.llm_cost_summary.is_none() {
+            self.task_metrics.llm_cost_summary = other.task_metrics.llm_cost_summary.clone();
         }
         if self.task_lifecycle.is_none() {
             self.task_lifecycle = other.task_lifecycle.clone();
@@ -1187,6 +1198,10 @@ mod coding_workflow_tests;
 #[cfg(test)]
 #[path = "task_journal_context_compaction_tests.rs"]
 mod context_compaction_tests;
+
+#[cfg(test)]
+#[path = "task_journal_cost_tests.rs"]
+mod cost_tests;
 
 #[cfg(test)]
 #[path = "task_journal_goal_tests.rs"]

@@ -187,6 +187,7 @@ fn build_llm_test_runtime(
         .map_err(|err| format!("build llm test client failed: {err}"))?;
     Ok(Arc::new(LlmProviderRuntime {
         config,
+        pricing: None,
         client,
         semaphore: Arc::new(Semaphore::new(1)),
         breaker: Arc::new(crate::providers::CircuitBreaker::new()),

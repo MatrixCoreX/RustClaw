@@ -238,11 +238,18 @@ fn build_providers_with_overrides(
             if let Some(model) = model_override {
                 runtime_cfg.model = model.to_string();
             }
+            let pricing = crate::providers::resolve_model_pricing(
+                &config.llm.pricing,
+                &runtime_cfg.name,
+                &runtime_cfg.provider_type,
+                &runtime_cfg.model,
+            );
 
             let client = build_llm_http_client(runtime_cfg.timeout_seconds).ok()?;
 
             Some(Arc::new(LlmProviderRuntime {
                 config: runtime_cfg.clone(),
+                pricing,
                 client,
                 semaphore: Arc::new(Semaphore::new(runtime_cfg.max_concurrency.max(1))),
                 breaker: Arc::new(crate::providers::CircuitBreaker::new()),
@@ -586,6 +593,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     // Phase 1.5: 同时按 prompt label 分桶累计，task journal 里 by_prompt 维度可观测。
     let prompt_label = classify_prompt_source(prompt_source);
     state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
+    let logical_call_index = state.task_llm_call_count(&task.task_id);
     state.note_task_prompt_size_with_label(&task.task_id, prompt_label, prompt.len());
     touch_llm_task_lease(state, &task.task_id, prompt_label, "call_start");
     let mut heartbeat_stop = Some(start_llm_task_lease_heartbeat(
@@ -704,6 +712,19 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     sanitized,
                     None,
                 );
+                state.note_task_llm_cost_record(
+                    &task.task_id,
+                    crate::providers::build_cost_record(
+                        logical_call_index,
+                        prompt_label,
+                        &provider.config.name,
+                        &provider.config.model,
+                        "ok",
+                        output.attempts,
+                        output.usage.as_ref(),
+                        provider.pricing.as_ref(),
+                    ),
+                );
                 let _ = crate::insert_audit_log(
                     state,
                     Some(task.user_id),
@@ -795,6 +816,19 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     err.usage.as_ref(),
                     false,
                     Some(&err.message),
+                );
+                state.note_task_llm_cost_record(
+                    &task.task_id,
+                    crate::providers::build_cost_record(
+                        logical_call_index,
+                        prompt_label,
+                        &provider.config.name,
+                        &provider.config.model,
+                        "failed",
+                        err.attempts,
+                        err.usage.as_ref(),
+                        provider.pricing.as_ref(),
+                    ),
                 );
                 let _ = crate::insert_audit_log(
                     state,
