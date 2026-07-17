@@ -15,6 +15,7 @@ REQUIRED_FILE_TOKENS = {
     "Cargo.toml": (
         'rmcp = { version = "2.2.0"',
         'default-features = false',
+        '"auth"',
         '"client"',
         '"transport-child-process"',
         '"transport-streamable-http-client-reqwest"',
@@ -25,6 +26,10 @@ REQUIRED_FILE_TOKENS = {
         "catalog_search_max_results",
         "pub struct McpServerConfig",
         "auth_token_env",
+        "oauth_client_id_env",
+        "oauth_client_secret_env",
+        "oauth_scopes",
+        "oauth_resource",
         "trusted",
         "allowed_tools",
         "tool_policies",
@@ -46,6 +51,9 @@ REQUIRED_FILE_TOKENS = {
     "crates/clawd/src/mcp_runtime/manager.rs": (
         "TokioChildProcess",
         "StreamableHttpClientTransportConfig",
+        "OAuthState",
+        "ClientCredentialsConfig",
+        "AuthClient",
         "reinit_on_expired_session(true)",
         "spawn_health_monitor",
         "schedule_reconnect",

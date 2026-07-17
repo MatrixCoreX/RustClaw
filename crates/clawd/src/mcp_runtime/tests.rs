@@ -1,8 +1,10 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use axum::http::StatusCode;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
 use tokio::sync::oneshot;
@@ -96,6 +98,9 @@ async fn untrusted_and_invalid_schema_servers_fail_closed() {
         Some("mcp_server_untrusted")
     );
     assert!(runtime.tools().is_empty());
+    assert!(runtime.reconnect_retry_blocked("fixture"));
+    runtime.health_tick().await;
+    assert!(runtime.reconnect_retry_blocked("fixture"));
 
     let mut invalid = fixture_config();
     invalid
@@ -114,6 +119,28 @@ async fn untrusted_and_invalid_schema_servers_fail_closed() {
     );
     assert!(runtime.tools().is_empty());
     runtime.stop().await;
+}
+
+#[tokio::test]
+async fn conflicting_http_auth_is_blocked_without_background_retry() {
+    let mut config = fixture_config();
+    let fixture = config.servers.get_mut("fixture").expect("fixture config");
+    fixture.transport = claw_core::config::McpTransportConfig::StreamableHttp;
+    fixture.command = None;
+    fixture.url = Some("http://127.0.0.1:1/mcp".to_string());
+    fixture.auth_token_env = Some("RUSTCLAW_MCP_BEARER".to_string());
+    fixture.oauth_client_id_env = Some("RUSTCLAW_MCP_CLIENT_ID".to_string());
+    fixture.oauth_client_secret_env = Some("RUSTCLAW_MCP_CLIENT_SECRET".to_string());
+    let runtime = McpRuntime::new(config);
+    runtime.start().await;
+    let lifecycle = runtime.lifecycle_snapshots();
+    assert_eq!(
+        lifecycle[0].last_error_code.as_deref(),
+        Some("mcp_http_auth_conflict")
+    );
+    assert!(runtime.reconnect_retry_blocked("fixture"));
+    runtime.health_tick().await;
+    assert!(runtime.reconnect_retry_blocked("fixture"));
 }
 
 #[tokio::test]
@@ -348,6 +375,169 @@ async fn streamable_http_fixture(Json(message): Json<serde_json::Value>) -> Resp
         Json(json!({"jsonrpc": "2.0", "id": request_id, "result": result})),
     )
         .into_response()
+}
+
+#[derive(Default)]
+struct OAuthFixtureState {
+    token_requests: AtomicUsize,
+}
+
+fn oauth_fixture_base_url(headers: &HeaderMap) -> String {
+    format!(
+        "http://{}",
+        headers
+            .get("host")
+            .and_then(|value| value.to_str().ok())
+            .expect("fixture host")
+    )
+}
+
+async fn oauth_resource_metadata(headers: HeaderMap) -> Json<serde_json::Value> {
+    let base_url = oauth_fixture_base_url(&headers);
+    Json(json!({
+        "resource": format!("{base_url}/mcp"),
+        "authorization_servers": [base_url],
+        "scopes_supported": ["read"],
+    }))
+}
+
+async fn oauth_authorization_metadata(headers: HeaderMap) -> Json<serde_json::Value> {
+    let base_url = oauth_fixture_base_url(&headers);
+    Json(json!({
+        "issuer": base_url,
+        "authorization_endpoint": format!("{base_url}/authorize"),
+        "token_endpoint": format!("{base_url}/token"),
+        "token_endpoint_auth_methods_supported": ["client_secret_post"],
+        "grant_types_supported": ["client_credentials", "refresh_token"],
+        "scopes_supported": ["read"],
+    }))
+}
+
+async fn oauth_token(State(state): State<Arc<OAuthFixtureState>>, body: String) -> Response {
+    state.token_requests.fetch_add(1, Ordering::SeqCst);
+    if body.contains("grant_type=client_credentials")
+        && body.contains("client_id=fixture-client")
+        && body.contains("client_secret=fixture-secret")
+    {
+        return Json(json!({
+            "access_token": "expired-fixture-token",
+            "refresh_token": "fixture-refresh-token",
+            "token_type": "Bearer",
+            "expires_in": 0,
+            "scope": "read",
+        }))
+        .into_response();
+    }
+    if body.contains("grant_type=refresh_token")
+        && body.contains("refresh_token=fixture-refresh-token")
+    {
+        return Json(json!({
+            "access_token": "active-fixture-token",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "read",
+        }))
+        .into_response();
+    }
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({"error": "invalid_client"})),
+    )
+        .into_response()
+}
+
+async fn oauth_mcp_fixture(
+    State(_state): State<Arc<OAuthFixtureState>>,
+    headers: HeaderMap,
+    message: Json<serde_json::Value>,
+) -> Response {
+    if headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        != Some("Bearer active-fixture-token")
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    streamable_http_fixture(message).await
+}
+
+#[tokio::test]
+async fn oauth_client_credentials_discovers_refreshes_and_redacts_tokens() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind OAuth fixture");
+    let address = listener.local_addr().expect("fixture address");
+    let state = Arc::new(OAuthFixtureState::default());
+    let server_state = Arc::clone(&state);
+    let (stop_tx, stop_rx) = oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route(
+                    "/.well-known/oauth-protected-resource/mcp",
+                    get(oauth_resource_metadata),
+                )
+                .route(
+                    "/.well-known/oauth-protected-resource",
+                    get(oauth_resource_metadata),
+                )
+                .route(
+                    "/.well-known/oauth-authorization-server",
+                    get(oauth_authorization_metadata),
+                )
+                .route("/token", post(oauth_token))
+                .route("/mcp", post(oauth_mcp_fixture))
+                .with_state(server_state),
+        )
+        .with_graceful_shutdown(async {
+            let _ = stop_rx.await;
+        })
+        .await
+        .expect("serve OAuth fixture");
+    });
+
+    let suffix = uuid::Uuid::new_v4()
+        .simple()
+        .to_string()
+        .to_ascii_uppercase();
+    let client_id_env = format!("RUSTCLAW_MCP_OAUTH_CLIENT_ID_{suffix}");
+    let client_secret_env = format!("RUSTCLAW_MCP_OAUTH_CLIENT_SECRET_{suffix}");
+    std::env::set_var(&client_id_env, "fixture-client");
+    std::env::set_var(&client_secret_env, "fixture-secret");
+
+    let mut config = fixture_config();
+    let fixture = config.servers.get_mut("fixture").expect("fixture config");
+    fixture.transport = claw_core::config::McpTransportConfig::StreamableHttp;
+    fixture.command = None;
+    fixture.args.clear();
+    fixture.url = Some(format!("http://{address}/mcp"));
+    fixture.allowed_tools = vec!["lookup".to_string()];
+    fixture.oauth_client_id_env = Some(client_id_env.clone());
+    fixture.oauth_client_secret_env = Some(client_secret_env.clone());
+    fixture.oauth_scopes = vec!["read".to_string()];
+    let runtime = McpRuntime::new(config);
+    runtime.start().await;
+
+    let lifecycle = runtime.lifecycle_snapshots();
+    assert_eq!(lifecycle[0].state, McpLifecycleState::Ready);
+    assert_eq!(lifecycle[0].auth_mode, "oauth_client_credentials");
+    let lifecycle_json = serde_json::to_string(&lifecycle).expect("serialize lifecycle");
+    assert!(!lifecycle_json.contains("fixture-client"));
+    assert!(!lifecycle_json.contains("fixture-secret"));
+    assert!(!lifecycle_json.contains("active-fixture-token"));
+    assert!(state.token_requests.load(Ordering::SeqCst) >= 2);
+
+    let outcome = runtime
+        .call("mcp.fixture.lookup", json!({"query": "oauth-token"}), None)
+        .await
+        .expect("OAuth MCP call");
+    assert_eq!(outcome.status, "ok");
+    runtime.stop().await;
+    std::env::remove_var(client_id_env);
+    std::env::remove_var(client_secret_env);
+    let _ = stop_tx.send(());
+    server.await.expect("join OAuth fixture");
 }
 
 #[tokio::test]

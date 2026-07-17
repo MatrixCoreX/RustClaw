@@ -30,6 +30,7 @@ pub(crate) struct McpLifecycleSnapshot {
     pub(crate) server_id: String,
     pub(crate) state: McpLifecycleState,
     pub(crate) transport: String,
+    pub(crate) auth_mode: String,
     pub(crate) tool_count: usize,
     pub(crate) last_error_code: Option<String>,
 }

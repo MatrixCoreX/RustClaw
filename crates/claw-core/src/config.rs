@@ -597,6 +597,14 @@ pub struct McpServerConfig {
     pub url: Option<String>,
     #[serde(default)]
     pub auth_token_env: Option<String>,
+    #[serde(default)]
+    pub oauth_client_id_env: Option<String>,
+    #[serde(default)]
+    pub oauth_client_secret_env: Option<String>,
+    #[serde(default)]
+    pub oauth_scopes: Vec<String>,
+    #[serde(default)]
+    pub oauth_resource: Option<String>,
     #[serde(default = "default_mcp_timeout_seconds")]
     pub timeout_seconds: u64,
     #[serde(default = "default_mcp_max_concurrency")]
@@ -634,6 +642,10 @@ impl Default for McpServerConfig {
             env_refs: HashMap::new(),
             url: None,
             auth_token_env: None,
+            oauth_client_id_env: None,
+            oauth_client_secret_env: None,
+            oauth_scopes: Vec::new(),
+            oauth_resource: None,
             timeout_seconds: default_mcp_timeout_seconds(),
             max_concurrency: default_mcp_max_concurrency(),
             max_output_bytes: default_mcp_max_output_bytes(),
@@ -646,6 +658,22 @@ impl Default for McpServerConfig {
             capability_prefix: None,
             allowed_tools: Vec::new(),
             tool_policies: HashMap::new(),
+        }
+    }
+}
+
+impl McpServerConfig {
+    pub fn uses_oauth_client_credentials(&self) -> bool {
+        self.oauth_client_id_env.is_some() || self.oauth_client_secret_env.is_some()
+    }
+
+    pub fn auth_mode_token(&self) -> &'static str {
+        if self.uses_oauth_client_credentials() {
+            "oauth_client_credentials"
+        } else if self.auth_token_env.is_some() {
+            "bearer_env"
+        } else {
+            "none"
         }
     }
 }

@@ -130,6 +130,15 @@ network_access = false
 enabled = false
 transport = "sse"
 url = "http://127.0.0.1:9000/events"
+
+[mcp.servers.oauth]
+enabled = false
+transport = "streamable_http"
+url = "https://mcp.example.invalid/mcp"
+oauth_client_id_env = "RUSTCLAW_TEST_MCP_OAUTH_CLIENT_ID"
+oauth_client_secret_env = "RUSTCLAW_TEST_MCP_OAUTH_CLIENT_SECRET"
+oauth_scopes = ["read", "write"]
+oauth_resource = "https://mcp.example.invalid/mcp"
 "#,
     )
     .expect("write temp config");
@@ -176,6 +185,21 @@ url = "http://127.0.0.1:9000/events"
     assert_eq!(
         disabled.url.as_deref(),
         Some("http://127.0.0.1:9000/events")
+    );
+    let oauth = cfg.mcp.servers.get("oauth").expect("oauth server");
+    assert_eq!(oauth.auth_mode_token(), "oauth_client_credentials");
+    assert_eq!(
+        oauth.oauth_client_id_env.as_deref(),
+        Some("RUSTCLAW_TEST_MCP_OAUTH_CLIENT_ID")
+    );
+    assert_eq!(
+        oauth.oauth_client_secret_env.as_deref(),
+        Some("RUSTCLAW_TEST_MCP_OAUTH_CLIENT_SECRET")
+    );
+    assert_eq!(oauth.oauth_scopes, vec!["read", "write"]);
+    assert_eq!(
+        oauth.oauth_resource.as_deref(),
+        Some("https://mcp.example.invalid/mcp")
     );
 
     fs::remove_dir_all(dir).expect("remove temp config dir");
