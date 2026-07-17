@@ -576,6 +576,47 @@ fn requested_machine_kv_summary_does_not_recover_required_content_gap() {
 }
 
 #[test]
+fn ordinary_machine_kv_summary_does_not_erase_required_content_gap() {
+    let prompt = "Return the requested machine summary after completing the observed work.";
+    let mut route = route_result();
+    route.requires_content_evidence = false;
+    route.delivery_required = false;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-kv-open-work", "ask", prompt);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string(), "field_value".to_string()],
+        answer_incomplete_reason: "required execution evidence is still missing".to_string(),
+        should_retry: true,
+        retry_instruction: "continue execution and collect the missing evidence".to_string(),
+        confidence: 0.96,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "http_basic",
+            r#"{"extra":{"action":"get","status_code":200,"body_preview":"not_ready"}}"#,
+        ));
+    let mut answer_text = "status=200".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!recover_requested_machine_kv_summary_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+        false,
+    ));
+    assert!(journal
+        .answer_verifier_summary
+        .as_ref()
+        .is_some_and(|summary| !summary.pass && summary.should_retry));
+    assert_eq!(answer_text, "status=200");
+}
+
+#[test]
 fn requested_machine_kv_summary_force_patches_archive_db_json_instead_of_scalar_replace() {
     let prompt = "Return required machine field user_version.";
     let mut route = route_result();

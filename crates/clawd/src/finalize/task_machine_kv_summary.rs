@@ -29,7 +29,7 @@ pub(super) fn recover_requested_machine_kv_summary_final_answer(
     answer_messages: &mut Vec<String>,
     force_structured: bool,
 ) -> bool {
-    if force_structured && machine_kv_recovery_blocked_by_required_content_gap(journal) {
+    if machine_kv_recovery_blocked_by_required_content_gap(journal) {
         return false;
     }
     let applied = if force_structured {
