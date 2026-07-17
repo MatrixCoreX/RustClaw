@@ -1,6 +1,82 @@
 use serde_json::{json, Value};
 
-use crate::{policy_decision::PolicyDecision, AppState};
+use crate::policy_decision::PolicyDecision;
+
+mod command;
+pub(crate) use command::pre_tool_use_outcome_for_state;
+#[cfg(test)]
+use command::{
+    execute_command_handler, parse_handler_output, pre_tool_hook_event, validate_command_handler,
+    HookHandlerConfig,
+};
+
+const HOOK_EVENT_SCHEMA_VERSION: u16 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HookStage {
+    SessionStart,
+    UserPromptSubmit,
+    PreToolUse,
+    PermissionRequest,
+    PostToolUse,
+    PreCompact,
+    PostCompact,
+    SubagentStart,
+    SubagentStop,
+    Stop,
+    SessionEnd,
+}
+
+impl HookStage {
+    pub(crate) fn all() -> &'static [Self] {
+        &[
+            Self::SessionStart,
+            Self::UserPromptSubmit,
+            Self::PreToolUse,
+            Self::PermissionRequest,
+            Self::PostToolUse,
+            Self::PreCompact,
+            Self::PostCompact,
+            Self::SubagentStart,
+            Self::SubagentStop,
+            Self::Stop,
+            Self::SessionEnd,
+        ]
+    }
+
+    pub(crate) fn as_token(self) -> &'static str {
+        match self {
+            Self::SessionStart => "session_start",
+            Self::UserPromptSubmit => "user_prompt_submit",
+            Self::PreToolUse => "pre_tool_use",
+            Self::PermissionRequest => "permission_request",
+            Self::PostToolUse => "post_tool_use",
+            Self::PreCompact => "pre_compact",
+            Self::PostCompact => "post_compact",
+            Self::SubagentStart => "subagent_start",
+            Self::SubagentStop => "subagent_stop",
+            Self::Stop => "stop",
+            Self::SessionEnd => "session_end",
+        }
+    }
+
+    fn parse_token(value: &str) -> Option<Self> {
+        match value.trim() {
+            "session_start" => Some(Self::SessionStart),
+            "user_prompt_submit" => Some(Self::UserPromptSubmit),
+            "pre_tool_use" => Some(Self::PreToolUse),
+            "permission_request" => Some(Self::PermissionRequest),
+            "post_tool_use" => Some(Self::PostToolUse),
+            "pre_compact" => Some(Self::PreCompact),
+            "post_compact" => Some(Self::PostCompact),
+            "subagent_start" => Some(Self::SubagentStart),
+            "subagent_stop" => Some(Self::SubagentStop),
+            "stop" => Some(Self::Stop),
+            "session_end" => Some(Self::SessionEnd),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 struct HookPolicy {
@@ -10,11 +86,27 @@ struct HookPolicy {
     background_wait_action_refs: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct HookEvaluation {
+    pub(crate) outcome: HookOutcome,
+    pub(crate) handler_observations: Vec<Value>,
+}
+
+impl HookEvaluation {
+    pub(crate) fn requires_confirmation(&self) -> bool {
+        self.outcome.requires_confirmation()
+    }
+
+    pub(crate) fn requires_background_wait(&self) -> bool {
+        self.outcome.requires_background_wait()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HookOutcome {
     pub(crate) stage: &'static str,
     pub(crate) decision: &'static str,
-    pub(crate) reason_code: &'static str,
+    pub(crate) reason_code: String,
     pub(crate) action_ref: String,
 }
 
@@ -36,6 +128,8 @@ impl HookOutcome {
     pub(crate) fn to_machine_json(&self, tool_or_skill: &str) -> Value {
         json!({
             "schema_version": 1,
+            "event_schema_version": HOOK_EVENT_SCHEMA_VERSION,
+            "event_type": self.stage,
             "owner_layer": "agent_hooks",
             "stage": self.stage,
             "decision": self.decision,
@@ -45,16 +139,6 @@ impl HookOutcome {
             "tool_or_skill": normalize_machine_token(tool_or_skill),
         })
     }
-}
-
-pub(crate) fn pre_tool_use_outcome_for_state(
-    state: &AppState,
-    tool_or_skill: &str,
-    args: &Value,
-) -> HookOutcome {
-    let action_ref = tool_action_ref(tool_or_skill, args);
-    let policy = load_hook_policy(state);
-    evaluate_pre_tool_use(&policy, &action_ref)
 }
 
 pub(crate) fn post_tool_use_outcome(
@@ -71,7 +155,7 @@ pub(crate) fn post_tool_use_outcome(
     HookOutcome {
         stage: "post_tool_use",
         decision: PolicyDecision::Allow.as_token(),
-        reason_code,
+        reason_code: reason_code.to_string(),
         action_ref,
     }
 }
@@ -87,7 +171,7 @@ pub(crate) fn stop_outcome(final_status: &str) -> HookOutcome {
     HookOutcome {
         stage: "stop",
         decision: PolicyDecision::Allow.as_token(),
-        reason_code,
+        reason_code: reason_code.to_string(),
         action_ref: "agent_loop.stop".to_string(),
     }
 }
@@ -96,7 +180,7 @@ pub(crate) fn session_start_outcome() -> HookOutcome {
     HookOutcome {
         stage: "session_start",
         decision: PolicyDecision::Allow.as_token(),
-        reason_code: "session_start",
+        reason_code: "session_start".to_string(),
         action_ref: "agent_loop.session_start".to_string(),
     }
 }
@@ -112,7 +196,7 @@ pub(crate) fn session_end_outcome(final_status: &str) -> HookOutcome {
     HookOutcome {
         stage: "session_end",
         decision: PolicyDecision::Allow.as_token(),
-        reason_code,
+        reason_code: reason_code.to_string(),
         action_ref: "agent_loop.session_end".to_string(),
     }
 }
@@ -121,7 +205,7 @@ pub(crate) fn user_prompt_submit_outcome() -> HookOutcome {
     HookOutcome {
         stage: "user_prompt_submit",
         decision: PolicyDecision::Allow.as_token(),
-        reason_code: "user_prompt_submitted",
+        reason_code: "user_prompt_submitted".to_string(),
         action_ref: "agent_loop.user_prompt_submit".to_string(),
     }
 }
@@ -154,7 +238,7 @@ fn evaluate_pre_tool_use(policy: &HookPolicy, action_ref: &str) -> HookOutcome {
     HookOutcome {
         stage: "pre_tool_use",
         decision: decision.as_token(),
-        reason_code,
+        reason_code: reason_code.to_string(),
         action_ref,
     }
 }
@@ -181,50 +265,20 @@ fn structured_hook_error(outcome: &HookOutcome) -> String {
     .to_string()
 }
 
-fn load_hook_policy(state: &AppState) -> HookPolicy {
-    let path = state
-        .skill_rt
-        .workspace_root
-        .join("configs/agent_guard.toml");
-    let parsed = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| toml::from_str::<toml::Value>(&raw).ok());
-    let Some(root) = parsed.as_ref() else {
-        return HookPolicy::default();
-    };
-    HookPolicy {
-        blocked_action_refs: toml_string_array(root, &["agent", "hooks", "blocked_action_refs"]),
-        blocked_tools: toml_string_array(root, &["agent", "hooks", "blocked_tools"]),
-        require_confirmation_action_refs: toml_string_array(
-            root,
-            &["agent", "hooks", "require_confirmation_action_refs"],
-        ),
-        background_wait_action_refs: toml_string_array(
-            root,
-            &["agent", "hooks", "background_wait_action_refs"],
-        ),
+fn merge_hook_decision(outcome: &mut HookOutcome, decision: PolicyDecision, reason_code: String) {
+    if decision_priority(decision) > outcome.decision_kind().map(decision_priority).unwrap_or(0) {
+        outcome.decision = decision.as_token();
+        outcome.reason_code = reason_code;
     }
 }
 
-fn toml_string_array(root: &toml::Value, path: &[&str]) -> Vec<String> {
-    let mut cursor = root;
-    for segment in path {
-        let Some(next) = cursor.get(*segment) else {
-            return Vec::new();
-        };
-        cursor = next;
+fn decision_priority(decision: PolicyDecision) -> u8 {
+    match decision {
+        PolicyDecision::Allow => 1,
+        PolicyDecision::BackgroundWait => 2,
+        PolicyDecision::RequireConfirmation => 3,
+        PolicyDecision::Deny => 4,
     }
-    cursor
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(toml::Value::as_str)
-                .map(normalize_machine_token)
-                .filter(|value| !value.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn tool_action_ref(tool_or_skill: &str, args: &Value) -> String {

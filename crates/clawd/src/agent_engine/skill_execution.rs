@@ -37,7 +37,7 @@ use skill_execution_evidence::{
     structured_extra_evidence_output,
 };
 use skill_execution_observations::{
-    log_step_journal_summary, record_hook_outcome_observation,
+    log_step_journal_summary, record_hook_evaluation_observation,
     record_mcp_tool_execution_observation, record_post_tool_use_observation,
 };
 use skill_execution_preflight::{
@@ -822,23 +822,28 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
         ));
     }
-    let pre_tool_use_outcome =
-        crate::agent_hooks::pre_tool_use_outcome_for_state(state, normalized_skill, &exec_args);
-    record_hook_outcome_observation(
+    let pre_tool_use_evaluation = crate::agent_hooks::pre_tool_use_outcome_for_state(
+        state,
+        &task.task_id,
+        normalized_skill,
+        &exec_args,
+    )
+    .await;
+    record_hook_evaluation_observation(
         loop_state,
         normalized_skill,
         global_step,
         step_in_round,
-        &pre_tool_use_outcome,
+        &pre_tool_use_evaluation,
     );
-    if pre_tool_use_outcome.requires_confirmation() {
+    if pre_tool_use_evaluation.requires_confirmation() {
         super::publish_agent_loop_user_input_checkpoint_progress(
             state,
             task,
             loop_state,
             "hook_confirmation_required",
             normalized_skill,
-            &pre_tool_use_outcome.action_ref,
+            &pre_tool_use_evaluation.outcome.action_ref,
             &exec_args,
         );
         return Ok(SkillActionOutcome {
@@ -847,7 +852,7 @@ pub(super) async fn execute_prepared_skill_action(
             continue_in_round: false,
         });
     }
-    if pre_tool_use_outcome.requires_background_wait() {
+    if pre_tool_use_evaluation.requires_background_wait() {
         super::support::publish_agent_loop_checkpoint_progress(
             state,
             task,
@@ -860,7 +865,9 @@ pub(super) async fn execute_prepared_skill_action(
             continue_in_round: false,
         });
     }
-    if let Some(err) = crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_outcome) {
+    if let Some(err) =
+        crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_evaluation.outcome)
+    {
         return Ok(handle_preflight_argument_failure(
             state,
             task,

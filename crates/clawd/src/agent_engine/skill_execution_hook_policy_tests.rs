@@ -4,6 +4,7 @@ use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 struct TempDirGuard {
     path: PathBuf,
@@ -15,6 +16,15 @@ impl TempDirGuard {
             "rustclaw_{prefix}_{}",
             uuid::Uuid::new_v4().simple()
         ));
+        std::fs::create_dir_all(path.join("configs")).expect("create config dir");
+        Self { path }
+    }
+
+    fn new_in_repository(prefix: &str) -> Self {
+        let path = std::env::current_dir()
+            .expect("current repository")
+            .join("target/hook-runtime-tests")
+            .join(format!("{prefix}-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(path.join("configs")).expect("create config dir");
         Self { path }
     }
@@ -182,4 +192,106 @@ fn post_tool_hook_records_safe_run_cmd_machine_args() {
         Some("python3 test_calc_core.py")
     );
     assert!(observation.pointer("/args/api_key").is_none());
+}
+
+#[tokio::test]
+async fn trusted_command_hook_blocks_through_production_pre_tool_path() {
+    let temp = TempDirGuard::new_in_repository("trusted_command_hook");
+    std::fs::create_dir_all(temp.path.join("hooks")).expect("create hooks dir");
+    let body = "#!/bin/sh\nIFS= read -r _event\nprintf '%s\\n' '{\"schema_version\":1,\"decision\":\"deny\",\"reason_code\":\"fixture_policy_denied\"}'\n";
+    let hook_path = temp.path.join("hooks/policy-guard.sh");
+    std::fs::write(&hook_path, body).expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&hook_path)
+            .expect("hook metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&hook_path, permissions).expect("make hook executable");
+    }
+    let hash = format!("sha256:{:x}", Sha256::digest(body.as_bytes()));
+    std::fs::write(
+        temp.path.join("configs/agent_guard.toml"),
+        format!(
+            r#"
+[agent.hooks]
+blocked_action_refs = []
+blocked_tools = []
+require_confirmation_action_refs = []
+background_wait_action_refs = []
+
+[[agent.hooks.handlers]]
+id = "fixture_guard"
+stage = "pre_tool_use"
+kind = "command"
+enabled = true
+trusted = true
+blocking = true
+path = "hooks/policy-guard.sh"
+content_sha256 = "{hash}"
+timeout_ms = 1000
+max_input_bytes = 4096
+max_output_bytes = 4096
+max_attempts = 1
+failure_policy = "deny"
+"#
+        ),
+    )
+    .expect("write agent guard");
+    let mut state = super::tests::test_state();
+    state.skill_rt.workspace_root = temp.path.clone();
+    let task = claimed_task();
+    let mut loop_state = super::LoopState::new(2);
+    let exec_args = json!({"action": "read_text", "path": "README.md"});
+    let action = crate::AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: exec_args.clone(),
+    };
+    let actions = vec![action.clone()];
+
+    let _ = super::execute_prepared_skill_action(
+        &state,
+        &task,
+        "inspect",
+        "inspect",
+        &actions,
+        &[],
+        &mut loop_state,
+        &test_policy(),
+        0,
+        &action,
+        "fp-trusted-command-hook",
+        1,
+        1,
+        "fs_basic",
+        exec_args,
+        None,
+        None,
+        None,
+        "fs_basic.read_text".to_string(),
+        "call_tool",
+    )
+    .await
+    .expect("skill action outcome");
+
+    assert!(loop_state
+        .executed_step_results
+        .iter()
+        .all(|step| !step.is_ok()));
+    let handler = loop_state
+        .task_observations
+        .iter()
+        .find(|observation| {
+            observation
+                .get("handler_id")
+                .and_then(serde_json::Value::as_str)
+                == Some("fixture_guard")
+        })
+        .expect("handler observation");
+    assert_eq!(handler["status"], "ok", "handler={handler}");
+    assert_eq!(handler["decision"], "deny");
+    assert_eq!(handler["reason_code"], "fixture_policy_denied");
+    assert_eq!(handler["trust_status"], "trusted");
+    assert_eq!(handler["content_sha256"], hash);
 }

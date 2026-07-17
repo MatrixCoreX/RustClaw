@@ -7,8 +7,8 @@ use super::skill_execution_preflight::{
 };
 use super::{
     compose_policy_block_delivery, handle_skill_step_success, log_step_journal_summary,
-    record_hook_outcome_observation, record_post_tool_use_observation, register_failed_step_output,
-    AppState, ClaimedTask, LoopState,
+    record_hook_evaluation_observation, record_post_tool_use_observation,
+    register_failed_step_output, AppState, ClaimedTask, LoopState,
 };
 use crate::agent_engine::{
     append_delivery_message, append_progress_hint, build_safe_skill_args_summary,
@@ -436,28 +436,33 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
         );
         return Ok(Some(outcome.stop_signal));
     }
-    let pre_tool_use_outcome =
-        crate::agent_hooks::pre_tool_use_outcome_for_state(state, "run_cmd", &retry_args);
-    record_hook_outcome_observation(
+    let pre_tool_use_evaluation = crate::agent_hooks::pre_tool_use_outcome_for_state(
+        state,
+        &task.task_id,
+        "run_cmd",
+        &retry_args,
+    )
+    .await;
+    record_hook_evaluation_observation(
         loop_state,
         "run_cmd",
         global_step,
         step_in_round,
-        &pre_tool_use_outcome,
+        &pre_tool_use_evaluation,
     );
-    if pre_tool_use_outcome.requires_confirmation() {
+    if pre_tool_use_evaluation.requires_confirmation() {
         publish_agent_loop_user_input_checkpoint_progress(
             state,
             task,
             loop_state,
             "hook_confirmation_required",
             "run_cmd",
-            &pre_tool_use_outcome.action_ref,
+            &pre_tool_use_evaluation.outcome.action_ref,
             &retry_args,
         );
         return Ok(Some(Some("hook_confirmation_required".to_string())));
     }
-    if pre_tool_use_outcome.requires_background_wait() {
+    if pre_tool_use_evaluation.requires_background_wait() {
         support::publish_agent_loop_checkpoint_progress(
             state,
             task,
@@ -466,7 +471,9 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
         );
         return Ok(Some(Some("hook_background_wait".to_string())));
     }
-    if let Some(err) = crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_outcome) {
+    if let Some(err) =
+        crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_evaluation.outcome)
+    {
         let outcome = handle_preflight_argument_failure(
             state,
             task,

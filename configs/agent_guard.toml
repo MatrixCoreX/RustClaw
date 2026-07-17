@@ -63,6 +63,24 @@ blocked_tools = []
 require_confirmation_action_refs = []
 background_wait_action_refs = []
 
+# Trusted repository command hook template. Keep disabled until the relative path and SHA-256
+# are reviewed together; changing the file invalidates trust before the next execution.
+# [[agent.hooks.handlers]]
+# id = "workspace_policy_guard"
+# stage = "pre_tool_use"
+# kind = "command"
+# enabled = false
+# trusted = false
+# blocking = true
+# path = "hooks/workspace-policy-guard"
+# args = []
+# content_sha256 = "sha256:replace_with_64_lowercase_hex_characters"
+# timeout_ms = 3000
+# max_input_bytes = 32768
+# max_output_bytes = 16384
+# max_attempts = 1
+# failure_policy = "deny"
+
 [agent.subagents]
 # 用途/Purpose: subagent 角色与只读并发预算；只消费机器 token，不解析用户自然语言。
 # Machine-only subagent role and read-only parallel budget configuration.

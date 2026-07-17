@@ -36,14 +36,22 @@ pub(super) fn log_step_journal_summary(
     );
 }
 
-pub(super) fn record_hook_outcome_observation(
+pub(super) fn record_hook_evaluation_observation(
     loop_state: &mut LoopState,
     normalized_skill: &str,
     global_step: usize,
     step_in_round: usize,
-    outcome: &crate::agent_hooks::HookOutcome,
+    evaluation: &crate::agent_hooks::HookEvaluation,
 ) {
-    let mut payload = outcome.to_machine_json(normalized_skill);
+    for mut payload in evaluation.handler_observations.clone() {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("global_step".to_string(), json!(global_step));
+            obj.insert("step_in_round".to_string(), json!(step_in_round));
+            obj.insert("round_no".to_string(), json!(loop_state.round_no));
+        }
+        loop_state.task_observations.push(payload);
+    }
+    let mut payload = evaluation.outcome.to_machine_json(normalized_skill);
     if let Some(obj) = payload.as_object_mut() {
         obj.insert("global_step".to_string(), json!(global_step));
         obj.insert("step_in_round".to_string(), json!(step_in_round));
