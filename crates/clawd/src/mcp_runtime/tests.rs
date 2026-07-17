@@ -117,6 +117,43 @@ async fn untrusted_and_invalid_schema_servers_fail_closed() {
 }
 
 #[tokio::test]
+async fn health_tick_reconnects_closed_transport_without_replaying_a_tool() {
+    let marker =
+        std::env::temp_dir().join(format!("rustclaw-mcp-reconnect-{}", uuid::Uuid::new_v4()));
+    let mut config = fixture_config();
+    config
+        .servers
+        .get_mut("fixture")
+        .expect("fixture config")
+        .env
+        .insert(
+            "MCP_FIXTURE_EXIT_ONCE_MARKER".to_string(),
+            marker.to_string_lossy().into_owned(),
+        );
+    let runtime = McpRuntime::new(config);
+    runtime.start().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    runtime.health_tick().await;
+
+    assert_eq!(
+        runtime.lifecycle_snapshots()[0].state,
+        McpLifecycleState::Ready
+    );
+    let result = runtime
+        .call(
+            "mcp.fixture.lookup",
+            json!({"query": "after-reconnect"}),
+            None,
+        )
+        .await
+        .expect("call after reconnect");
+    assert_eq!(result.status, "ok");
+    runtime.stop().await;
+    let _ = std::fs::remove_file(marker);
+}
+
+#[tokio::test]
 async fn dynamic_mcp_capability_reaches_resolver_prompt_and_verifier_policy() {
     let runtime = started_fixture_runtime().await;
     let mut state = crate::AppState::test_default_with_fixture_provider();
@@ -183,6 +220,57 @@ async fn dynamic_mcp_capability_reaches_resolver_prompt_and_verifier_policy() {
         issue.kind == crate::verifier::VerifyIssueKind::MissingRequiredArg
             && issue.missing_fields == vec!["query"]
     }));
+    runtime.stop().await;
+}
+
+#[tokio::test]
+async fn large_catalog_uses_bounded_search_then_discloses_matching_schema() {
+    let mut config = fixture_config();
+    config.planner_visible_tools = 3;
+    config.catalog_search_max_results = 2;
+    let runtime = Arc::new(McpRuntime::new(config));
+    runtime.start().await;
+
+    let planner_tools = runtime.planner_tools();
+    assert_eq!(planner_tools.len(), 3);
+    assert!(planner_tools
+        .iter()
+        .any(|tool| tool.capability == "mcp.catalog.search"));
+    assert!(!planner_tools
+        .iter()
+        .any(|tool| tool.capability == "mcp.fixture.slow"));
+
+    let search = runtime
+        .call(
+            "mcp.catalog.search",
+            json!({"query": "slow", "limit": 1}),
+            None,
+        )
+        .await
+        .expect("catalog search");
+    assert_eq!(search.status, "ok");
+    let result = search.structured_content.expect("structured search result");
+    assert_eq!(result["match_count"], 1);
+    assert_eq!(result["returned_count"], 1);
+    assert_eq!(result["tools"][0]["capability"], "mcp.fixture.slow");
+    assert_eq!(result["tools"][0]["input_schema"]["type"], "object");
+
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.mcp_runtime = Arc::clone(&runtime);
+    let task = crate::ClaimedTask {
+        task_id: "mcp-search-task".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: Some("mcp-search-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let capability_map = crate::capability_map::build_capability_map_for_task(&state, &task);
+    assert!(capability_map.contains("mcp.catalog.search"));
+    assert!(!capability_map.contains("mcp.fixture.slow"));
     runtime.stop().await;
 }
 

@@ -70,6 +70,8 @@ busy_timeout_ms = 2000
         .expect("config without mcp table should load");
 
     assert!(!cfg.mcp.enabled);
+    assert_eq!(cfg.mcp.planner_visible_tools, 32);
+    assert_eq!(cfg.mcp.catalog_search_max_results, 20);
     assert!(cfg.mcp.servers.is_empty());
     assert!(cfg.mcp.enabled_server_names().is_empty());
 
@@ -96,6 +98,8 @@ busy_timeout_ms = 2000
 
 [mcp]
 enabled = true
+planner_visible_tools = 16
+catalog_search_max_results = 8
 
 [mcp.servers.repo]
 enabled = true
@@ -107,6 +111,9 @@ max_concurrency = 3
 max_output_bytes = 8192
 max_schema_bytes = 4096
 max_tools = 12
+health_check_seconds = 15
+reconnect_base_seconds = 3
+reconnect_max_seconds = 45
 trusted = true
 capability_prefix = "repo"
 allowed_tools = ["search", "read"]
@@ -131,6 +138,8 @@ url = "http://127.0.0.1:9000/events"
         .expect("config with mcp table should load");
 
     assert!(cfg.mcp.enabled);
+    assert_eq!(cfg.mcp.planner_visible_tools, 16);
+    assert_eq!(cfg.mcp.catalog_search_max_results, 8);
     assert_eq!(cfg.mcp.enabled_server_names(), vec!["repo".to_string()]);
     let repo = cfg.mcp.servers.get("repo").expect("repo server");
     assert_eq!(repo.transport.as_token(), "stdio");
@@ -140,6 +149,9 @@ url = "http://127.0.0.1:9000/events"
     assert_eq!(repo.max_output_bytes, 8192);
     assert_eq!(repo.max_schema_bytes, 4096);
     assert_eq!(repo.max_tools, 12);
+    assert_eq!(repo.health_check_seconds, 15);
+    assert_eq!(repo.reconnect_base_seconds, 3);
+    assert_eq!(repo.reconnect_max_seconds, 45);
     assert!(repo.trusted);
     assert_eq!(repo.capability_prefix.as_deref(), Some("repo"));
     assert_eq!(

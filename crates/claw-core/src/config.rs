@@ -540,12 +540,27 @@ impl McpTransportConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct McpConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default = "default_mcp_planner_visible_tools")]
+    pub planner_visible_tools: usize,
+    #[serde(default = "default_mcp_catalog_search_max_results")]
+    pub catalog_search_max_results: usize,
     #[serde(default)]
     pub servers: HashMap<String, McpServerConfig>,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            planner_visible_tools: default_mcp_planner_visible_tools(),
+            catalog_search_max_results: default_mcp_catalog_search_max_results(),
+            servers: HashMap::new(),
+        }
+    }
 }
 
 impl McpConfig {
@@ -592,6 +607,12 @@ pub struct McpServerConfig {
     pub max_schema_bytes: usize,
     #[serde(default = "default_mcp_max_tools")]
     pub max_tools: usize,
+    #[serde(default = "default_mcp_health_check_seconds")]
+    pub health_check_seconds: u64,
+    #[serde(default = "default_mcp_reconnect_base_seconds")]
+    pub reconnect_base_seconds: u64,
+    #[serde(default = "default_mcp_reconnect_max_seconds")]
+    pub reconnect_max_seconds: u64,
     #[serde(default)]
     pub trusted: bool,
     #[serde(default)]
@@ -618,6 +639,9 @@ impl Default for McpServerConfig {
             max_output_bytes: default_mcp_max_output_bytes(),
             max_schema_bytes: default_mcp_max_schema_bytes(),
             max_tools: default_mcp_max_tools(),
+            health_check_seconds: default_mcp_health_check_seconds(),
+            reconnect_base_seconds: default_mcp_reconnect_base_seconds(),
+            reconnect_max_seconds: default_mcp_reconnect_max_seconds(),
             trusted: false,
             capability_prefix: None,
             allowed_tools: Vec::new(),
@@ -730,6 +754,26 @@ fn default_mcp_max_schema_bytes() -> usize {
 
 fn default_mcp_max_tools() -> usize {
     128
+}
+
+fn default_mcp_planner_visible_tools() -> usize {
+    32
+}
+
+fn default_mcp_catalog_search_max_results() -> usize {
+    20
+}
+
+fn default_mcp_health_check_seconds() -> u64 {
+    30
+}
+
+fn default_mcp_reconnect_base_seconds() -> u64 {
+    2
+}
+
+fn default_mcp_reconnect_max_seconds() -> u64 {
+    60
 }
 
 #[derive(Debug, Clone, Deserialize)]
