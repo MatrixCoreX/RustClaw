@@ -23,6 +23,7 @@ AUTO_BUILD="${AUTO_BUILD:-1}"
 LOG_DIR="${LOG_DIR:-}"
 PRINT_LLM_TRACE_VALUE="${PRINT_LLM_TRACE:-1}"
 SELF_TEST_TRANSPORT=0
+CASE_NAMES=()
 
 TEMP_WORKSPACE=""
 CLAWD_PID=""
@@ -70,6 +71,7 @@ Usage:
 
 Options:
   --case-file PATH         NL case file. Default: scripts/nl_tests/cases/nl_cases_long_tail_flows.txt
+  --case-name NAME         Run one named case. Repeat to select multiple cases.
   --workspace-root DIR     Reuse a temp workspace instead of mktemp
   --log-dir DIR            Preserve logs under this directory
   --port PORT              clawd listen port
@@ -105,6 +107,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --case-file)
       CASE_FILE="${2:-}"
+      shift 2
+      ;;
+    --case-name)
+      CASE_NAMES+=("${2:-}")
       shift 2
       ;;
     --workspace-root)
@@ -252,6 +258,11 @@ def replace_once(pattern: str, replacement: str, raw: str) -> str:
 
 text = replace_once(r'^listen\s*=\s*".*"$', f'listen = "127.0.0.1:{port}"', text)
 text = replace_once(r'^sqlite_path\s*=\s*".*"$', f'sqlite_path = "{sqlite_path}"', text)
+text = replace_once(
+    r'^access_profile\s*=\s*".*"$',
+    'access_profile = "full"',
+    text,
+)
 text = replace_once(r'^auto_on_capability_gap\s*=\s*(true|false)$', 'auto_on_capability_gap = false', text)
 text = replace_once(r'^allow_execute\s*=\s*(true|false)$', 'allow_execute = false', text)
 text = replace_once(r'^allow_package_install\s*=\s*(true|false)$', 'allow_package_install = false', text)
@@ -260,6 +271,11 @@ text = replace_once(r'^allow_runtime_enable\s*=\s*(true|false)$', 'allow_runtime
 
 config_path.write_text(text, encoding="utf-8")
 PY
+
+  grep -Fxq 'access_profile = "full"' "$config_path" || {
+    echo "long-tail test config did not enable its required full tool profile" >&2
+    return 1
+  }
 }
 
 prepare_http_demo() {
@@ -615,97 +631,78 @@ def trace_has_expected_part(part: str) -> bool:
             return True
     return False
 
-def is_mutating_run_cmd(command: str) -> bool:
-    lower = command.lower()
-    markers = [
-        ">",
-        " tee ",
-        "sed -i",
-        "python -c",
-        "python3 -c",
-        "perl -0pi",
-        "perl -pi",
-        "printf ",
-        "echo ",
-        "cat <<",
-        "cp ",
-        "mv ",
-    ]
-    return any(marker in lower for marker in markers)
+step_results = [
+    step
+    for step in (trace.get("step_results") or [])
+    if isinstance(step, dict) and str(step.get("status") or "").lower() == "ok"
+]
 
-repair_round = False
-repair_mutation = False
-for idx, round_entry in enumerate(rounds):
-    plan = round_entry.get("plan_result") or {}
-    goal = str(plan.get("goal") or "")
-    plan_kind = str(plan.get("plan_kind") or "")
-    in_repair = "current_phase=repair" in goal or plan_kind == "Repair"
-    in_apply_after_first_check = idx > 0 and "current_phase=apply" in goal
-    treat_as_repair_round = in_repair or in_apply_after_first_check
-    if treat_as_repair_round:
-        repair_round = True
-    for step in plan.get("steps") or []:
-        skill = str(step.get("skill") or step.get("tool") or step.get("capability") or "")
-        args = step.get("args") or {}
-        action = str(args.get("action") or "").strip().lower()
-        if not treat_as_repair_round:
-            continue
-        if skill in {"write_file", "make_dir", "remove_file"}:
-            repair_mutation = True
-            break
-        if skill == "fs_basic" and action in {
-            "write_text",
-            "append_text",
-            "make_dir",
-            "remove_path",
-            "rename_path",
-            "copy_path",
-        }:
-            repair_mutation = True
-            break
-        if skill == "service_control":
-            if action in {"start", "stop", "restart", "reload", "enable", "disable"}:
-                repair_mutation = True
-                break
-        if skill == "run_cmd":
-            command = str(args.get("command") or "")
-            if is_mutating_run_cmd(command):
-                repair_mutation = True
-                break
-    if repair_mutation:
-        break
+def action_refs(step):
+    refs = []
+    for key in (
+        "requested_action_ref",
+        "requested_capability",
+        "resolved_capability",
+        "sanitized_args_summary",
+    ):
+        value = step.get(key)
+        if isinstance(value, str) and value.strip():
+            refs.append(value.strip().lower())
+    return refs
 
-if repair_round and not repair_mutation:
-    for step in trace.get("step_results") or []:
-        skill = str(
-            step.get("executed_skill")
-            or step.get("skill")
-            or step.get("resolved_tool_or_skill")
-            or ""
-        )
-        output_excerpt = str(step.get("output_excerpt") or "")
-        if skill in {"write_file", "make_dir", "remove_file"}:
-            repair_mutation = True
-            break
-        if skill == "fs_basic":
-            action_ref = str(
-                step.get("requested_action_ref")
-                or step.get("requested_capability")
-                or ""
-            ).lower()
-            if any(token in action_ref for token in (
-                "write_text",
-                "append_text",
-                "make_dir",
-                "remove_path",
-                "rename_path",
-                "copy_path",
-            )):
-                repair_mutation = True
-                break
-        if skill == "run_cmd" and is_mutating_run_cmd(output_excerpt):
-            repair_mutation = True
-            break
+def is_http_observation(step):
+    refs = set(action_refs(step))
+    return bool(refs & {"http.get", "http_basic.get"})
+
+mutation_action_refs = {
+    "fs_basic.write_text",
+    "fs_basic.append_text",
+    "fs_basic.make_dir",
+    "fs_basic.remove_path",
+    "fs_basic.rename_path",
+    "fs_basic.copy_path",
+    "write_file",
+    "make_dir",
+    "remove_file",
+    "workspace.apply_patch",
+}
+
+def is_structured_mutation(step):
+    if isinstance(step.get("structured_workspace_mutation"), dict):
+        return True
+    return bool(set(action_refs(step)) & mutation_action_refs)
+
+http_indexes = [
+    idx for idx, step in enumerate(step_results) if is_http_observation(step)
+]
+mutation_indexes = [
+    idx for idx, step in enumerate(step_results) if is_structured_mutation(step)
+]
+first_http_index = http_indexes[0] if http_indexes else None
+repair_mutation_index = next(
+    (
+        idx
+        for idx in mutation_indexes
+        if first_http_index is not None and idx > first_http_index
+    ),
+    None,
+)
+
+coding_workflow = (
+    ((result.get("task_journal") or {}).get("summary") or {}).get("coding_workflow")
+    or trace.get("coding_workflow")
+    or {}
+)
+changed_file_count = int(coding_workflow.get("changed_file_count") or 0)
+repair_mutation = repair_mutation_index is not None
+if not repair_mutation and first_http_index is not None and changed_file_count > 0:
+    repair_mutation = True
+
+if repair_mutation_index is not None:
+    post_repair_validation = any(idx > repair_mutation_index for idx in http_indexes)
+else:
+    post_repair_validation = repair_mutation and len(http_indexes) >= 2
+repair_round = len(rounds) >= 2 and repair_mutation and post_repair_validation
 
 status = str(data.get("status") or "")
 missing = []
@@ -718,6 +715,8 @@ if not repair_round:
     missing.append("repair_round_missing")
 if not repair_mutation:
     missing.append("repair_mutation_missing")
+if not post_repair_validation:
+    missing.append("post_repair_validation_missing")
 if missing:
     print("\n".join(missing))
     raise SystemExit(1)
@@ -937,11 +936,13 @@ PY
 
 load_case_rows() {
   local case_file="$1"
-  python3 - "$case_file" <<'PY'
+  python3 - "$case_file" "${CASE_NAMES[@]}" <<'PY'
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
+selected_names = set(sys.argv[2:])
+matched_names = set()
 for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
     line = raw.strip()
     if not line or line.startswith("#"):
@@ -950,7 +951,14 @@ for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1
     if len(parts) != 5:
         raise SystemExit(f"invalid case format on line {idx}: {raw}")
     name, auth, assertion, expected, prompt = parts
+    if selected_names and name not in selected_names:
+        continue
+    matched_names.add(name)
     print(f"{idx}\x1f{name}\x1f{auth}\x1f{assertion}\x1f{expected}\x1f{prompt}")
+
+missing_names = sorted(selected_names - matched_names)
+if missing_names:
+    raise SystemExit(f"unknown case name(s): {','.join(missing_names)}")
 PY
 }
 
