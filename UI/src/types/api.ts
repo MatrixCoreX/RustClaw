@@ -188,6 +188,26 @@ export interface TaskLlmDebugCall extends TaskLlmDebugEntry {
 
 export interface TaskLlmDebugResponse {
   task_id: string;
+  trace_schema_version?: number | null;
+  access?: {
+    opt_in?: boolean | null;
+    scope?: string | null;
+  } | null;
+  redaction?: {
+    applied?: boolean | null;
+    field_count?: number | null;
+    policy?: string | null;
+  } | null;
+  trace_layers?: {
+    provider_data?: {
+      classification?: string | null;
+      fields?: string[] | null;
+    } | null;
+    rustclaw_decisions?: {
+      classification?: string | null;
+      fields?: string[] | null;
+    } | null;
+  } | null;
   call_count?: number | null;
   flow_summary?: TaskLlmDebugFlowSummary | null;
   calls?: TaskLlmDebugCall[] | null;

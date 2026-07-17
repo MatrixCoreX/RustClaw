@@ -21,12 +21,17 @@ pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let stripped = compact_internal_json_log_lines(&stripped);
     let stripped = redact_internal_context_fragments(&stripped);
     let stripped = replace_structured_skill_error_payloads(&stripped);
-    let redacted = redact_sensitive_url_params(&stripped);
+    let redacted = redact_sensitive_text(&stripped);
+    redact_runtime_template_placeholders(&redacted)
+}
+
+pub(crate) fn redact_sensitive_text(text: &str) -> String {
+    let redacted = redact_sensitive_url_params(text);
     let redacted = redact_sensitive_key_value_pairs(&redacted);
     let redacted = redact_sensitive_json_string_fields(&redacted);
     let redacted = redact_authorization_values(&redacted);
     let redacted = redact_secret_token_references(&redacted);
-    redact_runtime_template_placeholders(&redacted)
+    redact_prefixed_secret_values(&redacted)
 }
 
 fn first_internal_context_marker_pos(text: &str) -> Option<usize> {
@@ -405,6 +410,17 @@ fn redact_secret_token_references(text: &str) -> String {
     SECRET_TOKEN_RE
         .get_or_init(|| {
             Regex::new(r"rustclaw-secret://v1/[A-Za-z0-9-]+").expect("secret_token_reference_regex")
+        })
+        .replace_all(text, REDACTED)
+        .into_owned()
+}
+
+fn redact_prefixed_secret_values(text: &str) -> String {
+    static PREFIXED_SECRET_RE: OnceLock<Regex> = OnceLock::new();
+    PREFIXED_SECRET_RE
+        .get_or_init(|| {
+            Regex::new(r"(?i)\b(?:sk-|tp-|ghp_|github_pat_|xoxb-|xoxp-)[A-Za-z0-9._~+/=-]{12,}")
+                .expect("prefixed_secret_regex")
         })
         .replace_all(text, REDACTED)
         .into_owned()

@@ -314,6 +314,7 @@ include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");
+include!("ui_routes/teaching_trace_security.rs");
 include!("ui_routes/task_debug_trace.rs");
 include!("ui_routes/logs_usage_debug.rs");
 include!("ui_routes/slo_metrics.rs");
@@ -332,3 +333,7 @@ mod tests;
 #[cfg(test)]
 #[path = "ui_routes/slo_metrics_tests.rs"]
 mod slo_metrics_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/teaching_trace_security_tests.rs"]
+mod teaching_trace_security_tests;

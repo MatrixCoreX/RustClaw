@@ -282,7 +282,7 @@ export function useChatRuntime({
 
   const fetchChatTeachingLlmDebugById = async (id: string): Promise<TaskLlmDebugResponse> => {
     const normalizedId = encodeURIComponent(id.trim());
-    const res = await apiFetch(`/v1/debug/tasks/${normalizedId}`);
+    const res = await apiFetch(`/v1/debug/tasks/${normalizedId}?teaching=true`);
     const body = (await res.json()) as ApiResponse<TaskLlmDebugResponse>;
     if (!res.ok || !body.ok || !body.data) {
       throw new Error(body.error || `chat teaching trace query failed (${res.status})`);
