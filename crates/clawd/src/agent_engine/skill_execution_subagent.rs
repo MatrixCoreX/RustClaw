@@ -1,6 +1,61 @@
 use serde_json::{json, Value};
 
-use super::{log_step_journal_summary, register_step_output, ClaimedTask, LoopState};
+use super::{log_step_journal_summary, register_step_output, AppState, ClaimedTask, LoopState};
+
+pub(super) async fn record_subagent_hook_stage(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    stage: crate::agent_hooks::HookStage,
+    args: &Value,
+    global_step: usize,
+    step_in_round: usize,
+    status: &str,
+) {
+    let role = args
+        .get("role")
+        .and_then(Value::as_str)
+        .and_then(crate::agent_runtime_contract::SubagentRole::parse_token)
+        .map(|role| role.as_token())
+        .unwrap_or("unresolved");
+    let evaluation = crate::agent_hooks::lifecycle_stage_outcome_for_state(
+        state,
+        &task.task_id,
+        stage,
+        "agent_loop.subagent",
+        json!({
+            "role": role,
+            "status": status,
+            "objective_char_count": args
+                .get("objective")
+                .and_then(Value::as_str)
+                .map(|value| value.chars().count())
+                .unwrap_or(0),
+            "context_ref_count": args
+                .get("context_refs")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0),
+            "child_count": args
+                .get("children")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0),
+            "global_step": global_step,
+            "step_in_round": step_in_round,
+            "round_no": loop_state.round_no,
+        }),
+    )
+    .await;
+    for mut observation in evaluation.machine_observations("subagent") {
+        if let Some(object) = observation.as_object_mut() {
+            object.insert("global_step".to_string(), json!(global_step));
+            object.insert("step_in_round".to_string(), json!(step_in_round));
+            object.insert("round_no".to_string(), json!(loop_state.round_no));
+        }
+        loop_state.task_observations.push(observation);
+    }
+}
 
 fn latest_subagent_runtime_observation_for_step(
     loop_state: &LoopState,

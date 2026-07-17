@@ -5,9 +5,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    evaluate_pre_tool_use, execute_command_handler, merge_hook_decision, parse_handler_output,
-    pre_tool_hook_event, structured_hook_error, validate_command_handler, HookHandlerConfig,
-    HookPolicy, HookStage,
+    evaluate_pre_tool_use, execute_command_handler, lifecycle_hook_event, merge_hook_decision,
+    parse_handler_output, pre_tool_hook_event, structured_hook_error, validate_command_handler,
+    HookHandlerConfig, HookPolicy, HookStage,
 };
 use crate::policy_decision::PolicyDecision;
 
@@ -239,6 +239,57 @@ fn pre_tool_event_exposes_machine_shape_without_argument_values() {
     assert!(!raw.contains("secret-command-value"));
     assert!(!raw.contains("secret-token-value"));
     assert!(!raw.contains("非机器字段"));
+}
+
+#[test]
+fn lifecycle_event_drops_semantic_and_secret_metadata_fields() {
+    let event = lifecycle_hook_event(
+        HookStage::SessionStart,
+        "task-1",
+        "agent_loop.session_start",
+        json!({
+            "task_kind": "ask",
+            "user_prompt": "must-not-appear",
+            "final_answer": "must-not-appear",
+            "api_key": "must-not-appear",
+            "access_token": "must-not-appear",
+            "非机器字段": "must-not-appear"
+        }),
+    );
+    let raw = event.to_string();
+
+    assert_eq!(event["metadata"]["task_kind"], "ask");
+    assert!(!raw.contains("must-not-appear"));
+    assert!(event["metadata"]
+        .as_object()
+        .is_some_and(|value| value.len() == 1));
+}
+
+#[test]
+fn blocking_handler_is_limited_to_decision_capable_stages() {
+    let mut handler = HookHandlerConfig {
+        id: "fixture_session_observer".to_string(),
+        stage: "session_start".to_string(),
+        kind: "command".to_string(),
+        enabled: true,
+        trusted: true,
+        blocking: true,
+        ..HookHandlerConfig::default()
+    };
+    assert_eq!(
+        validate_command_handler(Path::new("."), handler.clone())
+            .expect_err("session observer cannot block")
+            .1,
+        "hook_handler_blocking_stage_invalid"
+    );
+
+    handler.blocking = false;
+    assert_ne!(
+        validate_command_handler(Path::new("."), handler)
+            .expect_err("missing command path must still fail")
+            .1,
+        "hook_handler_blocking_stage_invalid"
+    );
 }
 
 #[tokio::test]

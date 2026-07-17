@@ -36,9 +36,12 @@ use skill_execution_evidence::{
     register_structured_extra_file_path_outputs, skill_extra_requests_user_input,
     structured_extra_evidence_output,
 };
+#[cfg(test)]
+use skill_execution_observations::record_post_tool_use_observation;
 use skill_execution_observations::{
     log_step_journal_summary, record_hook_evaluation_observation,
-    record_mcp_tool_execution_observation, record_post_tool_use_observation,
+    record_mcp_tool_execution_observation, record_permission_request_hook,
+    record_post_tool_use_hook_observations,
 };
 use skill_execution_preflight::{
     capability_isolation_artifact_refs, capability_isolation_policy_error,
@@ -46,7 +49,7 @@ use skill_execution_preflight::{
     structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
     validate_skill_output_contract,
 };
-use skill_execution_subagent::record_subagent_step_execution;
+use skill_execution_subagent::{record_subagent_hook_stage, record_subagent_step_execution};
 
 async fn run_mcp_tool_observation(
     state: &AppState,
@@ -695,6 +698,17 @@ pub(super) async fn execute_prepared_skill_action(
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
     if normalized_skill == "subagent" {
+        record_subagent_hook_stage(
+            state,
+            task,
+            loop_state,
+            crate::agent_hooks::HookStage::SubagentStart,
+            &exec_args,
+            global_step,
+            step_in_round,
+            "started",
+        )
+        .await;
         let subagent_config = super::subagent_runtime::load_subagent_runtime_config(state);
         if super::subagent_runtime::persistent_child_task_requested(&exec_args) {
             let persistent_outcome =
@@ -719,6 +733,21 @@ pub(super) async fn execute_prepared_skill_action(
                 action_trace_kind,
                 step_error_signal,
             );
+            record_subagent_hook_stage(
+                state,
+                task,
+                loop_state,
+                crate::agent_hooks::HookStage::SubagentStop,
+                &exec_args,
+                global_step,
+                step_in_round,
+                if step_error_signal.is_some() {
+                    "error"
+                } else {
+                    "ok"
+                },
+            )
+            .await;
             return Ok(SkillActionOutcome {
                 ended_with_user_visible_output: false,
                 stop_signal: stop_signal.map(str::to_string),
@@ -752,6 +781,17 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
             stop_signal.as_deref(),
         );
+        record_subagent_hook_stage(
+            state,
+            task,
+            loop_state,
+            crate::agent_hooks::HookStage::SubagentStop,
+            &exec_args,
+            global_step,
+            step_in_round,
+            if stop_signal.is_some() { "error" } else { "ok" },
+        )
+        .await;
         return Ok(SkillActionOutcome {
             ended_with_user_visible_output: false,
             stop_signal,
@@ -837,6 +877,48 @@ pub(super) async fn execute_prepared_skill_action(
         &pre_tool_use_evaluation,
     );
     if pre_tool_use_evaluation.requires_confirmation() {
+        let permission_evaluation = record_permission_request_hook(
+            state,
+            task,
+            loop_state,
+            normalized_skill,
+            &pre_tool_use_evaluation.outcome.action_ref,
+            global_step,
+            step_in_round,
+        )
+        .await;
+        if permission_evaluation.requires_background_wait() {
+            super::support::publish_agent_loop_checkpoint_progress(
+                state,
+                task,
+                loop_state,
+                "hook_background_wait",
+            );
+            return Ok(SkillActionOutcome {
+                ended_with_user_visible_output: false,
+                stop_signal: Some("hook_background_wait".to_string()),
+                continue_in_round: false,
+            });
+        }
+        if permission_evaluation.outcome.decision_kind()
+            == Some(crate::policy_decision::PolicyDecision::Deny)
+        {
+            if let Some(err) =
+                crate::agent_hooks::structured_error_for_outcome(&permission_evaluation.outcome)
+            {
+                return Ok(handle_preflight_argument_failure(
+                    state,
+                    task,
+                    loop_state,
+                    global_step,
+                    step_in_round,
+                    normalized_skill,
+                    classification_args,
+                    &err,
+                    action_trace_kind,
+                ));
+            }
+        }
         super::publish_agent_loop_user_input_checkpoint_progress(
             state,
             task,
@@ -942,14 +1024,17 @@ pub(super) async fn execute_prepared_skill_action(
             started_at.elapsed(),
         );
     }
-    record_post_tool_use_observation(
+    record_post_tool_use_hook_observations(
+        state,
+        task,
         loop_state,
         normalized_skill,
         &exec_args,
         global_step,
         step_in_round,
         step_execution.status,
-    );
+    )
+    .await;
     let raw_action_effect = crate::execution_recipe::classify_skill_action_effect(
         state,
         normalized_skill,

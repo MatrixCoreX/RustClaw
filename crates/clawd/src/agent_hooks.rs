@@ -9,9 +9,9 @@ mod runtime;
 mod shared;
 #[cfg(test)]
 use command::{execute_command_handler, validate_command_handler};
-pub(crate) use runtime::pre_tool_use_outcome_for_state;
+pub(crate) use runtime::{lifecycle_stage_outcome_for_state, pre_tool_use_outcome_for_state};
 #[cfg(test)]
-use shared::{parse_handler_output, pre_tool_hook_event, HookHandlerConfig};
+use shared::{lifecycle_hook_event, parse_handler_output, pre_tool_hook_event, HookHandlerConfig};
 
 const HOOK_EVENT_SCHEMA_VERSION: u16 = 1;
 
@@ -103,6 +103,12 @@ impl HookEvaluation {
     pub(crate) fn requires_background_wait(&self) -> bool {
         self.outcome.requires_background_wait()
     }
+
+    pub(crate) fn machine_observations(&self, target: &str) -> Vec<Value> {
+        let mut observations = self.handler_observations.clone();
+        observations.push(self.outcome.to_machine_json(target));
+        observations
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,6 +185,7 @@ pub(crate) fn stop_outcome(final_status: &str) -> HookOutcome {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn session_start_outcome() -> HookOutcome {
     HookOutcome {
         stage: "session_start",
@@ -204,6 +211,7 @@ pub(crate) fn session_end_outcome(final_status: &str) -> HookOutcome {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn user_prompt_submit_outcome() -> HookOutcome {
     HookOutcome {
         stage: "user_prompt_submit",
@@ -247,9 +255,18 @@ fn evaluate_pre_tool_use(policy: &HookPolicy, action_ref: &str) -> HookOutcome {
 }
 
 fn structured_hook_error(outcome: &HookOutcome) -> String {
-    let message_key = match outcome.decision_kind() {
-        Some(PolicyDecision::BackgroundWait) => "clawd.agent_hook.pre_tool_use_background_wait",
-        Some(PolicyDecision::RequireConfirmation) => {
+    let message_key = match (outcome.stage, outcome.decision_kind()) {
+        ("permission_request", Some(PolicyDecision::BackgroundWait)) => {
+            "clawd.agent_hook.permission_request_background_wait"
+        }
+        ("permission_request", Some(PolicyDecision::RequireConfirmation)) => {
+            "clawd.agent_hook.permission_request_requires_confirmation"
+        }
+        ("permission_request", _) => "clawd.agent_hook.permission_request_blocked",
+        (_, Some(PolicyDecision::BackgroundWait)) => {
+            "clawd.agent_hook.pre_tool_use_background_wait"
+        }
+        (_, Some(PolicyDecision::RequireConfirmation)) => {
             "clawd.agent_hook.pre_tool_use_requires_confirmation"
         }
         _ => "clawd.agent_hook.pre_tool_use_blocked",

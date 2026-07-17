@@ -153,6 +153,9 @@ pub(super) fn validate_common_handler(
     let Some(stage) = HookStage::parse_token(&handler.stage) else {
         return Err((handler_id, "hook_handler_stage_invalid"));
     };
+    if handler.blocking && !matches!(stage, HookStage::PreToolUse | HookStage::PermissionRequest) {
+        return Err((handler_id, "hook_handler_blocking_stage_invalid"));
+    }
     if !handler.trusted {
         return Err((handler_id, "hook_handler_untrusted"));
     }
@@ -269,6 +272,51 @@ pub(super) fn pre_tool_hook_event(
         "argument_byte_count": args.to_string().len(),
         "argument_fields": argument_fields,
     })
+}
+
+pub(super) fn lifecycle_hook_event(
+    stage: HookStage,
+    task_id: &str,
+    action_ref: &str,
+    metadata: Value,
+) -> Value {
+    let metadata = metadata
+        .as_object()
+        .map(|object| {
+            object
+                .iter()
+                .filter(|(key, _)| lifecycle_metadata_key_allowed(key))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<serde_json::Map<_, _>>()
+        })
+        .unwrap_or_default();
+    json!({
+        "schema_version": HOOK_EVENT_SCHEMA_VERSION,
+        "event_type": stage.as_token(),
+        "task_id": task_id,
+        "action_ref": action_ref,
+        "metadata": metadata,
+    })
+}
+
+fn lifecycle_metadata_key_allowed(key: &str) -> bool {
+    is_machine_token(key, 128)
+        && !matches!(
+            key,
+            "user_prompt"
+                | "user_text"
+                | "final_answer"
+                | "response_text"
+                | "raw_response"
+                | "raw_output"
+                | "api_key"
+        )
+        && !key.split(['_', '-', '.']).any(|part| {
+            matches!(
+                part,
+                "secret" | "password" | "credential" | "token" | "api_key"
+            )
+        })
 }
 
 pub(super) fn handler_observation(

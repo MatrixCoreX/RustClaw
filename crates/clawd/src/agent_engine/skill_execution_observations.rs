@@ -43,7 +43,7 @@ pub(super) fn record_hook_evaluation_observation(
     step_in_round: usize,
     evaluation: &crate::agent_hooks::HookEvaluation,
 ) {
-    for mut payload in evaluation.handler_observations.clone() {
+    for mut payload in evaluation.machine_observations(normalized_skill) {
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("global_step".to_string(), json!(global_step));
             obj.insert("step_in_round".to_string(), json!(step_in_round));
@@ -51,15 +51,87 @@ pub(super) fn record_hook_evaluation_observation(
         }
         loop_state.task_observations.push(payload);
     }
-    let mut payload = evaluation.outcome.to_machine_json(normalized_skill);
-    if let Some(obj) = payload.as_object_mut() {
-        obj.insert("global_step".to_string(), json!(global_step));
-        obj.insert("step_in_round".to_string(), json!(step_in_round));
-        obj.insert("round_no".to_string(), json!(loop_state.round_no));
-    }
-    loop_state.task_observations.push(payload);
 }
 
+pub(super) async fn record_permission_request_hook(
+    state: &crate::AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    normalized_skill: &str,
+    action_ref: &str,
+    global_step: usize,
+    step_in_round: usize,
+) -> crate::agent_hooks::HookEvaluation {
+    let evaluation = crate::agent_hooks::lifecycle_stage_outcome_for_state(
+        state,
+        &task.task_id,
+        crate::agent_hooks::HookStage::PermissionRequest,
+        action_ref,
+        json!({
+            "request_source": "pre_tool_hook",
+            "global_step": global_step,
+            "step_in_round": step_in_round,
+            "round_no": loop_state.round_no,
+        }),
+    )
+    .await;
+    record_hook_evaluation_observation(
+        loop_state,
+        normalized_skill,
+        global_step,
+        step_in_round,
+        &evaluation,
+    );
+    evaluation
+}
+
+pub(super) async fn record_post_tool_use_hook_observations(
+    state: &crate::AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    normalized_skill: &str,
+    action_args: &Value,
+    global_step: usize,
+    step_in_round: usize,
+    step_status: crate::executor::StepExecutionStatus,
+) {
+    let action_ref = crate::agent_hooks::post_tool_use_outcome(
+        normalized_skill,
+        action_args,
+        step_status.as_str(),
+    )
+    .action_ref;
+    let evaluation = crate::agent_hooks::lifecycle_stage_outcome_for_state(
+        state,
+        &task.task_id,
+        crate::agent_hooks::HookStage::PostToolUse,
+        &action_ref,
+        json!({
+            "step_status": step_status.as_str(),
+            "global_step": global_step,
+            "step_in_round": step_in_round,
+            "round_no": loop_state.round_no,
+        }),
+    )
+    .await;
+    for mut payload in evaluation.machine_observations(normalized_skill) {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("global_step".to_string(), json!(global_step));
+            obj.insert("step_in_round".to_string(), json!(step_in_round));
+            obj.insert("round_no".to_string(), json!(loop_state.round_no));
+            obj.insert("step_status".to_string(), json!(step_status.as_str()));
+            obj.insert("status".to_string(), json!(step_status.as_str()));
+            if obj.get("handler_id").is_none() {
+                if let Some(args) = safe_post_tool_observation_args(normalized_skill, action_args) {
+                    obj.insert("args".to_string(), args);
+                }
+            }
+        }
+        loop_state.task_observations.push(payload);
+    }
+}
+
+#[cfg(test)]
 pub(super) fn record_post_tool_use_observation(
     loop_state: &mut LoopState,
     normalized_skill: &str,
