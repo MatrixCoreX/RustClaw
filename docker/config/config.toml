@@ -205,6 +205,8 @@ models = [
 ]
 input_modalities = ["text", "image", "video"]
 output_modalities = ["text"]
+supports_tools = true
+expected_latency_ms = 5000
 # MiniMax text routing/model calls can be slow under load; keep the per-request
 # window aligned with worker.llm_total_timeout_seconds instead of cutting off
 # normal responses at 60s.
@@ -226,6 +228,8 @@ models = [
 ]
 input_modalities = ["text"]
 output_modalities = ["text"]
+supports_tools = true
+expected_latency_ms = 5000
 timeout_seconds = 180
 
 # 用途/Purpose: 自定义 OpenAI-compatible 提供商.

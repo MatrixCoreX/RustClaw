@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use claw_core::config::AppConfig;
 
-use super::{classify_prompt_source, matches_provider_override, synthesize_llm_providers};
+use super::{
+    build_providers_for_selection, classify_prompt_source, matches_provider_override,
+    synthesize_llm_providers,
+};
 
 fn repo_config_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -213,4 +216,30 @@ fn minimax_defaults_openai_when_api_format_missing_or_empty() {
         .find(|p| p.name == "vendor-minimax")
         .expect("vendor-minimax when api_format blank");
     assert_eq!(minimax.provider_type, "openai_compat");
+}
+
+#[test]
+fn configured_vendor_capabilities_reach_provider_runtime() {
+    let path = repo_config_path();
+    let config =
+        AppConfig::load(path.to_str().expect("utf-8 path")).expect("config fixture should load");
+
+    let minimax = build_providers_for_selection(&config, Some("minimax"), None)
+        .into_iter()
+        .next()
+        .expect("minimax runtime provider");
+    assert_eq!(
+        minimax.config.input_modalities,
+        vec!["text".to_string(), "image".to_string(), "video".to_string()]
+    );
+    assert!(minimax.config.supports_tools);
+    assert_eq!(minimax.config.expected_latency_ms, Some(5_000));
+
+    let mimo = build_providers_for_selection(&config, Some("mimo"), None)
+        .into_iter()
+        .next()
+        .expect("mimo runtime provider");
+    assert_eq!(mimo.config.input_modalities, vec!["text".to_string()]);
+    assert!(mimo.config.supports_tools);
+    assert_eq!(mimo.config.expected_latency_ms, Some(5_000));
 }

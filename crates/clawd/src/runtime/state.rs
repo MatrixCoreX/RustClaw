@@ -49,6 +49,7 @@ pub(crate) struct LlmPromptBucket {
     pub(crate) provider_final_error_kinds: BTreeMap<String, u64>,
     pub(crate) provider_breaker_snapshots:
         BTreeMap<String, crate::providers::CircuitBreakerSnapshot>,
+    pub(crate) provider_route_evaluations: Vec<crate::providers::LlmProviderRouteEvaluation>,
     pub(crate) prompt_truncation_count: u64,
     pub(crate) prompt_bytes_before_max: Option<usize>,
     pub(crate) prompt_bytes_budget_min: Option<usize>,
@@ -1197,6 +1198,26 @@ impl AppState {
         bucket
             .provider_breaker_snapshots
             .insert(provider.to_string(), breaker);
+    }
+
+    pub(crate) fn note_task_provider_routing_plan_with_label(
+        &self,
+        task_id: &str,
+        label: &str,
+        evaluations: Vec<crate::providers::LlmProviderRouteEvaluation>,
+    ) {
+        const MAX_PROVIDER_ROUTE_EVALUATIONS_PER_BUCKET: usize = 64;
+        let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
+        let bucket = guard
+            .entry(task_id.to_string())
+            .or_default()
+            .entry(label.to_string())
+            .or_default();
+        let remaining = MAX_PROVIDER_ROUTE_EVALUATIONS_PER_BUCKET
+            .saturating_sub(bucket.provider_route_evaluations.len());
+        bucket
+            .provider_route_evaluations
+            .extend(evaluations.into_iter().take(remaining));
     }
 
     pub(crate) fn note_task_provider_breaker_snapshot_with_label(

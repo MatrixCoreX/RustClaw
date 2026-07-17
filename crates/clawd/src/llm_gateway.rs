@@ -11,6 +11,7 @@ use crate::runtime::TaskProviderBlocker;
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
 
 const TASK_LLM_COST_POLICY_BLOCKED_ERR: &str = "llm_cost_policy_blocked";
+const NO_ELIGIBLE_LLM_PROVIDER_ERR: &str = "no_eligible_llm_provider";
 
 fn llm_cost_policy_allows(
     state: &AppState,
@@ -303,12 +304,12 @@ fn build_providers_with_overrides(
                 &runtime_cfg.provider_type,
                 &runtime_cfg.model,
             );
-
             let client = build_llm_http_client(runtime_cfg.timeout_seconds).ok()?;
 
             Some(Arc::new(LlmProviderRuntime {
                 config: runtime_cfg.clone(),
                 pricing,
+                latency: Arc::new(crate::providers::LlmProviderLatencyTracker::default()),
                 client,
                 semaphore: Arc::new(Semaphore::new(runtime_cfg.max_concurrency.max(1))),
                 breaker: Arc::new(crate::providers::CircuitBreaker::new()),
@@ -394,6 +395,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 1,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -416,6 +420,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 2,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -438,6 +445,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 3,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -460,6 +470,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 4,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -482,6 +495,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 5,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -504,6 +520,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 6,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -527,6 +546,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 7,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -550,6 +572,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 8,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -572,6 +597,9 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 context_window_tokens: v.context_window_tokens,
+                input_modalities: v.input_modalities.clone(),
+                supports_tools: v.supports_tools,
+                expected_latency_ms: v.expected_latency_ms,
                 priority: 9,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
@@ -659,6 +687,16 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
     let logical_call_index = state.task_llm_call_count(&task.task_id);
     state.note_task_prompt_size_with_label(&task.task_id, prompt_label, prompt.len());
+    let routing_plan = crate::providers::route_providers(providers, prompt.len(), &hints);
+    state.note_task_provider_routing_plan_with_label(
+        &task.task_id,
+        prompt_label,
+        routing_plan.evaluations,
+    );
+    let providers = routing_plan.providers;
+    if providers.is_empty() {
+        return Err(NO_ELIGIBLE_LLM_PROVIDER_ERR.to_string());
+    }
     touch_llm_task_lease(state, &task.task_id, prompt_label, "call_start");
     let mut heartbeat_stop = Some(start_llm_task_lease_heartbeat(
         state.clone(),
@@ -771,8 +809,12 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
             prompt_source
         );
 
+        let provider_started_at = std::time::Instant::now();
         match crate::call_provider_with_retry_with_hints(provider.clone(), prompt, &hints).await {
             Ok(output) => {
+                provider
+                    .latency
+                    .note_sample(provider_started_at.elapsed().as_millis() as u64);
                 touch_llm_task_lease(state, &task.task_id, prompt_label, "provider_success");
                 state.note_task_provider_attempts_with_label(
                     &task.task_id,
@@ -876,6 +918,9 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 return Ok(cleaned_text);
             }
             Err(err) => {
+                provider
+                    .latency
+                    .note_sample(provider_started_at.elapsed().as_millis() as u64);
                 touch_llm_task_lease(state, &task.task_id, prompt_label, "provider_error");
                 let error_kind = err.observability_kind();
                 if let Some(retry_after_seconds) = err.background_wait_seconds() {

@@ -611,6 +611,7 @@ async fn internal_llm_text(
     let hints = crate::ChatRequestHints {
         temperature: req.temperature,
         max_tokens: req.max_tokens,
+        ..Default::default()
     };
 
     match crate::llm_gateway::run_with_fallback_on_providers_with_hints(
