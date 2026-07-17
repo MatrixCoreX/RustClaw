@@ -10,10 +10,26 @@ pub(super) fn normalize_planned_actions(
     let actions = crate::capability_resolver::resolve_agent_actions_for_state(state, actions);
     let actions = normalize_action_arg_aliases(state, actions);
     let actions = annotate_readonly_cli_surface_run_cmds(state, actions);
+    let actions = collapse_redundant_drafting_synthesis(actions);
     super::media_artifact_plan::strip_media_artifact_text_overwrites(
         &state.skill_rt.workspace_root,
         actions,
     )
+}
+
+fn collapse_redundant_drafting_synthesis(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    let [AgentAction::SynthesizeAnswer { .. }, AgentAction::Respond { content }] =
+        actions.as_slice()
+    else {
+        return actions;
+    };
+    if content.trim().is_empty() || content.contains("{{") || content.contains("}}") {
+        return actions;
+    }
+    info!("plan_normalize_redundant_drafting_synthesis");
+    vec![AgentAction::Respond {
+        content: content.clone(),
+    }]
 }
 
 fn normalize_action_arg_aliases(state: &AppState, actions: Vec<AgentAction>) -> Vec<AgentAction> {

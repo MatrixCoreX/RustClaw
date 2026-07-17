@@ -57,6 +57,8 @@ REQUIRED_FILE_TOKENS = {
     ),
     "crates/clawd/src/memory_recent.rs": (
         "build_recent_turns_full_context_with_sources",
+        "CONTEXT_TRUNCATION_MARKER",
+        "bounded_context_segment",
         "source_task_ids.push(turn.task_id.clone())",
         "source_task_ids.reverse()",
     ),
