@@ -258,6 +258,12 @@ enum Command {
         command: ModelsCommand,
     },
 
+    /// Inspect configured MCP servers and discovered tools.
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommand,
+    },
+
     /// POST /v1/tasks/active
     Active {
         #[arg(long)]
@@ -435,6 +441,33 @@ enum ModelsCommand {
     },
     /// Print selected provider/model readiness from /v1/models/catalog.
     Readiness {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpCommand {
+    /// List configured MCP servers.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show MCP server lifecycle state.
+    Status {
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List discovered MCP tools.
+    Tools {
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a protocol ping without invoking a tool.
+    Test {
+        server: String,
         #[arg(long)]
         json: bool,
     },
@@ -1254,6 +1287,10 @@ fn main() -> Result<()> {
                 commands::run_models_readiness(base_url, k, *json)
             }
         },
+        Command::Mcp { command } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_mcp(base_url, k, command)
+        }
         Command::Active {
             user_id,
             chat_id,

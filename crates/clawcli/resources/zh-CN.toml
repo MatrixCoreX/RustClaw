@@ -26,6 +26,7 @@
 "command.tui" = "打开终端任务控制台"
 "command.permission" = "查看结构化权限决策"
 "command.models" = "查看供应商和模型能力"
+"command.mcp" = "查看 MCP 服务和已发现工具"
 "command.active" = "列出运行中的任务"
 "command.automation-runs" = "列出自动化运行记录"
 "command.cancel" = "取消匹配的运行中任务"
@@ -40,6 +41,16 @@
 "command.reload-skills" = "重新加载技能注册表"
 "command.replay" = "导出或查看任务回放包"
 "command.completions" = "生成终端补全脚本"
+"mcp.column.server" = "服务"
+"mcp.column.state" = "状态"
+"mcp.column.transport" = "传输方式"
+"mcp.column.tools" = "工具数"
+"mcp.column.error" = "错误码"
+"mcp.column.capability" = "能力"
+"mcp.column.effect" = "效果"
+"mcp.column.risk" = "风险"
+"mcp.column.required" = "必填参数"
+"mcp.column.latency_ms" = "延迟（毫秒）"
 
 [lists]
 "tui.help" = [

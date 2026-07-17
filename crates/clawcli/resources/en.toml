@@ -26,6 +26,7 @@
 "command.tui" = "Open the terminal task console"
 "command.permission" = "Inspect structured permission decisions"
 "command.models" = "Inspect provider and model capabilities"
+"command.mcp" = "Inspect MCP servers and discovered tools"
 "command.active" = "List active tasks"
 "command.automation-runs" = "List automation runs"
 "command.cancel" = "Cancel matching active tasks"
@@ -40,6 +41,16 @@
 "command.reload-skills" = "Reload the skill registry"
 "command.replay" = "Export or inspect recorded task replay bundles"
 "command.completions" = "Generate a shell completion script"
+"mcp.column.server" = "SERVER"
+"mcp.column.state" = "STATE"
+"mcp.column.transport" = "TRANSPORT"
+"mcp.column.tools" = "TOOLS"
+"mcp.column.error" = "ERROR"
+"mcp.column.capability" = "CAPABILITY"
+"mcp.column.effect" = "EFFECT"
+"mcp.column.risk" = "RISK"
+"mcp.column.required" = "REQUIRED"
+"mcp.column.latency_ms" = "LATENCY_MS"
 
 [lists]
 "tui.help" = [

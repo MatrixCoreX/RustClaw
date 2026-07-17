@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use std::time::Instant;
 
 use claw_core::config::{McpConfig, McpServerConfig, McpTransportConfig};
 use rmcp::transport::streamable_http_client::{
@@ -14,8 +15,8 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 use super::client::{McpClient, RmcpClient};
 use super::types::{
-    McpCallOutcome, McpLifecycleSnapshot, McpLifecycleState, McpRuntimeError, McpToolDescriptor,
-    McpToolPolicy,
+    McpCallOutcome, McpLifecycleSnapshot, McpLifecycleState, McpProbeOutcome, McpRuntimeError,
+    McpToolDescriptor, McpToolPolicy,
 };
 
 pub(crate) struct McpRuntime {
@@ -152,6 +153,34 @@ impl McpRuntime {
             .expect("mcp catalog lock poisoned")
             .get(capability)
             .cloned()
+    }
+
+    pub(crate) async fn probe(&self, server_id: &str) -> Result<McpProbeOutcome, McpRuntimeError> {
+        if !self.config.servers.contains_key(server_id) {
+            return Err(McpRuntimeError::new("mcp_server_not_configured"));
+        }
+        let client = self
+            .clients
+            .read()
+            .await
+            .get(server_id)
+            .cloned()
+            .ok_or_else(|| McpRuntimeError::new("mcp_server_not_ready"))?;
+        let started = Instant::now();
+        if let Err(error) = client.ping().await {
+            self.set_lifecycle(
+                server_id,
+                McpLifecycleState::Degraded,
+                0,
+                Some(error.code()),
+            );
+            return Err(error);
+        }
+        Ok(McpProbeOutcome {
+            server_id: server_id.to_string(),
+            status: "ok".to_string(),
+            latency_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        })
     }
 
     pub(crate) async fn call(

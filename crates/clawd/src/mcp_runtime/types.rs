@@ -35,6 +35,13 @@ pub(crate) struct McpLifecycleSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct McpProbeOutcome {
+    pub(crate) server_id: String,
+    pub(crate) status: String,
+    pub(crate) latency_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct McpToolPolicy {
     pub(crate) effect: String,
     pub(crate) risk_level: String,

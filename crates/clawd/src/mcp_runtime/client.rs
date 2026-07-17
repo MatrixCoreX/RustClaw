@@ -3,7 +3,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rmcp::model::{CallToolRequestParams, CallToolResult, PaginatedRequestParams, Tool};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ClientRequest, PaginatedRequestParams, PingRequest, Tool,
+};
 use rmcp::service::RunningService;
 use rmcp::{Peer, RoleClient};
 use serde_json::{Map, Value};
@@ -15,6 +17,7 @@ pub(crate) type McpClientFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, McpRuntimeError>> + Send + 'a>>;
 
 pub(crate) trait McpClient: Send + Sync {
+    fn ping(&self) -> McpClientFuture<'_, ()>;
     fn list_tools(&self) -> McpClientFuture<'_, Vec<Tool>>;
     fn call_tool(
         &self,
@@ -52,6 +55,20 @@ impl RmcpClient {
 }
 
 impl McpClient for RmcpClient {
+    fn ping(&self) -> McpClientFuture<'_, ()> {
+        Box::pin(async move {
+            tokio::time::timeout(
+                self.timeout,
+                self.peer
+                    .send_request(ClientRequest::PingRequest(PingRequest::default())),
+            )
+            .await
+            .map_err(|_| McpRuntimeError::new("mcp_ping_timeout"))?
+            .map(|_| ())
+            .map_err(|_| McpRuntimeError::new("mcp_ping_failed"))
+        })
+    }
+
     fn list_tools(&self) -> McpClientFuture<'_, Vec<Tool>> {
         Box::pin(async move {
             tokio::time::timeout(self.timeout, async {

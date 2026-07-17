@@ -3,7 +3,7 @@ mod manager;
 mod types;
 
 pub(crate) use manager::McpRuntime;
-pub(crate) use types::McpToolDescriptor;
+pub(crate) use types::{McpLifecycleSnapshot, McpProbeOutcome, McpToolDescriptor};
 
 #[cfg(test)]
 #[path = "tests.rs"]
