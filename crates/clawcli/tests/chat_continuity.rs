@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 #[test]
-fn pty_chat_reconnects_scoped_approval_and_keeps_four_turns_in_one_thread() {
+fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock clawd");
     let address = listener.local_addr().expect("mock address");
     let server = thread::spawn(move || run_mock_clawd(listener));
@@ -46,7 +46,10 @@ fn pty_chat_reconnects_scoped_approval_and_keeps_four_turns_in_one_thread() {
         "/approve-scope",
         "update one file",
         "run focused tests",
+        "/continue",
+        "correct the failing test",
         "review the diff",
+        "finish with verification",
         "/exit",
     ] {
         writeln!(stdin, "{line}").expect("write PTY turn");
@@ -81,13 +84,15 @@ fn pty_chat_reconnects_scoped_approval_and_keeps_four_turns_in_one_thread() {
     let _ = std::fs::remove_file(transcript_path);
 
     assert!(status.success(), "stdout={stdout}\nstderr={stderr}");
-    for task_id in ["task-1", "task-2", "task-3", "task-4"] {
+    for task_id in ["task-1", "task-2", "task-3", "task-4", "task-5", "task-6"] {
         assert!(stdout.contains(&format!("task_id={task_id}")), "{stdout}");
     }
     assert!(stdout.contains("\"seq\":1"), "{stdout}");
     assert!(stdout.contains("\"seq\":3"), "{stdout}");
     assert!(stdout.contains("approval_scope_grant_created"), "{stdout}");
-    assert!(stdout.contains("turn-4-complete"), "{stdout}");
+    assert!(stdout.contains("task_resume_requested"), "{stdout}");
+    assert!(stdout.contains("checkpoint-coding-3"), "{stdout}");
+    assert!(stdout.contains("turn-6-complete"), "{stdout}");
 }
 
 #[test]
@@ -386,7 +391,7 @@ fn run_mock_clawd(listener: TcpListener) {
         &task_status_response("task-1", "succeeded", "completed", Some("turn-1-complete")),
     );
 
-    for turn in 2..=4 {
+    for turn in 2..=2 {
         let submit = accept_request(&listener);
         assert_eq!(submit.path, "/v1/tasks");
         let payload = parse_json_body(&submit);
@@ -395,6 +400,129 @@ fn run_mock_clawd(listener: TcpListener) {
         assert_eq!(
             json_string(&payload, "/payload/resume_task_id"),
             format!("task-{}", turn - 1)
+        );
+        let task_id = format!("task-{turn}");
+        respond_json(submit.stream, &task_submit_response(&task_id));
+
+        let stream = accept_request(&listener);
+        assert_eq!(stream.path, format!("/v1/tasks/{task_id}/events?cursor=0"));
+        respond_sse(
+            stream.stream,
+            &[json!({
+                "seq": 1,
+                "event_type": "task_final",
+                "payload": {"execution_state": "completed", "status": "succeeded"}
+            })],
+        );
+        let final_status = accept_request(&listener);
+        assert_eq!(final_status.path, format!("/v1/tasks/{task_id}"));
+        respond_json(
+            final_status.stream,
+            &task_status_response(
+                &task_id,
+                "succeeded",
+                "completed",
+                Some(&format!("turn-{turn}-complete")),
+            ),
+        );
+    }
+
+    let background_submit = accept_request(&listener);
+    assert_eq!(background_submit.path, "/v1/tasks");
+    let background_payload = parse_json_body(&background_submit);
+    assert_eq!(
+        json_string(&background_payload, "/payload/thread_id"),
+        thread_id
+    );
+    assert_eq!(
+        json_string(&background_payload, "/payload/session_id"),
+        session_id
+    );
+    assert_eq!(
+        json_string(&background_payload, "/payload/resume_task_id"),
+        "task-2"
+    );
+    assert_eq!(
+        json_string(&background_payload, "/payload/text"),
+        "run focused tests"
+    );
+    respond_json(background_submit.stream, &task_submit_response("task-3"));
+
+    let background_stream = accept_request(&listener);
+    assert_eq!(background_stream.path, "/v1/tasks/task-3/events?cursor=0");
+    respond_sse(
+        background_stream.stream,
+        &[json!({
+            "seq": 1,
+            "event_type": "checkpoint_created",
+            "payload": {
+                "execution_state": "background",
+                "checkpoint_id": "checkpoint-coding-3",
+                "next_action_kind": "resume_checkpoint"
+            }
+        })],
+    );
+    let background_status = accept_request(&listener);
+    assert_eq!(background_status.path, "/v1/tasks/task-3");
+    respond_json(
+        background_status.stream,
+        &background_task_status_response("task-3"),
+    );
+
+    let continue_request = accept_request(&listener);
+    assert_eq!(continue_request.path, "/v1/tasks/resume-by-task-id");
+    let continue_payload = parse_json_body(&continue_request);
+    assert_eq!(continue_payload["task_id"], "task-3");
+    assert_eq!(continue_payload["resume_reason"], "user_continue");
+    assert!(continue_payload.get("approval_decision").is_none());
+    respond_json(
+        continue_request.stream,
+        &json!({
+            "ok": true,
+            "data": {
+                "status": "task_resume_requested",
+                "task_id": "task-3",
+                "checkpoint_id": "checkpoint-coding-3",
+                "resume_due": true
+            }
+        }),
+    );
+
+    let continued_stream = accept_request(&listener);
+    assert_eq!(continued_stream.path, "/v1/tasks/task-3/events?cursor=1");
+    respond_sse(
+        continued_stream.stream,
+        &[json!({
+            "seq": 2,
+            "event_type": "task_final",
+            "payload": {"execution_state": "completed", "status": "succeeded"}
+        })],
+    );
+    let continued_status = accept_request(&listener);
+    assert_eq!(continued_status.path, "/v1/tasks/task-3");
+    respond_json(
+        continued_status.stream,
+        &task_status_response("task-3", "succeeded", "completed", Some("turn-3-complete")),
+    );
+
+    let expected_prompts = [
+        "correct the failing test",
+        "review the diff",
+        "finish with verification",
+    ];
+    for turn in 4..=6 {
+        let submit = accept_request(&listener);
+        assert_eq!(submit.path, "/v1/tasks");
+        let payload = parse_json_body(&submit);
+        assert_eq!(json_string(&payload, "/payload/thread_id"), thread_id);
+        assert_eq!(json_string(&payload, "/payload/session_id"), session_id);
+        assert_eq!(
+            json_string(&payload, "/payload/resume_task_id"),
+            format!("task-{}", turn - 1)
+        );
+        assert_eq!(
+            json_string(&payload, "/payload/text"),
+            expected_prompts[turn - 4]
         );
         let task_id = format!("task-{turn}");
         respond_json(submit.stream, &task_submit_response(&task_id));
@@ -508,6 +636,31 @@ fn task_status_response(
             "status": status,
             "execution_state": execution_state,
             "result_json": {"messages": messages}
+        }
+    })
+}
+
+fn background_task_status_response(task_id: &str) -> Value {
+    json!({
+        "ok": true,
+        "data": {
+            "task_id": task_id,
+            "status": "running",
+            "execution_state": "background",
+            "task_lifecycle": {
+                "state": "background",
+                "execution_state": "background",
+                "checkpoint_id": "checkpoint-coding-3",
+                "resume_due": false,
+                "next_action_kind": "resume_checkpoint"
+            },
+            "result_json": {
+                "messages": [],
+                "resume_context": {
+                    "checkpoint_id": "checkpoint-coding-3",
+                    "resume_entrypoint": "next_planner_round"
+                }
+            }
         }
     })
 }

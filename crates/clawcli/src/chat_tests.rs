@@ -9,6 +9,7 @@ fn chat_controls_are_explicit_slash_protocol_not_natural_language() {
     assert_eq!(chat_control("/detach"), Some(ChatControl::Detach));
     assert_eq!(chat_control("/cancel"), Some(ChatControl::Cancel));
     assert_eq!(chat_control("/status"), Some(ChatControl::Status));
+    assert_eq!(chat_control("/continue"), Some(ChatControl::Continue));
     assert_eq!(chat_control("/approve"), Some(ChatControl::Approve));
     assert_eq!(
         chat_control("/approve-scope"),
