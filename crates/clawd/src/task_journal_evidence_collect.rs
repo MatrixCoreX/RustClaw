@@ -1255,6 +1255,12 @@ pub(super) fn redacted_text_excerpt(text: &str) -> String {
 }
 
 pub(super) fn text_looks_sensitive(text: &str) -> bool {
+    if text
+        .to_ascii_lowercase()
+        .contains(claw_core::secrets::SECRET_TOKEN_REFERENCE_PREFIX)
+    {
+        return true;
+    }
     let trimmed =
         text.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-');
     if known_non_secret_config_risk_label(trimmed) {

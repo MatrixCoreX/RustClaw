@@ -25,6 +25,7 @@ pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let redacted = redact_sensitive_key_value_pairs(&redacted);
     let redacted = redact_sensitive_json_string_fields(&redacted);
     let redacted = redact_authorization_values(&redacted);
+    let redacted = redact_secret_token_references(&redacted);
     redact_runtime_template_placeholders(&redacted)
 }
 
@@ -396,6 +397,16 @@ fn redact_authorization_values(text: &str) -> String {
                 REDACTED
             )
         })
+        .into_owned()
+}
+
+fn redact_secret_token_references(text: &str) -> String {
+    static SECRET_TOKEN_RE: OnceLock<Regex> = OnceLock::new();
+    SECRET_TOKEN_RE
+        .get_or_init(|| {
+            Regex::new(r"rustclaw-secret://v1/[A-Za-z0-9-]+").expect("secret_token_reference_regex")
+        })
+        .replace_all(text, REDACTED)
         .into_owned()
 }
 

@@ -542,7 +542,8 @@ fn is_sensitive_key(key: &str) -> bool {
 fn secret_like_value(value: &str) -> bool {
     let trimmed = value.trim();
     let lower = trimmed.to_ascii_lowercase();
-    lower.starts_with("bearer ")
+    lower.contains(claw_core::secrets::SECRET_TOKEN_REFERENCE_PREFIX)
+        || lower.starts_with("bearer ")
         || lower.starts_with("basic ")
         || ["sk-", "tp-", "ghp_", "github_pat_", "xoxb-", "xoxp-"]
             .iter()
