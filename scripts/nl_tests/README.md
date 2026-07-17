@@ -243,12 +243,15 @@ the artifact must contain `ANSWER_VERIFIER_BOUNDARY_CHECK ok`,
 It also writes `maintainability_skill_contracts.txt` from
 `scripts/check_long_files.py`, `scripts/check_skill_prompts.py`, and
 `scripts/check_skill_registry_parity.py --mode all --strict`, plus
-`scripts/check_mcp_runtime_contracts.py --self-test` and its main check.
+`scripts/check_mcp_runtime_contracts.py --self-test` and its main check, plus
+`scripts/check_agent_hook_runtime_contracts.py --self-test` and its main check.
 `gate_summary.env` records `maintainability_skill_contracts=1`, and the
 artifact must contain `LONG_FILE_CHECK ok`, layered prompt success text, and
 `REGISTRY_PARITY mode=all ... differences=0`, plus
 `MCP_RUNTIME_CONTRACT_SELF_TEST ok` and
-`MCP_RUNTIME_CONTRACT_CHECK findings=0`, so file-size maintainability,
+`MCP_RUNTIME_CONTRACT_CHECK findings=0`, plus
+`AGENT_HOOK_RUNTIME_CONTRACT_SELF_TEST ok` and
+`AGENT_HOOK_RUNTIME_CONTRACT_CHECK findings=0`, so file-size maintainability,
 generated skill prompts, main/docker registry parity, and the official-SDK MCP
 trust/permission/protocol boundary are release artifacts.
 It also writes `agent_parity_gate_inventory_contracts.txt` from
@@ -460,7 +463,9 @@ For `maintainability_skill_contracts.txt`, the required content includes
 `registry skills have a generated layered prompt body`,
 `REGISTRY_PARITY mode=all`, `differences=0`,
 `MCP_RUNTIME_CONTRACT_SELF_TEST ok`, and
-`MCP_RUNTIME_CONTRACT_CHECK findings=0`.
+`MCP_RUNTIME_CONTRACT_CHECK findings=0`, plus
+`AGENT_HOOK_RUNTIME_CONTRACT_SELF_TEST ok` and
+`AGENT_HOOK_RUNTIME_CONTRACT_CHECK findings=0`.
 For `agent_parity_gate_inventory_contracts.txt`, the required content includes
 `AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok` and
 `AGENT_PARITY_GATE_INVENTORY_CHECK ok`, plus

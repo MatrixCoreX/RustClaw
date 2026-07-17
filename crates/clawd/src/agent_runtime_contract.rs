@@ -79,43 +79,9 @@ impl SubagentRole {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HookStage {
-    PreToolUse,
-    PostToolUse,
-    Stop,
-    SessionStart,
-    SessionEnd,
-    UserPromptSubmit,
-}
-
-impl HookStage {
-    fn all() -> &'static [Self] {
-        &[
-            Self::PreToolUse,
-            Self::PostToolUse,
-            Self::Stop,
-            Self::SessionStart,
-            Self::SessionEnd,
-            Self::UserPromptSubmit,
-        ]
-    }
-
-    fn as_token(self) -> &'static str {
-        match self {
-            Self::PreToolUse => "pre_tool_use",
-            Self::PostToolUse => "post_tool_use",
-            Self::Stop => "stop",
-            Self::SessionStart => "session_start",
-            Self::SessionEnd => "session_end",
-            Self::UserPromptSubmit => "user_prompt_submit",
-        }
-    }
-}
-
 pub(crate) fn runtime_protocol_hint_line() -> String {
     let roles = SubagentRole::all_tokens().join("|");
-    let hooks = HookStage::all()
+    let hooks = crate::agent_hooks::HookStage::all()
         .iter()
         .map(|stage| stage.as_token())
         .collect::<Vec<_>>()
@@ -137,9 +103,15 @@ mod tests {
         assert!(hint.contains(&expected_roles));
         assert!(hint.contains("subagent_write_enabled:false"));
         assert!(hint.contains("subagent_external_publish_enabled:false"));
-        assert!(hint.contains(
-            "hook_stages:pre_tool_use|post_tool_use|stop|session_start|session_end|user_prompt_submit"
-        ));
+        let expected_hook_stages = format!(
+            "hook_stages:{}",
+            crate::agent_hooks::HookStage::all()
+                .iter()
+                .map(|stage| stage.as_token())
+                .collect::<Vec<_>>()
+                .join("|")
+        );
+        assert!(hint.contains(&expected_hook_stages));
         let expected_hook_decisions =
             format!("hook_decisions:{}", PolicyDecision::all_tokens().join("|"));
         assert!(hint.contains(&expected_hook_decisions));
