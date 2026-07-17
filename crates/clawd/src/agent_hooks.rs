@@ -3,12 +3,15 @@ use serde_json::{json, Value};
 use crate::policy_decision::PolicyDecision;
 
 mod command;
-pub(crate) use command::pre_tool_use_outcome_for_state;
+mod http;
+mod mcp;
+mod runtime;
+mod shared;
 #[cfg(test)]
-use command::{
-    execute_command_handler, parse_handler_output, pre_tool_hook_event, validate_command_handler,
-    HookHandlerConfig,
-};
+use command::{execute_command_handler, validate_command_handler};
+pub(crate) use runtime::pre_tool_use_outcome_for_state;
+#[cfg(test)]
+use shared::{parse_handler_output, pre_tool_hook_event, HookHandlerConfig};
 
 const HOOK_EVENT_SCHEMA_VERSION: u16 = 1;
 
@@ -302,3 +305,7 @@ fn normalize_machine_token(value: &str) -> String {
 #[cfg(test)]
 #[path = "agent_hooks_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_hooks_transport_tests.rs"]
+mod transport_tests;

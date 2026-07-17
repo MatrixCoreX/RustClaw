@@ -67,6 +67,7 @@ fn command_handler(path: &Path, content_sha256: &str) -> HookHandlerConfig {
         max_attempts: 1,
         failure_policy: "deny".to_string(),
         args: Vec::new(),
+        ..HookHandlerConfig::default()
     }
 }
 

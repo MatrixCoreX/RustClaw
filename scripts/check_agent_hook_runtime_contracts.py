@@ -21,16 +21,40 @@ REQUIRED_FILE_TOKENS = {
         "SubagentStart",
         "SubagentStop",
         "mod command",
-        "pub(crate) use command::pre_tool_use_outcome_for_state",
+        "mod http",
+        "mod mcp",
+        "mod runtime",
+        "mod shared",
+        "pub(crate) use runtime::pre_tool_use_outcome_for_state",
         "HookEvaluation",
         "merge_hook_decision",
         "PolicyDecision::parse_token",
     ),
-    "crates/clawd/src/agent_hooks/command.rs": (
+    "crates/clawd/src/agent_hooks/shared.rs": (
         "HOOK_OUTPUT_SCHEMA_VERSION",
         "HookHandlerConfig",
         "#[serde(default, deny_unknown_fields)]",
         "#[serde(deny_unknown_fields)]",
+        "validate_common_handler",
+        "parse_handler_output_value",
+        "hook_async_decision_forbidden",
+        '"argument_fields"',
+        '"argument_byte_count"',
+        '"handler_id"',
+        '"failure_policy"',
+        '"trust_status"',
+        '"content_sha256"',
+        '"output_truncated"',
+    ),
+    "crates/clawd/src/agent_hooks/runtime.rs": (
+        "load_hook_configuration",
+        "run_command_handler",
+        "run_http_handler",
+        "run_mcp_handler",
+        "record_validation_failure",
+        "merge_hook_decision",
+    ),
+    "crates/clawd/src/agent_hooks/command.rs": (
         "validate_command_handler",
         "hook_handler_hash_mismatch",
         "ToolSandboxMode::ReadOnly",
@@ -39,14 +63,29 @@ REQUIRED_FILE_TOKENS = {
         "CancellationToken",
         "hook_handler_timeout",
         "hook_handler_output_too_large",
-        "hook_async_decision_forbidden",
-        "PolicyDecision::parse_token",
-        '"argument_fields"',
-        '"argument_byte_count"',
-        '"handler_id"',
-        '"trust_status"',
-        '"content_sha256"',
-        '"output_truncated"',
+    ),
+    "crates/clawd/src/agent_hooks/http.rs": (
+        "validate_http_handler",
+        "redirect(Policy::none())",
+        "hook_http_https_required",
+        "allow_insecure_loopback",
+        "is_literal_loopback_host",
+        "is_env_reference",
+        "hook_http_redirect_forbidden",
+        "hook_handler_output_too_large",
+        "max_attempts",
+        "CancellationToken",
+    ),
+    "crates/clawd/src/agent_hooks/mcp.rs": (
+        "validate_mcp_handler",
+        'matches!(policy.effect.as_str(), "observe" | "validate")',
+        'policy.risk_level != "low"',
+        "policy.idempotent",
+        "structured_content",
+        "parse_handler_output_value",
+        "hook_mcp_policy_unsafe",
+        "hook_mcp_structured_output_required",
+        "CancellationToken",
     ),
     "crates/clawd/src/agent_runtime_contract.rs": (
         "crate::agent_hooks::HookStage::all()",
@@ -66,7 +105,12 @@ REQUIRED_FILE_TOKENS = {
     "configs/agent_guard.toml": (
         "[[agent.hooks.handlers]]",
         'kind = "command"',
+        'kind = "http"',
+        'kind = "mcp"',
         "content_sha256",
+        "auth_token_env",
+        "allow_insecure_loopback",
+        "event_argument",
         "timeout_ms",
         "max_input_bytes",
         "max_output_bytes",
@@ -86,6 +130,17 @@ REQUIRED_FILE_TOKENS = {
         "trusted_command_hook_blocks_through_production_pre_tool_path",
         'handler["trust_status"]',
         'handler["content_sha256"]',
+    ),
+    "crates/clawd/src/agent_hooks_transport_tests.rs": (
+        "trusted_loopback_http_hook_retries_and_returns_machine_decision",
+        "http_hook_rejects_external_plaintext_and_redirects",
+        "trusted_observation_only_mcp_hook_uses_structured_content_only",
+        "mcp_hook_rejects_unavailable_or_unsafe_capabilities",
+    ),
+    "crates/clawd/tests/fixtures/mcp_stdio_fixture.py": (
+        "hook_decision",
+        '"structuredContent"',
+        '"fixture_mcp_denied"',
     ),
 }
 
@@ -124,9 +179,11 @@ def evaluate(root: Path) -> list[str]:
             if token not in raw:
                 findings.append(f"missing_token:{relative}:{token}")
 
-    production_files = (
-        "crates/clawd/src/agent_hooks.rs",
-        "crates/clawd/src/agent_hooks/command.rs",
+    production_files = tuple(
+        relative
+        for relative in texts
+        if relative.startswith("crates/clawd/src/agent_hooks")
+        and not relative.endswith(("_tests.rs", "tests.rs"))
     )
     for relative in production_files:
         production = texts.get(relative, "")

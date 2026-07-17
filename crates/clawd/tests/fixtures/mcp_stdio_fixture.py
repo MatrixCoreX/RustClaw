@@ -47,6 +47,14 @@ TOOLS = [
 
 def fixture_tools():
     tools = list(TOOLS)
+    if os.environ.get("MCP_FIXTURE_MODE") == "hook":
+        tools.append(
+            tool(
+                "hook_decision",
+                {"hook_event": {"type": "object"}},
+                ["hook_event"],
+            )
+        )
     if os.environ.get("MCP_FIXTURE_MODE") == "duplicate_tool":
         tools.append(tool("lookup", {"query": {"type": "string"}}, ["query"]))
     return tools
@@ -103,6 +111,19 @@ for line in sys.stdin:
                 {
                     "content": [{"type": "text", "text": "x" * 2048}],
                     "structuredContent": {"size": 2048},
+                    "isError": False,
+                },
+            )
+        elif name == "hook_decision":
+            send(
+                request_id,
+                {
+                    "content": [{"type": "text", "text": "ignored_hook_text"}],
+                    "structuredContent": {
+                        "schema_version": 1,
+                        "decision": "deny",
+                        "reason_code": "fixture_mcp_denied",
+                    },
                     "isError": False,
                 },
             )
