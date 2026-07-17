@@ -78,12 +78,18 @@ pub(crate) fn prepare_process_command(
         if request.network == ProcessNetworkPolicy::Deny {
             command.arg("--unshare-net");
         }
+        command.arg("--tmpfs").arg("/tmp");
         if matches!(
             request.mode,
             ToolSandboxMode::WorkspaceWrite | ToolSandboxMode::IsolatedWorktree
         ) {
             command
                 .arg("--bind")
+                .arg(&workspace_root)
+                .arg(&workspace_root);
+        } else {
+            command
+                .arg("--ro-bind")
                 .arg(&workspace_root)
                 .arg(&workspace_root);
         }
@@ -107,8 +113,6 @@ pub(crate) fn prepare_process_command(
             additional_writable_targets.push(target);
         }
         command
-            .arg("--tmpfs")
-            .arg("/tmp")
             .arg("--chdir")
             .arg(&execution_root)
             .arg("--")

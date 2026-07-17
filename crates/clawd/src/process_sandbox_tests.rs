@@ -9,15 +9,23 @@ struct TestDir(PathBuf);
 
 impl TestDir {
     fn new(label: &str) -> Self {
-        let path = std::env::current_dir()
-            .expect("current test directory")
-            .join("target/process-sandbox-tests")
-            .join(format!(
-                "{}_{}_{}",
-                label,
-                std::process::id(),
-                uuid::Uuid::new_v4()
-            ));
+        Self::new_under(
+            &std::env::current_dir().expect("current test directory"),
+            label,
+        )
+    }
+
+    fn new_in_system_temp(label: &str) -> Self {
+        Self::new_under(&std::env::temp_dir(), label)
+    }
+
+    fn new_under(parent: &Path, label: &str) -> Self {
+        let path = parent.join("target/process-sandbox-tests").join(format!(
+            "{}_{}_{}",
+            label,
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&path).expect("create test dir");
         Self(path)
     }
@@ -120,14 +128,81 @@ async fn workspace_backend_writes_only_inside_bound_workspace() {
 
 #[cfg(target_os = "linux")]
 #[tokio::test]
+async fn read_only_backend_can_execute_inside_system_temp_workspace() {
+    if !std::path::Path::new("/usr/bin/bwrap").is_file()
+        && !std::path::Path::new("/bin/bwrap").is_file()
+    {
+        return;
+    }
+    let root = TestDir::new_in_system_temp("read_only_system_temp");
+    std::fs::write(root.path().join("input.txt"), "visible").expect("write input");
+    let mut prepared = prepare_process_command(
+        "bash",
+        ProcessSandboxRequest {
+            mode: ToolSandboxMode::ReadOnly,
+            workspace_root: root.path(),
+            execution_root: root.path(),
+            network: ProcessNetworkPolicy::Deny,
+            additional_writable_paths: &[],
+        },
+    )
+    .expect("sandbox command");
+    prepared
+        .command
+        .arg("-lc")
+        .arg("test \"$(cat input.txt)\" = visible")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let status = prepared.command.status().await.expect("sandbox status");
+    assert!(status.success());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn workspace_backend_can_write_inside_system_temp_workspace() {
+    if !std::path::Path::new("/usr/bin/bwrap").is_file()
+        && !std::path::Path::new("/bin/bwrap").is_file()
+    {
+        return;
+    }
+    let root = TestDir::new_in_system_temp("workspace_write_system_temp");
+    let mut prepared = prepare_process_command(
+        "bash",
+        ProcessSandboxRequest {
+            mode: ToolSandboxMode::WorkspaceWrite,
+            workspace_root: root.path(),
+            execution_root: root.path(),
+            network: ProcessNetworkPolicy::Deny,
+            additional_writable_paths: &[],
+        },
+    )
+    .expect("sandbox command");
+    prepared
+        .command
+        .arg("-lc")
+        .arg("printf visible > result.txt")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let status = prepared.command.status().await.expect("sandbox status");
+    assert!(status.success());
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("result.txt")).expect("result"),
+        "visible"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
 async fn read_only_backend_limits_writes_to_explicit_internal_path() {
     if !std::path::Path::new("/usr/bin/bwrap").is_file()
         && !std::path::Path::new("/bin/bwrap").is_file()
     {
         return;
     }
-    let root = TestDir::new("read_only_explicit_write");
-    let internal = TestDir::new("internal_write");
+    let root = TestDir::new_in_system_temp("read_only_explicit_write");
+    let internal = TestDir::new_in_system_temp("internal_write");
     let writable_paths = vec![internal.path().to_path_buf()];
     let mut prepared = prepare_process_command(
         "bash",
