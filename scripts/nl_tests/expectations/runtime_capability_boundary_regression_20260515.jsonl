@@ -1,20 +1,20 @@
-{"case": 1, "status": "succeeded", "first_layer_any": ["direct_answer", "planner_execute"], "route_gate_any": ["chat", "execute"], "final_shape": "non_empty"}
-{"case": 2, "status": "succeeded", "first_layer": "direct_answer", "route_gate": "chat", "final_shape": "non_empty"}
-{"case": 3, "status": "succeeded", "first_layer": "direct_answer", "route_gate": "chat", "final_shape": "non_empty", "final_contains": ["beta"]}
-{"case": 4, "status": "succeeded", "first_layer": "clarify", "final_shape": "non_empty"}
-{"case": 5, "status": "succeeded", "first_layer": "clarify", "final_shape": "non_empty"}
-{"case": 6, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "executed_any": ["run_cmd"], "verifier_approved": true, "final_shape": "path"}
-{"case": 7, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "executed_any": ["run_cmd"], "verifier_approved": true, "final_shape": "non_empty"}
-{"case": 8, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.list_entries", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_shape": "list"}
-{"case": 9, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.read_text_range", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_shape": "non_empty"}
-{"case": 10, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["config.read_field", "config_basic", "filesystem.read_text_range", "fs_basic"], "executed_any": ["config_basic", "fs_basic"], "verifier_approved": true, "final_contains": ["rustclaw-nl-fixture"]}
-{"case": 11, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.grep_text", "fs_basic", "fs_search", "log_analyze"], "executed_any": ["fs_basic", "fs_search", "log_analyze"], "verifier_approved": true, "final_contains": ["ERROR"]}
-{"case": 12, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.list_entries", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_shape": "integer"}
-{"case": 13, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.stat_paths", "filesystem.find_entries", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_contains": ["not_exists_capability_boundary_20260515.md"]}
-{"case": 14, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["config.read_field", "config_basic"], "executed_any": ["config_basic"], "verifier_approved": true, "final_contains": ["selected_vendor"]}
-{"case": 15, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["config.validate", "config_basic"], "executed_any": ["config_basic"], "verifier_approved": true, "final_shape": "non_empty"}
-{"case": 16, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "executed_any": ["db_basic"], "verifier_approved": true, "final_shape": "list", "final_contains": ["users"]}
-{"case": 17, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "executed_any": ["archive_basic"], "verifier_approved": true, "final_shape": "list"}
-{"case": 18, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.make_dir", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_contains": ["capability_boundary_dir_20260515"]}
-{"case": 19, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.write_text", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_contains": ["capability-boundary-ok"]}
-{"case": 20, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "executed_any": ["run_cmd"], "verifier_approved": true, "final_shape": "integer", "final_contains": ["8"]}
+{"case":1,"status":"succeeded","route_gate_any":["chat","execute"],"final_shape":"non_empty"}
+{"case":2,"status":"succeeded","route_gate":"chat","final_shape":"non_empty"}
+{"case":3,"status":"succeeded","route_gate":"chat","final_shape":"non_empty","final_contains":["beta"]}
+{"case":4,"status":"succeeded","final_shape":"non_empty"}
+{"case":5,"status":"succeeded","final_shape":"non_empty"}
+{"case":6,"status":"succeeded","route_gate":"execute","executed_any":["run_cmd"],"verifier_approved":true,"final_shape":"path"}
+{"case":7,"status":"succeeded","route_gate":"execute","executed_any":["run_cmd"],"verifier_approved":true,"final_shape":"non_empty"}
+{"case":8,"status":"succeeded","route_gate":"execute","capability_any":["filesystem.list_entries","fs_basic"],"executed_any":["fs_basic"],"verifier_approved":true,"final_shape":"list"}
+{"case":9,"status":"succeeded","route_gate":"execute","capability_any":["filesystem.read_text_range","fs_basic"],"executed_any":["fs_basic"],"verifier_approved":true,"final_shape":"non_empty"}
+{"case":10,"status":"succeeded","route_gate":"execute","capability_any":["config.read_field","config_basic","filesystem.read_text_range","fs_basic"],"executed_any":["config_basic","fs_basic"],"verifier_approved":true,"final_contains":["rustclaw-nl-fixture"]}
+{"case":11,"status":"succeeded","route_gate":"execute","capability_any":["filesystem.grep_text","fs_basic","fs_search","log_analyze"],"executed_any":["fs_basic","fs_search","log_analyze"],"verifier_approved":true,"final_contains":["ERROR"]}
+{"case":12,"status":"succeeded","route_gate":"execute","capability_any":["filesystem.list_entries","fs_basic"],"executed_any":["fs_basic"],"verifier_approved":true,"final_shape":"integer"}
+{"case":13,"status":"succeeded","route_gate":"execute","capability_any":["filesystem.stat_paths","filesystem.find_entries","fs_basic"],"executed_any":["fs_basic"],"verifier_approved":true,"final_contains":["not_exists_capability_boundary_20260515.md"]}
+{"case":14,"status":"succeeded","route_gate":"execute","capability_any":["config.read_field","config_basic"],"executed_any":["config_basic"],"verifier_approved":true,"final_contains":["selected_vendor"]}
+{"case":15,"status":"succeeded","route_gate":"execute","capability_any":["config.validate","config_basic"],"executed_any":["config_basic"],"verifier_approved":true,"final_shape":"non_empty"}
+{"case":16,"status":"succeeded","route_gate":"execute","executed_any":["db_basic"],"verifier_approved":true,"final_shape":"list","final_contains":["users"]}
+{"case":17,"status":"succeeded","route_gate":"execute","executed_any":["archive_basic"],"verifier_approved":true,"final_shape":"list"}
+{"case":18,"status":"succeeded","route_gate":"execute","capability_any":["filesystem.make_dir","fs_basic"],"executed_any":["fs_basic"],"verifier_approved":true,"final_contains":["capability_boundary_dir_20260515"]}
+{"case":19,"status":"succeeded","route_gate":"execute","capability_any":["filesystem.write_text","fs_basic"],"executed_any":["fs_basic"],"verifier_approved":true,"final_contains":["capability-boundary-ok"]}
+{"case":20,"status":"succeeded","route_gate":"execute","executed_any":["run_cmd"],"verifier_approved":true,"final_shape":"integer","final_contains":["8"]}
