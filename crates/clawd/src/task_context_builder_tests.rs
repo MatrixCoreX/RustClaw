@@ -134,6 +134,7 @@ fn task_goal_context_uses_structured_payload_only() {
 
 #[test]
 fn execution_context_is_projected_to_planner_and_chat_prompts() {
+    let recent_execution_anchor = format!("### EXECUTION_ANCHOR\n{}", "x".repeat(1_200));
     let bundle = TaskContextBundle {
         raw_sources: TaskContextRawSources::default(),
         planner_view: PlannerContextView::default(),
@@ -152,7 +153,7 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
                     .to_string(),
             recent_turns_full: "### RECENT_TURNS\nturn".to_string(),
             last_turn_full: "<none>".to_string(),
-            recent_execution_anchor: "### EXECUTION_ANCHOR\nstep".to_string(),
+            recent_execution_anchor: recent_execution_anchor.clone(),
             recent_execution_context: "<none>".to_string(),
             compacted_history_context: "### COMPACTED_HISTORY_CONTEXT\n{}".to_string(),
             image_context: None,
@@ -191,4 +192,47 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
     assert!(!memory.contains("__ACTIVE_TASK_CONTEXT__"));
     assert!(!memory.contains("__ACTIVE_EXECUTION_ANCHOR__"));
     assert!(!memory.contains("__RECENT_EXECUTION_CONTEXT__"));
+    assert_eq!(memory.matches(&recent_execution_anchor).count(), 1);
+}
+
+#[test]
+fn context_prompt_dynamic_slots_are_declared_once() {
+    for (name, source, placeholder) in [
+        (
+            "runtime",
+            include_str!("../../../prompts/layers/overlays/context_runtime_context.md"),
+            "__RUNTIME_CONTEXT__",
+        ),
+        (
+            "session_aliases",
+            include_str!("../../../prompts/layers/overlays/context_session_aliases.md"),
+            "__SESSION_ALIAS_BINDINGS__",
+        ),
+        (
+            "active_task",
+            include_str!("../../../prompts/layers/overlays/context_active_task.md"),
+            "__ACTIVE_TASK_CONTEXT__",
+        ),
+        (
+            "active_execution_anchor",
+            include_str!("../../../prompts/layers/overlays/context_active_execution_anchor.md"),
+            "__ACTIVE_EXECUTION_ANCHOR__",
+        ),
+        (
+            "recent_execution",
+            include_str!("../../../prompts/layers/overlays/context_recent_execution.md"),
+            "__RECENT_EXECUTION_CONTEXT__",
+        ),
+        (
+            "compaction",
+            include_str!("../../../prompts/layers/overlays/context_compaction_prompt.md"),
+            "__CONTEXT_SOURCE_BUNDLE__",
+        ),
+    ] {
+        assert_eq!(
+            source.matches(placeholder).count(),
+            1,
+            "{name} must expand dynamic context exactly once"
+        );
+    }
 }

@@ -1,8 +1,8 @@
 <!--
 Purpose: project temporary session aliases into continuation context.
 Component: clawd `task_context_builder`
-Placeholders: __SESSION_ALIAS_BINDINGS__
-Version: 2026-07-17.1
+Input slot: SESSION_ALIAS_BINDINGS
+Version: 2026-07-17.2
 -->
 
 __SESSION_ALIAS_BINDINGS__

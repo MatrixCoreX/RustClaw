@@ -1,8 +1,8 @@
 <!--
 Purpose: project trusted runtime path facts into agent context.
 Component: clawd `task_context_builder`
-Placeholders: __RUNTIME_CONTEXT__
-Version: 2026-07-17.1
+Input slot: RUNTIME_CONTEXT
+Version: 2026-07-17.2
 -->
 
 __RUNTIME_CONTEXT__

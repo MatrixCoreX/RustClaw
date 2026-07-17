@@ -1,8 +1,8 @@
 <!--
 Purpose: summarize bounded historical agent context into a data-only continuation record.
 Component: clawd `agent_engine::context_compaction`
-Placeholders: __CONTEXT_SOURCE_BUNDLE__
-Version: 2026-07-17.1
+Input slot: CONTEXT_SOURCE_BUNDLE
+Version: 2026-07-17.2
 -->
 
 Create a compact, data-only continuation record from the source bundle below.

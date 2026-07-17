@@ -19,12 +19,19 @@ pub(super) async fn prepare_ask_execution_context(
 ) -> anyhow::Result<PreparedAskExecutionContext> {
     let chat_memory_budget_chars =
         crate::dynamic_chat_memory_budget_chars(state, task, planner_user_request);
-    let mut context_bundle = crate::task_context_builder::build_agent_loop_task_context_bundle(
-        state,
-        task,
-        planner_user_request,
-        chat_memory_budget_chars,
-    );
+    let context_state = state.clone();
+    let context_task = task.clone();
+    let context_request = planner_user_request.to_string();
+    let mut context_bundle = tokio::task::spawn_blocking(move || {
+        crate::task_context_builder::build_agent_loop_task_context_bundle(
+            &context_state,
+            &context_task,
+            &context_request,
+            chat_memory_budget_chars,
+        )
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("task_context_build_join_failed:{error}"))?;
     if let Some(image_context) =
         crate::analyze_attached_images_for_ask(state, task, payload, planner_user_request).await?
     {

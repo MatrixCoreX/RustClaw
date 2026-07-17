@@ -1,8 +1,8 @@
 <!--
 Purpose: project the current active task into continuation context.
 Component: clawd `task_context_builder`
-Placeholders: __ACTIVE_TASK_CONTEXT__
-Version: 2026-07-17.1
+Input slot: ACTIVE_TASK_CONTEXT
+Version: 2026-07-17.2
 -->
 
 __ACTIVE_TASK_CONTEXT__
