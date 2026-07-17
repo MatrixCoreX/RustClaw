@@ -36,6 +36,7 @@ async fn planner_run_cmd_async_start_publishes_waiting_checkpoint() {
     };
     let actions = vec![action.clone()];
     let policy = test_policy();
+    let policy_args = raw_args.clone();
 
     let outcome = super::execute_prepared_skill_action(
         &state,
@@ -52,6 +53,8 @@ async fn planner_run_cmd_async_start_publishes_waiting_checkpoint() {
         1,
         1,
         "run_cmd",
+        "run_cmd",
+        &policy_args,
         exec_args,
         Some(raw_args),
         None,

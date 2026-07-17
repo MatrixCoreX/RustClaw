@@ -1,0 +1,425 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
+
+use claw_core::skill_registry::CapabilityIsolationProfile;
+use serde_json::{json, Value};
+
+use super::execute_child_task_patch;
+use crate::execution_isolation::{
+    build_child_worktree_patch_artifact, create_execution_isolation, plan_execution_isolation,
+};
+use crate::ClaimedTask;
+
+struct TempRepo {
+    path: PathBuf,
+}
+
+impl TempRepo {
+    fn new(label: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "rustclaw_parent_child_patch_{label}_{}_{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&path).expect("create temp repo");
+        init_git_repo(&path);
+        Self { path }
+    }
+}
+
+impl Drop for TempRepo {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+struct ChildPatchFixture {
+    _repo: TempRepo,
+    state: crate::AppState,
+    parent: ClaimedTask,
+    child_task_id: String,
+    worktree_root: PathBuf,
+    artifact_path: PathBuf,
+    patch_ref: String,
+}
+
+impl ChildPatchFixture {
+    fn new(label: &str) -> Self {
+        let repo = TempRepo::new(label);
+        let db_path = repo.path.join("tasks.sqlite");
+        let mut state = file_backed_state_with_schema(&db_path);
+        state.skill_rt.workspace_root = repo.path.clone();
+        let parent_task_id = format!("parent-{label}");
+        let child_task_id = format!("child-{label}");
+        let plan = plan_execution_isolation(
+            &repo.path,
+            &child_task_id,
+            CapabilityIsolationProfile::LocalWorktree,
+        )
+        .expect("plan child worktree");
+        create_execution_isolation(&plan, 100).expect("create child worktree");
+        fs::write(plan.execution_root.join("README.md"), "child change\n")
+            .expect("modify tracked file");
+        fs::create_dir_all(plan.execution_root.join("src")).expect("create source dir");
+        fs::write(plan.execution_root.join("src/new.txt"), "child file\n")
+            .expect("write new child file");
+        let artifact =
+            build_child_worktree_patch_artifact(&plan).expect("build child patch artifact");
+        let artifact_path =
+            PathBuf::from(artifact["artifact_path"].as_str().expect("artifact path"));
+        let patch_ref = artifact["patch_ref"]
+            .as_str()
+            .expect("patch ref")
+            .to_string();
+        insert_task(
+            &state,
+            &parent_task_id,
+            "running",
+            &json!({"text": "parent"}),
+            &json!({}),
+        );
+        insert_task(
+            &state,
+            &child_task_id,
+            "succeeded",
+            &child_payload(&parent_task_id, &child_task_id),
+            &json!({
+                "child_task_execution_scope": {
+                    "patch_artifact": artifact
+                },
+                "child_task_result": {
+                    "verification_artifact": {
+                        "schema_version": 1,
+                        "kind": "child_task_verification",
+                        "verification_status": "verified",
+                        "verification_command_count": 1,
+                        "verification_commands": ["cargo test -p fixture"],
+                        "validation_gate": {
+                            "gate_status": "satisfied",
+                            "can_report_fully_verified": true
+                        }
+                    }
+                }
+            }),
+        );
+        let parent = ClaimedTask {
+            task_id: parent_task_id,
+            user_id: 42,
+            chat_id: 7,
+            user_key: Some("test-key".to_string()),
+            channel: "ui".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: json!({"text": "parent"}).to_string(),
+        };
+        Self {
+            _repo: repo,
+            state,
+            parent,
+            child_task_id,
+            worktree_root: plan.execution_root,
+            artifact_path,
+            patch_ref,
+        }
+    }
+
+    fn run(&self, action: &str) -> Result<Value, String> {
+        let args = json!({
+            "action": action,
+            "child_task_id": self.child_task_id,
+            "patch_ref": self.patch_ref,
+        });
+        execute_child_task_patch(
+            &self.state,
+            Some(&self.parent),
+            args.as_object().expect("args object"),
+        )
+        .and_then(|raw| serde_json::from_str(&raw).map_err(|err| err.to_string()))
+    }
+}
+
+#[test]
+fn parent_reviews_then_applies_child_patch_with_checkpoint_and_cleanup() {
+    let fixture = ChildPatchFixture::new("apply");
+
+    let review = fixture.run("review_child_patch").expect("review patch");
+    assert_eq!(review["action"], "review_child_patch");
+    assert_eq!(review["base_is_parent_ancestor"], true);
+    assert_eq!(review["changed_file_count"], 2);
+    assert_eq!(review["permission_profile"], "local_worktree");
+    assert_eq!(review["allowed_capabilities"][0], "filesystem.write_text");
+    assert_eq!(
+        review["verification_artifact"]["verification_status"],
+        "verified"
+    );
+    assert!(review["patch"]
+        .as_str()
+        .is_some_and(|patch| patch.contains("diff --git a/README.md b/README.md")));
+
+    let applied = fixture.run("apply_child_patch").expect("apply patch");
+    assert_eq!(applied["action"], "apply_child_patch");
+    assert_eq!(applied["disposition"], "applied");
+    assert_eq!(applied["cleanup_status"], "complete");
+    assert_eq!(applied["workspace_patch"]["action"], "apply_patch");
+    assert!(applied["workspace_patch"]["checkpoint_id"].is_string());
+    assert_eq!(
+        fs::read_to_string(fixture._repo.path.join("README.md")).expect("read primary"),
+        "child change\n"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture._repo.path.join("src/new.txt")).expect("read new file"),
+        "child file\n"
+    );
+    assert!(!fixture.worktree_root.exists());
+    assert!(!fixture.artifact_path.exists());
+
+    let repeated = fixture
+        .run("apply_child_patch")
+        .expect("repeat applied decision");
+    assert_eq!(repeated["disposition"], "applied");
+    assert_eq!(repeated["cleanup_status"], "complete");
+    let child = stored_result_json(&fixture.state, &fixture.child_task_id);
+    assert_eq!(
+        child["child_task_execution_scope"]["patch_disposition"]["disposition"],
+        "applied"
+    );
+    let parent = stored_result_json(&fixture.state, &fixture.parent.task_id);
+    assert_eq!(
+        parent["child_patch_dispositions"][0]["child_task_id"],
+        fixture.child_task_id
+    );
+}
+
+#[test]
+fn parent_rejects_child_patch_without_mutating_primary_workspace() {
+    let fixture = ChildPatchFixture::new("reject");
+
+    let rejected = fixture.run("reject_child_patch").expect("reject patch");
+
+    assert_eq!(rejected["action"], "reject_child_patch");
+    assert_eq!(rejected["disposition"], "rejected");
+    assert_eq!(rejected["cleanup_status"], "complete");
+    assert_eq!(
+        fs::read_to_string(fixture._repo.path.join("README.md")).expect("read primary"),
+        "fixture\n"
+    );
+    assert!(!fixture._repo.path.join("src/new.txt").exists());
+    assert!(!fixture.worktree_root.exists());
+    assert!(!fixture.artifact_path.exists());
+}
+
+#[test]
+fn parent_dirty_change_blocks_child_patch_and_preserves_review_artifacts() {
+    let fixture = ChildPatchFixture::new("conflict");
+    fs::write(fixture._repo.path.join("README.md"), "parent change\n")
+        .expect("write conflicting parent change");
+
+    let error = fixture
+        .run("apply_child_patch")
+        .expect_err("dirty parent file must block patch");
+
+    assert!(error.contains("patch_precondition_failed"));
+    assert_eq!(
+        fs::read_to_string(fixture._repo.path.join("README.md")).expect("read primary"),
+        "parent change\n"
+    );
+    assert!(fixture.worktree_root.exists());
+    assert!(fixture.artifact_path.exists());
+    let child = stored_result_json(&fixture.state, &fixture.child_task_id);
+    assert!(child["child_task_execution_scope"]
+        .get("patch_disposition")
+        .is_none());
+}
+
+#[test]
+fn overlapping_child_patches_require_parent_resolution() {
+    let fixture = ChildPatchFixture::new("overlap");
+    let second_child_task_id = "child-overlap-second";
+    let second_plan = plan_execution_isolation(
+        &fixture._repo.path,
+        second_child_task_id,
+        CapabilityIsolationProfile::LocalWorktree,
+    )
+    .expect("plan second child worktree");
+    create_execution_isolation(&second_plan, 101).expect("create second child worktree");
+    fs::write(
+        second_plan.execution_root.join("README.md"),
+        "second child change\n",
+    )
+    .expect("modify overlapping file");
+    let second_artifact =
+        build_child_worktree_patch_artifact(&second_plan).expect("build second patch artifact");
+    let second_artifact_path = PathBuf::from(
+        second_artifact["artifact_path"]
+            .as_str()
+            .expect("second artifact path"),
+    );
+    let second_patch_ref = second_artifact["patch_ref"]
+        .as_str()
+        .expect("second patch ref");
+    insert_task(
+        &fixture.state,
+        second_child_task_id,
+        "succeeded",
+        &child_payload(&fixture.parent.task_id, second_child_task_id),
+        &json!({
+            "child_task_execution_scope": {
+                "patch_artifact": second_artifact
+            }
+        }),
+    );
+
+    fixture
+        .run("apply_child_patch")
+        .expect("apply first child patch");
+    let second_args = json!({
+        "action": "apply_child_patch",
+        "child_task_id": second_child_task_id,
+        "patch_ref": second_patch_ref,
+    });
+    let error = execute_child_task_patch(
+        &fixture.state,
+        Some(&fixture.parent),
+        second_args.as_object().expect("second args"),
+    )
+    .expect_err("overlapping child patch must fail precondition validation");
+    let parsed =
+        crate::skills::parse_structured_skill_error(&error).expect("structured conflict error");
+
+    assert_eq!(parsed.error_kind, "patch_precondition_failed");
+    assert!(second_plan.execution_root.exists());
+    assert!(second_artifact_path.exists());
+
+    let reject_args = json!({
+        "action": "reject_child_patch",
+        "child_task_id": second_child_task_id,
+        "patch_ref": second_patch_ref,
+    });
+    execute_child_task_patch(
+        &fixture.state,
+        Some(&fixture.parent),
+        reject_args.as_object().expect("reject args"),
+    )
+    .expect("reject conflicting child patch");
+    assert!(!second_plan.execution_root.exists());
+    assert!(!second_artifact_path.exists());
+}
+
+#[test]
+fn unrelated_parent_cannot_review_or_decide_child_patch() {
+    let fixture = ChildPatchFixture::new("ownership");
+    let mut unrelated_parent = fixture.parent.clone();
+    unrelated_parent.task_id = "different-parent".to_string();
+    let args = json!({
+        "action": "review_child_patch",
+        "child_task_id": fixture.child_task_id,
+    });
+
+    let error = execute_child_task_patch(
+        &fixture.state,
+        Some(&unrelated_parent),
+        args.as_object().expect("args object"),
+    )
+    .expect_err("unrelated parent must be denied");
+
+    assert!(error.contains("child_patch_parent_mismatch"));
+    assert!(fixture.worktree_root.exists());
+    assert!(fixture.artifact_path.exists());
+}
+
+fn child_payload(parent_task_id: &str, child_task_id: &str) -> Value {
+    json!({
+        "text": "child",
+        "task_role": "subagent_child",
+        "parent_task_id": parent_task_id,
+        "child_task_id": child_task_id,
+        "child_task_contract": {
+            "schema_version": 1,
+            "parent_task_id": parent_task_id,
+            "child_task_id": child_task_id,
+            "role": "writer",
+            "permission_profile": "local_worktree",
+            "scope": {
+                "allowed_capabilities": ["filesystem.write_text"]
+            },
+            "required": true,
+            "merge_policy": "structured_findings"
+        }
+    })
+}
+
+fn insert_task(
+    state: &crate::AppState,
+    task_id: &str,
+    status: &str,
+    payload: &Value,
+    result: &Value,
+) {
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, result_json, error_text, created_at, updated_at
+        )
+        VALUES (?1, 42, 7, 'test-key', 'ui', 'ask', ?2, ?3, ?4, NULL, '1', '1')",
+        rusqlite::params![task_id, payload.to_string(), status, result.to_string()],
+    )
+    .expect("insert task");
+}
+
+fn stored_result_json(state: &crate::AppState, task_id: &str) -> Value {
+    let db = state.core.db.get().expect("get db");
+    let raw: String = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| row.get(0),
+        )
+        .expect("select result_json");
+    serde_json::from_str(&raw).expect("parse result_json")
+}
+
+fn file_backed_state_with_schema(db_path: &Path) -> crate::AppState {
+    let manager = r2d2_sqlite::SqliteConnectionManager::file(db_path).with_init(
+        |connection: &mut rusqlite::Connection| {
+            connection.busy_timeout(Duration::from_millis(5_000))?;
+            connection.pragma_update(None, "journal_mode", "WAL")?;
+            connection.pragma_update(None, "synchronous", "NORMAL")?;
+            connection.pragma_update(None, "foreign_keys", "ON")?;
+            Ok(())
+        },
+    );
+    let pool = r2d2::Pool::builder()
+        .max_size(2)
+        .build(manager)
+        .expect("build db pool");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.db = pool;
+    state.worker.database_sqlite_path = db_path.to_path_buf();
+    state.with_seeded_db_schema()
+}
+
+fn init_git_repo(path: &Path) {
+    for args in [
+        ["init", "--quiet"].as_slice(),
+        ["config", "user.email", "rustclaw-test@example.invalid"].as_slice(),
+        ["config", "user.name", "RustClaw Test"].as_slice(),
+    ] {
+        assert!(git_status(path, args).success());
+    }
+    fs::write(path.join("README.md"), "fixture\n").expect("write fixture");
+    assert!(git_status(path, &["add", "README.md"]).success());
+    assert!(git_status(path, &["commit", "--quiet", "-m", "fixture"]).success());
+}
+
+fn git_status(path: &Path, args: &[&str]) -> std::process::ExitStatus {
+    Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .status()
+        .expect("run git")
+}

@@ -3,8 +3,9 @@
 
 This guard keeps Codex/Claude-style execution observability release-gated:
 task journal events, context budget/compaction records, provider-call metrics,
-coding evidence, and read-only subagent team aggregation must remain
-machine-readable protocol rather than prose/log-only behavior.
+coding evidence, inline read-only teams, isolated persistent writers, and
+parent-owned patch decisions must remain machine-readable protocol rather than
+prose/log-only behavior.
 """
 
 from __future__ import annotations
@@ -93,7 +94,8 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "SubagentRuntimeConfig",
         "allowed_roles",
         "max_parallel_readonly",
-        "write_enabled",
+        "inline_write_enabled",
+        "persistent_worktree_write_enabled",
         "external_publish_enabled",
         "role_allowed",
         "record_subagent_action_with_config",
@@ -138,18 +140,47 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         '"local_worktree"',
         '"capability_not_allowed"',
         '"permission_profile_unsupported"',
+        '"child_worktree_binding_required"',
+        '"local_current_workspace"',
     ),
     "crates/clawd/src/agent_engine/skill_execution.rs": (
         "child_task_execution_policy_error(",
+        "child_policy_skill",
+        "child_policy_args",
         "if normalized_skill == \"subagent\"",
         "handle_preflight_argument_failure(",
+    ),
+    "crates/clawd/src/agent_engine/dispatch_support.rs": (
+        "requested_virtual_skill",
+        "requested_virtual_args",
+        "&requested_virtual_skill",
+        "&requested_virtual_args",
     ),
     "crates/clawd/src/agent_engine/child_task_execution_policy_tests.rs": (
         "read_only_child_accepts_declared_observe_capability",
         "child_rejects_missing_or_out_of_scope_capability",
         "read_only_child_rejects_declared_write_capability",
         "local_worktree_child_accepts_scoped_write_but_rejects_publish",
+        "local_worktree_child_rejects_unbound_primary_workspace",
         "child_rejects_non_machine_allowlist_tokens_and_unknown_profile",
+    ),
+    "crates/clawd/src/agent_engine/subagent_runtime_persistent.rs": (
+        "persistent_child_task_requested",
+        "persistent_child_specs",
+        "SubagentRole::Writer",
+        '"local_worktree"',
+        "persistent_allowed_capabilities",
+        "machine_capability_token",
+        '"write_enabled": write_enabled',
+        '"write_scope"',
+        '"persistent_local_worktree"',
+        '"external_publish_enabled": false',
+    ),
+    "crates/clawd/src/agent_engine/subagent_runtime_tests.rs": (
+        "persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint",
+        "persistent_writer_defaults_to_parent_reviewed_local_worktree",
+        '"allowed_capabilities"',
+        '"persistent_local_worktree"',
     ),
     "crates/clawd/src/execution_isolation.rs": (
         "create_or_reuse_execution_isolation",
@@ -161,13 +192,43 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "crates/clawd/src/execution_isolation_patch.rs": (
         "build_child_worktree_patch_artifact",
+        "load_validated_child_worktree_patch_artifact",
+        "cleanup_child_worktree_artifacts",
+        "child_patch_base_is_parent_ancestor",
         "GIT_INDEX_FILE",
         '"kind": "child_worktree_patch"',
         '"apply_owner": "parent_agent"',
         '"apply_policy": "parent_review_required"',
         '"patch_sha256"',
+        '"precondition_hashes"',
         "MAX_CHILD_PATCH_BYTES",
         "MAX_CHILD_PATCH_FILES",
+    ),
+    "crates/clawd/src/repo/child_patch.rs": (
+        "load_child_patch_record",
+        "record_child_patch_disposition",
+        "verification_artifact",
+        "allowed_capabilities",
+        "machine_capability_token",
+        '"patch_disposition"',
+        '"child_patch_parent_mismatch"',
+        '"child_patch_profile_mismatch"',
+        '"child_patch_artifact_missing"',
+    ),
+    "crates/clawd/src/skills/builtin_child_task_patch.rs": (
+        '"review_child_patch"',
+        '"apply_child_patch"',
+        '"reject_child_patch"',
+        "execute_workspace_patch_for_root",
+        "record_child_patch_disposition",
+        "cleanup_child_worktree_artifacts",
+    ),
+    "crates/clawd/src/skills/builtin_child_task_patch_tests.rs": (
+        "parent_reviews_then_applies_child_patch_with_checkpoint_and_cleanup",
+        "parent_rejects_child_patch_without_mutating_primary_workspace",
+        "parent_dirty_change_blocks_child_patch_and_preserves_review_artifacts",
+        "overlapping_child_patches_require_parent_resolution",
+        "unrelated_parent_cannot_review_or_decide_child_patch",
     ),
     "crates/clawd/src/worker/child_task_execution_scope.rs": (
         "ChildTaskExecutionScope",
@@ -195,6 +256,13 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "record_child_task_execution_scope",
         '"child_task_execution_scope"',
         "record_child_task_terminal_projection",
+        "child_verification_artifact",
+        '"child_task_verification"',
+        '"verification_artifact"',
+        '"child_profile_capacity_exceeded"',
+    ),
+    "crates/clawd/src/repo/child_tasks_tests.rs": (
+        "scheduler_limits_local_worktree_children_across_writer_role_aliases",
     ),
     "crates/clawd/src/worker/child_task_execution_scope_tests.rs": (
         "local_worktree_child_binds_and_reuses_task_scoped_workspace",
@@ -210,6 +278,23 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "unchanged_child_worktree_returns_empty_review_artifact",
         "apply",
         "--check",
+    ),
+    "prompts/layers/overlays/agent_tool_spec.md": (
+        "subagent_inline_write_enabled=false",
+        "subagent_persistent_worktree_write_enabled=true",
+        'role="writer"',
+        'permission_profile="local_worktree"',
+        "workspace.review_child_patch",
+        "workspace.apply_child_patch",
+        "workspace.reject_child_patch",
+    ),
+    "prompts/layers/overlays/plan_repair_prompt.md": (
+        "Inline subagents are read-only",
+        'role="writer"',
+        'permission_profile="local_worktree"',
+        "workspace.review_child_patch",
+        "workspace.apply_child_patch",
+        "workspace.reject_child_patch",
     ),
     "crates/clawd/src/task_journal_tests/event_stream_hooks.rs": (
         "trace_json_includes_pollable_machine_event_stream",
@@ -312,6 +397,16 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
     ):
         if token not in subagent_text:
             findings.append(f"subagent_machine_boundary_missing:{token}")
+    persistent_subagent_text = (
+        texts.get("crates/clawd/src/agent_engine/subagent_runtime_persistent.rs") or ""
+    )
+    for token in (
+        '"write_enabled": write_enabled',
+        '"persistent_local_worktree"',
+        '"external_publish_enabled": false',
+    ):
+        if token not in persistent_subagent_text:
+            findings.append(f"persistent_subagent_machine_boundary_missing:{token}")
     if "write_permission" in subagent_text and '"read_only"' not in subagent_text:
         findings.append("subagent_write_permission_not_read_only")
 

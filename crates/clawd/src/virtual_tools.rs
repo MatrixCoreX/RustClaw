@@ -391,7 +391,8 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             obj.remove("action");
             Ok(rewrite_to("remove_file", obj))
         }
-        "apply_patch" | "diff" | "rewind" => Ok(rewrite_to("workspace_patch", obj)),
+        "apply_patch" | "diff" | "rewind" | "review_child_patch" | "apply_child_patch"
+        | "reject_child_patch" => Ok(rewrite_to("workspace_patch", obj)),
         _ => Err(format!("unsupported_fs_basic_action:{action}")),
     }
 }

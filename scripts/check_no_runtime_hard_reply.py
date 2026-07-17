@@ -127,6 +127,8 @@ def looks_machine_literal(value: str) -> bool:
         return True
     if re.fullmatch(r"any_of\([A-Za-z0-9_|.:-]+\)", value):
         return True
+    if re.fullmatch(r":\([a-z0-9_,!-]+\)[A-Za-z0-9_./*-]+", value):
+        return True
     if re.fullmatch(r"[A-Z0-9_]+", value):
         return True
     if re.fullmatch(r"[a-z0-9_]+", value):

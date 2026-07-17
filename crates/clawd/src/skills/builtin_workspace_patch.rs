@@ -51,7 +51,7 @@ pub(super) fn execute_workspace_patch(
     execute_workspace_patch_for_root(&state.skill_rt.workspace_root, task_id, args)
 }
 
-fn execute_workspace_patch_for_root(
+pub(super) fn execute_workspace_patch_for_root(
     workspace_root: &Path,
     task_id: &str,
     args: &Map<String, Value>,

@@ -794,7 +794,14 @@ fn fs_basic_write_text_write_mode_alias_rewrites_to_write_file_mode() {
 
 #[test]
 fn fs_basic_patch_actions_rewrite_to_workspace_patch() {
-    for action in ["apply_patch", "diff", "rewind"] {
+    for action in [
+        "apply_patch",
+        "diff",
+        "rewind",
+        "review_child_patch",
+        "apply_child_patch",
+        "reject_child_patch",
+    ] {
         let args = json!({"action": action, "checkpoint_id": "patch_12345678"});
         let rewrite = rewrite_virtual_tool_call("fs_basic", args.clone())
             .unwrap()

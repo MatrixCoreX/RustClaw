@@ -111,12 +111,13 @@ image_edit_skills = ["image_edit"]
 # failure_policy = "deny"
 
 [agent.subagents]
-# 用途/Purpose: subagent 角色与只读并发预算；只消费机器 token，不解析用户自然语言。
-# Machine-only subagent role and read-only parallel budget configuration.
+# 用途/Purpose: subagent 角色与并发预算；只消费机器 token，不解析用户自然语言。
+# Machine-only subagent role and parallel budget configuration. Inline children remain read-only;
+# persistent writers run only in parent-reviewed local worktrees.
 # allowed_roles 缺失或为空时使用代码默认全集。
-allowed_roles = ["observe", "explorer", "worker", "review", "reviewer", "test", "verifier"]
-# 当前 runtime 仍是 inline_readonly_child_run；该值先进入 observation/scheduler 机器字段，
-# 后续 bounded parallel executor 使用同一配置。
+allowed_roles = ["observe", "explorer", "worker", "writer", "review", "reviewer", "test", "verifier"]
+# Inline read-only children use this limit. Persistent local-worktree writers have a separate
+# always-on scheduler boundary of one active writer worktree per parent batch.
 max_parallel_readonly = 4
 # 子 agent 未显式给 budget.timeout_ms 时使用的默认 timeout；0 或缺失表示使用 parent loop 默认。
 default_timeout_ms = 30000

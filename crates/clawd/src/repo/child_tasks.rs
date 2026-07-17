@@ -105,13 +105,16 @@ fn schedule_child_specs<'a>(
     let mut scheduled_specs = Vec::new();
     let mut skipped = Vec::new();
     let mut group_counts: HashMap<String, usize> = HashMap::new();
+    let mut profile_counts: HashMap<String, usize> = HashMap::new();
     for spec in specs {
         let role = machine_token(&spec.role);
         let permission_profile = spec.permission_profile.as_str();
         let group_key = format!("{role}:{permission_profile}");
+        let profile_key = permission_profile.to_string();
         let group_capacity =
             child_profile_group_capacity(spec.permission_profile, total_capacity).max(1);
         let group_count = *group_counts.get(&group_key).unwrap_or(&0);
+        let profile_count = *profile_counts.get(&profile_key).unwrap_or(&0);
         if scheduled_specs.len() >= total_capacity {
             skipped.push(child_schedule_skip_projection(
                 spec,
@@ -130,8 +133,18 @@ fn schedule_child_specs<'a>(
             ));
             continue;
         }
+        if profile_count >= group_capacity {
+            skipped.push(child_schedule_skip_projection(
+                spec,
+                "child_profile_capacity_exceeded",
+                &format!("profile:{profile_key}"),
+                group_capacity,
+            ));
+            continue;
+        }
         scheduled_specs.push(spec);
         group_counts.insert(group_key, group_count + 1);
+        profile_counts.insert(profile_key, profile_count + 1);
     }
 
     let mut scheduler = base;
@@ -558,6 +571,7 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
     let status = child_terminal_status(status);
     let mut evidence_refs = vec![format!("task:{child_task_id}:result_json")];
     let mut artifact_refs = Vec::new();
+    let verification_artifact = child_verification_artifact(child_task_id, result_json);
     for pointer in [
         "/child_task_execution_scope/patch_artifact/patch_ref",
         "/child_task_execution_scope/artifact_refs/0/cleanup_ref",
@@ -570,6 +584,11 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
             evidence_refs.push(reference.to_string());
             artifact_refs.push(reference.to_string());
         }
+    }
+    if verification_artifact.is_some() {
+        let reference = format!("task:{child_task_id}:verification");
+        evidence_refs.push(reference.clone());
+        artifact_refs.push(reference);
     }
     json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
@@ -598,12 +617,61 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         },
         "evidence_refs": evidence_refs,
         "artifact_refs": artifact_refs,
+        "verification_artifact": verification_artifact,
         "finding_refs": if status == "succeeded" {
             json!([format!("child_task:{child_task_id}:structured_result")])
         } else {
             json!([])
         },
     })
+}
+
+fn child_verification_artifact(child_task_id: &str, result_json: &Value) -> Option<Value> {
+    let workflow = result_json
+        .pointer("/task_journal/summary/coding_workflow")
+        .filter(|value| value.is_object())?;
+    Some(json!({
+        "schema_version": 1,
+        "kind": "child_task_verification",
+        "source": "task_journal_coding_workflow",
+        "source_ref": format!("task:{child_task_id}:task_journal.coding_workflow"),
+        "verification_status": workflow
+            .get("verification_status")
+            .cloned()
+            .unwrap_or_else(|| json!("not_observed")),
+        "verification_command_count": workflow
+            .get("verification_command_count")
+            .cloned()
+            .unwrap_or_else(|| json!(0)),
+        "verification_commands": workflow
+            .get("verification_commands")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+        "failure_kind_count": workflow
+            .get("failure_kind_count")
+            .cloned()
+            .unwrap_or_else(|| json!(0)),
+        "failure_kinds": workflow
+            .get("failure_kinds")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+        "changed_file_count": workflow
+            .get("changed_file_count")
+            .cloned()
+            .unwrap_or_else(|| json!(0)),
+        "changed_files": workflow
+            .get("changed_files")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+        "checkpoint_refs": workflow
+            .get("checkpoint_refs")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+        "validation_gate": workflow
+            .get("validation_gate")
+            .cloned()
+            .unwrap_or(Value::Null),
+    }))
 }
 
 fn child_terminal_lifecycle_projection(status: &str, payload: &Value) -> Value {

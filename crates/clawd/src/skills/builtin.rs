@@ -4,6 +4,8 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::{AppState, ClaimedTask};
 
+#[path = "builtin_child_task_patch.rs"]
+mod builtin_child_task_patch;
 #[path = "builtin_run_cmd.rs"]
 mod builtin_run_cmd;
 #[path = "builtin_schedule.rs"]
@@ -12,6 +14,7 @@ mod builtin_schedule;
 mod builtin_workspace_mutation;
 #[path = "builtin_workspace_patch.rs"]
 mod builtin_workspace_patch;
+use builtin_child_task_patch::execute_child_task_patch;
 #[cfg(test)]
 pub(crate) use builtin_run_cmd::run_safe_command;
 pub(crate) use builtin_run_cmd::run_safe_command_with_sandbox;
@@ -681,7 +684,16 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 },
             )
         }
-        "workspace_patch" => execute_workspace_patch(state, task, map),
+        "workspace_patch" => {
+            if matches!(
+                map.get("action").and_then(Value::as_str),
+                Some("review_child_patch" | "apply_child_patch" | "reject_child_patch")
+            ) {
+                execute_child_task_patch(state, task, map)
+            } else {
+                execute_workspace_patch(state, task, map)
+            }
+        }
         _ => Err(format!("unknown skill: {skill_name}")),
     }
 }
