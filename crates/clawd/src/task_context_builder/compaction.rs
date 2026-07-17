@@ -20,11 +20,13 @@ const CONTINUITY_REF_NAMESPACES: &[&str] = &[
     "fact",
     "failure",
     "goal",
+    "owner",
     "permission",
     "side_effect",
     "window",
 ];
 const CURRENT_STATE_REF_NAMESPACES: &[&str] = &["next", "open", "risk"];
+const SPACED_SCALAR_REF_NAMESPACES: &[&str] = &["owner"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContextCompactionPlan {
@@ -482,6 +484,11 @@ fn extract_machine_refs(value: &str, namespaces: &[&str]) -> Vec<String> {
             continue;
         }
         index += 1;
+        if SPACED_SCALAR_REF_NAMESPACES.contains(&namespace) {
+            while index < bytes.len() && matches!(bytes[index], b' ' | b'\t') {
+                index += 1;
+            }
+        }
         let value_start = index;
         while index < bytes.len() && is_machine_ref_value_char(bytes[index]) {
             index += 1;
@@ -502,7 +509,7 @@ fn extract_machine_refs(value: &str, namespaces: &[&str]) -> Vec<String> {
         {
             continue;
         }
-        refs.push(value[namespace_start..token_end].to_string());
+        refs.push(format!("{namespace}:{}", &value[value_start..token_end]));
     }
     refs
 }
