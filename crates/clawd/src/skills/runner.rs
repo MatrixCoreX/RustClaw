@@ -224,45 +224,69 @@ pub(crate) async fn run_skill_with_runner_once(
     } else {
         None
     };
-    let tokenized_secret_envs =
-        match claw_core::secrets::issue_secret_env_tokens(&secret_envs, secret_token_ttl) {
+    let selected_openai_api_key = skill_uses_llm
+        .then(|| crate::llm_gateway::selected_openai_api_key(state, Some(task)))
+        .filter(|value| !value.trim().is_empty());
+    let secret_token_scope = if secret_envs.is_empty() && selected_openai_api_key.is_none() {
+        None
+    } else {
+        Some(
+            claw_core::secrets::SecretTokenScope::create().map_err(|err| {
+                tracing::error!(
+                    skill = canonical_skill_name,
+                    error = %err,
+                    "secret_token_scope_create_failed"
+                );
+                format!("secret_token_scope_create_failed; skill={canonical_skill_name}")
+            })?,
+        )
+    };
+    let tokenized_secret_envs = match secret_token_scope.as_ref() {
+        Some(scope) => match scope.issue_env_tokens(&secret_envs, secret_token_ttl) {
             Ok(pairs) => pairs,
             Err(err) => {
+                tracing::error!(
+                    skill = canonical_skill_name,
+                    secret_kind = "declared_env",
+                    error = %err,
+                    "secret_token_issue_failed"
+                );
                 return Err(format!(
-                "skill `{canonical_skill_name}` failed to issue short-lived secret tokens: {err}"
-            ));
+                    "secret_token_issue_failed; skill={canonical_skill_name}; secret_kind=declared_env"
+                ));
             }
-        };
-    let openai_api_key_token = if skill_uses_llm {
-        let selected_openai_api_key =
-            crate::llm_gateway::selected_openai_api_key(state, Some(task));
-        if selected_openai_api_key.trim().is_empty() {
-            None
-        } else {
-            match claw_core::secrets::issue_secret_token_value(
-                &claw_core::secrets::SecretValue::new(selected_openai_api_key),
+        },
+        None => Vec::new(),
+    };
+    let openai_api_key_token = match (
+        secret_token_scope.as_ref(),
+        selected_openai_api_key.as_deref(),
+    ) {
+        (Some(scope), Some(api_key)) => {
+            match scope.issue_value(
+                &claw_core::secrets::SecretValue::new(api_key),
                 secret_token_ttl,
             ) {
                 Ok(token) => Some(token),
                 Err(err) => {
+                    tracing::error!(
+                        skill = canonical_skill_name,
+                        secret_kind = "openai_api_key",
+                        error = %err,
+                        "secret_token_issue_failed"
+                    );
                     return Err(format!(
-                        "skill `{canonical_skill_name}` failed to mint OPENAI_API_KEY token: {err}"
+                        "secret_token_issue_failed; skill={canonical_skill_name}; secret_kind=openai_api_key"
                     ));
                 }
             }
         }
-    } else {
-        None
+        _ => None,
     };
-    let token_store_dir = claw_core::secrets::secret_token_store_dir();
-    let additional_writable_paths = if internal_llm_token.is_some()
-        || openai_api_key_token.is_some()
-        || !tokenized_secret_envs.is_empty()
-    {
-        vec![token_store_dir.clone()]
-    } else {
-        Vec::new()
-    };
+    let additional_writable_paths = secret_token_scope
+        .as_ref()
+        .map(|scope| vec![scope.store_dir().to_path_buf()])
+        .unwrap_or_default();
     let network = if caps.iter().any(|cap| {
         matches!(
             cap,
@@ -296,11 +320,7 @@ pub(crate) async fn run_skill_with_runner_once(
         network_policy = ?network,
         "skill_runner_process_sandbox_prepared"
     );
-    let sandbox_token_store_dir = prepared
-        .additional_writable_targets
-        .first()
-        .cloned()
-        .unwrap_or_else(|| token_store_dir.clone());
+    let sandbox_token_store_dir = prepared.additional_writable_targets.first().cloned();
     let mut cmd = prepared.command;
     if let Some(report) = apply_skill_runner_env_isolation(&mut cmd) {
         tracing::info!(
@@ -314,10 +334,6 @@ pub(crate) async fn run_skill_with_runner_once(
     cmd.kill_on_drop(true);
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env(
-            "RUSTCLAW_SECRET_TOKEN_DIR",
-            sandbox_token_store_dir.display().to_string(),
-        )
-        .env(
             "WORKSPACE_ROOT",
             state.skill_rt.workspace_root.display().to_string(),
         )
@@ -329,6 +345,12 @@ pub(crate) async fn run_skill_with_runner_once(
             "RUSTCLAW_LOCATOR_SCAN_MAX_FILES",
             state.skill_rt.locator_scan_max_files.to_string(),
         );
+    if let Some(token_store_dir) = sandbox_token_store_dir {
+        cmd.env(
+            "RUSTCLAW_SECRET_TOKEN_DIR",
+            token_store_dir.display().to_string(),
+        );
+    }
     if let Some(token) = &internal_llm_token {
         cmd.env(
             "RUSTCLAW_INTERNAL_LLM_URL",

@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -55,13 +56,64 @@ pub struct SecretValue {
     inner: String,
 }
 
-const SECRET_TOKEN_PREFIX: &str = "rustclaw-secret://v1/";
+pub const SECRET_TOKEN_REFERENCE_PREFIX: &str = "rustclaw-secret://v1/";
 const SECRET_TOKEN_STORE_DIR_ENV: &str = "RUSTCLAW_SECRET_TOKEN_DIR";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SecretTokenRecord {
     value: String,
     expires_at_epoch_ms: u64,
+}
+
+pub struct SecretTokenScope {
+    store_dir: PathBuf,
+}
+
+impl SecretTokenScope {
+    pub fn create() -> Result<Self, SecretTokenError> {
+        Self::create_in(&secret_token_store_dir())
+    }
+
+    fn create_in(parent: &Path) -> Result<Self, SecretTokenError> {
+        ensure_store_dir(parent)?;
+        let store_dir = parent.join(format!("dispatch-{}", Uuid::new_v4()));
+        fs::create_dir(&store_dir).map_err(|source| SecretTokenError::StoreIo {
+            path: store_dir.clone(),
+            source,
+        })?;
+        restrict_secret_store_permissions(&store_dir)?;
+        Ok(Self { store_dir })
+    }
+
+    pub fn store_dir(&self) -> &Path {
+        &self.store_dir
+    }
+
+    pub fn issue_value(
+        &self,
+        secret: &SecretValue,
+        ttl: Duration,
+    ) -> Result<String, SecretTokenError> {
+        issue_secret_token_value_in_dir(&self.store_dir, secret, ttl)
+    }
+
+    pub fn issue_env_tokens(
+        &self,
+        secret_envs: &[(String, SecretValue)],
+        ttl: Duration,
+    ) -> Result<Vec<(String, String)>, SecretTokenError> {
+        let mut out = Vec::with_capacity(secret_envs.len());
+        for (env_name, secret) in secret_envs {
+            out.push((env_name.clone(), self.issue_value(secret, ttl)?));
+        }
+        Ok(out)
+    }
+}
+
+impl Drop for SecretTokenScope {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.store_dir);
+    }
 }
 
 impl SecretValue {
@@ -334,7 +386,23 @@ fn ensure_store_dir(store_dir: &Path) -> Result<(), SecretTokenError> {
     fs::create_dir_all(store_dir).map_err(|source| SecretTokenError::StoreIo {
         path: store_dir.to_path_buf(),
         source,
-    })
+    })?;
+    restrict_secret_store_permissions(store_dir)
+}
+
+fn restrict_secret_store_permissions(store_dir: &Path) -> Result<(), SecretTokenError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        fs::set_permissions(store_dir, fs::Permissions::from_mode(0o700)).map_err(|source| {
+            SecretTokenError::StoreIo {
+                path: store_dir.to_path_buf(),
+                source,
+            }
+        })?;
+    }
+    Ok(())
 }
 
 fn resolved_secret_env_cache() -> &'static Mutex<HashMap<String, String>> {
@@ -376,11 +444,25 @@ fn issue_secret_token_value_in_dir(
         expires_at_epoch_ms: now_epoch_ms().saturating_add(ttl_ms.max(1)),
     };
     let payload = serde_json::to_vec(&record).expect("secret token record must serialize");
-    fs::write(&path, payload).map_err(|source| SecretTokenError::StoreIo {
-        path: path.clone(),
-        source,
-    })?;
-    Ok(format!("{SECRET_TOKEN_PREFIX}{token}"))
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .map_err(|source| SecretTokenError::StoreIo {
+            path: path.clone(),
+            source,
+        })?;
+    file.write_all(&payload)
+        .map_err(|source| SecretTokenError::StoreIo {
+            path: path.clone(),
+            source,
+        })?;
+    Ok(format!("{SECRET_TOKEN_REFERENCE_PREFIX}{token}"))
 }
 
 pub fn issue_secret_token_value(
@@ -390,26 +472,11 @@ pub fn issue_secret_token_value(
     issue_secret_token_value_in_dir(&secret_token_store_dir(), secret, ttl)
 }
 
-pub fn issue_secret_env_tokens(
-    secret_envs: &[(String, SecretValue)],
-    ttl: Duration,
-) -> Result<Vec<(String, String)>, SecretTokenError> {
-    let store_dir = secret_token_store_dir();
-    let mut out = Vec::with_capacity(secret_envs.len());
-    for (env_name, secret) in secret_envs {
-        out.push((
-            env_name.clone(),
-            issue_secret_token_value_in_dir(&store_dir, secret, ttl)?,
-        ));
-    }
-    Ok(out)
-}
-
 fn redeem_secret_token_reference_in_dir(
     store_dir: &Path,
     value: &str,
 ) -> Result<Option<String>, SecretTokenError> {
-    let Some(token) = value.strip_prefix(SECRET_TOKEN_PREFIX) else {
+    let Some(token) = value.strip_prefix(SECRET_TOKEN_REFERENCE_PREFIX) else {
         return Ok(None);
     };
     let path = token_record_path(store_dir, token);

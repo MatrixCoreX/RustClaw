@@ -41,6 +41,7 @@ fn secrets_and_raw_teaching_fields_are_redacted_before_persistence() {
             "api_key": "top-secret",
             "nested": {"authorization": "Bearer abcdefghijklmnop"},
             "raw_llm_response": {"content": "private"},
+            "opaque_ref": "rustclaw-secret://v1/12345678-1234-1234-1234-123456789abc",
             "safe": "visible",
         }),
     )
@@ -50,6 +51,7 @@ fn secrets_and_raw_teaching_fields_are_redacted_before_persistence() {
     assert!(!encoded.contains("top-secret"));
     assert!(!encoded.contains("abcdefghijklmnop"));
     assert!(!encoded.contains("private"));
+    assert!(!encoded.contains("rustclaw-secret://"));
     assert_eq!(event["payload"]["safe"], "visible");
     assert_eq!(event["redaction"]["applied"], true);
 }

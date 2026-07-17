@@ -943,7 +943,8 @@ fn embedded_http_health_body_prioritizes_optional_daemon_statuses() {
 fn text_observed_evidence_keeps_safe_file_tokens_while_redacting_secret_tokens() {
     let output = concat!(
         "The files are builtin_write_smoke.txt, full_suite_trace_note.txt, gen-1778122040.png, ",
-        "and hello.sh; secret sk-123456789012345678901234 should not be exposed."
+        "and hello.sh; secrets sk-123456789012345678901234 and ",
+        "rustclaw-secret://v1/12345678-1234-1234-1234-123456789abc should not be exposed."
     );
 
     let observed = observed_evidence_from_output(Some(output))
@@ -964,6 +965,7 @@ fn text_observed_evidence_keeps_safe_file_tokens_while_redacting_secret_tokens()
     assert!(text_excerpt.contains("hello.sh"));
     assert!(text_excerpt.contains("[redacted]"));
     assert!(!text_excerpt.contains("sk-123456789012345678901234"));
+    assert!(!text_excerpt.contains("rustclaw-secret://"));
 }
 
 #[test]

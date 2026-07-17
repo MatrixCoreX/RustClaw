@@ -208,6 +208,39 @@ fn expired_secret_token_is_rejected() {
 }
 
 #[test]
+fn dispatch_secret_token_scopes_are_isolated_and_removed_on_drop() {
+    let parent = fresh_token_store_dir("dispatch-scope");
+    let _ = fs::remove_dir_all(&parent);
+    let scope_a = SecretTokenScope::create_in(&parent).expect("scope a");
+    let scope_b = SecretTokenScope::create_in(&parent).expect("scope b");
+    let scope_a_dir = scope_a.store_dir().to_path_buf();
+    let scope_b_dir = scope_b.store_dir().to_path_buf();
+    let token = scope_a
+        .issue_value(&SecretValue::new("scope-a-secret"), Duration::from_secs(60))
+        .expect("issue scoped token");
+
+    assert_ne!(scope_a_dir, scope_b_dir);
+    assert!(scope_a_dir.is_dir());
+    assert!(scope_b_dir.is_dir());
+    assert!(matches!(
+        redeem_secret_token_reference_in_dir(scope_b.store_dir(), &token),
+        Err(SecretTokenError::Missing { .. })
+    ));
+    assert_eq!(
+        redeem_secret_token_reference_in_dir(scope_a.store_dir(), &token)
+            .expect("redeem from selected scope")
+            .as_deref(),
+        Some("scope-a-secret")
+    );
+
+    drop(scope_a);
+    drop(scope_b);
+    assert!(!scope_a_dir.exists());
+    assert!(!scope_b_dir.exists());
+    let _ = fs::remove_dir_all(parent);
+}
+
+#[test]
 fn env_non_empty_resolved_redeems_token_and_caches_by_env_name() {
     let dir = fresh_token_store_dir("env-cache");
     let previous_dir = env::var(SECRET_TOKEN_STORE_DIR_ENV).ok();
