@@ -303,7 +303,19 @@ fn skill_permission_profile_hint(entry: &SkillRegistryEntry) -> Option<String> {
 #[cfg(test)]
 #[path = "capability_map_tests.rs"]
 mod tests;
-pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask) -> String {
+
+pub(crate) fn build_compact_capability_map_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> String {
+    build_capability_map_for_task_with_detail(state, task, false)
+}
+
+fn build_capability_map_for_task_with_detail(
+    state: &AppState,
+    task: &ClaimedTask,
+    include_registry_skill_hints: bool,
+) -> String {
     let all_visible = state.planner_visible_skills_for_task(task);
     let visible = state.planner_available_skills_for_task(task);
     let available_set = visible.iter().cloned().collect::<BTreeSet<_>>();
@@ -373,174 +385,176 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
         ));
     }
 
-    if let Some(registry) = state.get_skills_registry() {
-        let mut hints = Vec::new();
-        for skill in &visible {
-            let Some(entry) = registry.get(skill) else {
-                continue;
-            };
-            let aliases = entry
-                .aliases
-                .iter()
-                .map(|alias| alias.trim())
-                .filter(|alias| !alias.is_empty())
-                .take(6)
-                .collect::<Vec<_>>();
-            let description = entry
-                .description
-                .as_deref()
-                .map(str::trim)
-                .filter(|description| !description.is_empty());
-            let semantic_tags = entry
-                .semantic_tags
-                .iter()
-                .map(|tag| tag.trim())
-                .filter(|tag| !tag.is_empty())
-                .take(8)
-                .collect::<Vec<_>>();
-            let validation_actions = entry
-                .validation_actions
-                .iter()
-                .map(|action| action.trim())
-                .filter(|action| !action.is_empty())
-                .take(6)
-                .collect::<Vec<_>>();
-            let capability_tokens = entry
-                .resolved_capabilities
-                .iter()
-                .map(|capability| capability.as_token())
-                .take(8)
-                .collect::<Vec<_>>();
-            let planner_capability_tokens = entry
-                .planner_capabilities
-                .iter()
-                .map(planner_capability_hint)
-                .take(12)
-                .collect::<Vec<_>>();
-            let supported_os = entry
-                .supported_os
-                .iter()
-                .map(|os| os.trim())
-                .filter(|os| !os.is_empty())
-                .take(6)
-                .collect::<Vec<_>>();
-            let required_bins = entry
-                .required_bins
-                .iter()
-                .map(|bin| bin.trim())
-                .filter(|bin| !bin.is_empty())
-                .take(8)
-                .collect::<Vec<_>>();
-            let optional_bins = entry
-                .optional_bins
-                .iter()
-                .map(|bin| bin.trim())
-                .filter(|bin| !bin.is_empty())
-                .take(8)
-                .collect::<Vec<_>>();
-            let platform_notes = entry
-                .platform_notes
-                .iter()
-                .map(|note| note.trim())
-                .filter(|note| !note.is_empty())
-                .take(2)
-                .collect::<Vec<_>>();
-            let planner_kind = registry
-                .planner_kind(skill)
-                .unwrap_or(PlannerCapabilityKind::Skill);
-            if aliases.is_empty()
-                && description.is_none()
-                && semantic_tags.is_empty()
-                && validation_actions.is_empty()
-                && planner_capability_tokens.is_empty()
-                && capability_tokens.is_empty()
-                && supported_os.is_empty()
-                && required_bins.is_empty()
-                && optional_bins.is_empty()
-                && platform_notes.is_empty()
-                && entry.retryable.is_none()
-                && entry.requires_confirmation.is_none()
-                && !entry.preferred_over_run_cmd
-                && planner_kind == PlannerCapabilityKind::Skill
-            {
-                continue;
-            }
-            let mut parts = Vec::new();
-            parts.push(format!("planner_kind: {}", planner_kind.as_token()));
-            if let Some(description) = description {
-                parts.push(description.to_string());
-            }
-            if !semantic_tags.is_empty() {
-                parts.push(format!("semantic_tags: {}", semantic_tags.join(", ")));
-            }
-            if entry.preferred_over_run_cmd {
-                parts.push("prefer over run_cmd when semantics match".to_string());
-            }
-            if let Some(permission_profile) = skill_permission_profile_hint(entry) {
-                parts.push(format!("permission_profile={permission_profile}"));
-            }
-            if !validation_actions.is_empty() {
-                parts.push(format!(
-                    "validation_actions: {}",
-                    validation_actions.join(", ")
-                ));
-            }
-            if !planner_capability_tokens.is_empty() {
-                parts.push(format!(
-                    "planner_capabilities: {}",
-                    planner_capability_tokens.join("; ")
-                ));
-            }
-            if let Some(retryable) = entry.retryable {
-                parts.push(format!("retryable: {retryable}"));
-            }
-            if let Some(requires_confirmation) = entry.requires_confirmation {
-                parts.push(format!("requires_confirmation: {requires_confirmation}"));
-            }
-            if !entry.confirmation_exempt_when.is_empty() {
-                let exemptions = entry
-                    .confirmation_exempt_when
+    if include_registry_skill_hints {
+        if let Some(registry) = state.get_skills_registry() {
+            let mut hints = Vec::new();
+            for skill in &visible {
+                let Some(entry) = registry.get(skill) else {
+                    continue;
+                };
+                let aliases = entry
+                    .aliases
                     .iter()
-                    .take(4)
-                    .map(|matcher| {
-                        matcher
-                            .iter()
-                            .map(|(key, value)| {
-                                format!("{key}={}", compact_toml_value_token(value))
-                            })
-                            .collect::<Vec<_>>()
-                            .join("+")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                parts.push(format!("confirmation_exempt_when: {exemptions}"));
+                    .map(|alias| alias.trim())
+                    .filter(|alias| !alias.is_empty())
+                    .take(6)
+                    .collect::<Vec<_>>();
+                let description = entry
+                    .description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|description| !description.is_empty());
+                let semantic_tags = entry
+                    .semantic_tags
+                    .iter()
+                    .map(|tag| tag.trim())
+                    .filter(|tag| !tag.is_empty())
+                    .take(8)
+                    .collect::<Vec<_>>();
+                let validation_actions = entry
+                    .validation_actions
+                    .iter()
+                    .map(|action| action.trim())
+                    .filter(|action| !action.is_empty())
+                    .take(6)
+                    .collect::<Vec<_>>();
+                let capability_tokens = entry
+                    .resolved_capabilities
+                    .iter()
+                    .map(|capability| capability.as_token())
+                    .take(8)
+                    .collect::<Vec<_>>();
+                let planner_capability_tokens = entry
+                    .planner_capabilities
+                    .iter()
+                    .map(planner_capability_hint)
+                    .take(12)
+                    .collect::<Vec<_>>();
+                let supported_os = entry
+                    .supported_os
+                    .iter()
+                    .map(|os| os.trim())
+                    .filter(|os| !os.is_empty())
+                    .take(6)
+                    .collect::<Vec<_>>();
+                let required_bins = entry
+                    .required_bins
+                    .iter()
+                    .map(|bin| bin.trim())
+                    .filter(|bin| !bin.is_empty())
+                    .take(8)
+                    .collect::<Vec<_>>();
+                let optional_bins = entry
+                    .optional_bins
+                    .iter()
+                    .map(|bin| bin.trim())
+                    .filter(|bin| !bin.is_empty())
+                    .take(8)
+                    .collect::<Vec<_>>();
+                let platform_notes = entry
+                    .platform_notes
+                    .iter()
+                    .map(|note| note.trim())
+                    .filter(|note| !note.is_empty())
+                    .take(2)
+                    .collect::<Vec<_>>();
+                let planner_kind = registry
+                    .planner_kind(skill)
+                    .unwrap_or(PlannerCapabilityKind::Skill);
+                if aliases.is_empty()
+                    && description.is_none()
+                    && semantic_tags.is_empty()
+                    && validation_actions.is_empty()
+                    && planner_capability_tokens.is_empty()
+                    && capability_tokens.is_empty()
+                    && supported_os.is_empty()
+                    && required_bins.is_empty()
+                    && optional_bins.is_empty()
+                    && platform_notes.is_empty()
+                    && entry.retryable.is_none()
+                    && entry.requires_confirmation.is_none()
+                    && !entry.preferred_over_run_cmd
+                    && planner_kind == PlannerCapabilityKind::Skill
+                {
+                    continue;
+                }
+                let mut parts = Vec::new();
+                parts.push(format!("planner_kind: {}", planner_kind.as_token()));
+                if let Some(description) = description {
+                    parts.push(description.to_string());
+                }
+                if !semantic_tags.is_empty() {
+                    parts.push(format!("semantic_tags: {}", semantic_tags.join(", ")));
+                }
+                if entry.preferred_over_run_cmd {
+                    parts.push("prefer over run_cmd when semantics match".to_string());
+                }
+                if let Some(permission_profile) = skill_permission_profile_hint(entry) {
+                    parts.push(format!("permission_profile={permission_profile}"));
+                }
+                if !validation_actions.is_empty() {
+                    parts.push(format!(
+                        "validation_actions: {}",
+                        validation_actions.join(", ")
+                    ));
+                }
+                if !planner_capability_tokens.is_empty() {
+                    parts.push(format!(
+                        "planner_capabilities: {}",
+                        planner_capability_tokens.join("; ")
+                    ));
+                }
+                if let Some(retryable) = entry.retryable {
+                    parts.push(format!("retryable: {retryable}"));
+                }
+                if let Some(requires_confirmation) = entry.requires_confirmation {
+                    parts.push(format!("requires_confirmation: {requires_confirmation}"));
+                }
+                if !entry.confirmation_exempt_when.is_empty() {
+                    let exemptions = entry
+                        .confirmation_exempt_when
+                        .iter()
+                        .take(4)
+                        .map(|matcher| {
+                            matcher
+                                .iter()
+                                .map(|(key, value)| {
+                                    format!("{key}={}", compact_toml_value_token(value))
+                                })
+                                .collect::<Vec<_>>()
+                                .join("+")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    parts.push(format!("confirmation_exempt_when: {exemptions}"));
+                }
+                parts.extend(skill_availability::availability_metadata_parts(
+                    &skill_availability::evaluate_entry_availability(entry),
+                ));
+                if !capability_tokens.is_empty() {
+                    parts.push(format!("capabilities: {}", capability_tokens.join(", ")));
+                }
+                if !supported_os.is_empty() {
+                    parts.push(format!("supported_os: {}", supported_os.join(", ")));
+                }
+                if !required_bins.is_empty() {
+                    parts.push(format!("required_bins: {}", required_bins.join(", ")));
+                }
+                if !optional_bins.is_empty() {
+                    parts.push(format!("optional_bins: {}", optional_bins.join(", ")));
+                }
+                if !platform_notes.is_empty() {
+                    parts.push(format!("platform_notes: {}", platform_notes.join(" | ")));
+                }
+                if !aliases.is_empty() {
+                    parts.push(format!("aliases: {}", aliases.join(", ")));
+                }
+                hints.push(format!("  - {skill}: {}", parts.join("; ")));
             }
-            parts.extend(skill_availability::availability_metadata_parts(
-                &skill_availability::evaluate_entry_availability(entry),
-            ));
-            if !capability_tokens.is_empty() {
-                parts.push(format!("capabilities: {}", capability_tokens.join(", ")));
+            if !hints.is_empty() {
+                lines.push("Registry skill hints:".to_string());
+                lines.extend(hints);
             }
-            if !supported_os.is_empty() {
-                parts.push(format!("supported_os: {}", supported_os.join(", ")));
-            }
-            if !required_bins.is_empty() {
-                parts.push(format!("required_bins: {}", required_bins.join(", ")));
-            }
-            if !optional_bins.is_empty() {
-                parts.push(format!("optional_bins: {}", optional_bins.join(", ")));
-            }
-            if !platform_notes.is_empty() {
-                parts.push(format!("platform_notes: {}", platform_notes.join(" | ")));
-            }
-            if !aliases.is_empty() {
-                parts.push(format!("aliases: {}", aliases.join(", ")));
-            }
-            hints.push(format!("  - {skill}: {}", parts.join("; ")));
-        }
-        if !hints.is_empty() {
-            lines.push("Registry skill hints:".to_string());
-            lines.extend(hints);
         }
     }
 

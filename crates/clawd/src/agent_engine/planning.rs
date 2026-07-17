@@ -11,7 +11,7 @@ use tracing::{info, warn};
 use super::{
     attempt_ledger::build_attempt_ledger_compact, build_loop_history_compact,
     build_planner_skill_context, build_single_plan_prompt, build_turn_analysis_prompt_block,
-    AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH,
+    AgentLoopGuardPolicy, LoopState,
 };
 use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult};
 
@@ -37,20 +37,9 @@ impl<'a> PlannerToolLibrary<'a> {
     }
 
     fn tool_spec(&self) -> Result<String, String> {
-        crate::bootstrap::load_required_prompt_template_for_state(self.state, AGENT_TOOL_SPEC_PATH)
-            .map(|resolved| {
-                let capability_map =
-                    crate::capability_map::build_capability_map_for_task(self.state, self.task);
-                let mut spec = String::new();
-                spec.push_str("runtime_capability_map_v1");
-                spec.push('\n');
-                spec.push_str(&capability_map);
-                spec.push('\n');
-                spec.push('\n');
-                spec.push_str(&resolved.0);
-                spec
-            })
-            .map_err(|err| err.to_string())
+        let capability_map =
+            crate::capability_map::build_compact_capability_map_for_task(self.state, self.task);
+        Ok(format!("runtime_capability_map_v2\n{capability_map}"))
     }
 }
 

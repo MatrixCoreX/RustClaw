@@ -309,7 +309,8 @@ async fn dynamic_mcp_capability_reaches_resolver_prompt_and_verifier_policy() {
         payload_json: "{}".to_string(),
     };
 
-    let capability_map = crate::capability_map::build_capability_map_for_task(&state, &task);
+    let capability_map =
+        crate::capability_map::build_compact_capability_map_for_task(&state, &task);
     assert!(capability_map.contains("mcp.fixture.lookup"));
     assert!(capability_map.contains("required=query"));
     assert!(capability_map.contains("effect=observe"));
@@ -471,7 +472,8 @@ async fn large_catalog_uses_bounded_search_then_discloses_matching_schema() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let capability_map = crate::capability_map::build_capability_map_for_task(&state, &task);
+    let capability_map =
+        crate::capability_map::build_compact_capability_map_for_task(&state, &task);
     assert!(capability_map.contains("mcp.catalog.search"));
     assert!(!capability_map.contains("mcp.fixture.slow"));
     runtime.stop().await;

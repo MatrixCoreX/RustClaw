@@ -116,7 +116,6 @@ pub(crate) fn answer_verifier_enforce_required_enabled(state: &AppState) -> bool
     load_agent_loop_guard_policy(state).answer_verifier_required_evidence_enabled()
 }
 
-const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
 const CLAWD_CONTINUE_ON_ERROR_ARG: &str = "_clawd_continue_on_error";
 const CLAWD_LITERAL_COMMAND_ARG: &str = "_clawd_literal_command";
 const CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG: &str = "_clawd_literal_failure_repairable";
