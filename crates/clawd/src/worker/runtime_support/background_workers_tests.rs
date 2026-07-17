@@ -94,6 +94,46 @@ fn task_result(state: &AppState, task_id: &str) -> Value {
 }
 
 #[test]
+fn cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner() {
+    let state = test_state();
+    let task_id = format!("task-cost-cleanup-{}", Uuid::new_v4().simple());
+    insert_task(&state, &task_id, "succeeded", Some(&json!({})));
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "INSERT INTO llm_cost_ledger (
+                task_id, user_id, provider, model, logical_call_index, prompt_label,
+                provider_status, cost_status, estimated_cost_usd_nanos, record_json,
+                created_at_ts
+             ) VALUES (?1, 42, 'vendor-primary', 'model-a', 1, 'plan',
+                       'ok', 'known', 1000, '{}', 1)",
+            rusqlite::params![task_id],
+        )
+        .expect("insert cost ledger row");
+    }
+
+    cleanup_once(&state).expect("run cleanup");
+
+    let db = state.core.db.get().expect("get db");
+    let task_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE task_id=?1",
+            rusqlite::params![task_id],
+            |row| row.get(0),
+        )
+        .expect("count retained task");
+    let cost_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM llm_cost_ledger WHERE task_id=?1",
+            rusqlite::params![task_id],
+            |row| row.get(0),
+        )
+        .expect("count retained cost rows");
+    assert_eq!(task_count, 0);
+    assert_eq!(cost_count, 0);
+}
+
+#[test]
 fn scheduled_wakeup_resumes_waiting_thread_without_enqueuing_duplicate_task() {
     let state = test_state();
     let now = crate::now_ts_u64() as i64;
