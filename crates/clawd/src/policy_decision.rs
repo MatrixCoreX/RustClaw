@@ -45,15 +45,6 @@ impl PolicyDecision {
         self == Self::BackgroundWait
     }
 
-    pub(crate) fn pre_tool_use_reason_code(self) -> &'static str {
-        match self {
-            Self::Allow => "pre_tool_use_allowed",
-            Self::Deny => "pre_tool_use_blocked",
-            Self::RequireConfirmation => "pre_tool_use_requires_confirmation",
-            Self::BackgroundWait => "pre_tool_use_background_wait",
-        }
-    }
-
     pub(crate) fn from_permission_flags(
         approved: bool,
         needs_confirmation: bool,
@@ -135,10 +126,7 @@ mod tests {
         assert!(PolicyDecision::RequireConfirmation.blocks_execution());
         assert!(PolicyDecision::BackgroundWait.blocks_execution());
         assert!(PolicyDecision::RequireConfirmation.requires_confirmation());
-        assert_eq!(
-            PolicyDecision::BackgroundWait.pre_tool_use_reason_code(),
-            "pre_tool_use_background_wait"
-        );
+        assert!(PolicyDecision::BackgroundWait.requires_background_wait());
     }
 
     #[test]

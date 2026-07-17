@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
-use super::{normalize_machine_token, HookPolicy, HookStage, HOOK_EVENT_SCHEMA_VERSION};
+use super::{normalize_machine_token, HookStage, HOOK_EVENT_SCHEMA_VERSION};
 use crate::policy_decision::PolicyDecision;
 
 pub(super) const HOOK_OUTPUT_SCHEMA_VERSION: u16 = 1;
@@ -62,7 +62,6 @@ impl Default for HookHandlerConfig {
 
 #[derive(Debug)]
 pub(super) struct LoadedHookConfiguration {
-    pub(super) policy: HookPolicy,
     pub(super) handlers: Vec<HookHandlerConfig>,
     pub(super) error_code: Option<&'static str>,
 }

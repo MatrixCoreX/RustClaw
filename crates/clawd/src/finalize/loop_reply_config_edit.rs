@@ -429,7 +429,7 @@ fn config_field_array_count(value: &serde_json::Value, field_path: &str) -> usiz
         .unwrap_or(0)
 }
 
-fn agent_hook_policy_surface_answer(
+fn agent_hook_runtime_surface_answer(
     outputs: &[ConfigEditObservedOutput],
     _prefer_english: bool,
 ) -> Option<String> {
@@ -442,49 +442,28 @@ fn agent_hook_policy_surface_answer(
             .is_some_and(path_is_agent_guard_config)
     })?;
 
-    let blocked_action_refs = "agent.hooks.blocked_action_refs";
-    let blocked_tools = "agent.hooks.blocked_tools";
-    let require_confirmation = "agent.hooks.require_confirmation_action_refs";
-    let background_wait = "agent.hooks.background_wait_action_refs";
-    let deny_supported = config_field_exists(&observation.value, blocked_action_refs)
-        || config_field_exists(&observation.value, blocked_tools);
+    let handler_field_path = "agent.hooks.handlers";
+    if !config_field_exists(&observation.value, handler_field_path) {
+        return None;
+    }
+    let hook_stages = crate::agent_hooks::HookStage::all()
+        .iter()
+        .map(|stage| stage.as_token())
+        .collect::<Vec<_>>();
+    let decision_tokens = crate::policy_decision::PolicyDecision::all_tokens();
     let payload = serde_json::json!({
-        "message_key": "clawd.msg.agent_hooks.pre_tool_use_policy_surface",
-        "reason_code": "agent_hooks_pre_tool_use_policy_surface",
+        "message_key": "clawd.msg.agent_hooks.runtime_surface",
+        "reason_code": "agent_hooks_runtime_surface",
         "owner_layer": "agent_hooks",
-        "stage": "pre_tool_use",
         "path": "configs/agent_guard.toml",
         "read_only": true,
         "would_mutate": false,
-        "decision_tokens": ["allow", "deny", "require_confirmation", "background_wait"],
-        "field_paths": [
-            blocked_action_refs,
-            blocked_tools,
-            require_confirmation,
-            background_wait
-        ],
-        "decisions": {
-            "allow": {
-                "supported": true,
-                "source": "default_allow"
-            },
-            "deny": {
-                "supported": deny_supported,
-                "fields": [blocked_action_refs, blocked_tools],
-                "configured_ref_count": config_field_array_count(&observation.value, blocked_action_refs)
-                    + config_field_array_count(&observation.value, blocked_tools)
-            },
-            "require_confirmation": {
-                "supported": config_field_exists(&observation.value, require_confirmation),
-                "field": require_confirmation,
-                "configured_ref_count": config_field_array_count(&observation.value, require_confirmation)
-            },
-            "background_wait": {
-                "supported": config_field_exists(&observation.value, background_wait),
-                "field": background_wait,
-                "configured_ref_count": config_field_array_count(&observation.value, background_wait)
-            }
-        }
+        "handler_field_path": handler_field_path,
+        "configured_handler_count": config_field_array_count(&observation.value, handler_field_path),
+        "handler_kinds": ["command", "http", "mcp"],
+        "hook_stages": hook_stages,
+        "decision_tokens": decision_tokens,
+        "blocking_stages": ["pre_tool_use", "permission_request"]
     });
     Some(payload.to_string())
 }
@@ -617,7 +596,7 @@ pub(crate) fn direct_config_edit_observed_answer(
         || (request_language == "config_default" && prefer_english_for_user_text(state, user_text));
     let answer = direct_config_edit_apply_answer(&outputs, prefer_english)
         .or_else(|| direct_config_edit_plan_answer(&outputs, prefer_english))
-        .or_else(|| agent_hook_policy_surface_answer(&outputs, prefer_english))
+        .or_else(|| agent_hook_runtime_surface_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_read_guard_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_guard_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_validate_answer(&outputs, prefer_english))
