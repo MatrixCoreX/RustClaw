@@ -151,3 +151,75 @@ async fn checkpointed_ask_finalization_overrides_failure_metric() {
     assert!(lease_owner.is_none());
     assert_eq!(lease_expires_at, 0);
 }
+
+#[tokio::test]
+async fn provider_outage_finalizes_as_resumable_waiting_checkpoint() {
+    let state = state_with_tasks_table();
+    let task = claimed_ask_task("task-provider-wait-finalize");
+    insert_running_task(&state, &task);
+    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, "plan", 42);
+    state.note_task_provider_blocker(
+        &task.task_id,
+        crate::TaskProviderBlocker {
+            provider: "fixture-provider".to_string(),
+            status_code: "rate_limited".to_string(),
+            retry_after_seconds: 60,
+            external_provider_blocked: true,
+            message_key: "provider.rate_limited".to_string(),
+        },
+    );
+    let payload = json!({"text": "start long task"});
+
+    super::finalize_ask_result(
+        &state,
+        &task,
+        &payload,
+        "start long task",
+        "",
+        None,
+        "start long task",
+        None,
+        &[],
+        None,
+        Err("opaque-provider-failure".to_string()),
+    )
+    .await
+    .expect("provider wait finalization");
+
+    let (status, result) = task_status_and_result(&state, &task.task_id);
+    assert_eq!(status, "running");
+    let lifecycle = &result["task_journal"]["summary"]["task_lifecycle"];
+    assert_eq!(lifecycle["state"], "waiting");
+    assert_eq!(
+        lifecycle["resume_reason"],
+        "provider_blocker_wait_background"
+    );
+    assert_eq!(lifecycle["provider_status"]["status_code"], "rate_limited");
+    assert_eq!(lifecycle["provider_status"]["retry_after_seconds"], 60);
+    assert_eq!(
+        lifecycle["provider_status"]["message_key"],
+        "provider.rate_limited"
+    );
+    let checkpoint = &result["task_journal"]["summary"]["task_checkpoint"];
+    assert_eq!(checkpoint["resume_entrypoint"], "next_planner_round");
+    assert_eq!(
+        checkpoint["repair_signal"]["next_recovery_kind"],
+        "wait_background"
+    );
+    let lifecycle_projection =
+        crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&result), None);
+    assert_eq!(lifecycle_projection["provider_blocker_active"], true);
+    assert_eq!(
+        lifecycle_projection["provider_blocker_status_code"],
+        "rate_limited"
+    );
+    let next_check_after = lifecycle["next_check_after"]
+        .as_i64()
+        .expect("next_check_after");
+    assert!(matches!(
+        crate::task_lifecycle::checkpoint_resume_directive(&result, next_check_after + 1),
+        crate::task_lifecycle::CheckpointResumeDirective::RunNextPlannerRound { .. }
+    ));
+    assert!(result["text"].as_str().is_some_and(str::is_empty));
+    assert!(state.task_provider_blocker(&task.task_id).is_none());
+}

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::{is_quota_exhausted_429, BreakerImpact, ProviderError, PROVIDER_IMPLS};
+use super::{is_quota_exhausted_response, BreakerImpact, ProviderError, PROVIDER_IMPLS};
 use serde_json::Value;
 use std::future::pending;
 
@@ -30,7 +30,7 @@ fn provider_impls_names_are_unique_and_cover_known_protocols() {
 
 #[test]
 fn provider_error_marks_breaker_impact_by_failure_class() {
-    let retryable = ProviderError::retryable("timeout".to_string(), Value::Null);
+    let retryable = ProviderError::timeout("opaque timeout detail".to_string(), Value::Null);
     assert!(retryable.should_trip_breaker());
     assert!(!retryable.should_reset_breaker());
     assert_eq!(retryable.observability_kind(), "timeout");
@@ -79,16 +79,27 @@ fn provider_error_marks_breaker_impact_by_failure_class() {
 }
 
 #[test]
-fn quota_exhausted_detector_matches_common_provider_phrases() {
-    assert!(is_quota_exhausted_429(
-        "{\"error\":\"usage limit exceeded (2056)\"}"
-    ));
-    assert!(is_quota_exhausted_429(
+fn quota_exhausted_detector_uses_machine_fields_only() {
+    assert!(is_quota_exhausted_response(
         "{\"error\":{\"code\":\"insufficient_quota\"}}"
     ));
-    assert!(!is_quota_exhausted_429(
-        "{\"error\":\"rate limit exceeded, retry later\"}"
+    assert!(is_quota_exhausted_response(
+        "{\"base_resp\":{\"status_code\":\"quota_exhausted\"}}"
     ));
+    assert!(!is_quota_exhausted_response(
+        "{\"error\":{\"message\":\"usage limit exceeded (2056)\"}}"
+    ));
+}
+
+#[test]
+fn provider_error_kind_does_not_parse_misleading_message_text() {
+    let local = ProviderError::non_retryable(
+        "timeout 429 quota exceeded recharge".to_string(),
+        Value::Null,
+    );
+
+    assert_eq!(local.observability_kind(), "local_non_retryable");
+    assert_eq!(local.background_wait_seconds(), None);
 }
 
 #[test]
@@ -99,7 +110,7 @@ fn rate_limit_retry_policy_uses_longer_structured_backoff() {
         "{}".to_string(),
         None,
     );
-    let timeout = ProviderError::retryable("timeout".to_string(), Value::Null);
+    let timeout = ProviderError::timeout("opaque timeout detail".to_string(), Value::Null);
 
     assert_eq!(
         super::retry_limit_for_provider_error_with_rate_limit_retries(&rate_limited, 4),
@@ -155,8 +166,8 @@ fn provider_retry_metadata_is_attached_to_results() {
     assert_eq!(response.retryable_error_count, 2);
     assert_eq!(response.last_retry_error_kind, Some("timeout"));
 
-    let error =
-        ProviderError::retryable("timeout".to_string(), Value::Null).with_retry_metadata(4, 4);
+    let error = ProviderError::timeout("opaque timeout detail".to_string(), Value::Null)
+        .with_retry_metadata(4, 4);
     assert_eq!(error.attempts, 4);
     assert_eq!(error.retryable_error_count, 4);
 }
