@@ -22,6 +22,7 @@ fn context_bundle(recent_turns_chars: usize) -> TaskContextBundle {
     TaskContextBundle {
         raw_sources: TaskContextRawSources::default(),
         planner_view: PlannerContextView::default(),
+        context_source_task_ids: Vec::new(),
         execution_view: Some(ExecutionContextView {
             budget_tier: ExecutionContextBudgetTier::Full,
             memory_ctx: empty_prompt_memory_context(),

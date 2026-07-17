@@ -11,7 +11,8 @@ mod compaction;
 mod summary;
 
 pub(crate) use compaction::{
-    apply_agent_loop_context_compaction, plan_agent_loop_context_compaction, ContextCompactionPlan,
+    apply_agent_loop_context_compaction, hydrate_agent_loop_context_compaction_plan,
+    plan_agent_loop_context_compaction, ContextCompactionPlan,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -45,6 +46,7 @@ pub(crate) struct TaskContextBundle {
     pub(crate) raw_sources: TaskContextRawSources,
     pub(crate) planner_view: PlannerContextView,
     pub(crate) execution_view: Option<ExecutionContextView>,
+    pub(crate) context_source_task_ids: Vec<String>,
     pub(crate) compaction_records: Vec<Value>,
 }
 
@@ -534,6 +536,16 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         &planner_memory_decision,
         &chat_memory_decision,
     );
+    let (recent_turns_full, context_source_task_ids) =
+        memory::build_recent_turns_full_context_with_sources(
+            state,
+            task.user_key.as_deref(),
+            task.user_id,
+            task.chat_id,
+            64,
+            560,
+            48_000,
+        );
     let execution_view = ExecutionContextView {
         budget_tier,
         memory_ctx,
@@ -542,15 +554,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         active_task_context: build_active_task_context(&session_snapshot),
         active_execution_anchor_context: build_active_execution_anchor_context(&session_snapshot),
         session_alias_context: build_session_alias_context(&session_snapshot),
-        recent_turns_full: memory::build_recent_turns_full_context(
-            state,
-            task.user_key.as_deref(),
-            task.user_id,
-            task.chat_id,
-            64,
-            560,
-            48_000,
-        ),
+        recent_turns_full,
         last_turn_full: memory::build_last_turn_full_context(
             state,
             task.user_key.as_deref(),
@@ -572,6 +576,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         raw_sources: TaskContextRawSources::default(),
         planner_view,
         execution_view: Some(execution_view),
+        context_source_task_ids,
         compaction_records: Vec::new(),
     }
 }

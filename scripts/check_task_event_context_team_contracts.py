@@ -70,8 +70,8 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "crates/clawd/src/task_journal_context_compaction.rs": (
         "transcript_compaction_records_json",
-        "transcript_compaction_records=",
-        ".filter(Value::is_array)",
+        '"context_compaction_record"',
+        'observation.get("record")',
     ),
     "crates/clawd/src/task_journal_goal.rs": (
         "task_goal_summary_json",

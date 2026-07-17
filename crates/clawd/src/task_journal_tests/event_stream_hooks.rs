@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use super::*;
+use crate::task_journal::context_compaction_record_observation;
 
 #[test]
 fn trace_json_includes_pollable_machine_event_stream() {
@@ -200,8 +201,15 @@ fn event_stream_projects_mcp_runtime_observation_as_dedicated_event() {
 fn trace_json_projects_goal_and_context_budget_events() {
     let mut journal = TaskJournal::for_task("task-context-events", "ask", "inspect");
     journal.record_context_bundle_summary(
-        r#"execution_view=true context_budget_report={"schema_version":1,"budget_tier":"light","included_ref_count":1,"excluded_ref_count":1,"char_estimate":64,"token_estimate":16,"truncation_reason":"light_execution_budget","safety_reason":"context_budget_policy","compaction_source":"deterministic_context_builder"} transcript_compaction_records=[{"schema_version":1,"compaction_id":"context_compaction:fnv64:0000000000000001","summary_kind":"deterministic_context_budget","active_goal_refs":["goal_context"],"risk_flags":["budget_excluded_context"]}]"#,
+        r#"execution_view=true context_budget_report={"schema_version":1,"budget_tier":"light","included_ref_count":1,"excluded_ref_count":1,"char_estimate":64,"token_estimate":16,"truncation_reason":"light_execution_budget","safety_reason":"context_budget_policy","compaction_source":"deterministic_context_builder"}"#,
     );
+    journal.push_task_observation(context_compaction_record_observation(json!({
+        "schema_version": 1,
+        "compaction_id": "context_compaction:fnv64:0000000000000001",
+        "summary_kind": "deterministic_context_budget",
+        "active_goal_refs": ["goal_context"],
+        "risk_flags": ["budget_excluded_context"]
+    })));
 
     let trace = journal.to_trace_json();
     let events = trace

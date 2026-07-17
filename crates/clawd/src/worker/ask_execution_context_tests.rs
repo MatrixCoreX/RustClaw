@@ -7,6 +7,18 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
     {
         let db = state.core.db.get().expect("database");
         for index in 0..52_i64 {
+            let result_json = if index == 24 {
+                json!({
+                    "text": format!("result-{index}-{}", "a".repeat(300)),
+                    "task_journal": {
+                        "summary": {
+                            "transcript_compaction_records": [{"generation": 3}]
+                        }
+                    }
+                })
+            } else {
+                json!({"text": format!("result-{index}-{}", "a".repeat(300))})
+            };
             db.execute(
                 "INSERT INTO tasks (
                     task_id, user_id, chat_id, user_key, channel, kind, payload_json,
@@ -15,12 +27,39 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
                 params![
                     format!("context-history-{index}"),
                     json!({"text": format!("request-{index}-{}", "u".repeat(300))}).to_string(),
-                    json!({"text": format!("result-{index}-{}", "a".repeat(300))}).to_string(),
+                    result_json.to_string(),
                     index + 1,
                 ],
             )
             .expect("insert historical turn");
         }
+        for (task_id, seq) in [("context-history-0", 2_i64), ("context-history-51", 9_i64)] {
+            db.execute(
+                "INSERT INTO task_event_stream (
+                    task_id, seq, event_hash, event_json, created_at_ms
+                 ) VALUES (?1, ?2, ?3, '{}', ?2)",
+                params![task_id, seq, format!("fixture-{task_id}-{seq}")],
+            )
+            .expect("insert source event range");
+        }
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, result_json, created_at, updated_at
+             ) VALUES (
+                'task-live-context-compaction', 7, 9, 'context-user', 'ui', 'ask',
+                '{}', 'running', ?1, 53, 53
+             )",
+            params![json!({
+                "task_journal": {
+                    "summary": {
+                        "transcript_compaction_records": [{"generation": 7}]
+                    }
+                }
+            })
+            .to_string()],
+        )
+        .expect("insert resumable current task record");
     }
     let task = crate::ClaimedTask {
         task_id: "task-live-context-compaction".to_string(),
@@ -67,10 +106,34 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
     assert!(prepared.initial_task_observations.iter().any(|item| {
         item.get("stage").and_then(serde_json::Value::as_str) == Some("post_compact")
     }));
-    assert!(prepared
+    assert!(prepared.initial_task_observations.iter().any(|item| {
+        item.get("observation_kind")
+            .and_then(serde_json::Value::as_str)
+            == Some("context_compaction_record")
+            && item
+                .get("record")
+                .and_then(|record| record.get("compaction_id"))
+                .is_some()
+    }));
+    assert!(!prepared
         .context_bundle
         .summary()
-        .contains("deterministic_context_budget"));
+        .contains("transcript_compaction_records="));
+    assert_eq!(record["generation"], 8);
+    assert_eq!(record["source_task_ids"].as_array().unwrap().len(), 52);
+    assert_eq!(record["source_task_ids"][0], "context-history-0");
+    assert_eq!(record["source_task_ids"][51], "context-history-51");
+    assert_eq!(
+        record["source_event_range"]["start"]["task_id"],
+        "context-history-0"
+    );
+    assert_eq!(record["source_event_range"]["start"]["event_seq"], 2);
+    assert_eq!(
+        record["source_event_range"]["end"]["task_id"],
+        "context-history-51"
+    );
+    assert_eq!(record["source_event_range"]["end"]["event_seq"], 9);
+    assert_eq!(record["source_event_ranges"].as_array().unwrap().len(), 52);
     assert_ne!(
         record["model_status_code"],
         "context_compaction_model_completed"

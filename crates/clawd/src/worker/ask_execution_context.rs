@@ -34,9 +34,14 @@ pub(super) async fn prepare_ask_execution_context(
         );
     }
     let mut initial_task_observations = Vec::new();
-    if let Some(compaction_plan) =
+    if let Some(mut compaction_plan) =
         crate::task_context_builder::plan_agent_loop_context_compaction(&context_bundle)
     {
+        crate::task_context_builder::hydrate_agent_loop_context_compaction_plan(
+            state,
+            task,
+            &mut compaction_plan,
+        );
         let pre_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
             state,
             &task.task_id,
@@ -65,6 +70,9 @@ pub(super) async fn prepare_ask_execution_context(
             model_summary,
             model_status_code,
         );
+        initial_task_observations.push(crate::task_journal::context_compaction_record_observation(
+            compaction_record.clone(),
+        ));
         let post_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
             state,
             &task.task_id,

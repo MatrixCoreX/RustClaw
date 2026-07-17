@@ -25,21 +25,51 @@ REQUIRED_FILE_TOKENS = {
         "compaction_summary_provenance_valid",
     ),
     "crates/clawd/src/task_context_builder/compaction.rs": (
+        "hydrate_agent_loop_context_compaction_plan",
+        "max_compaction_generation",
+        '"source_task_ids"',
+        '"source_event_range"',
+        '"source_event_ranges"',
         "model_status_code",
         "model_summary_attached",
         "compacted_history_context",
         "deterministic_fallback",
         '"instruction_authority": "none"',
     ),
+    "crates/clawd/src/task_context_builder/summary.rs": (
+        "context_budget_report",
+    ),
     "crates/clawd/src/task_context_builder.rs": (
+        "build_recent_turns_full_context_with_sources",
+        "context_source_task_ids",
         "compacted_history_context",
         "apply_execution_context_to_prompts",
     ),
+    "crates/clawd/src/memory_recent.rs": (
+        "build_recent_turns_full_context_with_sources",
+        "source_task_ids.push(turn.task_id.clone())",
+        "source_task_ids.reverse()",
+    ),
     "crates/clawd/src/worker/ask_execution_context.rs": (
         "HookStage::PreCompact",
+        "hydrate_agent_loop_context_compaction_plan",
         "run_model_assisted_context_compaction",
         "apply_agent_loop_context_compaction",
         "HookStage::PostCompact",
+        "context_compaction_record_observation",
+    ),
+    "crates/clawd/src/worker/resume_replay_executor.rs": (
+        "run_agent_with_tools_seeded",
+        "&prepared_flow.initial_task_observations",
+    ),
+    "crates/clawd/src/agent_engine/loop_control.rs": (
+        "run_agent_with_loop_seeded",
+        "initial_task_observations",
+        ".extend(initial_task_observations.iter().cloned())",
+    ),
+    "crates/clawd/src/task_journal_context_compaction.rs": (
+        '"context_compaction_record"',
+        'observation.get("record")',
     ),
     "prompts/layers/manifest.toml": (
         'logical_path = "prompts/context_compaction_prompt.md"',
@@ -84,6 +114,9 @@ def evaluate_texts(texts: dict[str, str]) -> list[str]:
     positions = [worker.find(token) for token in ordered_tokens]
     if any(position < 0 for position in positions) or positions != sorted(positions):
         findings.append("context_compaction_runtime_order_invalid")
+    summary = texts.get("crates/clawd/src/task_context_builder/summary.rs", "")
+    if "transcript_compaction_records=" in summary:
+        findings.append("legacy_compaction_summary_string_projection_present")
     return findings
 
 
@@ -102,14 +135,7 @@ def run_self_test() -> int:
         for relative, tokens in REQUIRED_FILE_TOKENS.items()
     }
     worker_path = "crates/clawd/src/worker/ask_execution_context.rs"
-    valid[worker_path] = "\n".join(
-        (
-            "HookStage::PreCompact",
-            "run_model_assisted_context_compaction",
-            "apply_agent_loop_context_compaction",
-            "HookStage::PostCompact",
-        )
-    )
+    valid[worker_path] = "\n".join(REQUIRED_FILE_TOKENS[worker_path])
     assert not evaluate_texts(valid)
 
     broken = dict(valid)

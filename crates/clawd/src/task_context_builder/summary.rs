@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 use super::{ExecutionContextView, TaskContextBundle};
 
 pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String {
@@ -32,9 +30,8 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         .map(super::execution_context_budget_report_json)
         .map(|value| value.to_string())
         .unwrap_or_else(|| "{}".to_string());
-    let transcript_compaction_records = Value::Array(bundle.compaction_records.clone()).to_string();
     format!(
-        "execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} context_budget_report={} transcript_compaction_records={}",
+        "execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} context_budget_report={}",
         execution_attached,
         execution_budget,
         execution_profile,
@@ -43,8 +40,7 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         has_resume_context,
         has_binding_context,
         has_goal_context,
-        context_budget_report,
-        transcript_compaction_records
+        context_budget_report
     )
 }
 

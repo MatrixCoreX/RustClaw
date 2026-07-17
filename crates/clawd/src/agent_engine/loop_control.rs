@@ -858,6 +858,7 @@ pub(super) async fn run_agent_with_loop_seeded(
     user_text: &str,
     agent_run_context: Option<&AgentRunContext>,
     resume_checkpoint: Option<&crate::task_lifecycle::TaskCheckpoint>,
+    initial_task_observations: &[Value],
 ) -> Result<AskReply, String> {
     run_agent_with_loop_seeded_and_initial_plan(
         state,
@@ -867,7 +868,7 @@ pub(super) async fn run_agent_with_loop_seeded(
         agent_run_context,
         resume_checkpoint,
         None,
-        &[],
+        initial_task_observations,
     )
     .await
 }
