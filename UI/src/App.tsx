@@ -7,6 +7,7 @@ import { DashboardPage } from "./components/DashboardPage";
 import { FactoryResetModal } from "./components/FactoryResetModal";
 import { LogsPage } from "./components/LogsPage";
 import { MemoryPage } from "./components/MemoryPage";
+import { McpConfigSection } from "./components/McpConfigSection";
 import { ModelConfigPage } from "./components/ModelConfigPage";
 import { NniPage } from "./components/NniPage";
 import { SignInPage } from "./components/SignInPage";
@@ -39,6 +40,7 @@ import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
 import { useLogsRuntime } from "./hooks/useLogsRuntime";
 import { useFactoryResetRuntime } from "./hooks/useFactoryResetRuntime";
 import { useModelConfigRuntime } from "./hooks/useModelConfigRuntime";
+import { useMcpRuntime } from "./hooks/useMcpRuntime";
 import { useSkillsRuntime } from "./hooks/useSkillsRuntime";
 import { useChannelConfigRuntime } from "./hooks/useChannelConfigRuntime";
 import { useAuthKeysRuntime } from "./hooks/useAuthKeysRuntime";
@@ -432,6 +434,26 @@ export default function App() {
     t,
     onBeforeSaveLlm: () => {},
   });
+  const {
+    mcpConfig,
+    mcpDraft,
+    mcpLifecycle,
+    mcpTools,
+    mcpLoading,
+    mcpSaving,
+    mcpTestingServerId,
+    mcpError,
+    mcpSaveMessage,
+    mcpProbeResults,
+    hasUnsavedMcpChanges,
+    refreshMcp,
+    saveMcpConfig,
+    testMcpServer,
+    setMcpEnabled,
+    updateMcpServer,
+    addMcpServer,
+    removeMcpServer,
+  } = useMcpRuntime({ apiFetch, t });
   const {
     skillImportSource,
     setSkillImportSource,
@@ -1189,6 +1211,12 @@ export default function App() {
   }, [currentPage, uiAuthReady, isAdminIdentity]);
 
   useEffect(() => {
+    if (!uiAuthReady || !isAdminIdentity || currentPage !== "models") return;
+    void refreshMcp();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity]);
+
+  useEffect(() => {
     if (!uiAuthReady) return;
     if (currentPage !== "nni") return;
     void fetchNniDeviceStatus();
@@ -1568,6 +1596,31 @@ export default function App() {
               onSaveMultimodalConfig={saveMultimodalConfig}
               onMultimodalDraftChange={setMultimodalDraftKey}
               renderMultimodalModelMeta={renderMultimodalModelMeta}
+            />
+          ) : null}
+
+          {currentPage === "models" ? (
+            <McpConfigSection
+              t={t}
+              canManage={isAdminIdentity}
+              config={mcpConfig}
+              draft={mcpDraft}
+              lifecycle={mcpLifecycle}
+              tools={mcpTools}
+              loading={mcpLoading}
+              saving={mcpSaving}
+              testingServerId={mcpTestingServerId}
+              error={mcpError}
+              saveMessage={mcpSaveMessage}
+              probeResults={mcpProbeResults}
+              hasUnsavedChanges={hasUnsavedMcpChanges}
+              onRefresh={refreshMcp}
+              onSave={saveMcpConfig}
+              onTestServer={testMcpServer}
+              onEnabledChange={setMcpEnabled}
+              onServerChange={updateMcpServer}
+              onAddServer={addMcpServer}
+              onRemoveServer={removeMcpServer}
             />
           ) : null}
 

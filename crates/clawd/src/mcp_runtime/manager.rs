@@ -81,6 +81,30 @@ impl McpRuntime {
         }
     }
 
+    pub(crate) fn validate_configuration(config: &McpConfig) -> Result<(), &'static str> {
+        if config.planner_visible_tools < 2 || config.catalog_search_max_results == 0 {
+            return Err("mcp_runtime_limit_invalid");
+        }
+        for (server_id, server) in &config.servers {
+            if !valid_machine_id(server_id) {
+                return Err("mcp_server_id_invalid");
+            }
+            validate_secret_references(server).map_err(|error| error.code())?;
+        }
+        let runtime = Self::new(config.clone());
+        if !runtime.duplicate_enabled_namespaces().is_empty() {
+            return Err("mcp_capability_prefix_duplicate");
+        }
+        for server_id in config.enabled_server_names() {
+            let server = config
+                .servers
+                .get(&server_id)
+                .ok_or("mcp_server_config_missing")?;
+            validate_server_config(&server_id, server).map_err(|error| error.code())?;
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn disabled() -> Self {
         Self::new(McpConfig::default())
@@ -843,6 +867,7 @@ fn validate_server_config(
     if !valid_machine_id(&server_namespace(server_id, server)) {
         return Err(McpRuntimeError::new("mcp_capability_prefix_invalid"));
     }
+    validate_secret_references(server)?;
     if server.timeout_seconds == 0
         || server.max_concurrency == 0
         || server.max_output_bytes < 128
@@ -886,6 +911,35 @@ fn validate_server_config(
         McpTransportConfig::Sse => Err(McpRuntimeError::new("mcp_transport_unsupported")),
         _ => Ok(()),
     }
+}
+
+fn validate_secret_references(server: &McpServerConfig) -> Result<(), McpRuntimeError> {
+    if server
+        .auth_token_env
+        .as_deref()
+        .is_some_and(|value| !valid_env_reference(value))
+    {
+        return Err(McpRuntimeError::new("mcp_auth_token_ref_invalid"));
+    }
+    if server
+        .oauth_client_id_env
+        .as_deref()
+        .is_some_and(|value| !valid_env_reference(value))
+        || server
+            .oauth_client_secret_env
+            .as_deref()
+            .is_some_and(|value| !valid_env_reference(value))
+    {
+        return Err(McpRuntimeError::new("mcp_oauth_secret_ref_invalid"));
+    }
+    if server
+        .env_refs
+        .iter()
+        .any(|(name, env_ref)| !valid_env_reference(name) || !valid_env_reference(env_ref))
+    {
+        return Err(McpRuntimeError::new("mcp_stdio_env_ref_invalid"));
+    }
+    Ok(())
 }
 
 fn valid_env_reference(value: &str) -> bool {

@@ -229,6 +229,32 @@ async fn conflicting_http_auth_is_blocked_without_background_retry() {
     assert!(runtime.reconnect_retry_blocked("fixture"));
 }
 
+#[test]
+fn configuration_validation_rejects_invalid_secret_reference_names() {
+    let mut config = fixture_config();
+    config
+        .servers
+        .get_mut("fixture")
+        .expect("fixture config")
+        .auth_token_env = Some("literal bearer value".to_string());
+    assert_eq!(
+        McpRuntime::validate_configuration(&config),
+        Err("mcp_auth_token_ref_invalid")
+    );
+
+    let mut config = fixture_config();
+    config
+        .servers
+        .get_mut("fixture")
+        .expect("fixture config")
+        .env_refs
+        .insert("CHILD_TOKEN".to_string(), "not-an-env-ref".to_string());
+    assert_eq!(
+        McpRuntime::validate_configuration(&config),
+        Err("mcp_stdio_env_ref_invalid")
+    );
+}
+
 #[tokio::test]
 async fn health_tick_reconnects_closed_transport_without_replaying_a_tool() {
     let marker =
