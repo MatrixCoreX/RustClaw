@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 
@@ -21,6 +22,16 @@ AGENT_GUARD_TOML = ROOT / "configs/agent_guard.toml"
 FINAL_SCOPE_KEYS = (
     "answer_verifier_enforce_required_scope",
     "registry_idempotency_guard_scope",
+)
+
+FORBIDDEN_CONFIG_SECTIONS = (
+    "agent.loop_guard.crypto",
+    "agent.loop_guard.fs_search",
+    "agent.loop_guard.media",
+    "agent.loop_guard.dedup",
+    "agent.dynamic_rules",
+    "agent.messages",
+    "agent.trace_messages",
 )
 
 FORBIDDEN_SUPPORT_TOKENS = (
@@ -55,6 +66,15 @@ def support_findings(raw: str, rel_path: str) -> list[str]:
 
 def config_findings(raw: str, rel_path: str) -> list[str]:
     findings: list[str] = []
+    try:
+        tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        findings.append(f"{rel_path}: invalid_toml:{exc}")
+        return findings
+    parsed_sections = set(re.findall(r"(?m)^\s*\[([^\]]+)\]\s*$", raw))
+    for section in FORBIDDEN_CONFIG_SECTIONS:
+        if section in parsed_sections:
+            findings.append(f"{rel_path}: removed_legacy_section_present:{section}")
     for key in FINAL_SCOPE_KEYS:
         assignments = re.findall(rf"(?m)^\s*{re.escape(key)}\s*=\s*\"([^\"]*)\"", raw)
         if not assignments:
@@ -121,6 +141,8 @@ registry_idempotency_guard_scope = "all"
 answer_verifier_enforce_required_scope = "off"
 registry_idempotency_guard_scope = "selected_agent_loop"
 structured_evidence_required_for_selected_contracts = true
+[agent.dynamic_rules]
+legacy = "text"
 """
     bad_config_findings = config_findings(bad_config, "configs/agent_guard.toml")
     assert any("final_scope_key_not_all" in item for item in bad_config_findings)
@@ -128,6 +150,10 @@ structured_evidence_required_for_selected_contracts = true
     assert any("config_mentions_guard_scope_rollback" in item for item in bad_config_findings)
     assert any(
         "config_mentions_legacy_selected_contract_gate" in item
+        for item in bad_config_findings
+    )
+    assert any(
+        "removed_legacy_section_present:agent.dynamic_rules" in item
         for item in bad_config_findings
     )
 
