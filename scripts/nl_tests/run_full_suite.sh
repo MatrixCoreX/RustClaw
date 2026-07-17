@@ -22,7 +22,6 @@ MODEL_EXHAUST_SLEEP_SECONDS_VALUE="${MODEL_EXHAUST_SLEEP_SECONDS:-3600}"
 MODEL_EXHAUST_MAX_RETRIES_VALUE="${MODEL_EXHAUST_MAX_RETRIES:-24}"
 WITH_TRACE=0
 WITH_RESUME=0
-WITH_SELF_EXTENSION=0
 FULL_TEXT=0
 PROMPT_REPLY_ONLY=0
 RESUME_DIR=""
@@ -62,7 +61,6 @@ Options:
   --resume-line N       continue after this tested source line in the main case file
   --with-trace          additionally run regression_trace_ask.sh on focused trace cases
   --with-resume         additionally run regression_resume_continue.sh
-  --with-self-extension additionally run self-extension regression suite
   -h, --help            show this help
 
 Artifacts:
@@ -71,7 +69,6 @@ Artifacts:
     simple_nl.log
     trace_ask.log          (if --with-trace)
     resume_continue.log    (if --with-resume)
-    self_extension.log     (if --with-self-extension)
 EOF
 }
 
@@ -170,10 +167,6 @@ while [[ $# -gt 0 ]]; do
       WITH_RESUME=1
       shift
       ;;
-    --with-self-extension)
-      WITH_SELF_EXTENSION=1
-      shift
-      ;;
     -h|--help)
       usage
       exit 0
@@ -223,7 +216,6 @@ if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "  resume_line:      ${RESUME_LINE:-<none>}"
   echo "  with_trace:       $WITH_TRACE"
   echo "  with_resume:      $WITH_RESUME"
-  echo "  with_self_ext:    $WITH_SELF_EXTENSION"
   echo
 fi
 
@@ -303,22 +295,6 @@ if [[ "$WITH_RESUME" -eq 1 ]]; then
   "${resume_cmd[@]}" | tee "${RUN_DIR}/resume_continue.log"
 fi
 
-if [[ "$WITH_SELF_EXTENSION" -eq 1 ]]; then
-  self_extension_cmd=(
-    bash "${ROOT_DIR}/scripts/regression_self_extension_suite.sh"
-    --wait-seconds "$WAIT_SECONDS_VALUE"
-  )
-  if [[ -x "${ROOT_DIR}/target/debug/clawd" ]]; then
-    self_extension_cmd+=(--clawd-bin "${ROOT_DIR}/target/debug/clawd")
-  fi
-
-  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
-    echo
-    echo "== Self-extension regressions =="
-  fi
-  "${self_extension_cmd[@]}" | tee "${RUN_DIR}/self_extension.log"
-fi
-
 if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo
   echo "Artifacts:"
@@ -329,8 +305,5 @@ if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   fi
   if [[ "$WITH_RESUME" -eq 1 ]]; then
     echo "  - resume_continue_log_ref=$(path_ref "$RUN_DIR" "${RUN_DIR}/resume_continue.log")"
-  fi
-  if [[ "$WITH_SELF_EXTENSION" -eq 1 ]]; then
-    echo "  - self_extension_log_ref=$(path_ref "$RUN_DIR" "${RUN_DIR}/self_extension.log")"
   fi
 fi

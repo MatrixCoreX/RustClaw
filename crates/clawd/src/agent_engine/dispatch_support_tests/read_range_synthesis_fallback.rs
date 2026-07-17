@@ -18,7 +18,7 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
         locator_hint: "/tmp/app.log".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -77,7 +77,7 @@ fn synthesize_direct_fallback_blocks_multiline_read_range_for_scalar_extraction(
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/service_notes.md".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -107,7 +107,7 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
         locator_hint: "/tmp/service_notes.md".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -136,7 +136,7 @@ fn deterministic_scalar_markdown_heading_uses_title_field_selector_for_free_rout
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -166,7 +166,7 @@ fn deterministic_scalar_markdown_heading_keeps_free_route_without_title_selector
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -193,7 +193,7 @@ fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/README.md".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -225,7 +225,7 @@ fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
         locator_hint: "/tmp/service_notes.md".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let summary_ctx = AgentRunContext {
         output_contract: Some(base_route.clone()),

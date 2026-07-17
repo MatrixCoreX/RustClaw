@@ -510,17 +510,13 @@ pub(crate) fn build_agent_loop_task_context_bundle(
     let budget_tier = ExecutionContextBudgetTier::Full;
     let has_active_session_state =
         session_snapshot_provides_execution_state_anchor(&session_snapshot);
-    let planner_memory_decision = memory::use_policy::decide_planner_memory_use_policy(
-        state,
-        budget_tier,
-        memory::use_policy::PlannerMemoryContextHint::Default,
-    );
+    let planner_memory_decision =
+        memory::use_policy::decide_planner_memory_use_policy(state, budget_tier);
     let chat_memory_decision = memory::use_policy::decide_chat_memory_use_policy(
         state,
         budget_tier,
         has_active_session_state,
         chat_memory_budget_chars,
-        memory::use_policy::ChatMemoryContextHint::Default,
     );
     let memory_ctx = memory::service::prepare_prompt_with_memory_for_policy(
         state,

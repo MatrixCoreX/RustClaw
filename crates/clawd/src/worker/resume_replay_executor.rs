@@ -96,10 +96,7 @@ fn load_resume_steering_input(
 }
 
 fn apply_resume_steering_prompt(payload: &mut Value, resume_input: &Value) {
-    let original_request = payload
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let original_request = super::ask_input::opaque_user_prompt(payload);
     let mut envelope = json!({
         "protocol": "rustclaw.resume_input.v1",
         "original_request": original_request,

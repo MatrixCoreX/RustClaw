@@ -50,7 +50,7 @@ pub(super) fn evidence_policy_strict_list_answer_is_grounded_in_successful_obser
 fn strict_list_selector_limit(route: &AnswerContract) -> Option<usize> {
     route
         .output_contract
-        .self_extension
+        .selection
         .list_selector
         .limit
         .and_then(|value| usize::try_from(value).ok())

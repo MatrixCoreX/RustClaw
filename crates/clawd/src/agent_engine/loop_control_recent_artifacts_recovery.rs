@@ -139,7 +139,7 @@ fn recent_artifact_selector_target_kind(
     output_contract: &crate::IntentOutputContract,
     request_text: &str,
 ) -> crate::OutputScalarCountTargetKind {
-    let selector = &output_contract.self_extension.list_selector;
+    let selector = &output_contract.selection.list_selector;
     if selector.target_kind_specified {
         return selector.target_kind;
     }
@@ -162,7 +162,7 @@ fn recent_artifact_selector_limit(
     request_text: &str,
 ) -> Option<usize> {
     output_contract
-        .self_extension
+        .selection
         .list_selector
         .limit
         .and_then(|limit| usize::try_from(limit).ok())

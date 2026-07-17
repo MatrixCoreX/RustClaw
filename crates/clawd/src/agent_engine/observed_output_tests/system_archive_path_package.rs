@@ -15,7 +15,7 @@ fn recent_artifacts_judgment_is_not_hard_classified_by_observed_output() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
             locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -44,7 +44,7 @@ fn direct_answer_defers_system_basic_info_summary_to_llm_for_brief_request() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -73,7 +73,7 @@ fn direct_answer_defers_archive_creation_success_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -106,7 +106,7 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "scripts/skill_calls".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -139,9 +139,9 @@ fn archive_read_direct_answer_projects_member_path_and_content_excerpt() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ArchiveRead,
             locator_hint: "tmp/test_bundle.zip | notes.txt".to_string(),
-            self_extension: crate::SelfExtensionContract {
+            selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("member_path,content_excerpt".to_string()),
-                ..crate::SelfExtensionContract::default()
+                ..crate::OutputSelectionContract::default()
             },
         };
     let agent_run_context = AgentRunContext {
@@ -172,7 +172,7 @@ fn archive_pack_scalar_contract_returns_created_archive_path() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ArchivePack,
             locator_hint: "scripts/skill_calls | tmp/nl_archive_case.zip".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -273,7 +273,7 @@ fn archive_unpack_contract_returns_one_sentence_destination_summary() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ArchiveUnpack,
             locator_hint: "/tmp/test_bundle.zip | tmp/contract_matrix_unpacked".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -307,7 +307,7 @@ fn direct_answer_defers_system_basic_info_summary_without_action_field() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -336,7 +336,7 @@ fn direct_answer_defers_system_basic_info_for_free_shape_request() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -365,7 +365,7 @@ fn direct_answer_defers_system_basic_info_service_status_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -395,7 +395,7 @@ fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() 
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ScalarPathOnly,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -424,7 +424,7 @@ fn direct_scalar_extracts_cwd_from_system_basic_info_without_action_field() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ScalarPathOnly,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -462,7 +462,7 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ScalarPathOnly,
             locator_hint: "pwd_line.txt".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -492,7 +492,7 @@ fn workspace_project_summary_is_not_hard_summarized_by_observed_output() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -540,7 +540,7 @@ fn direct_scalar_path_only_uses_auto_locator_full_path_for_unique_list_dir_match
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
             locator_hint: "report.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -588,7 +588,7 @@ fn direct_scalar_path_only_uses_rooted_full_path_for_unique_find_name_match() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
             locator_hint: "report.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -653,7 +653,7 @@ fn direct_scalar_path_only_prefers_resolved_path_from_path_batch_facts() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
             locator_hint: "report.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -683,7 +683,7 @@ fn direct_answer_keeps_plain_path_terminal_format_for_observed_path_fact() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
             locator_hint: "report.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -722,7 +722,7 @@ fn direct_scalar_counts_multiline_list_dir_when_route_requests_count() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ScalarCount,
             locator_hint: "scripts".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -751,7 +751,7 @@ fn direct_scalar_uses_inventory_dir_count_for_scalar_count() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ScalarCount,
             locator_hint: "scripts".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -780,7 +780,7 @@ fn direct_count_uses_inventory_dir_total_for_non_scalar_shape() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ScalarCount,
             locator_hint: "document".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -809,7 +809,7 @@ fn direct_scalar_path_lists_inventory_dir_candidates_without_choosing_first() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
             locator_hint: "/tmp/stem_multi".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -839,7 +839,7 @@ fn direct_scalar_uses_inventory_dir_hidden_count_for_hidden_entries_contract() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::HiddenEntriesCheck,
             locator_hint: ".".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -868,7 +868,7 @@ fn direct_answer_formats_package_manager_detect_summary() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -897,7 +897,7 @@ fn direct_answer_formats_package_manager_matrix_basis_summary() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::PackageManagerDetection,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -926,7 +926,7 @@ fn direct_scalar_extracts_package_manager_detect_value() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

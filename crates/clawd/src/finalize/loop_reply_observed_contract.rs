@@ -193,7 +193,7 @@ pub(super) fn direct_scalar_observed_answer(
 fn route_requests_title_scalar_selector(route: &crate::IntentOutputContract) -> bool {
     route.response_shape == crate::OutputResponseShape::Scalar
         && route
-            .self_extension
+            .selection
             .structured_field_selector
             .as_deref()
             .is_some_and(|selector| selector == "title")

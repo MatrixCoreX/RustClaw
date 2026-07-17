@@ -30,7 +30,7 @@ fn context_with_machine_fields(
         delivery_intent: OutputDeliveryIntent::None,
         semantic_kind: Default::default(),
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     AgentRunContext {
         output_contract: Some(route.clone()),

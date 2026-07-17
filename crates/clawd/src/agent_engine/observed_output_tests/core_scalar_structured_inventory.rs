@@ -440,7 +440,7 @@ fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> Inten
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "/workspace/project".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         }
 }
 
@@ -721,7 +721,7 @@ fn direct_scalar_defers_git_oneline_log_record_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: ".".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1114,7 +1114,7 @@ fn direct_scalar_defers_recent_structured_scalar_comparison_to_llm() {
                 delivery_intent: OutputDeliveryIntent::None,
                 semantic_kind: crate::OutputSemanticKind::QuantityComparison,
                 locator_hint: "UI/package.json|crates/clawd/Cargo.toml".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1183,7 +1183,7 @@ fn direct_scalar_formats_recent_structured_scalar_equality() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1217,7 +1217,7 @@ fn direct_scalar_formats_compare_paths_equality_with_explicit_existence_fields()
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
             locator_hint: "service_notes.md | release_checklist.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1253,7 +1253,7 @@ fn direct_scalar_equality_ignores_duplicate_structured_source() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
             locator_hint: "/tmp/Cargo.toml | /tmp/README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1289,7 +1289,7 @@ fn direct_answer_formats_recent_structured_scalar_equality_for_strict_route() {
             locator_hint:
                 "scripts/nl_tests/fixtures/device_local/package.json and crates/clawd/Cargo.toml"
                     .to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
             output_contract: Some(route_result.clone()),
@@ -1357,7 +1357,7 @@ fn direct_answer_formats_wrapped_config_basic_structured_scalar_equality() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
             locator_hint: "UI/package.json | crates/clawd/Cargo.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1400,7 +1400,7 @@ version.workspace = true
                 delivery_intent: OutputDeliveryIntent::None,
                 semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
                 locator_hint: String::new(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let _agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1475,7 +1475,7 @@ fn direct_scalar_missing_field_language_uses_original_request_before_resolved_pr
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "package.json".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

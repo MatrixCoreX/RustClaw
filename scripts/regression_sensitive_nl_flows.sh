@@ -450,14 +450,6 @@ extract_task_status() {
   printf '%s\n' "$1" | jq -r '.data.status // ""'
 }
 
-check_self_extension_route() {
-  local raw="$1"
-  printf '%s\n' "$raw" | jq -e '
-    .data.result_json.task_journal.summary.route_result.self_extension.mode == "permanent_extension"
-    and .data.result_json.task_journal.summary.route_result.self_extension.trigger == "explicit_user_request"
-  ' >/dev/null
-}
-
 run_direct_case() {
   local case_name="$1"
   local args_json="$2"
@@ -528,12 +520,6 @@ run_nl_case() {
 
   visible_text="$(extract_visible_text "$final_raw")"
   if missing="$(missing_substrings "$visible_text" "$expected" 2>&1)"; then
-    if [[ "$case_name" == self_extension_* ]] && ! check_self_extension_route "$final_raw"; then
-      echo "[FAIL] ${case_name}: self_extension route_result mismatch"
-      FAIL=$((FAIL + 1))
-      append_summary "ask" "$round_no" "$case_name" "$auth_kind" "fail" "self_extension route_result mismatch"
-      return
-    fi
     echo "[PASS] ${case_name} (status=${status})"
     PASS=$((PASS + 1))
     append_summary "ask" "$round_no" "$case_name" "$auth_kind" "pass" "status=${status}"

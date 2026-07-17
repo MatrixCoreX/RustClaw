@@ -24,7 +24,7 @@ fn deterministic_status_answer_defers_for_agent_loop_rich_content() {
             delivery_intent: crate::OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         }),
         ..Default::default()
     };

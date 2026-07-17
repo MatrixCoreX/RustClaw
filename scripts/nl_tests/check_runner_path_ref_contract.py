@@ -22,8 +22,6 @@ RUN_RUNTIME_CAPABILITY_BOUNDARY = ROOT / "scripts/nl_tests/run_runtime_capabilit
 OPS_CLOSED_LOOP = ROOT / "scripts/regression_ops_closed_loop.sh"
 LONG_TAIL_FLOWS = ROOT / "scripts/regression_long_tail_nl_flows.sh"
 SENSITIVE_FLOWS = ROOT / "scripts/regression_sensitive_nl_flows.sh"
-SELF_EXTENSION_RUNTIME_ENABLE = ROOT / "scripts/regression_self_extension_runtime_enable.sh"
-SELF_EXTENSION_NL_HANDOFF = ROOT / "scripts/regression_self_extension_nl_handoff.sh"
 CIRCUIT_BREAKER = ROOT / "scripts/nl_tests/test_circuit_breaker.sh"
 TASK_TERMINATION = ROOT / "scripts/verify_task_termination.sh"
 INSPECT_TASK = ROOT / "scripts/inspect_task.sh"
@@ -104,14 +102,6 @@ REQUIRED_SNIPPETS: dict[Path, dict[str, str]] = {
     SENSITIVE_FLOWS: {
         "path_ref_fn": "path_ref()",
         "log_dir_ref": "log_dir_ref=",
-        "workspace_root_ref": "workspace_root_ref=",
-    },
-    SELF_EXTENSION_RUNTIME_ENABLE: {
-        "path_ref_fn": "path_ref()",
-        "workspace_root_ref": "workspace_root_ref=",
-    },
-    SELF_EXTENSION_NL_HANDOFF: {
-        "path_ref_fn": "path_ref()",
         "workspace_root_ref": "workspace_root_ref=",
     },
     TASK_TERMINATION: {
@@ -207,12 +197,6 @@ FORBIDDEN_SNIPPETS: dict[Path, dict[str, str]] = {
     },
     SENSITIVE_FLOWS: {
         "log_dir_absolute_print": 'echo "log_dir=${LOG_DIR}"',
-        "workspace_root_absolute_print": 'echo "workspace_root=${TEMP_WORKSPACE}"',
-    },
-    SELF_EXTENSION_RUNTIME_ENABLE: {
-        "workspace_root_absolute_print": 'echo "workspace_root=${TEMP_WORKSPACE}"',
-    },
-    SELF_EXTENSION_NL_HANDOFF: {
         "workspace_root_absolute_print": 'echo "workspace_root=${TEMP_WORKSPACE}"',
     },
     TASK_TERMINATION: {

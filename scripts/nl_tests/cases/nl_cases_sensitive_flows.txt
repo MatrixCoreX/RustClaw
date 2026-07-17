@@ -8,5 +8,3 @@ crypto_binance_unbound_en|user|Binance API is not bound;;/cryptoapi set binance|
 crypto_binance_unbound_zh|user|当前 key 还没有绑定 Binance API;;/cryptoapi set binance|查一下我现在在 Binance 的现货余额。
 crypto_okx_unbound_en|user|OKX API is not bound;;/cryptoapi set okx|Check my OKX account positions right now.
 crypto_okx_unbound_zh|user|当前 key 还没有绑定 OKX API;;/cryptoapi set okx|查一下我现在在 OKX 的账户持仓。
-self_extension_en|admin|external-skill scaffold plan|Do not use any existing skill. Instead, plan a brand-new reusable skill for this capability: when called with action ping, reply with a short success message. Do not execute or enable anything yet; just prepare the reusable skill plan.
-self_extension_zh|admin|外部技能脚手架方案|不要使用任何现有技能。请先为这个能力规划一个全新的可复用技能：调用 action ping 时，返回一句简短的成功提示。先不要执行，也不要启用，只生成可复用技能方案。

@@ -190,10 +190,7 @@ fn clarify_state_source_request(
     let request = prompt.trim().to_string();
     append_structured_field_selector_token(
         request,
-        route_result
-            .self_extension
-            .structured_field_selector
-            .as_deref(),
+        route_result.selection.structured_field_selector.as_deref(),
     )
 }
 

@@ -495,9 +495,9 @@ fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
     route.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.limit = Some(3);
-    route.self_extension.list_selector.include_metadata = Some(false);
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.limit = Some(3);
+    route.selection.list_selector.include_metadata = Some(false);
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -525,8 +525,8 @@ fn matrix_path_list_inventory_uses_planner_semantic_kind() {
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.limit = Some(2);
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.limit = Some(2);
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -882,7 +882,7 @@ fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "tmp/test_bundle.zip".to_string();
     route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1018,7 +1018,7 @@ fn matrix_strict_list_shape_respects_hidden_entry_selector_limit() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
-    route.self_extension.list_selector.limit = Some(3);
+    route.selection.list_selector.limit = Some(3);
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1069,7 +1069,7 @@ fn matrix_grouped_name_list_shape_preserves_observed_sort_order() {
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "scripts".to_string();
     route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
-    route.self_extension.list_selector.sort_by = Some("name_desc".to_string());
+    route.selection.list_selector.sort_by = Some("name_desc".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",

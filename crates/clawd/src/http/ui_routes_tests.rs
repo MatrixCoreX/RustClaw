@@ -979,7 +979,7 @@ async fn workspace_update_refresh_clears_resolved_failure_when_upstream_matches(
         exit_code: Some(1),
         stdout_tail: "stale stdout".to_string(),
         stderr_tail: "stale stderr".to_string(),
-        error: Some("git path list exceeds updater item limit".to_string()),
+        error: Some("workspace_update_git_path_list_item_limit_exceeded".to_string()),
         next_step_key: Some("workspace_update.pull_conflict_detection_failed".to_string()),
         ..WorkspaceUpdateStatus::default()
     }));

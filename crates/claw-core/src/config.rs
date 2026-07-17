@@ -58,8 +58,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub webd: WebdConfig,
     #[serde(default)]
-    pub self_extension: SelfExtensionConfig,
-    #[serde(default)]
     pub prompts: PromptsConfig,
 }
 
@@ -1141,38 +1139,6 @@ impl Default for SkillsConfig {
             skills_list: default_skills_list(),
             skill_switches: HashMap::new(),
             registry_path: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SelfExtensionConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub auto_on_capability_gap: bool,
-    #[serde(default)]
-    pub allow_execute: bool,
-    #[serde(default)]
-    pub allow_package_install: bool,
-    #[serde(default)]
-    pub allow_permanent_extension: bool,
-    #[serde(default)]
-    pub allow_runtime_enable: bool,
-}
-
-impl Default for SelfExtensionConfig {
-    fn default() -> Self {
-        // Phase 0.1: 默认安全收敛。self_extension 会允许 agent 临时生成/安装/
-        // 执行脚本，属高权力能力。默认一律关闭，只有当用户在 config.toml 里
-        // 显式设为 true 时才启用，避免"未配置即默认全开"的权限面过大问题。
-        Self {
-            enabled: false,
-            auto_on_capability_gap: false,
-            allow_execute: false,
-            allow_package_install: false,
-            allow_permanent_extension: false,
-            allow_runtime_enable: false,
         }
     }
 }

@@ -1305,8 +1305,8 @@ async fn git_workspace_name_list_raw(
         .stderr(StdProcessStdio::piped());
     let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
         .await
-        .map_err(|_| "git path query timed out after 60s".to_string())?
-        .map_err(|error| format!("failed to run git path query: {error}"))?;
+        .map_err(|_| "workspace_update_git_path_query_timeout:seconds=60".to_string())?
+        .map_err(|error| format!("workspace_update_git_path_query_failed:error={error}"))?;
     if !output.status.success() {
         return Err(format!(
             "git {} failed: {}",
@@ -1319,17 +1319,17 @@ async fn git_workspace_name_list_raw(
 
 fn parse_git_name_list_bytes(raw: &[u8]) -> Result<Vec<String>, String> {
     if raw.len() > WORKSPACE_UPDATE_PATH_LIST_MAX_BYTES {
-        return Err("git path list exceeds updater byte limit".to_string());
+        return Err("workspace_update_git_path_list_byte_limit_exceeded".to_string());
     }
     let mut paths = Vec::new();
     for item in raw.split(|byte| *byte == 0).filter(|item| !item.is_empty()) {
         if paths.len() >= WORKSPACE_UPDATE_PATH_LIST_MAX_ITEMS {
-            return Err("git path list exceeds updater item limit".to_string());
+            return Err("workspace_update_git_path_list_item_limit_exceeded".to_string());
         }
         let path = std::str::from_utf8(item)
-            .map_err(|_| "git path list contains non-UTF-8 path".to_string())?;
+            .map_err(|_| "workspace_update_git_path_non_utf8".to_string())?;
         if !safe_workspace_relative_git_path(path) {
-            return Err("git path list contains unsafe relative path".to_string());
+            return Err("workspace_update_git_path_unsafe_relative".to_string());
         }
         paths.push(path.to_string());
     }

@@ -406,7 +406,7 @@ fn system_basic_scalar_path_candidate_satisfies_contract(
 
 fn hidden_entries_contract_limit(route: &crate::IntentOutputContract) -> usize {
     route
-        .self_extension
+        .selection
         .list_selector
         .limit
         .and_then(|value| usize::try_from(value).ok())

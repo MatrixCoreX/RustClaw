@@ -95,7 +95,7 @@ pub(super) fn archive_read_direct_answer_candidate(
                 .and_then(archive_read_first_content_line)
         });
     let project_structured_fields = route
-        .and_then(|route| route.self_extension.structured_field_selector.as_deref())
+        .and_then(|route| route.selection.structured_field_selector.as_deref())
         .is_some_and(archive_read_selector_requests_member_and_excerpt);
     match (member_path, content_excerpt) {
         (Some(member_path), Some(content_excerpt)) if project_structured_fields => Some(

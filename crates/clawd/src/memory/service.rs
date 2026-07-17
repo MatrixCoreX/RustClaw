@@ -67,12 +67,7 @@ pub(crate) struct PromptMemoryContext {
     pub(crate) prompt_with_memory: String,
     pub(crate) chat_prompt_context: String,
     pub(crate) memory_trace: Option<Value>,
-    pub(crate) long_term_summary: Option<String>,
-    pub(crate) preferences: Vec<(String, String)>,
     pub(crate) recalled: Vec<(String, String)>,
-    pub(crate) similar_triggers: Vec<RetrievedMemoryItem>,
-    pub(crate) relevant_facts: Vec<RetrievedMemoryItem>,
-    pub(crate) recent_related_events: Vec<RetrievedMemoryItem>,
 }
 
 pub(crate) fn prepare_prompt_with_memory_for_policy(
@@ -118,27 +113,7 @@ pub(crate) fn prepare_prompt_with_memory_for_policy(
     PromptMemoryContext {
         chat_prompt_context,
         memory_trace,
-        long_term_summary: planner_structured
-            .long_term_summary
-            .clone()
-            .or_else(|| chat_structured.long_term_summary.clone()),
-        preferences: merge_preferences(
-            &planner_structured.preferences,
-            &chat_structured.preferences,
-        ),
         recalled: crate::memory::retrieval::legacy_pairs_from_structured(&chat_structured),
-        similar_triggers: merge_items(
-            &planner_structured.similar_triggers,
-            &chat_structured.similar_triggers,
-        ),
-        relevant_facts: merge_items(
-            &planner_structured.relevant_facts,
-            &chat_structured.relevant_facts,
-        ),
-        recent_related_events: merge_items(
-            &planner_structured.recent_related_events,
-            &chat_structured.recent_related_events,
-        ),
         prompt_with_memory,
     }
 }
@@ -253,40 +228,6 @@ fn render_policy_memory_block(
     } else {
         format!("{}\n\n{}", decision.prompt_header(), block)
     }
-}
-
-fn merge_preferences(
-    left: &[(String, String)],
-    right: &[(String, String)],
-) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for (key, value) in left.iter().chain(right.iter()) {
-        if out
-            .iter()
-            .any(|(existing_key, _): &(String, String)| existing_key == key)
-        {
-            continue;
-        }
-        out.push((key.clone(), value.clone()));
-    }
-    out
-}
-
-fn merge_items(
-    left: &[RetrievedMemoryItem],
-    right: &[RetrievedMemoryItem],
-) -> Vec<RetrievedMemoryItem> {
-    let mut out = Vec::new();
-    for item in left.iter().chain(right.iter()) {
-        if out
-            .iter()
-            .any(|existing: &RetrievedMemoryItem| existing.text == item.text)
-        {
-            continue;
-        }
-        out.push(item.clone());
-    }
-    out
 }
 
 pub(crate) fn recall_structured_memory_context(

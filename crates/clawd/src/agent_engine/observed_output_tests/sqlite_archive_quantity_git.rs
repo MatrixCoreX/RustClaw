@@ -15,7 +15,7 @@ fn sqlite_database_kind_judgment_is_not_hard_classified_by_observed_output() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
             locator_hint: "data/db-basic-contract.sqlite".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -44,7 +44,7 @@ fn sqlite_empty_table_listing_returns_machine_fields() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::SqliteTableListing,
             locator_hint: "data/empty.sqlite".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -80,7 +80,7 @@ fn sqlite_database_kind_judgment_uses_contract_selector_and_cites_tables() {
                 semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
                 locator_hint:
                     "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
             output_contract: Some(route_result.clone()),
@@ -120,7 +120,7 @@ fn sqlite_database_kind_judgment_uses_run_cmd_table_names_without_llm() {
                 semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
                 locator_hint:
                     "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
             output_contract: Some(route_result.clone()),
@@ -156,7 +156,7 @@ fn sqlite_schema_version_uses_run_cmd_value_without_llm() {
             semantic_kind: crate::OutputSemanticKind::SqliteSchemaVersion,
             locator_hint: "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
                 .to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -186,7 +186,7 @@ fn sqlite_table_listing_uses_run_cmd_table_names_without_llm() {
             semantic_kind: crate::OutputSemanticKind::SqliteTableListing,
             locator_hint: "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
                 .to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -221,7 +221,7 @@ fn sqlite_database_kind_judgment_prefers_table_inventory_over_later_name_columns
                 semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
                 locator_hint:
                     "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
             output_contract: Some(route_result.clone()),
@@ -260,7 +260,7 @@ fn direct_answer_lists_sqlite_table_names_without_llm_when_names_only_is_request
                 semantic_kind: crate::OutputSemanticKind::SqliteTableNamesOnly,
                 locator_hint:
                     "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -290,7 +290,7 @@ fn direct_scalar_lists_sqlite_table_names_when_names_only_contract_is_scalar() {
                 semantic_kind: crate::OutputSemanticKind::SqliteTableNamesOnly,
                 locator_hint:
                     "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
+                selection: crate::OutputSelectionContract::default(),
             };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -344,7 +344,7 @@ fn direct_scalar_does_not_take_first_db_row_from_multi_row_query() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "data/app.sqlite".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -676,7 +676,7 @@ fn sqlite_table_listing_summary_defers_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::SqliteTableListing,
             locator_hint: "data/app.sqlite".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -705,7 +705,7 @@ fn direct_scalar_defers_route_locator_hint_quantity_comparison_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::QuantityComparison,
             locator_hint: "scripts".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -734,7 +734,7 @@ fn direct_scalar_defers_compare_paths_result_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::QuantityComparison,
             locator_hint: "Cargo.lock|Cargo.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -761,7 +761,7 @@ fn quantity_comparison_does_not_force_direct_scalar_observed_answer() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::QuantityComparison,
             locator_hint: "Cargo.lock|Cargo.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     assert!(!super::route_prefers_direct_observed_answer_for_scalar(
         &route
@@ -785,7 +785,7 @@ fn direct_answer_defers_git_status_dirty_worktree_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -814,7 +814,7 @@ fn direct_answer_defers_git_repository_state_one_sentence_to_synthesis() {
             delivery_intent: crate::OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -852,7 +852,7 @@ fn direct_answer_defers_wrapped_git_repository_state_one_sentence_to_synthesis()
             delivery_intent: crate::OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -882,7 +882,7 @@ fn direct_answer_defers_strict_git_repository_state_when_exact_one_sentence() {
             delivery_intent: crate::OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -912,7 +912,7 @@ fn direct_answer_defers_git_repository_state_for_any_language() {
             delivery_intent: crate::OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -947,7 +947,7 @@ fn direct_answer_does_not_override_git_state_language_synthesis() {
             delivery_intent: crate::OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -982,7 +982,7 @@ fn direct_answer_defers_git_branch_and_dirty_state_language_request() {
             delivery_intent: crate::OutputDeliveryIntent::None,
             semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
             output_contract: Some(route_result.clone()),
@@ -1030,7 +1030,7 @@ fn direct_answer_defers_git_log_release_note_to_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
             locator_hint: "RustClaw".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1060,7 +1060,7 @@ fn direct_scalar_extracts_git_commit_subject_from_oneline_log() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::GitCommitSubject,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1110,7 +1110,7 @@ fn direct_scalar_extracts_git_current_branch_from_structured_field() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::GitRepositoryState,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1138,7 +1138,7 @@ fn direct_answer_defers_git_status_clean_when_exit_only_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -1167,7 +1167,7 @@ fn direct_answer_defers_git_status_dirty_without_branch_header_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

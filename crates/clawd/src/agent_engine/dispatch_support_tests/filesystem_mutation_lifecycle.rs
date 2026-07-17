@@ -250,7 +250,7 @@ fn filesystem_mutation_route() -> crate::IntentOutputContract {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::FilesystemMutationResult,
         locator_hint: "tmp/nl_codex_resume_smoke".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     }
 }
 

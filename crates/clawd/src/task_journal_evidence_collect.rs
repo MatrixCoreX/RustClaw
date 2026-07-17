@@ -1348,7 +1348,6 @@ pub(super) fn known_non_secret_config_risk_label(text: &str) -> bool {
             | "tools.allow_path_outside_workspace"
             | "telegram.sendfile.full_access"
             | "server.listen"
-            | "self_extension.enabled"
             | "worker.task_timeout_seconds"
     ) {
         return false;

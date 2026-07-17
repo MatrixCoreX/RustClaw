@@ -92,6 +92,9 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "commands::run_goal_resume",
         "commands::run_goal_edit",
         "commands::run_goal_clear",
+        '#[path = "main_tests.rs"]',
+    ),
+    "crates/clawcli/src/main_tests.rs": (
         'for required in ["start", "status", "pause", "resume", "edit", "clear"]',
     ),
     "crates/clawcli/src/commands_tests.rs": (

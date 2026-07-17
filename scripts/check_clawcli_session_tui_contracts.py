@@ -178,6 +178,9 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "commands::run_session_delete",
         "commands::run_session_fork",
         "commands::run_tui",
+        '#[path = "main_tests.rs"]',
+    ),
+    "crates/clawcli/src/main_tests.rs": (
         "clawcli_parses_session_subcommands",
     ),
     "crates/clawcli/src/chat.rs": (

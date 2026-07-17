@@ -1,13 +1,12 @@
 # =============================================================================
 # [DEMO TEMPLATE - 不是生产默认值]
 #
-# 本文件是 rustclaw 自带的 demo / 开发模板，里面很多字段（self_extension、
-# tools.allow=["*"]、tools.allow_sudo、worker.task_timeout_seconds=86400 等）
+# 本文件是 rustclaw 自带的 demo / 开发模板，里面很多字段（tools.allow=["*"]、
+# tools.allow_sudo、worker.task_timeout_seconds=86400 等）
 # 为了演示方便而开到了"全权限/超长超时"。
 #
 # 真正的代码默认值（`*Config::default()` / `serde(default = ...)`) 已经
 # 在 Phase 0.1 / L4 收敛为安全基线：
-#   - SelfExtensionConfig::default()       => 全 false
 #   - ToolsConfig::default()               => allow=[], allow_sudo=false,
 #                                              allow_path_outside_workspace=false
 #   - WorkerConfig::default()              => task_timeout_seconds=3600 (1h)
@@ -15,8 +14,7 @@
 #   - default_tool_cmd_timeout_seconds()   => 60s
 #
 # 部署生产环境的推荐做法：
-#   1. 复制本文件，删掉所有 [self_extension] / [tools] 整节，让它们走代码安全默认；
-#      或显式只保留你需要的字段。
+#   1. 复制本文件，删除 [tools] 整节让它走代码安全默认，或显式只保留需要的字段。
 #   2. worker.task_timeout_seconds 按真实任务上限设置，不要继承 86400。
 #   3. tools.allow 显式列出需要的技能，避免 ["*"]。
 #   4. 把本文件路径换成自己的 configs/<env>.toml，避免 demo 模板被无意继承。
@@ -453,23 +451,6 @@ skills_list = [
     "kb",
     "browser_web",
 ]
-
-# 用途/Purpose: 当现有技能不能覆盖需求时，是否允许走受控自扩展链（临时脚本/语言级依赖）.
-# 建议修改/Recommended change: 默认关闭；仅在开发/受控环境开启.
-# 风险/Risk: 开启后会允许内部调用 extension_manager 生成临时方案，若 allow_execute=true 还会执行临时脚本.
-#
-# [Phase 0.1 默认安全配置收敛 - 2026-04-17]
-# 已收敛：本节六项全部 true → false，与代码里 `SelfExtensionConfig::default()` 对齐。
-# 这意味着 agent 不能临时生成/安装/执行脚本（除非显式重开）。
-# 生产环境强烈建议**把本 section 整节删掉**，依赖代码默认值（全 false）即可。
-# 仅在受控开发环境若需要恢复自扩展能力，把对应字段单独改回 true。
-[self_extension]
-enabled = false
-auto_on_capability_gap = false
-allow_execute = false
-allow_package_install = false
-allow_permanent_extension = false
-allow_runtime_enable = false
 
 # Phase 7 §3.5d: prompts 热替换。
 # - reload_on_sighup: 收到 SIGHUP 时把 persona / schedule.intent_prompt /

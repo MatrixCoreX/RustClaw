@@ -373,10 +373,10 @@ fn matrix_strict_file_names_ranked_inventory_applies_selector_limit() {
     route.semantic_kind = crate::OutputSemanticKind::FileNames;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs".to_string();
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.limit = Some(2);
-    route.self_extension.list_selector.sort_by = Some("size_desc".to_string());
-    route.self_extension.list_selector.include_metadata = Some(true);
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.limit = Some(2);
+    route.selection.list_selector.sort_by = Some("size_desc".to_string());
+    route.selection.list_selector.include_metadata = Some(true);
 
     let (answer, summary) = matrix_strict_list_observed_answer(&route, &loop_state)
         .expect("ranked file-name inventory answer");

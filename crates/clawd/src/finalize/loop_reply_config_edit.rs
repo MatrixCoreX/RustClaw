@@ -801,7 +801,6 @@ fn rustclaw_config_known_risk_field(field_path: &str) -> bool {
         "tools.allow_path_outside_workspace",
         "telegram.sendfile.full_access",
         "server.listen",
-        "self_extension.enabled",
         "worker.task_timeout_seconds",
     ]
     .iter()
@@ -836,10 +835,6 @@ fn rustclaw_config_risk_label(observation: &RustClawConfigFieldObservation) -> O
                 quoted_string_label(value.trim().trim_matches('"'))
             )
         });
-    }
-    if field_path.eq_ignore_ascii_case("self_extension.enabled") {
-        return observed_field_is_true(observation)
-            .then(|| "self_extension.enabled=true".to_string());
     }
     if field_path.eq_ignore_ascii_case("worker.task_timeout_seconds") {
         let value = observed_field_i64(observation)?;

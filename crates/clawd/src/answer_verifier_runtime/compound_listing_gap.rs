@@ -117,7 +117,7 @@ pub(in crate::answer_verifier) fn requested_listing_name_limit(
 ) -> Option<usize> {
     route_result
         .output_contract
-        .self_extension
+        .selection
         .list_selector
         .limit
         .and_then(|limit| usize::try_from(limit).ok())

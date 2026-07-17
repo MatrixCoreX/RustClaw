@@ -25,7 +25,7 @@ pub(super) fn file_name_list_prefers_observed_projection(
     if !route.semantic_kind_is(crate::OutputSemanticKind::FileNames)
         || route.response_shape != crate::OutputResponseShape::Strict
         || route
-            .self_extension
+            .selection
             .list_selector
             .sort_by
             .as_deref()
@@ -622,7 +622,7 @@ fn route_requests_key_list_or_summary(route: &crate::IntentOutputContract) -> bo
 
 fn matrix_list_selector_limit(route: &crate::IntentOutputContract) -> Option<usize> {
     route
-        .self_extension
+        .selection
         .list_selector
         .limit
         .and_then(|value| usize::try_from(value).ok())
@@ -874,7 +874,7 @@ fn ordered_matrix_grouped_name_list_from_value(
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|sort_by| !sort_by.is_empty())?;
-    if sort_by == "name" && route.self_extension.list_selector.sort_by.is_none() {
+    if sort_by == "name" && route.selection.list_selector.sort_by.is_none() {
         return None;
     }
     let names_by_kind = value
@@ -1098,13 +1098,12 @@ fn collect_matrix_strict_list_items(
 
 fn route_requests_file_name_list(route: &crate::IntentOutputContract) -> bool {
     route.semantic_kind_is(crate::OutputSemanticKind::FileNames)
-        || route.self_extension.list_selector.target_kind
-            == crate::OutputScalarCountTargetKind::File
+        || route.selection.list_selector.target_kind == crate::OutputScalarCountTargetKind::File
 }
 
 fn route_requests_directory_name_list(route: &crate::IntentOutputContract) -> bool {
     route.semantic_kind_is(crate::OutputSemanticKind::DirectoryNames)
-        || route.self_extension.list_selector.target_kind == crate::OutputScalarCountTargetKind::Dir
+        || route.selection.list_selector.target_kind == crate::OutputScalarCountTargetKind::Dir
 }
 
 fn collect_matrix_file_name_items(
@@ -1275,7 +1274,7 @@ fn archive_member_matches_list_selector(
     raw: &str,
     kind: Option<&str>,
 ) -> bool {
-    let selector = &route.self_extension.list_selector;
+    let selector = &route.selection.list_selector;
     let target_kind = if selector.target_kind == crate::OutputScalarCountTargetKind::Any
         && !selector.target_kind_specified
     {

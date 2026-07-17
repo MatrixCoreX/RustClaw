@@ -117,9 +117,9 @@ fn derive_locator_clarify_state_preserves_structured_field_selector_token() {
         response_shape: crate::OutputResponseShape::Scalar,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
-        self_extension: crate::SelfExtensionContract {
+        selection: crate::OutputSelectionContract {
             structured_field_selector: Some("name".to_string()),
-            ..crate::SelfExtensionContract::default()
+            ..crate::OutputSelectionContract::default()
         },
         ..crate::IntentOutputContract::default()
     };
@@ -156,7 +156,7 @@ fn derive_locator_clarify_state_marks_non_content_probe_as_existence_contract() 
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
 
     let clarify_state = derive_clarify_state_for_ask_outcome(

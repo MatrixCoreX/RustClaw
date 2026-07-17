@@ -672,7 +672,7 @@ fn current_delivery_satisfies_service_status_selector(
         return false;
     }
     let Some(selector) = route
-        .self_extension
+        .selection
         .structured_field_selector
         .as_deref()
         .map(str::trim)
@@ -1209,7 +1209,7 @@ fn service_status_selector_only_summary(
         return false;
     }
     let Some(selector) = route
-        .self_extension
+        .selection
         .structured_field_selector
         .as_deref()
         .map(str::trim)
@@ -1268,7 +1268,7 @@ fn publishable_service_status_terminal_delivery(
         || candidate.starts_with('{')
         || candidate.starts_with('[')
         || route
-            .self_extension
+            .selection
             .structured_field_selector
             .as_deref()
             .map(str::trim)

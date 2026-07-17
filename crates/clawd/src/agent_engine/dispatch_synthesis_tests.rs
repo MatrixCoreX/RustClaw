@@ -35,7 +35,7 @@ fn route_result_with_contract(
         },
         semantic_kind: Default::default(),
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     }
 }
 

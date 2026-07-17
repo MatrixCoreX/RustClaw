@@ -1709,7 +1709,7 @@ fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
         locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     };
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

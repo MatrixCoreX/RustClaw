@@ -391,17 +391,6 @@ skills_list = [
     "browser_web",
 ]
 
-# 用途/Purpose: 当现有技能不能覆盖需求时，是否允许走受控自扩展链（临时脚本/语言级依赖）.
-# 建议修改/Recommended change: 开启后会允许内部调用 extension_manager 进行临时补能力与可复用技能开发.
-# 风险/Risk: 开启后会允许内部执行临时脚本、安装语言级依赖，并在开发态下自动注册/启用新技能.
-[self_extension]
-enabled = true
-auto_on_capability_gap = true
-allow_execute = true
-allow_package_install = true
-allow_permanent_extension = true
-allow_runtime_enable = true
-
 # 渠道配置已拆分到以下文件 / Channel configs are split into:
 # - configs/channels/telegram.toml（Telegram）/ Telegram channel settings
 # - configs/channels/whatsapp-cloud.toml（WhatsApp Cloud / webhook）/ WhatsApp Cloud settings

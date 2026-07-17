@@ -1583,7 +1583,7 @@ fn route_with_contract(
         delivery_intent: OutputDeliveryIntent::None,
         semantic_kind,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     }
 }
 

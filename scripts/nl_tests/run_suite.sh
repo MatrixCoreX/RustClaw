@@ -19,7 +19,6 @@ ALL_SUITES=(
   full
   trace
   resume
-  self_extension
   sensitive_flows
   ops_closed_loop
   ops_http_repair
@@ -53,7 +52,6 @@ Suites:
   full
   trace
   resume
-  self_extension
   sensitive_flows
   ops_closed_loop
   ops_http_repair
@@ -116,7 +114,6 @@ Available suites:
   - full
   - trace
   - resume
-  - self_extension
   - sensitive_flows
   - ops_closed_loop
   - ops_http_repair
@@ -391,13 +388,6 @@ run_mode_resume() {
     "$@"
 }
 
-run_mode_self_extension() {
-  run_wrapped_suite \
-    "self_extension" \
-    bash "${ROOT_DIR}/scripts/regression_self_extension_suite.sh" \
-    "$@"
-}
-
 run_mode_sensitive_flows() {
   run_wrapped_suite \
     "sensitive_flows" \
@@ -508,7 +498,7 @@ suite_accepts_value_option() {
       ;;
     --wait-seconds)
       case "$suite" in
-        client_like_continuous|runtime_capability_boundary|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        client_like_continuous|runtime_capability_boundary|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|sensitive_flows|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
       esac
@@ -636,9 +626,6 @@ run_one_suite() {
     resume)
       run_mode_resume "${FILTERED_SUITE_ARGS[@]}"
       ;;
-    self_extension)
-      run_mode_self_extension "${FILTERED_SUITE_ARGS[@]}"
-      ;;
     sensitive_flows)
       run_mode_sensitive_flows "${FILTERED_SUITE_ARGS[@]}"
       ;;
@@ -691,7 +678,7 @@ add_suite() {
 expand_selector() {
   local selector="$1"
   case "$selector" in
-    evidence_policy_offline|contract_matrix_offline|client_like_continuous|runtime_capability_boundary|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|agent_parity_gate|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+    evidence_policy_offline|contract_matrix_offline|client_like_continuous|runtime_capability_boundary|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|agent_parity_gate|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
       add_suite "$selector"
       ;;
     smoke)

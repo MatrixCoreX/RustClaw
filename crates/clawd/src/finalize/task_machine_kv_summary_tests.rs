@@ -165,7 +165,7 @@ fn generic_free_route() -> IntentOutputContract {
         delivery_intent: OutputDeliveryIntent::None,
         semantic_kind: OutputSemanticKind::None,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     }
 }
 
@@ -179,6 +179,6 @@ fn service_status_one_sentence_route() -> IntentOutputContract {
         delivery_intent: OutputDeliveryIntent::None,
         semantic_kind: OutputSemanticKind::ServiceStatus,
         locator_hint: String::new(),
-        self_extension: crate::SelfExtensionContract::default(),
+        selection: crate::OutputSelectionContract::default(),
     }
 }

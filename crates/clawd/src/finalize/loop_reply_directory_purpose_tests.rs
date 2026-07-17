@@ -689,8 +689,8 @@ fn recent_artifacts_judgment_replaces_non_answer_with_structured_inventory_verdi
     route.response_shape = OutputResponseShape::Free;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/device_local/tmp".to_string();
-    route.self_extension.list_selector.limit = Some(3);
-    route.self_extension.list_selector.sort_by = Some("mtime_desc".to_string());
+    route.selection.list_selector.limit = Some(3);
+    route.selection.list_selector.sort_by = Some("mtime_desc".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -790,7 +790,7 @@ fn recent_artifacts_judgment_replaces_count_only_machine_field_synthesis() {
     route.response_shape = OutputResponseShape::OneSentence;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/device_local/tmp".to_string();
-    route.self_extension.list_selector.limit = Some(3);
+    route.selection.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -854,9 +854,9 @@ fn recent_artifacts_judgment_respects_file_selector_before_limit() {
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Free;
     route.locator_kind = OutputLocatorKind::Path;
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.target_kind_specified = true;
-    route.self_extension.list_selector.limit = Some(3);
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
+    route.selection.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -902,9 +902,9 @@ fn recent_artifacts_judgment_classifies_scripts_per_entry() {
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Free;
     route.locator_kind = OutputLocatorKind::Path;
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.target_kind_specified = true;
-    route.self_extension.list_selector.limit = Some(3);
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
+    route.selection.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -949,9 +949,9 @@ fn recent_artifacts_judgment_classifies_logs_per_entry() {
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Free;
     route.locator_kind = OutputLocatorKind::Path;
-    route.self_extension.list_selector.limit = Some(2);
-    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    route.self_extension.list_selector.target_kind_specified = true;
+    route.selection.list_selector.limit = Some(2);
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -993,7 +993,7 @@ fn recent_artifacts_judgment_classifies_docs_markdown_per_entry() {
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Free;
     route.locator_kind = OutputLocatorKind::Path;
-    route.self_extension.list_selector.limit = Some(3);
+    route.selection.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

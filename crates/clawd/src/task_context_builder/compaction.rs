@@ -256,14 +256,12 @@ pub(crate) fn apply_agent_loop_context_compaction(
     let planner_memory_decision = memory::use_policy::decide_planner_memory_use_policy(
         state,
         ExecutionContextBudgetTier::Light,
-        memory::use_policy::PlannerMemoryContextHint::Default,
     );
     let chat_memory_decision = memory::use_policy::decide_chat_memory_use_policy(
         state,
         ExecutionContextBudgetTier::Light,
         has_active_session_state,
         chat_memory_budget_chars,
-        memory::use_policy::ChatMemoryContextHint::Default,
     );
     let compacted_memory_ctx = memory::service::prepare_prompt_with_memory_for_policy(
         state,

@@ -127,7 +127,7 @@ fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_mach
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
-    route.self_extension.list_selector.limit = Some(3);
+    route.selection.list_selector.limit = Some(3);
     let answer = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md";
 
     assert!(observed_answer_language_compatible_for_route(
@@ -258,7 +258,7 @@ fn content_excerpt_summary_is_not_hard_summarized_by_observed_output() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "/tmp/config.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -460,7 +460,7 @@ fn direct_answer_keeps_fallback_for_unstructured_content_excerpt_summary() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "/tmp/README.txt".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -490,7 +490,7 @@ fn direct_answer_summarizes_doc_parse_content_excerpt_without_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -522,7 +522,7 @@ fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -552,7 +552,7 @@ fn direct_answer_passthroughs_contract_filename_read_range_excerpt_without_llm()
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -582,7 +582,7 @@ fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -612,7 +612,7 @@ fn raw_command_output_read_range_direct_answer_preserves_visible_blank_line() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -648,7 +648,7 @@ fn direct_answer_sanitizes_read_range_log_excerpt_without_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "feishud.log".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -695,7 +695,7 @@ fn scalar_route_fs_basic_tail_read_range_prefers_structured_excerpt() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     assert!(scalar_route_prefers_structured_observed_answer(
         &route_result,
@@ -733,7 +733,7 @@ fn direct_answer_passthroughs_chat_wrapped_execution_path_read_range_when_no_tra
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/config.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -763,7 +763,7 @@ fn direct_answer_does_not_passthrough_read_range_when_summary_is_requested() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -794,7 +794,7 @@ fn direct_answer_defers_read_range_passthrough_when_language_conflicts() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "service_notes.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -826,7 +826,7 @@ fn direct_answer_does_not_passthrough_read_range_for_existence_with_path_contrac
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: "rustclaw.service".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -858,7 +858,7 @@ fn direct_answer_prefers_current_turn_excerpt_summary_request_over_resolved_inte
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ContentExcerptSummary,
             locator_hint: "README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         user_request: Some("先读一下 README.md 前 4 行，再用三句话总结".to_string()),

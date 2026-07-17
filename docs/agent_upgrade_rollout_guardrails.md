@@ -188,7 +188,7 @@ Rollback procedure:
 - Ask runtime failure default delivery now emits `clawd.msg.ask_runtime_failure` + `ask_runtime_failure` machine payload. The fallback contract still carries user-request context and safety boundaries for synthesis.
 - Resume `ExecutionFailedStep` deterministic answers now emit `clawd.msg.execution.failed_step` + `execution_failed_step` with action/command/exit_code/detail machine fields instead of zh/en formatted failure prose.
 - Direct config edit deterministic fallbacks now emit `clawd.msg.config_edit.*` + `config_edit_*` machine payloads with path/field/value/valid/risk fields instead of zh/en success, plan, validation, guard, or read-back prose.
-- Self-extension temporary/permanent plan, success, and failure defaults now emit `clawd.msg.self_extension.*` + `self_extension_*` machine payloads with skill_path/phase/detail/count/status fields instead of zh/en deterministic prose.
+- The historical pre-loop self-extension response path and its locale templates are deleted. Explicit reusable-skill work now enters through the normal planner/resolver/verifier path via `extension_manager`.
 - Agent resume step failure defaults now emit `clawd.msg.execution.step_failed` / `clawd.msg.execution.step_error_missing` machine payloads instead of zh/en "step could not be completed" prose.
 - Dispatch support deterministic observed execution status uses the same `clawd.msg.execution.step_error_missing` machine payload for missing error text.
 - RustClaw config risk deterministic fallback now emits `clawd.msg.config_risk.summary` + `config_risk_*` machine payloads with path/risk_count/risks fields instead of fixed risk/no-risk prose.

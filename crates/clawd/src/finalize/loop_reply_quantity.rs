@@ -584,7 +584,7 @@ pub(super) fn inventory_ranked_size_list_answer(
 
 fn route_list_selector_limit(route: &crate::IntentOutputContract) -> Option<usize> {
     route
-        .self_extension
+        .selection
         .list_selector
         .limit
         .and_then(|value| usize::try_from(value).ok())

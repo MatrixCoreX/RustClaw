@@ -12,17 +12,20 @@ pub(super) struct PreparedRunSkillInput {
     pub(super) args: Value,
 }
 
+pub(super) fn opaque_user_prompt(payload: &Value) -> &str {
+    payload
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
 pub(super) async fn prepare_ask_input(
     _state: &AppState,
     _task: &ClaimedTask,
     payload: &mut Value,
 ) -> PreparedAskInput {
     PreparedAskInput {
-        prompt: payload
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        prompt: opaque_user_prompt(payload).to_string(),
         source: payload
             .get("source")
             .and_then(Value::as_str)

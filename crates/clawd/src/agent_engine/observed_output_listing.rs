@@ -513,7 +513,7 @@ pub(super) fn latest_hidden_entries(loop_state: &LoopState) -> Option<Vec<String
 
 fn hidden_entries_answer_limit(route: &crate::IntentOutputContract) -> usize {
     route
-        .self_extension
+        .selection
         .list_selector
         .limit
         .and_then(|value| usize::try_from(value).ok())

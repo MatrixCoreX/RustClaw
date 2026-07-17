@@ -15,7 +15,7 @@ fn direct_answer_defers_http_basic_one_sentence_summary_to_llm() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -43,7 +43,7 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -72,7 +72,7 @@ fn direct_answer_defers_http_basic_web_page_summary_to_observed_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::WebPageSummary,
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -105,7 +105,7 @@ fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -139,7 +139,7 @@ fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: "telegramd".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -168,7 +168,7 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: "telegramd".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -197,7 +197,7 @@ fn direct_answer_keeps_service_control_scalar_status_as_machine_value() {
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: "telegramd".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
+            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

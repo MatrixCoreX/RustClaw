@@ -69,9 +69,11 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     "crates/clawcli/src/main.rs": (
         "Command::LlmTrace",
         "commands::run_llm_trace",
-        "llm-trace",
         "raw",
         "limit",
+    ),
+    "crates/clawcli/src/main_tests.rs": (
+        "llm-trace",
     ),
     "crates/clawcli/src/commands_llm_trace_tests.rs": (
         "llm_trace_text_lines_number_calls_and_flow_tokens",

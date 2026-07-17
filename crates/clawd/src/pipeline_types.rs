@@ -256,48 +256,8 @@ impl OutputSemanticKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum SelfExtensionMode {
-    #[default]
-    None,
-    TemporaryFix,
-    PermanentExtension,
-}
-
-impl SelfExtensionMode {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::TemporaryFix => "temporary_fix",
-            Self::PermanentExtension => "permanent_extension",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum SelfExtensionTrigger {
-    #[default]
-    None,
-    ExplicitUserRequest,
-    CapabilityGap,
-}
-
-impl SelfExtensionTrigger {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::ExplicitUserRequest => "explicit_user_request",
-            Self::CapabilityGap => "capability_gap",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SelfExtensionContract {
-    pub(crate) mode: SelfExtensionMode,
-    pub(crate) trigger: SelfExtensionTrigger,
-    pub(crate) execute_now: bool,
-    pub(crate) scalar_count_filter: OutputScalarCountFilter,
+pub(crate) struct OutputSelectionContract {
     pub(crate) list_selector: OutputListSelector,
     pub(crate) structured_field_selector: Option<String>,
 }
@@ -308,23 +268,6 @@ pub(crate) enum OutputScalarCountTargetKind {
     Any,
     File,
     Dir,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct OutputScalarCountFilter {
-    pub(crate) target_kind: OutputScalarCountTargetKind,
-    pub(crate) include_hidden: Option<bool>,
-    pub(crate) recursive: Option<bool>,
-    pub(crate) extensions: Vec<String>,
-}
-
-impl OutputScalarCountFilter {
-    pub(crate) fn has_constraints(&self) -> bool {
-        self.target_kind != OutputScalarCountTargetKind::Any
-            || self.include_hidden.is_some()
-            || self.recursive.is_some()
-            || !self.extensions.is_empty()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -347,7 +290,7 @@ pub(crate) struct IntentOutputContract {
     pub(crate) delivery_intent: OutputDeliveryIntent,
     pub(crate) semantic_kind: OutputSemanticKind,
     pub(crate) locator_hint: String,
-    pub(crate) self_extension: SelfExtensionContract,
+    pub(crate) selection: OutputSelectionContract,
 }
 
 impl IntentOutputContract {
