@@ -7,7 +7,8 @@ use super::{
     list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_executor_state_internal,
-    record_paused_checkpoint_resume_work_item_internal, touch_running_task, update_task_failure,
+    record_paused_checkpoint_resume_work_item_internal, touch_running_task,
+    update_task_checkpointed_result, update_task_failure,
 };
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
@@ -1531,6 +1532,76 @@ fn claim_due_paused_checkpoint_task_sets_machine_resume_lease() {
         .expect("select task lease fields");
     assert_eq!(lease_owner, state.worker.worker_id);
     assert_eq!(lease_expires_at, now + 30);
+}
+
+#[test]
+fn due_checkpoint_waits_for_frontend_worker_lease_and_claim_rechecks_it() {
+    let state = state_with_tasks_table();
+    let now = 5_000;
+    let due = json!({
+        "task_lifecycle": {
+            "state": "waiting",
+            "resume_reason": "agent_loop_max_rounds",
+            "next_check_after": now - 1,
+            "checkpoint_id": "ckpt-worker-owned"
+        },
+        "task_checkpoint": checkpoint_json("ckpt-worker-owned", vec![])
+    });
+    insert_task(
+        &state,
+        "worker-owned-checkpoint",
+        "running",
+        Some(&due),
+        now - 10,
+    );
+    set_task_lease(
+        &state,
+        "worker-owned-checkpoint",
+        "worker:foreground",
+        now + 120,
+        1,
+        now - 10,
+    );
+
+    assert!(list_due_paused_checkpoint_tasks_internal(&state, now, 10)
+        .expect("list while foreground lease is active")
+        .is_empty());
+    assert!(claim_due_paused_checkpoint_task_internal(
+        &state,
+        "worker-owned-checkpoint",
+        "ckpt-worker-owned",
+        now,
+        30,
+    )
+    .expect("claim while foreground lease is active")
+    .is_none());
+
+    update_task_checkpointed_result(&state, "worker-owned-checkpoint", &due.to_string())
+        .expect("release foreground lease with checkpoint finalization");
+    let due_after_release = list_due_paused_checkpoint_tasks_internal(&state, now, 10)
+        .expect("list after foreground lease release");
+    assert_eq!(due_after_release.len(), 1);
+    assert_eq!(due_after_release[0].task_id, "worker-owned-checkpoint");
+}
+
+#[test]
+fn foreground_heartbeat_cannot_reclaim_a_published_checkpoint() {
+    let state = state_with_tasks_table();
+    let checkpoint = json!({
+        "task_lifecycle": {
+            "state": "waiting",
+            "resume_reason": "agent_loop_max_rounds",
+            "next_check_after": 1,
+            "checkpoint_id": "ckpt-paused"
+        },
+        "task_checkpoint": checkpoint_json("ckpt-paused", vec![])
+    });
+    insert_task(&state, "paused-heartbeat", "running", Some(&checkpoint), 1);
+
+    assert!(
+        !touch_running_task(&state, "paused-heartbeat").expect("touch paused checkpoint"),
+        "a foreground heartbeat must not reacquire a handed-off checkpoint"
+    );
 }
 
 #[test]

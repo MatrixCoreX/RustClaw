@@ -88,6 +88,17 @@ async fn checkpointed_ask_finalization_overrides_failure_metric() {
     let state = state_with_tasks_table();
     let task = claimed_ask_task("task-checkpoint-finalize");
     insert_running_task(&state, &task);
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "UPDATE tasks
+             SET lease_owner = 'worker:foreground',
+                 lease_expires_at = 1781800300
+             WHERE task_id = ?1",
+            rusqlite::params![task.task_id],
+        )
+        .expect("set foreground lease");
+    }
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "start long task");
@@ -127,4 +138,16 @@ async fn checkpointed_ask_finalization_overrides_failure_metric() {
         result["task_journal"]["summary"]["task_lifecycle"]["checkpoint_id"],
         "ckpt-accepted"
     );
+    let db = state.core.db.get().expect("get db");
+    let (lease_owner, lease_expires_at): (Option<String>, i64) = db
+        .query_row(
+            "SELECT lease_owner, lease_expires_at
+             FROM tasks
+             WHERE task_id = ?1",
+            rusqlite::params![task.task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("select released lease");
+    assert!(lease_owner.is_none());
+    assert_eq!(lease_expires_at, 0);
 }

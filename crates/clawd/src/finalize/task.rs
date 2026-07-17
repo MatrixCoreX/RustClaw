@@ -207,7 +207,7 @@ async fn finalize_ask_checkpointed(
 ) -> Result<()> {
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     let result = ask_result_payload(answer_text, answer_messages, Some(journal));
-    repo::update_task_progress_result(state, &task.task_id, &result.to_string())?;
+    repo::update_task_checkpointed_result(state, &task.task_id, &result.to_string())?;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_checkpointed task_id={} kind=ask lifecycle_state={} checkpoint_id={}",
@@ -549,6 +549,29 @@ pub(crate) async fn finalize_ask_result(
             }
             if let Some(answer_journal) = answer.task_journal.as_ref() {
                 journal.merge_from(answer_journal);
+            }
+            if answer.resume_context.is_none()
+                && journal_has_checkpointed_nonterminal_lifecycle(&journal)
+            {
+                let answer_text = crate::intercept_response_text_for_delivery(&answer.text);
+                let answer_messages = answer
+                    .messages
+                    .iter()
+                    .map(|message| message.trim().to_string())
+                    .filter(|message| !message.is_empty())
+                    .collect::<Vec<_>>();
+                journal.record_final_answer(&answer_text);
+                journal.record_runtime_llm_metrics(state, &task.task_id);
+                crate::finalize::ensure_task_metrics(&mut journal, &answer_text, &answer_messages);
+                finalize_ask_checkpointed(
+                    state,
+                    task,
+                    &answer_text,
+                    &answer_messages,
+                    &mut journal,
+                )
+                .await?;
+                return Ok(());
             }
             let effective_output_contract =
                 planner_output_contract_for_finalization(answer.task_journal.as_ref());
