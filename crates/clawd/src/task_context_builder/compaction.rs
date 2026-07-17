@@ -484,16 +484,35 @@ fn extract_machine_refs(value: &str, namespaces: &[&str]) -> Vec<String> {
             continue;
         }
         index += 1;
-        if SPACED_SCALAR_REF_NAMESPACES.contains(&namespace) {
+        let scalar_namespace = SPACED_SCALAR_REF_NAMESPACES.contains(&namespace);
+        if scalar_namespace {
             while index < bytes.len() && matches!(bytes[index], b' ' | b'\t') {
                 index += 1;
             }
+            if bytes[index..].starts_with(namespace.as_bytes())
+                && bytes.get(index + namespace.len()) == Some(&b':')
+            {
+                index += namespace.len() + 1;
+                while index < bytes.len() && matches!(bytes[index], b' ' | b'\t') {
+                    index += 1;
+                }
+            }
         }
         let value_start = index;
-        while index < bytes.len() && is_machine_ref_value_char(bytes[index]) {
+        while index < bytes.len()
+            && if scalar_namespace {
+                is_machine_scalar_ref_value_char(bytes[index])
+            } else {
+                is_machine_ref_value_char(bytes[index])
+            }
+        {
             index += 1;
         }
         if index == value_start {
+            continue;
+        }
+        if scalar_namespace && bytes.get(index) == Some(&b':') {
+            index += 1;
             continue;
         }
         let mut token_end = index;
@@ -526,6 +545,10 @@ fn is_machine_namespace_char(value: u8) -> bool {
 
 fn is_machine_ref_value_char(value: u8) -> bool {
     value.is_ascii_alphanumeric() || matches!(value, b'_' | b'.' | b'/' | b':' | b'-')
+}
+
+fn is_machine_scalar_ref_value_char(value: u8) -> bool {
+    value.is_ascii_alphanumeric() || matches!(value, b'_' | b'.' | b'/' | b'-')
 }
 
 fn is_machine_ref_char(value: u8) -> bool {

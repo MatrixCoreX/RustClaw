@@ -224,103 +224,60 @@ PY
 final_result_provider_unavailable() {
   python3 - "$1" <<'PY'
 import json
-import re
 import sys
 from pathlib import Path
 
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
-messages = result.get("messages") or []
-error_text = str(data.get("error_text") or "").strip().lower()
-result_text = str(result.get("text") or "").strip().lower()
-message_texts = []
-for item in messages:
-    if isinstance(item, dict):
-        message_texts.append(str(item.get("text") or "").strip().lower())
+if str(data.get("status") or "") not in {"failed", "timeout"}:
+    raise SystemExit(1)
 
-strong_markers = [
-    "当前大模型服务暂时不可用",
-    "模型暂时不可用",
-    "模型暂不可用",
-    "selected model is at capacity",
-    "usage limit exceeded",
-    "rate limit",
-    "rate_limit",
-    "too many requests",
-    "http 401",
-    "http 429",
-    "http 529",
-    "529 overloaded",
-    "authorized_error",
-    "login fail",
-    "鉴权失败",
-    "missing choices[0].message.content",
-    "timeout: error sending request for url",
-    "error sending request for url",
-    "operation timed out",
-]
+machine_codes = set()
+for lifecycle in (
+    data.get("lifecycle"),
+    data.get("task_lifecycle"),
+    result.get("lifecycle"),
+    result.get("task_lifecycle"),
+):
+    if not isinstance(lifecycle, dict):
+        continue
+    for field in (
+        "error_code",
+        "failure_attribution",
+        "provider_blocker_status_code",
+        "reason_code",
+        "status_code",
+    ):
+        value = str(lifecycle.get(field) or "").strip().lower()
+        if value:
+            machine_codes.add(value)
 
-def provider_like_blob(text: str) -> bool:
-    text = (text or "").strip().lower()
-    if not text:
-        return False
-    if any(marker in text for marker in strong_markers):
-        return True
-    return (
-        "provider=vendor-" in text
-        and (
-            re.search(r"http 5\d\d", text) is not None
-            or '"type":"server_error"' in text
-            or "unknown error, 520" in text
-        )
-    )
+journal = result.get("task_journal") or {}
+summary = journal.get("summary") or {}
+for field in ("final_failure_attribution", "provider_blocker_status_code"):
+    value = str(summary.get(field) or "").strip().lower()
+    if value:
+        machine_codes.add(value)
 
-def provider_like_final_text(text: str) -> bool:
-    text = (text or "").strip().lower()
-    if not text:
-        return False
-    if len(text) > 400:
-        return False
-    anchored_markers = [
-        "当前大模型服务暂时不可用",
-        "模型暂时不可用",
-        "模型暂不可用",
-        "selected model is at capacity",
-        "usage limit exceeded",
-        "rate limit",
-        "rate_limit",
-        "too many requests",
-        "http 401",
-        "http 429",
-        "http 529",
-        "529 overloaded",
-        "authorized_error",
-        "login fail",
-        "鉴权失败",
-        "missing choices[0].message.content",
-        "timeout: error sending request for url",
-        "error sending request for url",
-        "operation timed out",
-    ]
-    if any(text.startswith(marker) for marker in anchored_markers):
-        return True
-    return (
-        "provider=vendor-" in text
-        and (
-            re.search(r"http 5\d\d", text) is not None
-            or '"type":"server_error"' in text
-            or "unknown error, 520" in text
-        )
-    )
+provider_final_errors = 0
+by_prompt = ((summary.get("task_metrics") or {}).get("by_prompt") or {})
+if isinstance(by_prompt, dict):
+    for metrics in by_prompt.values():
+        if not isinstance(metrics, dict):
+            continue
+        try:
+            provider_final_errors += int(metrics.get("provider_final_error_count") or 0)
+        except (TypeError, ValueError):
+            pass
 
-if provider_like_blob(error_text):
-    raise SystemExit(0)
-if provider_like_final_text(result_text):
-    raise SystemExit(0)
-if any(provider_like_final_text(text) for text in message_texts):
-    raise SystemExit(0)
-raise SystemExit(1)
+provider_machine_failure = any(
+    code == "rate_limited"
+    or code.startswith("provider_")
+    or code.startswith("llm_provider_")
+    for code in machine_codes
+)
+raise SystemExit(0 if provider_machine_failure or provider_final_errors > 0 else 1)
 PY
 }
 
@@ -754,6 +711,18 @@ while IFS=$'\t' read -r -a parts; do
       fi
       break
     done
+
+    if [[ -z "$effective_status" ]]; then
+      effective_status="$(extract_status "$final_file")"
+    fi
+    case "$effective_status" in
+      failed|canceled|timeout)
+        suite_failed=1
+        if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+          echo "  [suite] turn ${turn} ended with task status ${effective_status}; suite will fail after remaining cases finish"
+        fi
+        ;;
+    esac
 
     task_ids+=("$task_id")
     finals+=("$final_file")
