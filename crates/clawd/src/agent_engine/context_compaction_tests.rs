@@ -100,6 +100,16 @@ fn context_compaction_source_bundle_enforces_total_budget() {
         .unwrap()
         .iter()
         .any(|item| { item["truncated"].as_bool() == Some(true) }));
+    assert!(!source["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["ref"] == "prompt_memory_context"));
+    assert!(source["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["ref"] == "recent_turns_full"));
 }
 
 #[test]
@@ -160,7 +170,7 @@ fn model_assisted_compaction_bounds_arrays_and_text() {
 
     let normalized = normalize_model_assisted_compaction_output(&value).unwrap();
 
-    assert_eq!(normalized["open_questions"].as_array().unwrap().len(), 24);
+    assert_eq!(normalized["open_questions"].as_array().unwrap().len(), 30);
     assert_eq!(
         normalized["facts"][0]["fact_value"]
             .as_str()
@@ -169,6 +179,20 @@ fn model_assisted_compaction_bounds_arrays_and_text() {
             .count(),
         1_024
     );
+}
+
+#[test]
+fn model_assisted_compaction_bounds_large_arrays_at_sixty_four_items() {
+    let mut value = valid_output();
+    value["open_questions"] = Value::Array(
+        (0..80)
+            .map(|index| Value::String(format!("question-{index}")))
+            .collect(),
+    );
+
+    let normalized = normalize_model_assisted_compaction_output(&value).unwrap();
+
+    assert_eq!(normalized["open_questions"].as_array().unwrap().len(), 64);
 }
 
 #[test]

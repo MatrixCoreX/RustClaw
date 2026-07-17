@@ -7,9 +7,9 @@ use crate::task_context_builder::{ContextCompactionPlan, TaskContextBundle};
 use crate::{llm_gateway, AppState, ClaimedTask};
 
 const CONTEXT_COMPACTION_PROMPT_LOGICAL_PATH: &str = "prompts/context_compaction_prompt.md";
-const CONTEXT_COMPACTION_MAX_TOKENS: u64 = 3_072;
-const CONTEXT_COMPACTION_TIMEOUT_SECONDS: u64 = 45;
-const MAX_COMPACTION_ITEMS: usize = 24;
+const CONTEXT_COMPACTION_MAX_TOKENS: u64 = 8_192;
+const CONTEXT_COMPACTION_TIMEOUT_SECONDS: u64 = 90;
+const MAX_COMPACTION_ITEMS: usize = 64;
 const MAX_CONTEXT_SOURCE_TOTAL_CHARS: usize = 48_000;
 const MAX_CONTEXT_SOURCE_ITEM_CHARS: usize = 24_000;
 const MAX_FACT_VALUE_CHARS: usize = 1_024;
@@ -140,12 +140,13 @@ fn context_source_bundle(bundle: &TaskContextBundle, plan: &ContextCompactionPla
             ("runtime_context", view.runtime_context.as_str()),
             ("goal_context", view.goal_context.as_str()),
             ("active_task_context", view.active_task_context.as_str()),
+            ("last_turn_full", view.last_turn_full.as_str()),
+            ("recent_turns_full", view.recent_turns_full.as_str()),
             (
                 "active_execution_anchor_context",
                 view.active_execution_anchor_context.as_str(),
             ),
             ("session_alias_context", view.session_alias_context.as_str()),
-            ("last_turn_full", view.last_turn_full.as_str()),
             (
                 "recent_execution_anchor",
                 view.recent_execution_anchor.as_str(),
@@ -155,14 +156,9 @@ fn context_source_bundle(bundle: &TaskContextBundle, plan: &ContextCompactionPla
                 view.image_context.as_deref().unwrap_or("<none>"),
             ),
             (
-                "prompt_memory_context",
-                view.memory_ctx.prompt_with_memory.as_str(),
-            ),
-            (
                 "recent_execution_context",
                 view.recent_execution_context.as_str(),
             ),
-            ("recent_turns_full", view.recent_turns_full.as_str()),
         ] {
             if !context_value_present(value) || remaining_chars == 0 {
                 continue;

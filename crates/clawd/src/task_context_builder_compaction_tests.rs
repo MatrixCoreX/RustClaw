@@ -200,3 +200,114 @@ fn compacted_permission_and_child_state_reaches_the_next_planner_prompt() {
         assert!(prompt.contains("await_user_input"));
     }
 }
+
+#[test]
+fn deterministic_fallback_preserves_stable_machine_references() {
+    let mut bundle = context_bundle(13_000);
+    {
+        let view = bundle.execution_view.as_mut().unwrap();
+        view.recent_turns_full = format!(
+            "{}\n{}",
+            [
+                "goal:atlas_release constraint:no_external_publish",
+                "decision:canary_before_rollout fact:build_green",
+                "artifact:README.md window:2026_07_20_0200Z",
+                "risk:stale next:stale open:stale",
+                "自然语言不参与机器引用选择",
+            ]
+            .join("\n"),
+            "x".repeat(13_000)
+        );
+    }
+    let plan = plan_agent_loop_context_compaction(&bundle).unwrap();
+
+    let record = apply_context_compaction_with_inputs(
+        "task-context-compaction-machine-refs",
+        &mut bundle,
+        &plan,
+        empty_prompt_memory_context(),
+        "last_turn".to_string(),
+        None,
+        "context_compaction_schema_rejected",
+    );
+    let context = &bundle
+        .execution_view
+        .as_ref()
+        .unwrap()
+        .compacted_history_context;
+
+    assert_eq!(
+        record["compaction_source"],
+        "deterministic_machine_reference_fallback"
+    );
+    assert_eq!(record["model_summary_attached"], false);
+    assert_eq!(record["continuity_summary_attached"], true);
+    for machine_ref in [
+        "goal:atlas_release",
+        "constraint:no_external_publish",
+        "decision:canary_before_rollout",
+        "fact:build_green",
+        "artifact:README.md",
+        "window:2026_07_20_0200Z",
+    ] {
+        assert!(context.contains(machine_ref), "{machine_ref} missing");
+    }
+    for transient_ref in ["risk:stale", "next:stale", "open:stale"] {
+        assert!(!context.contains(transient_ref), "{transient_ref} leaked");
+    }
+}
+
+#[test]
+fn model_summary_receives_deterministic_continuity_references() {
+    let mut bundle = context_bundle(13_000);
+    bundle.execution_view.as_mut().unwrap().recent_turns_full = format!(
+        "goal:active fact:first fact:second constraint:read_only\n{}",
+        "x".repeat(13_000)
+    );
+    let plan = plan_agent_loop_context_compaction(&bundle).unwrap();
+    let model_summary = serde_json::json!({
+        "schema_version": 1,
+        "summary_kind": "model_assisted_context_compaction",
+        "facts": [],
+        "decisions": [],
+        "open_questions": [],
+        "active_goal_refs": [],
+        "constraint_refs": [],
+        "evidence_refs": [],
+        "artifact_refs": [],
+        "completed_side_effect_refs": [],
+        "failure_refs": [],
+        "permission_state_refs": [],
+        "child_task_refs": [],
+        "resume_entrypoint": null,
+        "source_refs": [],
+        "risk_flags": []
+    });
+
+    let record = apply_context_compaction_with_inputs(
+        "task-context-compaction-model-continuity",
+        &mut bundle,
+        &plan,
+        empty_prompt_memory_context(),
+        "last_turn".to_string(),
+        Some(model_summary),
+        "context_compaction_model_completed",
+    );
+    let context = &bundle
+        .execution_view
+        .as_ref()
+        .unwrap()
+        .compacted_history_context;
+
+    assert_eq!(record["compaction_source"], "model_assisted");
+    assert_eq!(record["model_summary_attached"], true);
+    assert_eq!(record["continuity_summary_attached"], true);
+    for machine_ref in [
+        "goal:active",
+        "fact:first",
+        "fact:second",
+        "constraint:read_only",
+    ] {
+        assert!(context.contains(machine_ref), "{machine_ref} missing");
+    }
+}
