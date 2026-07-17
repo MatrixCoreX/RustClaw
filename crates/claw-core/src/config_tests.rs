@@ -77,7 +77,7 @@ busy_timeout_ms = 2000
 }
 
 #[test]
-fn app_config_loads_mcp_server_boundary_without_runtime_effect() {
+fn app_config_loads_mcp_server_runtime_policy_boundary() {
     let dir = unique_temp_config_dir("mcp-configured");
     fs::create_dir_all(&dir).expect("create temp config dir");
     let config_path = dir.join("config.toml");
@@ -103,8 +103,21 @@ transport = "stdio"
 command = "mcp-repo"
 args = ["--workspace", "."]
 timeout_seconds = 45
+max_concurrency = 3
+max_output_bytes = 8192
+max_schema_bytes = 4096
+max_tools = 12
+trusted = true
 capability_prefix = "repo"
 allowed_tools = ["search", "read"]
+auth_token_env = "RUSTCLAW_TEST_MCP_TOKEN"
+env_refs = { REPO_TOKEN = "RUSTCLAW_TEST_REPO_TOKEN" }
+
+[mcp.servers.repo.tool_policies.search]
+effect = "observe"
+risk_level = "low"
+idempotent = true
+network_access = false
 
 [mcp.servers.disabled]
 enabled = false
@@ -123,11 +136,29 @@ url = "http://127.0.0.1:9000/events"
     assert_eq!(repo.transport.as_token(), "stdio");
     assert_eq!(repo.command.as_deref(), Some("mcp-repo"));
     assert_eq!(repo.timeout_seconds, 45);
+    assert_eq!(repo.max_concurrency, 3);
+    assert_eq!(repo.max_output_bytes, 8192);
+    assert_eq!(repo.max_schema_bytes, 4096);
+    assert_eq!(repo.max_tools, 12);
+    assert!(repo.trusted);
     assert_eq!(repo.capability_prefix.as_deref(), Some("repo"));
+    assert_eq!(
+        repo.auth_token_env.as_deref(),
+        Some("RUSTCLAW_TEST_MCP_TOKEN")
+    );
+    assert_eq!(
+        repo.env_refs.get("REPO_TOKEN").map(String::as_str),
+        Some("RUSTCLAW_TEST_REPO_TOKEN")
+    );
     assert_eq!(
         repo.allowed_tools,
         vec!["search".to_string(), "read".to_string()]
     );
+    let search = repo.tool_policies.get("search").expect("search policy");
+    assert_eq!(search.effect.as_token(), "observe");
+    assert_eq!(search.risk_level.as_token(), "low");
+    assert!(search.idempotent);
+    assert!(!search.network_access);
     let disabled = cfg.mcp.servers.get("disabled").expect("disabled server");
     assert_eq!(disabled.transport.as_token(), "sse");
     assert_eq!(

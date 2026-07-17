@@ -395,6 +395,14 @@ fn action_scoped_risk_level(
     canonical_skill: &str,
     action: Option<&str>,
 ) -> Option<SkillRiskLevel> {
+    if let Some(tool) = state.mcp_tool(canonical_skill) {
+        return Some(match tool.policy.risk_level.as_str() {
+            "low" => SkillRiskLevel::Low,
+            "medium" => SkillRiskLevel::Medium,
+            "high" => SkillRiskLevel::High,
+            _ => SkillRiskLevel::Unknown,
+        });
+    }
     state.skill_manifest(canonical_skill).and_then(|manifest| {
         claw_core::skill_registry::select_planner_capability_mapping(
             &manifest.planner_capabilities,
@@ -409,6 +417,9 @@ fn action_scoped_capability_policy(
     canonical_skill: &str,
     action: Option<&str>,
 ) -> Option<Value> {
+    if let Some(tool) = state.mcp_tool(canonical_skill) {
+        return Some(tool.policy.permission_policy_json());
+    }
     state.skill_manifest(canonical_skill).and_then(|manifest| {
         claw_core::skill_registry::select_planner_capability_mapping(
             &manifest.planner_capabilities,
@@ -739,7 +750,19 @@ pub(super) fn preflight_permission_decision(
         false,
     );
     let registry = state.get_skills_registry();
-    let registry_policy = registry.as_ref().map(|registry| {
+    let registry_policy = state
+        .mcp_tool(&canonical_skill)
+        .map(|tool| {
+            json!({
+                "available": true,
+                "source": "mcp_config",
+                "once_per_task": !tool.policy.idempotent,
+                "dedup_scope": "args",
+                "idempotent": tool.policy.idempotent,
+            })
+        })
+        .or_else(|| {
+            registry.as_ref().map(|registry| {
         json!({
             "available": true,
             "once_per_task": registry.resolved_once_per_task(&canonical_skill, action.as_deref()),
@@ -748,7 +771,8 @@ pub(super) fn preflight_permission_decision(
                 .as_token(),
             "idempotent": registry.resolved_idempotent(&canonical_skill, action.as_deref()),
         })
-    });
+    })
+        });
     json!({
         "schema_version": 1,
         "decision": decision.as_token(),

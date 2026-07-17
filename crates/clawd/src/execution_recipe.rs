@@ -874,6 +874,14 @@ pub(crate) fn classify_skill_action_effect(
     args: &Value,
 ) -> ActionEffect {
     let normalized_skill = state.resolve_canonical_skill_name(skill_name);
+    if let Some(tool) = state.mcp_tool(&normalized_skill) {
+        return match tool.policy.effect.as_str() {
+            "observe" => ActionEffect::observe(),
+            "validate" => ActionEffect::validate(),
+            "mutate" | "external" => ActionEffect::mutate(),
+            _ => ActionEffect::default(),
+        };
+    }
     if dry_run_observes_only_action(&normalized_skill, args) {
         return ActionEffect::observe();
     }

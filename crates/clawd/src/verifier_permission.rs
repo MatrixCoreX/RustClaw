@@ -68,6 +68,11 @@ fn step_permission_decision_json(
                 "idempotent": mapping.idempotent,
             });
             Some(policy)
+        })
+        .or_else(|| {
+            state
+                .mcp_tool(&normalized_skill)
+                .map(|tool| tool.policy.permission_policy_json())
         });
     let requires_confirmation = state.skill_rt.tools_policy.approval_required(
         risk_requires_confirmation,
@@ -186,24 +191,31 @@ pub(super) fn step_sandbox_denial_reason(
         .get("action")
         .and_then(Value::as_str)
         .map(normalize_schema_token);
-    let registry_policy = state.skill_manifest(normalized_skill).and_then(|manifest| {
-        claw_core::skill_registry::select_planner_capability_mapping(
-            &manifest.planner_capabilities,
-            action.as_deref(),
-        )
-        .map(|mapping| {
-            json!({
-                "isolation_profile": mapping.isolation_profile.map(|profile| profile.as_token()),
-                "network_access": mapping.network_access,
-                "filesystem_write": mapping.filesystem_write,
-                "external_publish": mapping.external_publish,
-                "credential_access": mapping.credential_access,
-                "subprocess": mapping.subprocess,
-                "package_install": mapping.package_install,
-                "privilege_escalation": mapping.privilege_escalation,
+    let registry_policy = state
+        .skill_manifest(normalized_skill)
+        .and_then(|manifest| {
+            claw_core::skill_registry::select_planner_capability_mapping(
+                &manifest.planner_capabilities,
+                action.as_deref(),
+            )
+            .map(|mapping| {
+                json!({
+                    "isolation_profile": mapping.isolation_profile.map(|profile| profile.as_token()),
+                    "network_access": mapping.network_access,
+                    "filesystem_write": mapping.filesystem_write,
+                    "external_publish": mapping.external_publish,
+                    "credential_access": mapping.credential_access,
+                    "subprocess": mapping.subprocess,
+                    "package_install": mapping.package_install,
+                    "privilege_escalation": mapping.privilege_escalation,
+                })
             })
         })
-    });
+        .or_else(|| {
+            state
+                .mcp_tool(normalized_skill)
+                .map(|tool| tool.policy.permission_policy_json())
+        });
     sandbox_denial_reason(state, normalized_skill, effect, registry_policy.as_ref())
 }
 

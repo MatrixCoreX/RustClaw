@@ -123,6 +123,20 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
         }
         RegistryCapabilityResolution::None => {}
     }
+    if let Some(tool) = state.mcp_tool(&normalized) {
+        let action = AgentAction::CallTool {
+            tool: tool.capability,
+            args,
+        };
+        let record = CapabilityResolutionRecord::resolved(
+            "capability_resolver_mcp_mapping_resolved",
+            "mcp",
+            normalized,
+            &action,
+            PlannerCapabilityKind::Tool,
+        );
+        return (Some(action), record);
+    }
     (None, CapabilityResolutionRecord::unresolved(normalized))
 }
 

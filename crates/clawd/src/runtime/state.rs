@@ -115,6 +115,7 @@ pub(crate) struct CoreServices {
     pub(crate) http_client: Client,
     pub(crate) skill_views_snapshot: Arc<RwLock<Arc<SkillViewsSnapshot>>>,
     pub(crate) active_provider_type: Option<String>,
+    pub(crate) mcp_runtime: Arc<crate::mcp_runtime::McpRuntime>,
 }
 
 impl CoreServices {
@@ -135,6 +136,7 @@ impl CoreServices {
                 skills_list: Arc::new(HashSet::new()),
             }))),
             active_provider_type: None,
+            mcp_runtime: Arc::new(crate::mcp_runtime::McpRuntime::disabled()),
         }
     }
 
@@ -1313,11 +1315,26 @@ impl AppState {
             .and_then(|r| r.manifest(canonical_name))
     }
 
+    pub(crate) fn mcp_tool(
+        &self,
+        capability: &str,
+    ) -> Option<crate::mcp_runtime::McpToolDescriptor> {
+        self.core.mcp_runtime.tool(capability)
+    }
+
+    pub(crate) fn mcp_tools(&self) -> Vec<crate::mcp_runtime::McpToolDescriptor> {
+        self.core.mcp_runtime.tools()
+    }
+
     pub(crate) fn skill_invocation_requires_confirmation_policy(
         &self,
         canonical_name: &str,
         args: Option<&serde_json::Value>,
     ) -> bool {
+        if let Some(tool) = self.mcp_tool(canonical_name) {
+            return !matches!(tool.policy.effect.as_str(), "observe" | "validate")
+                || !matches!(tool.policy.risk_level.as_str(), "low");
+        }
         let Some(manifest) = self.skill_manifest(canonical_name) else {
             return false;
         };
