@@ -1,6 +1,6 @@
 # Agent Guard Config Wiring Audit
 
-Last updated: 2026-07-15
+Last updated: 2026-07-18
 
 This document originally supported the June 2026 agent-loop migration plan and
 is now maintained as supporting documentation for the active post-migration
@@ -18,9 +18,9 @@ wiring and intended ownership.
   have converged to final `all`
   machine boundaries; non-`all` historical values are normalized to `all` and
   must not be used as rollback/debug controls.
-- Domain action lists, `dynamic_rules`, `messages`, and `trace_messages` need
-  cleanup. Current code search did not find production Rust readers for those
-  sections, so they should not be treated as active rollback controls.
+- Domain action lists, stale dedup compatibility fields, `dynamic_rules`,
+  `messages`, and `trace_messages` were physically removed after reader audit.
+  `check_agent_loop_guard_final_scope.py` rejects their re-entry.
 - User-visible copy should move toward `message_key` plus finalizer/LLM/i18n
   rendering before it is used in runtime behavior.
 - `agent.hooks` pre-tool policy is now wired as machine-token control:
@@ -54,13 +54,7 @@ wiring and intended ownership.
 | `agent.loop_guard.registry_idempotency_guard` | Historical bool name; current runtime config loader does not parse it. | Ignored legacy key. | Config migration. | Do not document or extend as a config field; use `registry_idempotency_guard_scope`. |
 | `agent.hooks.handlers` | Parsed as trusted command/HTTP/MCP lifecycle handlers with stage, trust/hash, bounds, retry, failure policy, and blocking mode. Handler output is a versioned machine contract merged through `PolicyDecision`; no configured handler leaves baseline execution unchanged. | Wired behavior. | Agent hook runtime. | Keep handler ids and decisions machine-token only. Repository command hooks require explicit trust plus a matching content hash; only PreToolUse and PermissionRequest may block. |
 | Removed fixed hook action/tool lists | The former blocked-action, blocked-tool, confirmation-action, and background-action arrays and their evaluator were physically deleted after handler migration. | Removed legacy keys. | Hook deletion guard. | Do not restore parallel list policy. Use a trusted bounded handler or the existing registry/permission policy owner. `check_agent_hook_runtime_contracts.py` rejects re-entry. |
-| `agent.loop_guard.crypto.*_actions` | No production Rust reader found in current audit; config comments now mark these keys `DEPRECATED`. | Deprecated compatibility config. | Registry metadata owns effect/dedup semantics. | Do not wire into runtime; use `planner_capabilities[].effect`, `semantic_tags`, `risk_level`, `once_per_task`, `dedup_scope`, and `idempotent`. |
-| `agent.loop_guard.fs_search.query_actions` | No production Rust reader found in current audit; config comments now mark this key `DEPRECATED`. | Deprecated compatibility config. | Registry metadata / capability contract. | Do not wire into runtime; replace with capability metadata if still needed. |
-| `agent.loop_guard.media.image_*_skills` | No production Rust reader found in current audit; config comments now mark these keys `DEPRECATED`. | Deprecated compatibility config. | Registry metadata / output contract. | Do not wire into runtime; use `semantic_tags` or output delivery metadata. |
-| `agent.loop_guard.dedup.*` | No production Rust reader found in current audit; comments mark compatibility. | Legacy compatibility config. | P3 dedup cleanup. | Deprecate after confirming no tests or deployments rely on it. |
-| `agent.dynamic_rules.*` | No production Rust reader found in current audit. Values are prompt text if wired later. | Prompt-policy text, currently stale. | Prompt layer, not runtime control flow. | Prefer prompt files or generated overlays; do not parse these as runtime semantics. |
-| `agent.messages.*` | No production Rust reader found in current audit. | Potential i18n/message copy. | i18n/finalizer. | If used later, convert to `message_key` plus renderer; do not hardcode final replies in Rust. |
-| `agent.trace_messages.*` | No production Rust reader found in current audit. | Trace/audit copy or reason labels. | Observability. | Replace prose reason strings with stable reason codes where behavior depends on them. |
+| Removed domain action lists / dedup / prose sections | Reader audit found no production owner, so the sections were physically deleted. | Removed legacy keys. | Registry metadata, prompt layers, machine reason codes, and language rendering. | Do not restore parallel config. Use `planner_capabilities` policy metadata, prompt files, or structured `message_key`/`reason_code` outputs. |
 
 ## Risk Notes
 
@@ -80,14 +74,11 @@ wiring and intended ownership.
 
 ## Required Follow-Up
 
-1. Add a config wiring test or static audit for stale `agent_guard.toml` keys.
-2. Decide whether domain sections should be marked deprecated in config comments
-   or removed after registry parity.
-3. Keep registry parity checks between `configs/skills_registry.toml` and
+1. Keep registry parity checks between `configs/skills_registry.toml` and
    `docker/config/skills_registry.toml` before enabling registry-driven guards.
    Use `python3 scripts/check_skill_registry_parity.py --mode p3 --strict`.
-4. Move behavior-affecting reason strings to stable `reason_code` fields.
-5. Keep broad NL canary until after plan/code work is complete; use focused Rust
+2. Keep behavior-affecting reasons in stable `reason_code` fields.
+3. Keep broad NL canary until after plan/code work is complete; use focused Rust
    tests and hard-match scan for document-only changes.
 
 ## Verification

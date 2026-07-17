@@ -1570,46 +1570,6 @@ fn registry_idempotency_guard_scope_all_token_is_enabled() {
     assert!(policy.registry_idempotency_guard_enabled());
 }
 
-#[test]
-fn deprecated_domain_action_lists_do_not_change_loop_guard_policy() {
-    let root = temp_support_workspace("deprecated-domain-actions");
-    let config_dir = root.join("configs");
-    std::fs::create_dir_all(&config_dir).expect("create config dir");
-    std::fs::write(
-        config_dir.join("agent_guard.toml"),
-        r#"
-[agent.loop_guard.crypto]
-news_actions = ["legacy_news"]
-market_query_actions = ["legacy_quote"]
-trade_preview_actions = ["legacy_preview"]
-trade_submit_actions = ["legacy_submit"]
-
-[agent.loop_guard.fs_search]
-query_actions = ["legacy_find"]
-
-[agent.loop_guard.media]
-image_generate_skills = ["legacy_image_generate"]
-image_edit_skills = ["legacy_image_edit"]
-"#,
-    )
-    .expect("write agent guard config");
-    let mut state = crate::AppState::test_default_with_fixture_provider();
-    state.skill_rt.workspace_root = root.clone();
-
-    let policy = load_agent_loop_guard_policy(&state);
-
-    assert_eq!(policy.max_rounds, 2);
-    assert_eq!(policy.max_steps, 32);
-    assert_eq!(policy.max_tool_calls, 12);
-    assert_eq!(
-        policy.effective_registry_idempotency_guard_scope(),
-        RegistryIdempotencyGuardScope::All
-    );
-    assert!(policy.registry_idempotency_guard_enabled());
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
 fn route_with_contract(
     semantic_kind: OutputSemanticKind,
     locator_kind: OutputLocatorKind,
