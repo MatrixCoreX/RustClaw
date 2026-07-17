@@ -98,9 +98,7 @@ use self::loop_state_contract_evidence::{
     pending_user_boundary_present_for_loop_seed, pre_loop_clarify_candidates_for_loop_seed,
     registry_capability_contract_evidence_for_loop_seed, registry_capability_contract_refs,
 };
-use self::planner_skill_context::{
-    build_skill_playbooks_text_scoped, build_skill_quick_index_text_scoped,
-};
+use self::planner_skill_context::build_planner_skill_context;
 use self::prepare_round::{prepare_round_actions, push_round_trace};
 use self::skill_execution::execute_prepared_skill_action;
 pub(crate) use self::support::append_delivery_message;

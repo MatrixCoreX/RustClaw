@@ -180,3 +180,39 @@ pub(super) fn planner_capabilities(manifest: &SkillManifest) -> String {
         .map(|metadata| format!("; {metadata}"))
         .unwrap_or_default()
 }
+
+pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String {
+    let total = manifest.planner_capabilities.len();
+    let mut candidates = manifest
+        .planner_capabilities
+        .iter()
+        .take(QUICK_INDEX_MAX_PLANNER_CAPABILITIES)
+        .map(|capability| {
+            let mut attrs = Vec::new();
+            if let Some(action) = capability.action.as_deref().map(str::trim) {
+                if !action.is_empty() {
+                    attrs.push(format!("action={action}"));
+                }
+            }
+            if !capability.required.is_empty() {
+                attrs.push(format!("required={}", capability.required.join("|")));
+            }
+            if let Some(effect) = capability.effect {
+                attrs.push(format!("effect={}", effect.as_token()));
+            }
+            if attrs.is_empty() {
+                capability.name.clone()
+            } else {
+                format!("{}({})", capability.name, attrs.join(","))
+            }
+        })
+        .collect::<Vec<_>>();
+    if total > candidates.len() {
+        candidates.push(format!("+{}more", total - candidates.len()));
+    }
+    if candidates.is_empty() {
+        String::new()
+    } else {
+        format!("; capability_candidates={}", candidates.join(";"))
+    }
+}
