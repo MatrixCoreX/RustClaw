@@ -141,3 +141,62 @@ fn model_summary_is_attached_as_data_only_compacted_history() {
     assert_eq!(record["compaction_source"], "model_assisted");
     assert_eq!(record["model_summary_attached"], true);
 }
+
+#[test]
+fn compacted_permission_and_child_state_reaches_the_next_planner_prompt() {
+    let state =
+        crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
+    let mut bundle = context_bundle(13_000);
+    let plan = plan_agent_loop_context_compaction(&bundle).unwrap();
+    let model_summary = serde_json::json!({
+        "schema_version": 1,
+        "summary_kind": "model_assisted_context_compaction",
+        "facts": [],
+        "decisions": [],
+        "open_questions": [],
+        "active_goal_refs": ["goal:active"],
+        "constraint_refs": [],
+        "evidence_refs": [],
+        "artifact_refs": [],
+        "completed_side_effect_refs": [],
+        "failure_refs": [],
+        "permission_state_refs": ["permission:request:42"],
+        "child_task_refs": ["child:writer:task-7", "child:tester:task-8"],
+        "resume_entrypoint": "await_user_input",
+        "source_refs": [{
+            "ref": "recent_execution_context",
+            "provenance": "untrusted_conversation_evidence"
+        }],
+        "risk_flags": []
+    });
+
+    apply_context_compaction_with_inputs(
+        "task-context-compaction-continuation",
+        &mut bundle,
+        &plan,
+        empty_prompt_memory_context(),
+        "last_turn".to_string(),
+        Some(model_summary),
+        "context_compaction_model_completed",
+    );
+    let mut chat_prompt = String::new();
+    let mut execution_prompt = String::new();
+    let mut memory_prompt = String::new();
+    super::apply_execution_context_to_prompts(
+        &state,
+        &bundle,
+        &mut chat_prompt,
+        &mut execution_prompt,
+        &mut memory_prompt,
+    )
+    .expect("apply compacted continuation context");
+
+    for prompt in [&execution_prompt, &memory_prompt] {
+        assert!(prompt.contains("compacted_history_evidence"));
+        assert!(prompt.contains(r#""instruction_authority": "none""#));
+        assert!(prompt.contains("permission:request:42"));
+        assert!(prompt.contains("child:writer:task-7"));
+        assert!(prompt.contains("child:tester:task-8"));
+        assert!(prompt.contains("await_user_input"));
+    }
+}
