@@ -578,13 +578,14 @@ async fn run_cmd_async_job_stops_at_checkpoint_expiry() {
     .expect("async run_cmd should start");
     assert!(output.contains("\"status\":\"accepted\""));
 
-    let exit_code_path = job_dir.join("exit_code");
+    let finished_at_path = job_dir.join("finished_at");
     for _ in 0..60 {
-        if exit_code_path.is_file() {
+        if finished_at_path.is_file() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    let exit_code_path = job_dir.join("exit_code");
     let exit_code = fs::read_to_string(&exit_code_path)
         .expect("expiry should publish an exit code")
         .trim()
@@ -597,7 +598,7 @@ async fn run_cmd_async_job_stops_at_checkpoint_expiry() {
     );
     assert!(started.elapsed() >= Duration::from_millis(800));
     assert!(started.elapsed() < Duration::from_secs(4));
-    assert!(job_dir.join("finished_at").is_file());
+    assert!(finished_at_path.is_file());
 }
 
 #[cfg(unix)]

@@ -532,7 +532,7 @@ fn final_config_edit_renderer_replaces_marker_final_answer_projection() {
 fn scalar_replacement_prefers_config_payload_over_field_path_marker() {
     let state = test_state();
     let task = claimed_task("task-config-edit-scalar-marker-replace");
-    let mut route = scalar_route_result();
+    let route = scalar_route_result();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()

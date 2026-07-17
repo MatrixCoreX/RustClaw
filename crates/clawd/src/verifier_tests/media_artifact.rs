@@ -53,7 +53,7 @@ fn generated_file_path_report_does_not_repair_media_artifact_output_with_text_wr
 fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
+    let route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
     let result = verify_plan(
         &state,
         &task,

@@ -4,7 +4,13 @@ use uuid::Uuid;
 use super::*;
 
 fn test_state() -> crate::AppState {
-    crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema()
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    {
+        let db = state.core.db.get().expect("get db");
+        crate::memory::indexing::ensure_retrieval_schema(&db)
+            .expect("ensure memory retrieval schema");
+    }
+    state
 }
 
 fn checkpoint_result(checkpoint_id: &str, next_check_after: i64) -> Value {

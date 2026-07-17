@@ -990,7 +990,7 @@ fn direct_scalar_finalize_defers_health_check_summary_to_synthesis() {
         started_at: 0,
         finished_at: 0,
     });
-    let mut route = scalar_route_result();
+    let route = scalar_route_result();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

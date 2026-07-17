@@ -1182,7 +1182,7 @@ mod logs_usage_debug_tests {
             TaskDebugEntry {
                 ts: Some(10),
                 task_id: Some("task-1".to_string()),
-                call_id: Some("task-1:normalizer".to_string()),
+                call_id: Some("task-1:planner".to_string()),
                 vendor: Some("minimax".to_string()),
                 provider: Some("vendor-minimax".to_string()),
                 provider_type: Some("openai_compat".to_string()),
@@ -1190,7 +1190,9 @@ mod logs_usage_debug_tests {
                 model_kind: Some("compat".to_string()),
                 status: Some("ok".to_string()),
                 mode: Some("chat".to_string()),
-                prompt_source: Some("layered:normalizer".to_string()),
+                prompt_source: Some(
+                    "layered:prompts/single_plan_execution_prompt.md".to_string(),
+                ),
                 prompt_hash: Some("hash-1".to_string()),
                 prompt_file: None,
                 prompt: Some("prompt-body".to_string()),
@@ -1234,13 +1236,13 @@ mod logs_usage_debug_tests {
         assert_eq!(calls[1].call_index, 2);
         assert_eq!(
             calls[0].entry.call_id.as_deref(),
-            Some("task-1:normalizer")
+            Some("task-1:planner")
         );
-        assert_eq!(calls[0].flow.prompt_label, "normalizer");
-        assert_eq!(calls[0].flow.flow_stage, "boundary.normalizer");
+        assert_eq!(calls[0].flow.prompt_label, "plan");
+        assert_eq!(calls[0].flow.flow_stage, "agent_loop.planner");
         assert_eq!(
             calls[0].flow.code_module,
-            "crates/clawd/src/intent_router_normalizer_model.rs"
+            "crates/clawd/src/agent_engine/planning.rs"
         );
         assert_eq!(
             calls[0].entry.request_payload.as_ref(),

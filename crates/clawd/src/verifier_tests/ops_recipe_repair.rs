@@ -63,7 +63,7 @@ fn ops_recipe_rewrites_combined_run_cmd_into_apply_then_validate() {
 fn ops_recipe_split_does_not_infer_success_marker_from_request_text() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result();
+    let route = route_result();
     let result = verify_plan(
             &state,
             &task,
@@ -109,7 +109,7 @@ fn ops_recipe_split_does_not_infer_success_marker_from_request_text() {
 fn ops_recipe_does_not_infer_http_expect_contains_marker_from_route_text() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result();
+    let route = route_result();
     let result = verify_plan(
         &state,
         &task,
@@ -197,7 +197,7 @@ fn ops_recipe_does_not_infer_http_expect_contains_marker_from_request_text() {
 fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result();
+    let route = route_result();
     let initial_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -323,7 +323,7 @@ fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
 fn ops_recipe_service_repair_round_plan_stays_valid_after_failed_status_preflight() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result();
+    let route = route_result();
     let initial_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -633,7 +633,7 @@ fn ops_recipe_database_change_accepts_schema_validation_after_execute() {
 fn ops_recipe_repair_round_rewrites_combined_run_cmd_plan() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result();
+    let route = route_result();
     let mut repair_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -695,7 +695,7 @@ fn ops_recipe_repair_round_rewrites_combined_run_cmd_plan() {
 fn ops_recipe_apply_phase_skips_leading_validation_before_mutation() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result();
+    let route = route_result();
     let mut apply_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,

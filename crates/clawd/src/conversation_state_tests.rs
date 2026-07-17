@@ -539,7 +539,7 @@ fn model_fallback_preserves_primary_state_from_structured_source() {
 
 #[test]
 fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
-    let mut route_result = output_contract_for_test();
+    let route_result = output_contract_for_test();
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -1465,7 +1465,7 @@ fn current_locator_rebinds_all_mentioned_alias_surfaces() {
 
 #[test]
 fn structural_prompt_alias_binding_uses_quote_and_single_locator() {
-    let mut route = output_contract_for_test();
+    let route = output_contract_for_test();
 
     let binding = super::structural_alias_binding_from_prompt(
         "先记一下，后面我说“那个文件”就是 /tmp/device/README.md",
@@ -1565,7 +1565,7 @@ fn ordered_listing_outcome_refreshes_active_session_pointers_for_status_query() 
 
 #[test]
 fn clarify_task_request_persists_primary_prompt_for_followups() {
-    let mut route_result = output_contract_for_test();
+    let route_result = output_contract_for_test();
     let persisted = next_last_primary_task_prompt(
         None,
         &route_result,
@@ -1584,7 +1584,7 @@ fn clarify_task_request_persists_primary_prompt_for_followups() {
 
 #[test]
 fn clarify_task_prompt_without_turn_analysis_is_not_inferred_from_route_trace() {
-    let mut route_result = output_contract_for_test();
+    let route_result = output_contract_for_test();
     let persisted = next_last_primary_task_prompt(
         None,
         &route_result,

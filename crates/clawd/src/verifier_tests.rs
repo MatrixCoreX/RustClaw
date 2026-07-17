@@ -1645,7 +1645,7 @@ fn verifier_allows_repeated_steps_from_same_primary_group_skill() {
 fn legacy_resume_route_does_not_bypass_confirmation_policy() {
     let state = test_state();
     let task = test_task();
-    let mut resumed_route = route_result();
+    let resumed_route = route_result();
     let result = verify_plan(
         &state,
         &task,
