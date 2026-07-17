@@ -843,7 +843,8 @@ impl AppState {
         self.core.active_provider_type =
             Some(crate::providers::fixture_replay::FIXTURE_REPLAY_PROVIDER_TYPE.to_string());
         self.skill_rt.skill_timeout_seconds = config.skills.skill_timeout_seconds;
-        self.skill_rt.skill_runner_path = workspace_root.join("target/release/skill-runner");
+        self.skill_rt.skill_runner_path =
+            crate::bootstrap::resolve_skill_runner_path(&workspace_root);
         self.skill_rt.tools_policy = Arc::new(tools_policy);
         self.skill_rt.cmd_timeout_seconds = config.tools.cmd_timeout_seconds.max(1);
         self.skill_rt.cmd_idle_timeout_seconds = config.tools.cmd_idle_timeout_seconds.max(1);

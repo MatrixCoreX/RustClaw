@@ -474,7 +474,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let effective_skill_runner_path = workspace_root.join("target/release/skill-runner");
+    let effective_skill_runner_path = bootstrap::resolve_skill_runner_path(&workspace_root);
     info!(
         "skill_runner_path resolved: {}",
         effective_skill_runner_path.display()
