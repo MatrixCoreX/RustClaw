@@ -48,7 +48,7 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         return false;
     }
     let current = normalize_markdown_format_table_delivery(loop_state, delivery_messages);
-    if current_delivery_contains_agent_hook_policy_surface(&current) {
+    if current_delivery_contains_agent_hook_runtime_surface(&current) {
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
@@ -598,18 +598,12 @@ fn normalize_markdown_format_table_delivery(
     normalized
 }
 
-fn current_delivery_contains_agent_hook_policy_surface(current: &str) -> bool {
+fn current_delivery_contains_agent_hook_runtime_surface(current: &str) -> bool {
     let current = current.trim();
     !current.is_empty()
-        && current.contains("stage=pre_tool_use")
-        && [
-            "agent.hooks.blocked_action_refs",
-            "agent.hooks.blocked_tools",
-            "agent.hooks.require_confirmation_action_refs",
-            "agent.hooks.background_wait_action_refs",
-        ]
-        .iter()
-        .all(|field| current.contains(field))
+        && ["agent.hooks.handlers", "hook_stages", "hook_decisions"]
+            .iter()
+            .all(|field| current.contains(field))
 }
 
 fn strip_markdown_format_label_table(text: &str) -> Option<String> {

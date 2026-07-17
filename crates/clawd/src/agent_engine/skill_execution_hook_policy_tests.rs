@@ -11,15 +11,6 @@ struct TempDirGuard {
 }
 
 impl TempDirGuard {
-    fn new(prefix: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "rustclaw_{prefix}_{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(path.join("configs")).expect("create config dir");
-        Self { path }
-    }
-
     fn new_in_repository(prefix: &str) -> Self {
         let path = std::env::current_dir()
             .expect("current repository")
@@ -95,13 +86,35 @@ fn test_policy() -> super::AgentLoopGuardPolicy {
 
 #[tokio::test]
 async fn pre_tool_hook_background_wait_publishes_checkpoint() {
-    let temp = TempDirGuard::new("hook_background_wait");
+    let temp = TempDirGuard::new_in_repository("hook_background_wait");
+    let hash = write_command_hook(
+        &temp,
+        "background-wait.sh",
+        "background_wait",
+        "fixture_background_wait",
+    );
     std::fs::write(
         temp.path.join("configs/agent_guard.toml"),
-        r#"
+        format!(
+            r#"
 [agent.hooks]
-background_wait_action_refs = ["fs_basic.read_text"]
-"#,
+
+[[agent.hooks.handlers]]
+id = "fixture_background_wait"
+stage = "pre_tool_use"
+kind = "command"
+enabled = true
+trusted = true
+blocking = true
+path = "hooks/background-wait.sh"
+content_sha256 = "{hash}"
+timeout_ms = 1000
+max_input_bytes = 4096
+max_output_bytes = 4096
+max_attempts = 1
+failure_policy = "deny"
+"#
+        ),
     )
     .expect("write agent guard");
     let mut state = super::tests::test_state();
@@ -227,10 +240,6 @@ async fn trusted_command_hook_blocks_through_production_pre_tool_path() {
         format!(
             r#"
 [agent.hooks]
-blocked_action_refs = []
-blocked_tools = []
-require_confirmation_action_refs = []
-background_wait_action_refs = []
 
 [[agent.hooks.handlers]]
 id = "fixture_guard"

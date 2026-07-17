@@ -264,14 +264,14 @@ fn direct_config_edit_observed_answer_combines_read_field_and_guard_config() {
 }
 
 #[test]
-fn direct_config_edit_observed_answer_projects_agent_hook_policy_surface() {
+fn direct_config_edit_observed_answer_projects_agent_hook_runtime_surface() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
-        r#"{"action":"extract_fields","count":4,"format":"toml","path":"configs/agent_guard.toml","resolved_path":"/workspace/configs/agent_guard.toml","results":[{"field_path":"agent.hooks.blocked_action_refs","resolved_field_path":"agent.hooks.blocked_action_refs","exists":true,"value":[],"value_text":"[]","value_type":"array"},{"field_path":"agent.hooks.blocked_tools","resolved_field_path":"agent.hooks.blocked_tools","exists":true,"value":["run_cmd"],"value_text":"[\"run_cmd\"]","value_type":"array"},{"field_path":"agent.hooks.require_confirmation_action_refs","resolved_field_path":"agent.hooks.require_confirmation_action_refs","exists":true,"value":[],"value_text":"[]","value_type":"array"},{"field_path":"agent.hooks.background_wait_action_refs","resolved_field_path":"agent.hooks.background_wait_action_refs","exists":true,"value":[],"value_text":"[]","value_type":"array"}]}"#,
+        r#"{"action":"extract_fields","count":1,"format":"toml","path":"configs/agent_guard.toml","resolved_path":"/workspace/configs/agent_guard.toml","results":[{"field_path":"agent.hooks.handlers","resolved_field_path":"agent.hooks.handlers","exists":true,"value":[{"id":"workspace_policy_guard","stage":"pre_tool_use","kind":"command","enabled":false}],"value_text":"[{ id = \"workspace_policy_guard\" }]","value_type":"array"}]}"#,
     ));
 
     let (answer, summary) = direct_config_edit_observed_answer(
@@ -286,37 +286,39 @@ fn direct_config_edit_observed_answer_projects_agent_hook_policy_surface() {
         payload
             .pointer("/reason_code")
             .and_then(serde_json::Value::as_str),
-        Some("agent_hooks_pre_tool_use_policy_surface")
+        Some("agent_hooks_runtime_surface")
     );
     assert_eq!(
         payload
-            .pointer("/stage")
+            .pointer("/handler_field_path")
             .and_then(serde_json::Value::as_str),
-        Some("pre_tool_use")
+        Some("agent.hooks.handlers")
     );
     assert_eq!(
         payload
-            .pointer("/decisions/allow/supported")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        payload
-            .pointer("/decisions/deny/configured_ref_count")
+            .pointer("/configured_handler_count")
             .and_then(serde_json::Value::as_u64),
         Some(1)
     );
     assert_eq!(
         payload
-            .pointer("/decisions/require_confirmation/supported")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
+            .pointer("/hook_stages")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(11)
     );
     assert_eq!(
         payload
-            .pointer("/decisions/background_wait/supported")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
+            .pointer("/decision_tokens")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(4)
+    );
+    assert_eq!(
+        payload
+            .pointer("/blocking_stages/1")
+            .and_then(serde_json::Value::as_str),
+        Some("permission_request")
     );
     assert_eq!(
         summary.disposition,

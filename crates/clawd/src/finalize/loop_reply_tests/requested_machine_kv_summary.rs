@@ -137,7 +137,7 @@ fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
 }
 
 #[test]
-fn hook_policy_surface_json_can_replace_short_token_delivery() {
+fn hook_runtime_surface_json_can_replace_short_token_delivery() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     let mut loop_state = crate::agent_engine::LoopState::new(1);
@@ -152,17 +152,13 @@ fn hook_policy_surface_json_can_replace_short_token_delivery() {
         r#"{"action":"read_range","path":"plan/current.md","excerpt":"Track I"}"#,
     ));
     let synthesis = serde_json::json!({
-        "message_key": "clawd.msg.agent_hooks.pre_tool_use_policy_surface",
-        "reason_code": "agent_hooks_pre_tool_use_policy_surface",
+        "message_key": "clawd.msg.agent_hooks.runtime_surface",
+        "reason_code": "agent_hooks_runtime_surface",
         "owner_layer": "agent_hooks",
-        "stage": "pre_tool_use",
+        "handler_field_path": "agent.hooks.handlers",
+        "hook_stages": ["session_start", "user_prompt_submit", "pre_tool_use", "permission_request", "post_tool_use", "pre_compact", "post_compact", "subagent_start", "subagent_stop", "stop", "session_end"],
         "decision_tokens": ["allow", "deny", "require_confirmation", "background_wait"],
-        "decisions": {
-            "allow": {"supported": true},
-            "deny": {"supported": true},
-            "require_confirmation": {"supported": true},
-            "background_wait": {"supported": true}
-        }
+        "configured_handler_count": 0
     })
     .to_string();
 
@@ -426,15 +422,15 @@ fn requested_machine_kv_summary_preserves_publishable_command_summary() {
 }
 
 #[test]
-fn requested_machine_kv_summary_preserves_agent_hook_policy_surface_delivery() {
+fn requested_machine_kv_summary_preserves_agent_hook_runtime_surface_delivery() {
     let task = claimed_task("task-machine-kv-agent-hook-surface");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
-        r#"{"extra":{"action":"extract_fields","path":"configs/agent_guard.toml","results":[{"field_path":"agent.hooks.blocked_action_refs","value":[]},{"field_path":"agent.hooks.blocked_tools","value":[]},{"field_path":"agent.hooks.require_confirmation_action_refs","value":[]},{"field_path":"agent.hooks.background_wait_action_refs","value":[]}]}}"#,
+        r#"{"extra":{"action":"extract_fields","path":"configs/agent_guard.toml","results":[{"field_path":"agent.hooks.handlers","value":[]}]}}"#,
     ));
-    let full_answer = "stage=pre_tool_use\nagent.hooks.blocked_action_refs=[]\nagent.hooks.blocked_tools=[]\nagent.hooks.require_confirmation_action_refs=[]\nagent.hooks.background_wait_action_refs=[]";
+    let full_answer = "agent.hooks.handlers=[]\nhook_stages=session_start,user_prompt_submit,pre_tool_use,permission_request,post_tool_use,pre_compact,post_compact,subagent_start,subagent_stop,stop,session_end\nhook_decisions=allow,deny,require_confirmation,background_wait";
     let mut delivery_messages = vec![full_answer.to_string()];
     loop_state.last_user_visible_respond = Some(full_answer.to_string());
     let mut finalizer_summary = None;

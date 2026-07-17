@@ -282,10 +282,10 @@ fn config_read_fields_capability_normalizes_machine_field_aliases() {
         json!({
             "config_path": "configs/agent_guard.toml",
             "fields": [
-                "agent.hooks.blocked_action_refs",
-                "agent.hooks.blocked_tools",
-                "agent.hooks.require_confirmation_action_refs",
-                "agent.hooks.background_wait_action_refs"
+                "agent.hooks.handlers",
+                "agent.subagents.allowed_roles",
+                "agent.subagents.max_parallel_readonly",
+                "agent.loop_guard.max_rounds"
             ]
         }),
     );
@@ -311,7 +311,7 @@ fn config_read_fields_capability_normalizes_machine_field_aliases() {
     assert_eq!(field_paths.len(), 4);
     assert!(field_paths
         .iter()
-        .any(|value| value.as_str() == Some("agent.hooks.background_wait_action_refs")));
+        .any(|value| value.as_str() == Some("agent.hooks.handlers")));
     assert_eq!(
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"

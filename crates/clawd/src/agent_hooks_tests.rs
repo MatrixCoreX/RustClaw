@@ -5,9 +5,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    evaluate_pre_tool_use, execute_command_handler, lifecycle_hook_event, merge_hook_decision,
-    parse_handler_output, pre_tool_hook_event, structured_hook_error, validate_command_handler,
-    HookHandlerConfig, HookPolicy, HookStage,
+    default_pre_tool_use_outcome, execute_command_handler, lifecycle_hook_event,
+    merge_hook_decision, parse_handler_output, pre_tool_hook_event, validate_command_handler,
+    HookHandlerConfig, HookStage,
 };
 use crate::policy_decision::PolicyDecision;
 
@@ -72,88 +72,13 @@ fn command_handler(path: &Path, content_sha256: &str) -> HookHandlerConfig {
 }
 
 #[test]
-fn pre_tool_use_hook_allows_without_policy_match() {
-    let policy = HookPolicy::default();
-    let outcome = evaluate_pre_tool_use(&policy, "filesystem.list_entries");
+fn pre_tool_use_hook_allows_without_configured_handlers() {
+    let outcome = default_pre_tool_use_outcome("filesystem.list_entries");
 
     assert_eq!(outcome.stage, "pre_tool_use");
     assert_eq!(outcome.decision, "allow");
     assert_eq!(outcome.reason_code, "pre_tool_use_allowed");
     assert_eq!(outcome.action_ref, "filesystem.list_entries");
-}
-
-#[test]
-fn pre_tool_use_hook_blocks_exact_machine_action_ref() {
-    let policy = HookPolicy {
-        blocked_action_refs: vec!["filesystem.remove_path".to_string()],
-        ..HookPolicy::default()
-    };
-    let outcome = evaluate_pre_tool_use(&policy, "filesystem.remove_path");
-
-    assert_eq!(outcome.decision, "deny");
-    assert_eq!(outcome.reason_code, "pre_tool_use_blocked");
-    let error = structured_hook_error(&outcome);
-    let parsed: serde_json::Value = serde_json::from_str(&error).expect("structured hook error");
-    assert_eq!(parsed["owner_layer"], json!("agent_hooks"));
-    assert_eq!(parsed["decision"], json!("deny"));
-    assert_eq!(parsed["action_ref"], json!("filesystem.remove_path"));
-    assert_eq!(
-        parsed["message_key"],
-        json!("clawd.agent_hook.pre_tool_use_blocked")
-    );
-}
-
-#[test]
-fn pre_tool_use_hook_requires_confirmation_from_machine_action_ref() {
-    let policy = HookPolicy {
-        require_confirmation_action_refs: vec!["package.install".to_string()],
-        ..HookPolicy::default()
-    };
-    let outcome = evaluate_pre_tool_use(&policy, "package.install");
-
-    assert_eq!(outcome.decision, "require_confirmation");
-    assert_eq!(
-        outcome.decision_kind(),
-        Some(PolicyDecision::RequireConfirmation)
-    );
-    assert!(outcome.requires_confirmation());
-    assert!(super::structured_error_for_outcome(&outcome).is_some());
-    assert_eq!(outcome.reason_code, "pre_tool_use_requires_confirmation");
-}
-
-#[test]
-fn pre_tool_use_hook_background_waits_from_machine_action_ref() {
-    let policy = HookPolicy {
-        background_wait_action_refs: vec!["media.generate_video".to_string()],
-        ..HookPolicy::default()
-    };
-    let outcome = evaluate_pre_tool_use(&policy, "media.generate_video");
-
-    assert_eq!(outcome.decision, "background_wait");
-    assert_eq!(
-        outcome.decision_kind(),
-        Some(PolicyDecision::BackgroundWait)
-    );
-    assert!(outcome.requires_background_wait());
-    assert!(!outcome.requires_confirmation());
-    assert_eq!(outcome.reason_code, "pre_tool_use_background_wait");
-    let error = structured_hook_error(&outcome);
-    let parsed: serde_json::Value = serde_json::from_str(&error).expect("structured hook error");
-    assert_eq!(
-        parsed["message_key"],
-        json!("clawd.agent_hook.pre_tool_use_background_wait")
-    );
-}
-
-#[test]
-fn pre_tool_use_hook_blocks_whole_tool_by_machine_token() {
-    let policy = HookPolicy {
-        blocked_tools: vec!["run_cmd".to_string()],
-        ..HookPolicy::default()
-    };
-    let outcome = evaluate_pre_tool_use(&policy, "run_cmd");
-
-    assert_eq!(outcome.decision, "deny");
 }
 
 #[test]
@@ -405,7 +330,7 @@ fn command_hook_output_rejects_semantic_rewrite_fields_and_merges_conservatively
         "hook_handler_output_schema_invalid"
     );
 
-    let mut outcome = evaluate_pre_tool_use(&HookPolicy::default(), "filesystem.read_text");
+    let mut outcome = default_pre_tool_use_outcome("filesystem.read_text");
     merge_hook_decision(
         &mut outcome,
         PolicyDecision::BackgroundWait,

@@ -5,8 +5,8 @@ use super::shared::{
     HandlerRunResult, HookFailurePolicy, HookHandlerConfig, LoadedHookConfiguration,
 };
 use super::{
-    command, evaluate_pre_tool_use, http, mcp, merge_hook_decision, normalize_machine_token,
-    HookEvaluation, HookOutcome, HookPolicy, HookStage,
+    command, default_pre_tool_use_outcome, http, mcp, merge_hook_decision, normalize_machine_token,
+    HookEvaluation, HookOutcome, HookStage,
 };
 use crate::{policy_decision::PolicyDecision, AppState};
 
@@ -18,7 +18,7 @@ pub(crate) async fn pre_tool_use_outcome_for_state(
 ) -> HookEvaluation {
     let action_ref = super::tool_action_ref(tool_or_skill, args);
     let loaded = load_hook_configuration(state);
-    let outcome = evaluate_pre_tool_use(&loaded.policy, &action_ref);
+    let outcome = default_pre_tool_use_outcome(&action_ref);
     let event = pre_tool_hook_event(task_id, tool_or_skill, args, &action_ref);
     evaluate_loaded_handlers(
         state,
@@ -252,14 +252,12 @@ fn load_hook_configuration(state: &AppState) -> LoadedHookConfiguration {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return LoadedHookConfiguration {
-                policy: HookPolicy::default(),
                 handlers: Vec::new(),
                 error_code: None,
             };
         }
         Err(_) => {
             return LoadedHookConfiguration {
-                policy: HookPolicy::default(),
                 handlers: Vec::new(),
                 error_code: Some("hook_config_read_failed"),
             };
@@ -269,23 +267,10 @@ fn load_hook_configuration(state: &AppState) -> LoadedHookConfiguration {
         Ok(root) => root,
         Err(_) => {
             return LoadedHookConfiguration {
-                policy: HookPolicy::default(),
                 handlers: Vec::new(),
                 error_code: Some("hook_config_parse_failed"),
             };
         }
-    };
-    let policy = HookPolicy {
-        blocked_action_refs: toml_string_array(&root, &["agent", "hooks", "blocked_action_refs"]),
-        blocked_tools: toml_string_array(&root, &["agent", "hooks", "blocked_tools"]),
-        require_confirmation_action_refs: toml_string_array(
-            &root,
-            &["agent", "hooks", "require_confirmation_action_refs"],
-        ),
-        background_wait_action_refs: toml_string_array(
-            &root,
-            &["agent", "hooks", "background_wait_action_refs"],
-        ),
     };
     let handler_values = root
         .get("agent")
@@ -301,7 +286,6 @@ fn load_hook_configuration(state: &AppState) -> LoadedHookConfiguration {
             Ok(handler) => handler,
             Err(_) => {
                 return LoadedHookConfiguration {
-                    policy,
                     handlers: Vec::new(),
                     error_code: Some("hook_handler_config_invalid"),
                 };
@@ -309,7 +293,6 @@ fn load_hook_configuration(state: &AppState) -> LoadedHookConfiguration {
         };
         if handler.enabled && !ids.insert(handler.id.trim().to_string()) {
             return LoadedHookConfiguration {
-                policy,
                 handlers: Vec::new(),
                 error_code: Some("hook_handler_id_duplicate"),
             };
@@ -317,29 +300,7 @@ fn load_hook_configuration(state: &AppState) -> LoadedHookConfiguration {
         handlers.push(handler);
     }
     LoadedHookConfiguration {
-        policy,
         handlers,
         error_code: None,
     }
-}
-
-fn toml_string_array(root: &toml::Value, path: &[&str]) -> Vec<String> {
-    let mut cursor = root;
-    for segment in path {
-        let Some(next) = cursor.get(*segment) else {
-            return Vec::new();
-        };
-        cursor = next;
-    }
-    cursor
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(toml::Value::as_str)
-                .map(normalize_machine_token)
-                .filter(|value| !value.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
 }

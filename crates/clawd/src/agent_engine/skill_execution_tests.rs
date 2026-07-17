@@ -964,7 +964,21 @@ async fn auto_sudo_retry_obeys_pre_tool_hook_policy() {
         "blocked-run-cmd",
         r#"
 [agent.hooks]
-blocked_tools = ["run_cmd"]
+
+[[agent.hooks.handlers]]
+id = "fixture_untrusted_guard"
+stage = "pre_tool_use"
+kind = "command"
+enabled = true
+trusted = false
+blocking = true
+path = "hooks/not-trusted"
+content_sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+timeout_ms = 1000
+max_input_bytes = 4096
+max_output_bytes = 4096
+max_attempts = 1
+failure_policy = "deny"
 "#,
     );
     enable_test_skills(&state, &["run_cmd", "system_basic"]);

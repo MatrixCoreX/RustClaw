@@ -81,14 +81,6 @@ impl HookStage {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct HookPolicy {
-    blocked_action_refs: Vec<String>,
-    blocked_tools: Vec<String>,
-    require_confirmation_action_refs: Vec<String>,
-    background_wait_action_refs: Vec<String>,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct HookEvaluation {
     pub(crate) outcome: HookOutcome,
@@ -230,28 +222,12 @@ pub(crate) fn structured_error_for_outcome(outcome: &HookOutcome) -> Option<Stri
         .then(|| structured_hook_error(outcome))
 }
 
-fn evaluate_pre_tool_use(policy: &HookPolicy, action_ref: &str) -> HookOutcome {
+fn default_pre_tool_use_outcome(action_ref: &str) -> HookOutcome {
     let action_ref = normalize_machine_token(action_ref);
-    let tool_ref = action_ref
-        .split_once('.')
-        .map(|(tool, _)| tool)
-        .unwrap_or(&action_ref);
-    let decision = if token_list_contains(&policy.blocked_action_refs, &action_ref)
-        || token_list_contains(&policy.blocked_tools, tool_ref)
-    {
-        PolicyDecision::Deny
-    } else if token_list_contains(&policy.background_wait_action_refs, &action_ref) {
-        PolicyDecision::BackgroundWait
-    } else if token_list_contains(&policy.require_confirmation_action_refs, &action_ref) {
-        PolicyDecision::RequireConfirmation
-    } else {
-        PolicyDecision::Allow
-    };
-    let reason_code = decision.pre_tool_use_reason_code();
     HookOutcome {
         stage: "pre_tool_use",
-        decision: decision.as_token(),
-        reason_code: reason_code.to_string(),
+        decision: PolicyDecision::Allow.as_token(),
+        reason_code: "pre_tool_use_allowed".to_string(),
         action_ref,
     }
 }
@@ -311,10 +287,6 @@ fn tool_action_ref(tool_or_skill: &str, args: &Value) -> String {
         .filter(|action| !action.is_empty())
         .map(|action| format!("{base}.{action}"))
         .unwrap_or(base)
-}
-
-fn token_list_contains(values: &[String], target: &str) -> bool {
-    values.iter().any(|value| value == target)
 }
 
 fn normalize_machine_token(value: &str) -> String {

@@ -27,6 +27,7 @@ REQUIRED_FILE_TOKENS = {
         "mod shared",
         "lifecycle_stage_outcome_for_state",
         "pre_tool_use_outcome_for_state",
+        "default_pre_tool_use_outcome",
         "HookEvaluation",
         "machine_observations",
         "merge_hook_decision",
@@ -145,6 +146,25 @@ REQUIRED_FILE_TOKENS = {
         "build_terminal_from_loop_state as build_loop_journal",
         ".await",
     ),
+    "crates/clawd/src/finalize/loop_reply_config_edit.rs": (
+        "agent_hook_runtime_surface_answer",
+        '"agent.hooks.handlers"',
+        "PolicyDecision::all_tokens()",
+        "HookStage::all()",
+    ),
+    "crates/clawd/src/finalize/loop_reply_machine_kv.rs": (
+        "current_delivery_contains_agent_hook_runtime_surface",
+        '"agent.hooks.handlers"',
+        '"hook_stages"',
+        '"hook_decisions"',
+    ),
+    "crates/clawd/src/finalize/loop_reply_synthesis_preference.rs": (
+        "agent_hook_runtime_surface_payload_is_publishable",
+        'Some("agent_hooks_runtime_surface")',
+        'Some("agent.hooks.handlers")',
+        "PolicyDecision::all_tokens()",
+        "HookStage::all()",
+    ),
     "crates/clawd/src/finalize/journal_tests.rs": (
         "terminal_builder_executes_stop_and_session_end_at_real_owner",
     ),
@@ -209,6 +229,27 @@ FORBIDDEN_PRODUCTION_PATTERNS = (
     ),
 )
 
+LEGACY_FIXED_POLICY_TOKENS = (
+    "agent.hooks.blocked_action_refs",
+    "agent.hooks.blocked_tools",
+    "agent.hooks.require_confirmation_action_refs",
+    "agent.hooks.background_wait_action_refs",
+)
+
+LEGACY_FIXED_POLICY_SCAN_FILES = (
+    "AGENTS.md",
+    "configs/agent_guard.toml",
+    "crates/clawd/src/agent_hooks.rs",
+    "crates/clawd/src/agent_hooks/runtime.rs",
+    "crates/clawd/src/agent_hooks/shared.rs",
+    "crates/clawd/src/finalize/loop_reply_config_edit.rs",
+    "crates/clawd/src/finalize/loop_reply_machine_kv.rs",
+    "crates/clawd/src/finalize/loop_reply_synthesis_preference.rs",
+    "prompts/layers/overlays/agent_tool_spec.md",
+    "prompts/layers/overlays/loop_incremental_plan_prompt.md",
+    "prompts/layers/overlays/single_plan_execution_prompt.md",
+)
+
 
 def read_text(root: Path, relative: str) -> str | None:
     path = root / relative
@@ -242,6 +283,21 @@ def evaluate(root: Path) -> list[str]:
             for match in pattern.finditer(production):
                 line = production.count("\n", 0, match.start()) + 1
                 findings.append(f"{label}:{relative}:{line}")
+
+    for relative in LEGACY_FIXED_POLICY_SCAN_FILES:
+        raw = read_text(root, relative)
+        if raw is None:
+            continue
+        for token in LEGACY_FIXED_POLICY_TOKENS:
+            if token in raw:
+                findings.append(f"legacy_fixed_hook_policy_token:{relative}:{token}")
+
+    for legacy_identifier in ("HookPolicy", "evaluate_pre_tool_use", "toml_string_array"):
+        for relative in production_files:
+            if legacy_identifier in texts.get(relative, ""):
+                findings.append(
+                    f"legacy_fixed_hook_policy_identifier:{relative}:{legacy_identifier}"
+                )
 
     production = texts.get("crates/clawd/src/agent_hooks.rs", "")
     stage_match = re.search(
@@ -296,6 +352,20 @@ def run_self_test() -> int:
         }
         if not expected.issubset(labels):
             print(f"SELF_TEST_FAIL negative findings={negative}")
+            return 1
+
+        hooks = root / "crates/clawd/src/agent_hooks.rs"
+        hooks.write_text(
+            hooks.read_text(encoding="utf-8")
+            + '\nconst LEGACY: &str = "agent.hooks.blocked_tools";\n',
+            encoding="utf-8",
+        )
+        legacy_negative = evaluate(root)
+        if not any(
+            finding.startswith("legacy_fixed_hook_policy_token:")
+            for finding in legacy_negative
+        ):
+            print(f"SELF_TEST_FAIL legacy findings={legacy_negative}")
             return 1
 
     print("AGENT_HOOK_RUNTIME_CONTRACT_SELF_TEST ok")

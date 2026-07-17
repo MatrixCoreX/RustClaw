@@ -54,14 +54,10 @@ image_generate_skills = ["image_generate"]
 image_edit_skills = ["image_edit"]
 
 [agent.hooks]
-# 用途/Purpose: Codex/Claude 风格工具前置 hook；仅消费机器 token，不解析用户自然语言。
-# Machine-only pre-tool hook. It consumes action/tool tokens only and never parses user NL.
-# 示例/Examples: ["filesystem.remove_path"], ["package.install"], ["run_cmd"].
-# 默认全空表示不改变现有执行行为。
-blocked_action_refs = []
-blocked_tools = []
-require_confirmation_action_refs = []
-background_wait_action_refs = []
+# 用途/Purpose: Codex/Claude 风格可信生命周期 hook；仅消费机器事件，不解析用户自然语言。
+# Trusted lifecycle hooks consume versioned machine events only and never parse user NL.
+# 没有启用 handler 时默认不改变执行行为；旧固定 action/tool 列表已删除，避免双重决策源。
+# With no enabled handlers, hooks do not alter execution. Legacy fixed action/tool lists are removed.
 
 # Trusted repository command hook template. Keep disabled until the relative path and SHA-256
 # are reviewed together; changing the file invalidates trust before the next execution.
