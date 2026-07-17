@@ -80,6 +80,19 @@ REQUIRED_FILE_TOKENS = {
         "initial_task_observations",
         ".extend(initial_task_observations.iter().cloned())",
     ),
+    "crates/clawd/src/answer_verifier_runtime.rs": (
+        "local_compacted_machine_ref_answer_verifier_gap(journal, candidate_answer)",
+        "if !should_verify_answer(route_result, journal, candidate_answer)",
+        "answer_verifier_local_compacted_machine_ref_gap",
+    ),
+    "crates/clawd/src/answer_verifier_runtime/compacted_machine_ref_gap.rs": (
+        '"context_compaction_record"',
+        '"/record/continuity_refs"',
+        "split_once(':')",
+        "contains_machine_token",
+        '"preserve_selected_compacted_machine_refs_exactly"',
+        '"compacted_machine_reference_namespace_omitted"',
+    ),
     "crates/clawd/src/task_journal_context_compaction.rs": (
         '"context_compaction_record"',
         'observation.get("record")',
@@ -160,6 +173,21 @@ def evaluate_texts(texts: dict[str, str]) -> list[str]:
     positions = [worker.find(token) for token in ordered_tokens]
     if any(position < 0 for position in positions) or positions != sorted(positions):
         findings.append("context_compaction_runtime_order_invalid")
+    answer_verifier_runtime = texts.get(
+        "crates/clawd/src/answer_verifier_runtime.rs", ""
+    )
+    machine_ref_gap_position = answer_verifier_runtime.find(
+        "local_compacted_machine_ref_answer_verifier_gap(journal, candidate_answer)"
+    )
+    verifier_skip_position = answer_verifier_runtime.find(
+        "if !should_verify_answer(route_result, journal, candidate_answer)"
+    )
+    if (
+        machine_ref_gap_position < 0
+        or verifier_skip_position < 0
+        or machine_ref_gap_position >= verifier_skip_position
+    ):
+        findings.append("compacted_machine_ref_gap_must_precede_verifier_skip")
     summary = texts.get("crates/clawd/src/task_context_builder/summary.rs", "")
     if "transcript_compaction_records=" in summary:
         findings.append("legacy_compaction_summary_string_projection_present")
