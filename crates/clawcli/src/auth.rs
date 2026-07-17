@@ -66,10 +66,14 @@ pub(crate) fn default_admin_key() -> Option<String> {
 }
 
 pub(crate) fn key_required_error() -> anyhow::Error {
-    let hint = if find_workspace_root().is_none() {
-        "workspace_not_found: current directory and parents do not contain configs/config.toml; set RUSTCLAW_WORKSPACE or run from the project root"
+    let (reason_code, hint_key) = if find_workspace_root().is_none() {
+        ("workspace_not_found", "auth.workspace_not_found")
     } else {
-        "admin_key_not_found: auth_keys has no enabled admin key; start clawd first or pass -k/--key"
+        ("admin_key_not_found", "auth.admin_key_not_found")
     };
-    anyhow::anyhow!("key_required: pass -k/--key or set RUSTCLAW_ADMIN_KEY; {hint}")
+    anyhow::anyhow!(
+        "key_required: {}; {reason_code}: {}",
+        crate::resources::text("auth.key_required"),
+        crate::resources::text(hint_key)
+    )
 }
