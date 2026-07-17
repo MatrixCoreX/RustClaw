@@ -87,6 +87,7 @@ fn slo_aggregate_projects_outcome_latency_reliability_context_and_cost() {
 
     assert_eq!(report["outcomes"]["success_rate_millis"], 500);
     assert_eq!(report["outcomes"]["resume_success_rate_millis"], 500);
+    assert_eq!(report["failure_classes"]["agent_failure"], 1);
     assert_eq!(report["latency"]["planner_ms"]["p50"], 200);
     assert_eq!(report["latency"]["tool_ms"]["p50"], 2_000);
     assert_eq!(report["latency"]["tool_ms"]["p95"], 5_000);
@@ -106,6 +107,54 @@ fn slo_aggregate_projects_outcome_latency_reliability_context_and_cost() {
     assert_eq!(report["cost"]["known_cost_per_success_usd_nanos"], 900);
     assert_eq!(report["cost"]["unknown_cost_tasks"], 1);
     assert_eq!(report["coverage"]["journal_tasks"], 2);
+}
+
+#[test]
+fn slo_failure_classes_use_structured_machine_fields_only() {
+    let rows = vec![
+        row(
+            "failed",
+            1,
+            json!({"final_failure_attribution": "provider_error"}),
+            json!({}),
+        ),
+        row(
+            "failed",
+            1,
+            json!({"final_failure_attribution": "contract_gap"}),
+            json!({}),
+        ),
+        row(
+            "timeout",
+            1,
+            json!({"final_failure_attribution": "tool_gap"}),
+            json!({"step_results": [{"status": "error"}]}),
+        ),
+        row(
+            "failed",
+            1,
+            json!({"final_failure_attribution": "tool_gap"}),
+            json!({"permission_decision": {"denied_by_policy": true}}),
+        ),
+    ];
+
+    let aggregate = aggregate_slo_rows(&rows);
+    let report = slo_metrics_json(
+        &aggregate,
+        1,
+        100,
+        rows.len(),
+        100,
+        false,
+        &LocalAsyncJobHealth::default(),
+    );
+
+    assert_eq!(report["outcomes"]["failed_tasks"], 4);
+    assert_eq!(report["failure_classes"]["model_failure"], 1);
+    assert_eq!(report["failure_classes"]["agent_failure"], 1);
+    assert_eq!(report["failure_classes"]["tool_failure"], 1);
+    assert_eq!(report["failure_classes"]["policy_block"], 1);
+    assert_eq!(report["failure_classes"]["classified_failure_count"], 4);
 }
 
 #[test]

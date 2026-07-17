@@ -16,6 +16,11 @@ struct SloTaskRow {
 struct SloAggregate {
     terminal_tasks: u64,
     succeeded_tasks: u64,
+    failed_tasks: u64,
+    model_failures: u64,
+    agent_failures: u64,
+    tool_failures: u64,
+    policy_blocks: u64,
     resumed_terminal_tasks: u64,
     resumed_succeeded_tasks: u64,
     journal_tasks: u64,
@@ -42,6 +47,14 @@ struct LocalAsyncJobHealth {
     terminal_jobs: u64,
     orphaned_jobs: u64,
     indeterminate_jobs: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SloFailureClass {
+    Model,
+    Agent,
+    Tool,
+    Policy,
 }
 
 async fn observability_slo_metrics(
@@ -159,6 +172,20 @@ fn aggregate_slo_rows(rows: &[SloTaskRow]) -> SloAggregate {
         );
         aggregate.terminal_tasks += u64::from(terminal);
         aggregate.succeeded_tasks += u64::from(row.status == "succeeded");
+        if matches!(row.status.as_str(), "failed" | "timeout") {
+            aggregate.failed_tasks += 1;
+            let failure_class = row
+                .result
+                .as_ref()
+                .map(classify_structured_failure)
+                .unwrap_or(SloFailureClass::Agent);
+            match failure_class {
+                SloFailureClass::Model => aggregate.model_failures += 1,
+                SloFailureClass::Agent => aggregate.agent_failures += 1,
+                SloFailureClass::Tool => aggregate.tool_failures += 1,
+                SloFailureClass::Policy => aggregate.policy_blocks += 1,
+            }
+        }
         if terminal && row.claim_attempt > 1 {
             aggregate.resumed_terminal_tasks += 1;
             aggregate.resumed_succeeded_tasks += u64::from(row.status == "succeeded");
@@ -188,6 +215,112 @@ fn aggregate_slo_rows(rows: &[SloTaskRow]) -> SloAggregate {
         collect_cost_metrics(summary, &mut aggregate);
     }
     aggregate
+}
+
+fn classify_structured_failure(result: &Value) -> SloFailureClass {
+    if contains_machine_bool(result, "denied_by_policy", true)
+        || machine_failure_attribution(result) == Some("permission_denied")
+    {
+        return SloFailureClass::Policy;
+    }
+    if matches!(
+        machine_failure_attribution(result),
+        Some("model_error" | "provider_error")
+    ) || contains_machine_bool(result, "provider_blocker_active", true)
+        || count_nonzero_machine_number(result, "provider_final_error_count") > 0
+    {
+        return SloFailureClass::Model;
+    }
+    if matches!(
+        machine_failure_attribution(result),
+        Some("tool_gap" | "delivery_error")
+    ) || contains_error_step(result)
+    {
+        return SloFailureClass::Tool;
+    }
+    SloFailureClass::Agent
+}
+
+fn machine_failure_attribution(value: &Value) -> Option<&str> {
+    [
+        "/task_journal/summary/final_failure_attribution",
+        "/task_journal/trace/final_failure_attribution",
+        "/task_lifecycle/failure_attribution",
+        "/failure_attribution",
+    ]
+    .iter()
+    .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+    .or_else(|| find_machine_string(value, "final_failure_attribution", 0))
+    .or_else(|| find_machine_string(value, "failure_attribution", 0))
+}
+
+fn find_machine_string<'a>(value: &'a Value, key: &str, depth: usize) -> Option<&'a str> {
+    if depth > 8 {
+        return None;
+    }
+    match value {
+        Value::Object(map) => map
+            .get(key)
+            .and_then(Value::as_str)
+            .or_else(|| {
+                map.values()
+                    .find_map(|child| find_machine_string(child, key, depth + 1))
+            }),
+        Value::Array(items) => items
+            .iter()
+            .find_map(|child| find_machine_string(child, key, depth + 1)),
+        _ => None,
+    }
+}
+
+fn contains_machine_bool(value: &Value, key: &str, expected: bool) -> bool {
+    match value {
+        Value::Object(map) => {
+            map.get(key).and_then(Value::as_bool) == Some(expected)
+                || map
+                    .values()
+                    .any(|child| contains_machine_bool(child, key, expected))
+        }
+        Value::Array(items) => items
+            .iter()
+            .any(|child| contains_machine_bool(child, key, expected)),
+        _ => false,
+    }
+}
+
+fn count_nonzero_machine_number(value: &Value, key: &str) -> u64 {
+    match value {
+        Value::Object(map) => {
+            let own = u64::from(
+                map.get(key)
+                    .and_then(Value::as_u64)
+                    .is_some_and(|count| count > 0),
+            );
+            map.values().fold(own, |count, child| {
+                count.saturating_add(count_nonzero_machine_number(child, key))
+            })
+        }
+        Value::Array(items) => items.iter().fold(0_u64, |count, child| {
+            count.saturating_add(count_nonzero_machine_number(child, key))
+        }),
+        _ => 0,
+    }
+}
+
+fn contains_error_step(value: &Value) -> bool {
+    value
+        .get("step_results")
+        .and_then(Value::as_array)
+        .is_some_and(|steps| {
+            steps
+                .iter()
+                .any(|step| step.get("status").and_then(Value::as_str) == Some("error"))
+        })
+        || match value {
+            Value::Object(map) => map.values().any(contains_error_step),
+            Value::Array(items) => items.iter().any(contains_error_step),
+            _ => false,
+        }
 }
 
 fn find_task_journal(value: &Value, depth: usize) -> Option<&Value> {
@@ -379,6 +512,7 @@ fn slo_metrics_json(
         "outcomes": {
             "terminal_tasks": aggregate.terminal_tasks,
             "succeeded_tasks": aggregate.succeeded_tasks,
+            "failed_tasks": aggregate.failed_tasks,
             "success_rate_millis": ratio_millis(aggregate.succeeded_tasks, aggregate.terminal_tasks),
             "resumed_terminal_tasks": aggregate.resumed_terminal_tasks,
             "resumed_succeeded_tasks": aggregate.resumed_succeeded_tasks,
@@ -386,6 +520,18 @@ fn slo_metrics_json(
                 aggregate.resumed_succeeded_tasks,
                 aggregate.resumed_terminal_tasks,
             ),
+        },
+        "failure_classes": {
+            "classification_source": "structured_runtime_fields",
+            "model_failure": aggregate.model_failures,
+            "agent_failure": aggregate.agent_failures,
+            "tool_failure": aggregate.tool_failures,
+            "policy_block": aggregate.policy_blocks,
+            "classified_failure_count": aggregate
+                .model_failures
+                .saturating_add(aggregate.agent_failures)
+                .saturating_add(aggregate.tool_failures)
+                .saturating_add(aggregate.policy_blocks),
         },
         "latency": {
             "planner_ms": percentile_summary(&aggregate.planner_latency_ms, "prompt_bucket_average"),
