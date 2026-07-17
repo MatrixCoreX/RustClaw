@@ -279,6 +279,55 @@ pub(crate) fn record_child_task_terminal_projection(
     Ok(true)
 }
 
+pub(crate) fn record_child_task_execution_scope(
+    state: &AppState,
+    task_id: &str,
+    projection: &Value,
+) -> anyhow::Result<bool> {
+    if !projection.is_object() {
+        return Ok(false);
+    }
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let row = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![task_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    let Some((status, raw_result_json)) = row else {
+        return Ok(false);
+    };
+    if !matches!(
+        status.as_str(),
+        "succeeded" | "failed" | "timeout" | "canceled"
+    ) {
+        return Ok(false);
+    }
+    let mut result_json = raw_result_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or_else(|| json!({}));
+    if !result_json.is_object() {
+        result_json = json!({"observed_result_json": result_json});
+    }
+    let Some(obj) = result_json.as_object_mut() else {
+        return Ok(false);
+    };
+    obj.insert("child_task_execution_scope".to_string(), projection.clone());
+    let changed = db.execute(
+        "UPDATE tasks
+         SET result_json = ?2, updated_at = ?3
+         WHERE task_id = ?1 AND status = ?4",
+        params![task_id, result_json.to_string(), now_ts(), status],
+    )?;
+    Ok(changed == 1)
+}
+
 pub(crate) fn refresh_parent_child_task_merge(
     state: &AppState,
     parent_task_id: &str,

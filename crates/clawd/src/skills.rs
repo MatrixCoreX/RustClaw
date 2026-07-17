@@ -1337,6 +1337,24 @@ fn prepare_skill_execution_isolation(
     let Some(profile) = action_scoped_isolation_profile(state, skill_name, args) else {
         return Ok(None);
     };
+    if let Some(current_profile) =
+        crate::execution_isolation::execution_isolation_root_profile(&state.skill_rt.workspace_root)
+    {
+        let compatible = matches!(
+            (current_profile.as_str(), profile),
+            (
+                "local_worktree",
+                CapabilityIsolationProfile::LocalWorktree | CapabilityIsolationProfile::ReadOnly
+            ) | (
+                "local_temp_workspace",
+                CapabilityIsolationProfile::LocalTempWorkspace
+                    | CapabilityIsolationProfile::ReadOnly
+            )
+        );
+        if compatible {
+            return Ok(None);
+        }
+    }
     let plan = crate::execution_isolation::plan_execution_isolation(
         &state.skill_rt.workspace_root,
         &task.task_id,

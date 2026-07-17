@@ -1985,3 +1985,6 @@ async fn run_cmd_does_not_inherit_undeclared_parent_secret() {
         None => std::env::remove_var("RUSTCLAW_TEST_PARENT_SECRET"),
     }
 }
+
+#[path = "skills_tests/task_scoped_worktree.rs"]
+mod task_scoped_worktree;
