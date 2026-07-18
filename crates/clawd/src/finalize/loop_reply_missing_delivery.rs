@@ -20,13 +20,19 @@ pub(super) async fn pending_confirmation_resume_payload(
     task: &ClaimedTask,
     user_text: &str,
     loop_state: &mut LoopState,
-) -> Option<(String, serde_json::Value)> {
-    let round = loop_state.round_traces.last()?;
-    let verify = round.verify_result.as_ref()?;
+) -> Result<Option<(String, serde_json::Value)>, String> {
+    let Some(round) = loop_state.round_traces.last() else {
+        return Ok(None);
+    };
+    let Some(verify) = round.verify_result.as_ref() else {
+        return Ok(None);
+    };
     if !verify_summary_requires_resume_confirmation(verify) {
-        return None;
+        return Ok(None);
     }
-    let plan = round.plan_result.as_ref()?;
+    let Some(plan) = round.plan_result.as_ref() else {
+        return Ok(None);
+    };
     let plan_steps = plan.steps.clone();
     let goal = round.goal.clone();
     let subtask_results = loop_state.subtask_results.clone();
@@ -74,10 +80,10 @@ pub(super) async fn pending_confirmation_resume_payload(
                 &step.skill,
                 &step.skill,
                 &step.args,
-            );
+            )?;
         }
     }
-    Some(response)
+    Ok(Some(response))
 }
 
 pub(super) fn verify_summary_requires_resume_confirmation(

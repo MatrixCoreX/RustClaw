@@ -7,6 +7,7 @@ pub(crate) mod child_tasks;
 pub(crate) mod submit;
 pub(crate) mod task_admin;
 pub(crate) mod task_approval;
+pub(crate) mod task_checkpoint_action;
 pub(crate) mod task_goal;
 pub(crate) mod task_mutation_ledger;
 pub(crate) mod task_resume_execution;
@@ -45,6 +46,9 @@ pub(crate) use task_admin::{
 pub(crate) use task_approval::{
     consume_task_approval_grant, decide_task_approval_request_for_actor,
     task_has_pending_approval_request, TaskApprovalConsumeOutcome,
+};
+pub(crate) use task_checkpoint_action::{
+    load_task_checkpoint_action, upsert_task_checkpoint_action, TaskCheckpointAction,
 };
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_mutation_ledger::{

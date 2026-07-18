@@ -158,6 +158,22 @@ CREATE TABLE IF NOT EXISTS task_mutation_ledger (
 CREATE INDEX IF NOT EXISTS idx_task_mutation_ledger_status_updated
     ON task_mutation_ledger(status, updated_at);
 
+CREATE TABLE IF NOT EXISTS task_checkpoint_actions (
+    task_id              TEXT NOT NULL,
+    checkpoint_id        TEXT NOT NULL,
+    tool_or_skill        TEXT NOT NULL,
+    action_ref           TEXT NOT NULL,
+    args_json            TEXT NOT NULL,
+    output_contract_json TEXT,
+    integrity_hash       TEXT NOT NULL,
+    created_at           INTEGER NOT NULL,
+    updated_at           INTEGER NOT NULL,
+    PRIMARY KEY (task_id, checkpoint_id),
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_task_checkpoint_actions_updated
+    ON task_checkpoint_actions(updated_at);
+
 CREATE TABLE IF NOT EXISTS llm_cost_ledger (
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id                  TEXT NOT NULL,

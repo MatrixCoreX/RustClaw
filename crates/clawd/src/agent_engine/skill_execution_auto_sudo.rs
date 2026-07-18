@@ -484,7 +484,7 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
             "run_cmd",
             &pre_tool_use_evaluation.outcome.action_ref,
             &retry_args,
-        );
+        )?;
         return Ok(Some(Some("hook_confirmation_required".to_string())));
     }
     if pre_tool_use_evaluation.requires_background_wait() {

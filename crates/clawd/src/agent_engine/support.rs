@@ -927,7 +927,7 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
     tool_or_skill: &str,
     action_ref: &str,
     args: &Value,
-) {
+) -> Result<(), String> {
     let now_ts = crate::now_ts_u64() as i64;
     let budget = checkpoint_budget_counters(
         loop_state,
@@ -944,33 +944,51 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         args,
         budget,
     );
-    if let Some(checkpoint_id) = payload
+    let checkpoint_id = payload
         .pointer("/task_lifecycle/checkpoint_id")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
-    {
-        loop_state
-            .output_vars
-            .insert("agent_loop.checkpoint_id".to_string(), checkpoint_id);
-    }
+        .ok_or_else(|| "checkpoint_action_checkpoint_id_missing".to_string())?;
+    let output_contract = loop_state
+        .output_contract
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|_| "checkpoint_action_output_contract_serialize_failed".to_string())?;
+    repo::upsert_task_checkpoint_action(
+        &state.core.db,
+        &task.task_id,
+        &checkpoint_id,
+        tool_or_skill,
+        action_ref,
+        args,
+        output_contract.as_ref(),
+    )
+    .map_err(|_| "checkpoint_action_persist_failed".to_string())?;
+    loop_state.output_vars.insert(
+        "agent_loop.checkpoint_id".to_string(),
+        checkpoint_id.clone(),
+    );
     loop_state.task_lifecycle = payload.get("task_lifecycle").cloned();
     loop_state.task_checkpoint = payload.get("task_checkpoint").cloned();
     loop_state.output_vars.insert(
         "agent_loop.resume_reason".to_string(),
         resume_reason.to_string(),
     );
-    if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
-    {
-        warn!(
-            "run_agent_with_tools: task_id={} publish user-input checkpoint failed: {}",
-            task.task_id, err
-        );
-    } else {
-        debug!(
-            "user-input checkpoint progress published task_id={} reason={} action_ref={}",
-            task.task_id, resume_reason, action_ref
-        );
-    }
+    repo::update_task_progress_result(state, &task.task_id, &payload.to_string()).map_err(
+        |err| {
+            warn!(
+                "run_agent_with_tools: task_id={} publish user-input checkpoint failed: {}",
+                task.task_id, err
+            );
+            "checkpoint_action_progress_publish_failed".to_string()
+        },
+    )?;
+    debug!(
+        "user-input checkpoint progress published task_id={} checkpoint_id={} reason={} action_ref={}",
+        task.task_id, checkpoint_id, resume_reason, action_ref
+    );
+    Ok(())
 }
 
 pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(
