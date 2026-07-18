@@ -9,7 +9,6 @@ pub(super) fn normalize_planned_actions(
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     let actions = collapse_redundant_config_preview_reads(actions);
-    let actions = crate::capability_resolver::resolve_agent_actions_for_state(state, actions);
     let actions = normalize_action_arg_aliases(state, actions);
     let actions = annotate_readonly_cli_surface_run_cmds(state, actions);
     let actions = collapse_redundant_drafting_synthesis(actions);
@@ -17,6 +16,17 @@ pub(super) fn normalize_planned_actions(
         &state.skill_rt.workspace_root,
         actions,
     )
+}
+
+pub(super) fn normalize_resolved_executable_action(
+    state: &AppState,
+    action: AgentAction,
+) -> AgentAction {
+    let actions = normalize_action_arg_aliases(state, vec![action]);
+    annotate_readonly_cli_surface_run_cmds(state, actions)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| unreachable!())
 }
 
 fn collapse_redundant_config_preview_reads(actions: Vec<AgentAction>) -> Vec<AgentAction> {

@@ -216,6 +216,76 @@ pub(crate) fn requested_machine_markers_for_projection(input: &str) -> Vec<Strin
         .collect()
 }
 
+pub(crate) fn structured_json_satisfies_field_selector(selector: &str, output: &str) -> bool {
+    let fields = selector
+        .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';'))
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    if fields.is_empty()
+        || fields.iter().any(|field| {
+            !valid_machine_key(field)
+                || field.contains('*')
+                || field.split('.').any(field_is_visible_text_boundary)
+        })
+    {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+        return false;
+    };
+    fields.into_iter().all(|field| {
+        let path = field.split('.').collect::<Vec<_>>();
+        structured_json_contains_field_path(&value, &path)
+    })
+}
+
+fn structured_json_contains_field_path(value: &serde_json::Value, path: &[&str]) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    match value {
+        serde_json::Value::Object(object) => {
+            if structured_object_contains_field_path(object, path) {
+                return true;
+            }
+            object.iter().any(|(key, child)| {
+                !field_is_visible_text_boundary(key)
+                    && matches!(
+                        child,
+                        serde_json::Value::Object(_) | serde_json::Value::Array(_)
+                    )
+                    && structured_json_contains_field_path(child, path)
+            })
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| structured_json_contains_field_path(item, path)),
+        _ => false,
+    }
+}
+
+fn structured_object_contains_field_path(
+    object: &serde_json::Map<String, serde_json::Value>,
+    path: &[&str],
+) -> bool {
+    let Some(value) = object.get(path[0]) else {
+        return false;
+    };
+    if path.len() == 1 {
+        return true;
+    }
+    match value {
+        serde_json::Value::Object(child) => {
+            structured_object_contains_field_path(child, &path[1..])
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| structured_json_contains_field_path(item, &path[1..])),
+        _ => false,
+    }
+}
+
 fn requested_machine_kv_pairs(input: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     let tokens = input.split_whitespace().collect::<Vec<_>>();

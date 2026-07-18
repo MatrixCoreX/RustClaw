@@ -47,6 +47,7 @@ fn verify_result_with_issue(
             detail: format!("test issue {}", kind.as_str()),
             missing_fields: Vec::new(),
         }],
+        capability_resolutions: Vec::new(),
     }
 }
 

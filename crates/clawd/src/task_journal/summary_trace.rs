@@ -297,6 +297,7 @@ pub(super) fn turn_analysis_json(analysis: &crate::turn_context::TurnAnalysis) -
 pub(super) struct RequestedPlanCapability {
     pub(super) action_type: String,
     pub(super) capability: String,
+    pub(super) resolved_capability: Option<String>,
     pub(super) action_ref: Option<String>,
     pub(super) args_fingerprint: Option<String>,
 }
@@ -345,6 +346,7 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
     Some(RequestedPlanCapability {
         action_type: action_type.to_string(),
         capability: capability.to_string(),
+        resolved_capability: None,
         action_ref: None,
         args_fingerprint: None,
     })
@@ -362,6 +364,7 @@ fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPla
                 .unwrap_or_else(|| RequestedPlanCapability {
                     action_type: normalized_step.action_type.clone(),
                     capability: normalized_step.skill.clone(),
+                    resolved_capability: None,
                     action_ref: None,
                     args_fingerprint: None,
                 });
@@ -386,7 +389,49 @@ pub(super) fn requested_capability_sequence(journal: &TaskJournal) -> Vec<Reques
             requested.extend(requested_capabilities_for_plan(plan));
         }
     }
+    attach_dispatch_capability_resolutions(&mut requested, &journal.task_observations);
     requested
+}
+
+fn attach_dispatch_capability_resolutions(
+    requested: &mut [RequestedPlanCapability],
+    observations: &[Value],
+) {
+    let mut resolutions = observations
+        .iter()
+        .filter(|value| {
+            value.get("observation_kind").and_then(Value::as_str) == Some("capability_resolution")
+        })
+        .filter_map(|value| {
+            let requested = value.get("requested_capability")?.as_str()?.trim();
+            let resolved = value.get("resolved_capability")?.as_str()?.trim();
+            (!requested.is_empty() && !resolved.is_empty())
+                .then(|| (requested.to_string(), resolved.to_string()))
+        })
+        .collect::<Vec<_>>();
+    for item in requested
+        .iter_mut()
+        .filter(|item| item.action_type == "call_capability")
+    {
+        let Some(index) = resolutions
+            .iter()
+            .position(|(requested, _)| capability_machine_token_eq(requested, &item.capability))
+        else {
+            continue;
+        };
+        item.resolved_capability = Some(resolutions.remove(index).1);
+    }
+}
+
+fn capability_machine_token_eq(left: &str, right: &str) -> bool {
+    fn normalize(value: &str) -> String {
+        value
+            .trim()
+            .to_ascii_lowercase()
+            .replace('-', "_")
+            .replace("::", ".")
+    }
+    normalize(left) == normalize(right)
 }
 
 pub(super) fn boundary_context_summary_json(journal: &TaskJournal) -> Option<Value> {
@@ -761,7 +806,7 @@ pub(super) fn step_trace_json(
         "resolved_tool_or_skill": &step.skill,
         "resolved_capability": requested
             .filter(|value| value.action_type == "call_capability")
-            .map(|value| value.capability.as_str()),
+            .and_then(|value| value.resolved_capability.as_deref()),
         "resolution_source": requested
             .map(|value| capability_resolution_source(&value.action_type))
             .unwrap_or("step_trace_fallback"),

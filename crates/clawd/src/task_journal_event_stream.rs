@@ -110,7 +110,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
                 "resolved_capability": requested
                     .as_ref()
                     .filter(|value| value.action_type == "call_capability")
-                    .map(|value| value.capability.as_str()),
+                    .and_then(|value| value.resolved_capability.as_deref()),
                 "resolution_source": requested
                     .as_ref()
                     .map(|value| capability_resolution_source(&value.action_type))
@@ -410,7 +410,7 @@ fn tool_lifecycle_event_payload(
         "resolved_tool_or_skill": step.skill,
         "resolved_capability": requested
             .filter(|value| value.action_type == "call_capability")
-            .map(|value| value.capability.as_str()),
+            .and_then(|value| value.resolved_capability.as_deref()),
         "resolution_source": requested
             .map(|value| capability_resolution_source(&value.action_type))
             .unwrap_or("step_trace_fallback"),

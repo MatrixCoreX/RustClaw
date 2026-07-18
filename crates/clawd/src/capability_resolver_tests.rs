@@ -62,6 +62,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
     let mut candidates = vec![
         ResolverCandidate {
             skill: "run_cmd".to_string(),
+            capability: "system.run_command".to_string(),
             action: None,
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
@@ -70,6 +71,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
         },
         ResolverCandidate {
             skill: "fs_basic".to_string(),
+            capability: "filesystem.list_entries".to_string(),
             action: Some("list_dir".to_string()),
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
@@ -160,6 +162,47 @@ fn capability_metadata_binds_only_unclassified_output_contract() {
 }
 
 #[test]
+fn missing_semantic_metadata_preserves_existing_planner_output_contract() {
+    let state = state_with_workspace_registry();
+    let mut output_contract = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        ..Default::default()
+    };
+    output_contract.selection.structured_field_selector = Some(
+        "checkpoint,diff,failed_verification,repair_attempt,passing_verification,rewind_references"
+            .to_string(),
+    );
+    let plan_result = crate::PlanResult {
+        goal: "preview repair".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: Some(output_contract),
+        steps: vec![crate::plan_step_from_agent_action(
+            &AgentAction::CallCapability {
+                capability: "coding_workflow.preview_repair".to_string(),
+                args: json!({}),
+            },
+            "step_1".to_string(),
+            Vec::new(),
+            "preview repair".to_string(),
+        )],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: "{}".to_string(),
+    };
+
+    let preserved = bind_unclassified_output_contract_from_capabilities(&state, &plan_result)
+        .expect("existing planner contract must remain available");
+    assert_eq!(preserved.response_shape, crate::OutputResponseShape::Strict);
+    assert_eq!(
+        preserved.selection.structured_field_selector.as_deref(),
+        Some(
+            "checkpoint,diff,failed_verification,repair_attempt,passing_verification,rewind_references"
+        )
+    );
+}
+
+#[test]
 fn optional_enum_arg_outside_registry_schema_is_preserved_for_verifier_repair() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
@@ -245,11 +288,41 @@ fn capability_resolution_record_covers_resolved_mapping() {
     assert_eq!(record.outcome, "resolved");
     assert_eq!(record.source, "registry");
     assert_eq!(record.capability_ref, "filesystem.list_entries");
+    assert_eq!(
+        record.canonical_capability_ref.as_deref(),
+        Some("filesystem.list_entries")
+    );
     assert!(matches!(
         record.resolved_ref.as_deref(),
         Some("tool:fs_basic") | Some("skill:fs_basic")
     ));
     assert!(record.planner_kind.is_some());
+}
+
+#[test]
+fn capability_alias_resolution_records_canonical_registry_identity() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "task_control.preview_repair",
+        json!({}),
+    );
+
+    let (executable, args) = match action {
+        Some(AgentAction::CallTool { tool, args }) => (tool, args),
+        Some(AgentAction::CallSkill { skill, args }) => (skill, args),
+        other => panic!("expected task_control executable action, got {other:?}"),
+    };
+    assert_eq!(executable, "task_control");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("preview_coding_repair")
+    );
+    assert_eq!(record.capability_ref, "task_control.preview_repair");
+    assert_eq!(
+        record.canonical_capability_ref.as_deref(),
+        Some("coding_workflow.preview_repair")
+    );
 }
 
 #[test]

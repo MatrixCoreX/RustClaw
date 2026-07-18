@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 use super::log_deterministic_delivery_record;
 use super::route_helpers::route_output_contract_machine_json;
 
+const TERMINAL_CLARIFY_STATUS: &str = "needs_clarification";
+
 pub(super) fn attach_agent_loop_clarify_machine_line(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
@@ -66,9 +68,18 @@ pub(super) fn attach_route_clarify_machine_envelope(
     if completed_act_delivery_should_own_terminal_state(loop_state, delivery_messages) {
         return false;
     }
-    if delivery_messages
+    let strict_machine_delivery = strict_clarify_machine_delivery_requested(agent_run_context);
+    let has_terminal_clarify_delivery = delivery_messages
         .iter()
-        .any(|message| delivery_has_terminal_clarify_machine_fields(message))
+        .any(|message| delivery_has_terminal_clarify_machine_fields(message));
+    if has_terminal_clarify_delivery && !strict_machine_delivery {
+        mark_terminal_clarify(loop_state, finalizer_summary);
+        return false;
+    }
+    if strict_machine_delivery
+        && delivery_messages
+            .iter()
+            .any(|message| canonical_terminal_clarify_envelope(message))
     {
         mark_terminal_clarify(loop_state, finalizer_summary);
         return false;
@@ -94,11 +105,12 @@ pub(super) fn attach_route_clarify_machine_envelope(
         ensure_output_var(loop_state, "agent_loop.field_path", field_path);
     }
     mark_terminal_clarify(loop_state, finalizer_summary);
-    if !clarify_machine_delivery_requested(agent_run_context) {
+    if !strict_machine_delivery && !clarify_machine_delivery_requested(agent_run_context) {
         return false;
     }
 
     let envelope = serde_json::json!({
+        "status": TERMINAL_CLARIFY_STATUS,
         "output_format": "machine_json",
         "owner_layer": "agent_loop_clarify",
         "terminal_intent": "clarify",
@@ -117,11 +129,23 @@ pub(super) fn attach_route_clarify_machine_envelope(
         "output_contract": route_output_contract_machine_json(route)
     })
     .to_string();
-    delivery_messages.push(envelope);
+    if strict_machine_delivery {
+        delivery_messages.clear();
+        delivery_messages.push(envelope.clone());
+        loop_state.delivery_messages.clear();
+        loop_state.delivery_messages.push(envelope.clone());
+        loop_state.last_user_visible_respond = Some(envelope);
+    } else {
+        delivery_messages.push(envelope);
+    }
     log_deterministic_delivery_record(
         &task.task_id,
         "agent_loop_clarify_machine_envelope",
-        "attached",
+        if strict_machine_delivery {
+            "replaced"
+        } else {
+            "attached"
+        },
         agent_run_context,
         loop_state.executed_step_results.len(),
     );
@@ -138,6 +162,12 @@ fn clarify_machine_delivery_requested(agent_run_context: Option<&AgentRunContext
         .flatten()
         .filter_map(Value::as_str)
         .any(is_clarify_machine_field)
+}
+
+fn strict_clarify_machine_delivery_requested(agent_run_context: Option<&AgentRunContext>) -> bool {
+    agent_run_context
+        .and_then(AgentRunContext::output_contract)
+        .is_some_and(|route| route.response_shape == crate::OutputResponseShape::Strict)
 }
 
 fn is_clarify_machine_field(raw: &str) -> bool {
@@ -218,6 +248,25 @@ pub(super) fn delivery_has_terminal_clarify_machine_fields(message: &str) -> boo
     machine_text_has_token(message, "agent_loop.terminal_intent=clarify")
         || markers.machine_value("agent_loop.terminal_intent") == Some("clarify")
         || markers.machine_value("terminal_intent") == Some("clarify")
+}
+
+fn canonical_terminal_clarify_envelope(message: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(message.trim()) else {
+        return false;
+    };
+    payload.get("status").and_then(serde_json::Value::as_str) == Some(TERMINAL_CLARIFY_STATUS)
+        && payload
+            .get("output_format")
+            .and_then(serde_json::Value::as_str)
+            == Some("machine_json")
+        && payload
+            .get("owner_layer")
+            .and_then(serde_json::Value::as_str)
+            == Some("agent_loop_clarify")
+        && payload
+            .get("terminal_intent")
+            .and_then(serde_json::Value::as_str)
+            == Some("clarify")
 }
 
 fn output_var(loop_state: &LoopState, key: &str) -> Option<String> {

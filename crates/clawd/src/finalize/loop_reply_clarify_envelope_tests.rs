@@ -275,6 +275,147 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
     );
 }
 
+fn terminal_clarify_loop_state(model_content: &str) -> crate::agent_engine::LoopState {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.pending_user_input_required = true;
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.clarify_reason_code".to_string(),
+        "missing_locator".to_string(),
+    );
+    loop_state
+        .output_vars
+        .insert("agent_loop.missing_slot".to_string(), "locator".to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.message_key".to_string(),
+        "missing_target_specification".to_string(),
+    );
+    loop_state
+        .output_vars
+        .insert("agent_loop.locator_kind".to_string(), "path".to_string());
+    loop_state.delivery_messages.push(model_content.to_string());
+    loop_state.last_user_visible_respond = Some(model_content.to_string());
+    loop_state
+}
+
+#[tokio::test]
+async fn strict_terminal_clarify_replaces_model_prose_with_machine_envelope() {
+    let state = test_state();
+    let task = claimed_task("task-strict-clarify-prose");
+    let mut route = free_route_result();
+    route.response_shape = OutputResponseShape::Strict;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+    let model_content = "Localized planner clarification.";
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "structured result required",
+        terminal_clarify_loop_state(model_content),
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("strict clarify should be normalized");
+
+    let payload =
+        serde_json::from_str::<serde_json::Value>(&reply.text).expect("machine JSON reply");
+    assert_eq!(
+        payload.get("status").and_then(serde_json::Value::as_str),
+        Some("needs_clarification")
+    );
+    assert_eq!(
+        payload
+            .get("terminal_intent")
+            .and_then(serde_json::Value::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        payload
+            .get("clarify_reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("missing_locator")
+    );
+    assert_eq!(
+        payload
+            .get("missing_slot")
+            .and_then(serde_json::Value::as_str),
+        Some("locator")
+    );
+    assert!(!reply.text.contains(model_content));
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
+}
+
+#[tokio::test]
+async fn strict_terminal_clarify_normalizes_existing_model_json() {
+    let state = test_state();
+    let task = claimed_task("task-strict-clarify-model-json");
+    let mut route = free_route_result();
+    route.response_shape = OutputResponseShape::Strict;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+    let model_content =
+        r#"{"status":"target_missing","terminal_intent":"clarify","detail":"model-owned"}"#;
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "structured result required",
+        terminal_clarify_loop_state(model_content),
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("strict clarify JSON should be normalized");
+
+    let payload =
+        serde_json::from_str::<serde_json::Value>(&reply.text).expect("machine JSON reply");
+    assert_eq!(
+        payload.get("status").and_then(serde_json::Value::as_str),
+        Some("needs_clarification")
+    );
+    assert_eq!(
+        payload
+            .get("owner_layer")
+            .and_then(serde_json::Value::as_str),
+        Some("agent_loop_clarify")
+    );
+    assert!(payload.get("detail").is_none());
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
+}
+
+#[tokio::test]
+async fn one_sentence_terminal_clarify_keeps_model_authored_text() {
+    let state = test_state();
+    let task = claimed_task("task-one-sentence-clarify");
+    let mut route = free_route_result();
+    route.response_shape = OutputResponseShape::OneSentence;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+    let model_content = "Which target should be used?";
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "clarification allowed",
+        terminal_clarify_loop_state(model_content),
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("one sentence clarify should stay model-authored");
+
+    assert_eq!(reply.text, model_content);
+    assert!(serde_json::from_str::<serde_json::Value>(&reply.text).is_err());
+}
+
 #[tokio::test]
 async fn finalize_loop_reply_keeps_agent_loop_clarify_machine_fields_structured_only() {
     let state = test_state();
