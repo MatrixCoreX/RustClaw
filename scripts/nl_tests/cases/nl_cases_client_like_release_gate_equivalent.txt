@@ -2,7 +2,7 @@
 # Do not edit by hand; regenerate with scripts/nl_tests/build_release_gate_subset.py.
 # Selection uses suite/name/tags/source metadata only, not natural-language prompt matching.
 # source=scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt
-# selected_rows=390 coverage_categories=622 missing_categories=0
+# selected_rows=390 coverage_categories=623 missing_categories=0
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_release_gate_equivalent.txt --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet --exclude-case-tag x_api --exclude-case-tag post_tweet --exclude-case-tag publish_tweet
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -385,7 +385,7 @@ release_tier1_safe|nl_cases_release_tier1_safe_24_20260718_t1_multi_instruction_
 release_tier1_safe|nl_cases_release_tier1_safe_24_20260718_t1_task_status_zh|covers:interruption,status_query,task_control,requires_tool_call=true,local_readonly,client_like,aggregate|查询当前任务概况，只返回 running、waiting、background、needs_user 四个计数；不要暂停或取消任务。
 release_tier1_safe|nl_cases_release_tier1_safe_24_20260718_t1_kb_readonly_zh|covers:memory,kb,knowledge,requires_tool_call=true,local_readonly,client_like,aggregate|列出知识库 namespace，最多 10 个，只返回 count 和 names；不要导入或删除文档。
 release_tier1_safe|nl_cases_release_tier1_safe_24_20260718_t1_media_dry_run_zh|covers:media,image_generate,dry_run,async,requires_tool_call=true,no_external_side_effect,client_like,aggregate|只做 dry-run：规划生成 512x512 状态卡到 document/media_dry_run/tier1.png，返回 provider、model、planned_outputs 和 async contract，不要调用生成 API。
-release_tier1_safe|nl_cases_release_tier1_safe_24_20260718_t1_coding_repair_dry_run_en|covers:coding,repair,verification,dry_run,no_external_side_effect,client_like,aggregate|Dry-run a coding loop where the first test fails and a patch repair makes it pass. Return checkpoint, diff, failed verification, repair attempt, passing verification, and rewind references as machine fields.
+release_tier1_safe|nl_cases_release_tier1_safe_24_20260718_t1_coding_repair_dry_run_en|covers:coding,repair,verification,dry_run,capability:coding_workflow.preview_repair,requires_tool_call=true,no_external_side_effect,client_like,aggregate|Dry-run a coding loop where the first test fails and a patch repair makes it pass. Return checkpoint, diff, failed verification, repair attempt, passing verification, and rewind references as machine fields.
 # source: scripts/nl_tests/cases/nl_cases_runtime_capability_boundary_regression_20260515.txt
 capability_boundary_regression|nl_cases_runtime_capability_boundary_regression_20260515_direct_intro_cn|direct,cn,client_like,aggregate|你好，用一句话说明 RustClaw 适合帮我做什么
 capability_boundary_regression|nl_cases_runtime_capability_boundary_regression_20260515_clarify_delete_that_file_cn|clarify,high-risk,cn,client_like,aggregate,allow_clarify|删除那个文件
