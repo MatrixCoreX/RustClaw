@@ -1,4 +1,5 @@
 use super::*;
+use crate::finalize::loop_reply::raw_command_machine_field_delivery_satisfies_request;
 use crate::finalize::loop_reply::replace_delivery_with_direct_structured_observed_answer;
 use crate::finalize::loop_reply::shell_stdout_redirect_target_path;
 use crate::finalize::raw_command_machine_field_projection_from_journal;
@@ -347,6 +348,85 @@ fn raw_command_requested_stdout_uses_observed_stdout_value() {
 
     assert_eq!(answer, "exit_code=0\nstdout=RUSTCLAW_NL_100");
     assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn raw_command_requested_mutation_fields_use_executed_plan_and_workspace_evidence() {
+    let mut state = test_state();
+    let tmp = TempDirGuard::new("raw_command_mutation_fields");
+    state.skill_rt.workspace_root = tmp.path().to_path_buf();
+    let relative_path = PathBuf::from("generated/result.txt");
+    let output_path = tmp.path().join(&relative_path);
+    fs::create_dir_all(output_path.parent().expect("output parent")).expect("create output parent");
+    fs::write(&output_path, "checkpoint_resume_ok").expect("write output");
+    let command = format!(
+        "mkdir -p generated && printf '%s' checkpoint_resume_ok > {} && cat {}",
+        relative_path.display(),
+        relative_path.display()
+    );
+    let mut route = free_route_result();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector =
+        Some("command,created_path,stdout,status".to_string());
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "create and verify a workspace file".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({"command": command}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }])),
+            verify_result: None,
+        });
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "checkpoint_resume_ok",
+    ));
+
+    let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
+        .expect("grounded mutation field projection");
+
+    assert_eq!(
+        answer,
+        format!(
+            "command={command}\ncreated_path={}\nstdout=checkpoint_resume_ok\nstatus=ok",
+            output_path.canonicalize().unwrap().display()
+        )
+    );
+    assert!(raw_command_machine_field_delivery_satisfies_request(
+        &route, &answer
+    ));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn raw_command_journal_projection_rejects_fields_without_persisted_grounding() {
+    let mut route = free_route_result();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("command,stdout,status".to_string());
+    let mut journal = crate::task_journal::TaskJournal::default();
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "run_cmd",
+            "checkpoint_resume_ok",
+        ));
+
+    assert!(raw_command_machine_field_projection_from_journal(&route, &journal).is_none());
 }
 
 #[test]

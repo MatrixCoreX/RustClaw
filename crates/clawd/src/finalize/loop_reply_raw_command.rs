@@ -171,13 +171,17 @@ pub(super) fn direct_raw_command_output_projection(
     if !requested_machine_fields.is_empty() {
         let all_run_cmd_outputs = successful_run_cmd_outputs(loop_state);
         let mut used_evidence_ids_count = outputs.len();
-        let mut answer = requested_raw_command_machine_field_projection_for_fields(
+        let mut answer = requested_raw_command_machine_field_projection_for_loop_state(
+            state,
             &requested_machine_fields,
+            loop_state,
             &outputs,
         );
         if answer.is_none() && all_run_cmd_outputs != outputs {
-            answer = requested_raw_command_machine_field_projection_for_fields(
+            answer = requested_raw_command_machine_field_projection_for_loop_state(
+                state,
                 &requested_machine_fields,
+                loop_state,
                 &all_run_cmd_outputs,
             );
             used_evidence_ids_count = all_run_cmd_outputs.len();
@@ -353,7 +357,7 @@ fn normalize_raw_command_machine_field_delivery(
                 let value = raw_command_machine_field_assignment_value(delivery, "stdout")?;
                 lines.push(format!("stdout={}", value.trim()));
             }
-            _ => {}
+            _ => return None,
         }
     }
     (!lines.is_empty()).then(|| lines.join("\n"))
@@ -584,6 +588,9 @@ fn requested_raw_command_machine_field_projection_for_fields(
     fields: &[String],
     outputs: &[String],
 ) -> Option<String> {
+    if outputs.is_empty() {
+        return None;
+    }
     let stdout = raw_command_stdout_value(outputs);
     let mut lines = Vec::new();
     for field in fields {
@@ -599,18 +606,74 @@ fn requested_raw_command_machine_field_projection_for_fields(
                     .filter(|value| raw_command_stdout_value_is_path(value))?;
                 lines.push(format!("stdout_path={value}"));
             }
-            _ => {}
+            "status" => lines.push("status=ok".to_string()),
+            _ => return None,
         }
     }
     (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn requested_raw_command_machine_field_projection_for_loop_state(
+    state: &AppState,
+    fields: &[String],
+    loop_state: &LoopState,
+    outputs: &[String],
+) -> Option<String> {
+    if outputs.is_empty() {
+        return None;
+    }
+    let stdout = raw_command_stdout_value(outputs);
+    let command = latest_successful_run_cmd_command(loop_state);
+    let created_path = latest_run_cmd_redirect_existing_file_path(state, loop_state);
+    let mut lines = Vec::new();
+    for field in fields {
+        match field.as_str() {
+            "command" => lines.push(format!("command={}", command.as_deref()?)),
+            "created_path" => {
+                lines.push(format!("created_path={}", created_path.as_deref()?));
+            }
+            "exit_code" => lines.push("exit_code=0".to_string()),
+            "status" => lines.push("status=ok".to_string()),
+            "stdout" => lines.push(format!("stdout={}", stdout.as_deref()?)),
+            "stdout_path" => {
+                let value = stdout
+                    .as_deref()
+                    .filter(|value| raw_command_stdout_value_is_path(value))?;
+                lines.push(format!("stdout_path={value}"));
+            }
+            _ => return None,
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn latest_successful_run_cmd_command(loop_state: &LoopState) -> Option<String> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "run_cmd")
+        .find_map(|step| {
+            let output = step.output.as_deref().unwrap_or_default();
+            plan_step_for_execution(loop_state, step)
+                .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
+                .or_else(|| run_cmd_machine_command_from_output(output))
+                .map(str::trim)
+                .filter(|command| {
+                    !command.is_empty() && !command.contains('\n') && !command.contains('\r')
+                })
+                .map(ToOwned::to_owned)
+        })
 }
 
 fn requested_raw_command_machine_fields(route: &crate::IntentOutputContract) -> Vec<String> {
     let mut fields = Vec::new();
     if let Some(selector) = route.selection.structured_field_selector.as_deref() {
         for token in selector.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')) {
-            if matches!(token, "exit_code" | "stdout" | "stdout_path")
-                && !fields.iter().any(|field| field == token)
+            if matches!(
+                token,
+                "command" | "created_path" | "exit_code" | "status" | "stdout" | "stdout_path"
+            ) && !fields.iter().any(|field| field == token)
             {
                 fields.push(token.to_string());
             }
