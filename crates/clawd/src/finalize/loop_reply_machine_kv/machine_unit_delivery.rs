@@ -23,9 +23,35 @@ pub(super) fn current_delivery_contains_all_requested_machine_units(
         return false;
     }
     let current_units = machine_kv_units(current);
-    requested_units
-        .iter()
-        .all(|unit| current_units.iter().any(|current| current == unit))
+    requested_units.iter().all(|unit| {
+        current_units.iter().any(|current| current == unit)
+            || requested_machine_unit_matches_labeled_line(current, unit)
+    })
+}
+
+fn requested_machine_unit_matches_labeled_line(current: &str, requested_unit: &str) -> bool {
+    let Some((requested_key, requested_value)) = requested_unit.split_once('=') else {
+        return false;
+    };
+    current
+        .lines()
+        .filter_map(|line| labeled_machine_field_value(line, requested_key))
+        .any(|value| value == requested_value)
+}
+
+fn labeled_machine_field_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let line = line
+        .trim()
+        .strip_prefix("- ")
+        .or_else(|| line.trim().strip_prefix("* "))
+        .or_else(|| line.trim().strip_prefix("+ "))
+        .unwrap_or_else(|| line.trim());
+    let rest = line.strip_prefix(key)?;
+    let value = rest
+        .strip_prefix('=')
+        .or_else(|| rest.strip_prefix(':'))?
+        .trim();
+    (!value.is_empty()).then_some(value)
 }
 
 pub(super) fn latest_publishable_delivery_with_requested_machine_units(
@@ -112,6 +138,62 @@ pub(super) fn patch_current_delivery_empty_requested_machine_fields(
             }
         })
         .collect::<Vec<_>>()
+        .join("\n");
+    changed.then_some(patched)
+}
+
+pub(super) fn patch_current_delivery_conflicting_requested_machine_fields(
+    current: &str,
+    requested_summary: &str,
+) -> Option<String> {
+    if current_delivery_is_machine_kv_only(current) {
+        return None;
+    }
+    let pairs = requested_machine_summary_pairs(requested_summary);
+    if pairs.is_empty() || current.trim().is_empty() {
+        return None;
+    }
+    let current_values = pairs
+        .iter()
+        .map(|(key, _)| {
+            current
+                .lines()
+                .filter_map(|line| labeled_machine_field_value(line, key))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    if current_values.iter().any(|values| values.len() != 1) {
+        return None;
+    }
+
+    let mut changed = false;
+    let patched = current
+        .lines()
+        .map(|line| {
+            for (key, expected) in &pairs {
+                let Some(actual) = labeled_machine_field_value(line, key) else {
+                    continue;
+                };
+                if actual == expected {
+                    break;
+                }
+                let key_offset = line.find(key)?;
+                let delimiter_offset = key_offset + key.len();
+                let delimiter = line.as_bytes().get(delimiter_offset).copied()?;
+                if !matches!(delimiter, b'=' | b':') {
+                    break;
+                }
+                changed = true;
+                return Some(format!(
+                    "{}{} {}",
+                    &line[..delimiter_offset],
+                    delimiter as char,
+                    expected
+                ));
+            }
+            Some(line.to_string())
+        })
+        .collect::<Option<Vec<_>>>()?
         .join("\n");
     changed.then_some(patched)
 }

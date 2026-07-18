@@ -1411,6 +1411,7 @@ fn read_range(
         "start_line": from,
         "end_line": to,
         "total_lines": total_lines,
+        "line_count": total_lines,
         "excerpt": excerpt,
         "line_safety": {
             "raw": raw,
@@ -1419,6 +1420,14 @@ fn read_range(
             "truncated_lines": truncated_lines,
         },
     });
+    if from == 1 && to >= 1 {
+        if let (Some(obj), Some(first_line)) = (output.as_object_mut(), lines.first()) {
+            obj.insert(
+                "first_line".to_string(),
+                json!(render_read_range_line(first_line, raw, max_line_chars).text),
+            );
+        }
+    }
     if mode == "last_non_empty" {
         if let Some(obj) = output.as_object_mut() {
             obj.insert(

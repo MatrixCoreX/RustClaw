@@ -1775,7 +1775,12 @@ fn step_output_excerpt_compacts_read_range_as_valid_json() {
             "excerpt": "1|def add(a, b):\n2|    return a + b\n3|def sub(a, b):\n4|    return a - b",
             "start_line": 1,
             "end_line": 4,
-            "total_lines": 4
+            "total_lines": 4,
+            "line_count": 4,
+            "first_line": "def add(a, b):",
+            "line_safety": {
+                "line_numbered": true
+            }
         },
         "text": "display text"
     })
@@ -1792,6 +1797,20 @@ fn step_output_excerpt_compacts_read_range_as_valid_json() {
         .pointer("/extra/excerpt")
         .and_then(Value::as_str)
         .is_some_and(|excerpt| excerpt.contains("def add")));
+    assert_eq!(
+        value.pointer("/extra/line_count").and_then(Value::as_u64),
+        Some(4)
+    );
+    assert_eq!(
+        value.pointer("/extra/first_line").and_then(Value::as_str),
+        Some("def add(a, b):")
+    );
+    assert_eq!(
+        value
+            .pointer("/extra/line_safety/line_numbered")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]

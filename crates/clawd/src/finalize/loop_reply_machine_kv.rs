@@ -21,6 +21,7 @@ use machine_unit_delivery::{
     current_delivery_is_publishable_evidence_summary,
     latest_publishable_delivery_with_requested_machine_units, machine_kv_units,
     machine_kv_units_strictly_extend, normalized_state_patch_key,
+    patch_current_delivery_conflicting_requested_machine_fields,
     patch_current_delivery_empty_requested_machine_fields, requested_machine_summary_pairs,
     route_required_machine_evidence_is_present_in_current_delivery,
     strict_machine_field_contract_requested, valid_machine_unit_key,
@@ -533,6 +534,39 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         log_deterministic_delivery_record(
             &task.task_id,
             "requested_machine_kv_summary_patch_empty_field",
+            "patched",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
+    if let Some(patched) =
+        patch_current_delivery_conflicting_requested_machine_fields(&current, &answer)
+    {
+        delivery_messages.clear();
+        delivery_messages.push(patched.clone());
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            patched.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(patched);
+        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        });
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "requested_machine_kv_summary_patch_conflicting_field",
             "patched",
             agent_run_context,
             loop_state.executed_step_results.len(),

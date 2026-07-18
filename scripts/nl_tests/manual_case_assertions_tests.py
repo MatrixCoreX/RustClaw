@@ -57,10 +57,13 @@ def capability_step(
     *,
     dry_run: bool = True,
     capability: str = "fixture.preview",
+    observed_fields: dict[str, object] | None = None,
 ) -> dict:
     items = []
     if dry_run:
         items.append({"field": "dry_run", "excerpt": "true"})
+    for field, value in (observed_fields or {}).items():
+        items.append({"field": f"extra.{field}", "excerpt": value})
     return {
         "requested_action_type": "call_capability",
         "action_kind": "call_capability",
@@ -188,6 +191,58 @@ def main() -> int:
             expect="",
         )
         assert complete_fields_row["assertion"] == "pass"
+
+        mismatched_observed_field = write_result(
+            root,
+            "mismatched-observed-field.json",
+            result_with_steps(
+                [capability_step(observed_fields={"line_count": 10})],
+                text="line_count: 1",
+            ),
+        )
+        mismatched_observed_field_row = row_for(
+            mismatched_observed_field,
+            "final_observed_field:line_count",
+            expect="",
+        )
+        assert mismatched_observed_field_row["assertion"] == "fail"
+
+        matched_observed_field = write_result(
+            root,
+            "matched-observed-field.json",
+            result_with_steps(
+                [capability_step(observed_fields={"line_count": 10})],
+                text="line_count: 10",
+            ),
+        )
+        matched_observed_field_row = row_for(
+            matched_observed_field,
+            "final_observed_field:line_count",
+            expect="",
+        )
+        assert matched_observed_field_row["assertion"] == "pass"
+
+        normalized_path = write_result(
+            root,
+            "normalized-path.json",
+            result_with_steps(
+                [
+                    capability_step(
+                        observed_fields={
+                            "path": "README.md",
+                            "resolved_path": "/workspace/README.md",
+                        }
+                    )
+                ],
+                text="path: /workspace/README.md",
+            ),
+        )
+        normalized_path_row = row_for(
+            normalized_path,
+            "final_observed_field:path",
+            expect="",
+        )
+        assert normalized_path_row["assertion"] == "pass"
 
     print("MANUAL_CASE_ASSERTIONS_TESTS ok")
     return 0

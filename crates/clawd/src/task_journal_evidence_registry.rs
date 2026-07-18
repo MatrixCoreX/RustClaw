@@ -227,7 +227,13 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "system_basic.read_range",
         "system_basic.read_range.structured_json_v1",
-        &["content_excerpt", "path"],
+        &[
+            "content_excerpt",
+            "first_line",
+            "line_count",
+            "path",
+            "total_lines",
+        ],
     ),
     step_json_extractor(
         "system_basic.extract_field",
@@ -275,7 +281,14 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "fs_basic.read_text_range",
         "fs_basic.read_text_range.structured_json_v1",
-        &["content_excerpt", "field_value", "path"],
+        &[
+            "content_excerpt",
+            "field_value",
+            "first_line",
+            "line_count",
+            "path",
+            "total_lines",
+        ],
     ),
     step_json_extractor(
         "fs_basic.write_text",
@@ -1203,6 +1216,7 @@ pub(super) fn canonical_evidence_source_action_token_for_skill(
 ) -> String {
     match (skill, action.as_str()) {
         ("fs_basic", "inventory_dir") => "list_dir".to_string(),
+        ("fs_basic", "read_range") => "read_text_range".to_string(),
         _ => action,
     }
 }

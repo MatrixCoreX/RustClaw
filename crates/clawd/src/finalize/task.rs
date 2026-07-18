@@ -467,6 +467,13 @@ pub(super) fn promote_verified_terminal_answer_after_verifier_pass(
     if answer_verifier_recovery_already_terminal(journal) {
         return false;
     }
+    if journal
+        .final_answer
+        .as_deref()
+        .is_some_and(|recorded| recorded.trim() == answer_text.trim())
+    {
+        return false;
+    }
     if !route_allows_verified_terminal_answer_promotion(route_result, journal) {
         return false;
     }

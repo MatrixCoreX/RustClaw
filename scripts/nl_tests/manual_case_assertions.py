@@ -133,19 +133,54 @@ def completed_side_effect_count(result: dict[str, Any]) -> int:
 
 
 def final_text_has_machine_field(text: str, field: str) -> bool:
+    return final_text_machine_field_value(text, field) is not None
+
+
+def final_text_machine_field_value(text: str, field: str) -> str | None:
     try:
         parsed = json.loads(text)
     except (json.JSONDecodeError, TypeError):
         parsed = None
     if isinstance(parsed, dict) and field in parsed:
-        return True
-    return (
-        re.search(
-            rf"(?m)(?:^|[;\s]){re.escape(field)}\s*[:=]",
-            text,
-        )
-        is not None
+        return value_to_compare_text(parsed[field])
+    match = re.search(
+        rf"(?m)^\s*{re.escape(field)}\s*[:=]\s*(.*?)\s*$",
+        text,
     )
+    if match is not None:
+        return match.group(1).strip()
+    match = re.search(
+        rf"(?:^|[;\s]){re.escape(field)}\s*=\s*(\S+)",
+        text,
+    )
+    return match.group(1).strip() if match is not None else None
+
+
+def observed_machine_field_values(
+    result: dict[str, Any],
+    field: str,
+) -> list[str]:
+    field_aliases = {
+        "path": {"path", "resolved_path", "effective_path"},
+    }
+    accepted_fields = field_aliases.get(field, {field})
+    values: list[str] = []
+    for step in actual_call_steps(result):
+        observed = step.get("observed_evidence")
+        items = observed.get("items") if isinstance(observed, dict) else None
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            observed_field = str(item.get("field") or "")
+            observed_leaf = observed_field.rsplit(".", maxsplit=1)[-1]
+            if observed_leaf not in accepted_fields:
+                continue
+            value = value_to_compare_text(item.get("excerpt", _MISSING))
+            if value is not None and value not in values:
+                values.append(value)
+    return values
 
 
 def structural_assertions(
@@ -233,6 +268,21 @@ def structural_assertions(
                 "tag": "final_field",
                 "expected": required_field,
                 "ok": final_text_has_machine_field(text, required_field),
+            }
+        )
+
+    observed_final_fields = token_tags(tags, "final_observed_field")
+    for required_field in observed_final_fields:
+        actual = final_text_machine_field_value(text, required_field)
+        observed_values = observed_machine_field_values(result, required_field)
+        details.append(
+            {
+                "kind": "tag",
+                "tag": "final_observed_field",
+                "expected": required_field,
+                "actual": actual,
+                "observed_values": observed_values,
+                "ok": actual is not None and actual in observed_values,
             }
         )
 

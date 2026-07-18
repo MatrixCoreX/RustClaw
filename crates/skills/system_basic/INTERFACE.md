@@ -139,7 +139,7 @@
 - `find_path` success `extra` fields:
   - `action`, `root`, `count`, and `results`; evidence roles `path`, `results`, and `count`.
 - `read_range` success `extra` fields:
-  - `action`, `path`, `start_line`, `end_line`, `line_count`, `excerpt`, optional `field_selector`, optional `field_value` / `value_text` for selector projections; evidence roles `path`, `field_value`, and `count`.
+  - `action`, `path`, `start_line`, `end_line`, `total_lines`, `line_count` (stable alias of total file lines), `excerpt`, optional `first_line` when the observed slice includes line 1, optional `field_selector`, optional `field_value` / `value_text` for selector projections; evidence roles `path`, `field_value`, and `count`.
 - `compare_paths` success `extra` fields:
   - `left` and `right` structured path fact objects with `exists`, `kind`, `size`, and modified time fields.
   - `comparison` structured comparison fields such as `same_path`, `same_kind`, `same_name`, `same_size`, `size_delta_bytes`, `left_newer`, and `same_content`.
@@ -217,7 +217,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-4","status":"ok","text":"{\"action\":\"read_range\",\"start_line\":1,\"end_line\":8,\"excerpt\":\"1|[server]\\n2|port = 8080\"}","extra":{"action":"read_range","start_line":1,"end_line":8,"excerpt":"1|[server]\n2|port = 8080"},"error_text":null}
+{"request_id":"demo-4","status":"ok","text":"{\"action\":\"read_range\",\"start_line\":1,\"end_line\":8,\"line_count\":12,\"first_line\":\"[server]\",\"excerpt\":\"1|[server]\\n2|port = 8080\"}","extra":{"action":"read_range","start_line":1,"end_line":8,"total_lines":12,"line_count":12,"first_line":"[server]","excerpt":"1|[server]\n2|port = 8080"},"error_text":null}
 ```
 
 ### Example 5
