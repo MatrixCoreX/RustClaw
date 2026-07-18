@@ -1,7 +1,7 @@
 use super::{
     collect_machine_text_fragments_from_output,
     collect_requested_machine_kv_surfaces_from_state_patch, parse_machine_kv_units,
-    requested_machine_kv_summary_from_observations,
+    requested_machine_kv_summary_from_observations, structured_json_satisfies_field_selector,
 };
 
 #[test]
@@ -895,4 +895,30 @@ fn single_inline_flag_pair_still_requires_observed_value() {
         requested_machine_kv_summary_from_observations("Only answer: required=yes.", &observed);
 
     assert!(summary.is_none());
+}
+
+#[test]
+fn structured_selector_requires_every_field_in_machine_payload() {
+    let output = r#"{"extra":{"checkpoint":{"status":"planned"},"diff":{"status":"planned"},"failed_verification":{"status":"failed"},"repair_attempt":{"attempt":1},"passing_verification":{"status":"passed"},"rewind_references":["checkpoint:1"]},"text":"localized fallback"}"#;
+
+    assert!(structured_json_satisfies_field_selector(
+        "checkpoint,diff,failed_verification,repair_attempt,passing_verification,rewind_references",
+        output,
+    ));
+    assert!(!structured_json_satisfies_field_selector(
+        "checkpoint,diff,missing_field",
+        output,
+    ));
+}
+
+#[test]
+fn structured_selector_does_not_use_visible_text_fallback() {
+    let output =
+        r#"{"extra":{"checkpoint":{"status":"planned"}},"text":"diff={\"status\":\"planned\"}"}"#;
+
+    assert!(!structured_json_satisfies_field_selector(
+        "checkpoint,diff",
+        output,
+    ));
+    assert!(!structured_json_satisfies_field_selector("text", output));
 }

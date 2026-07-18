@@ -203,6 +203,27 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         step.skill == "mcp.fixture.lookup"
             && step.status == crate::executor::StepExecutionStatus::Ok
     }));
+    let capability_resolution = journal
+        .task_observations
+        .iter()
+        .find(|observation| {
+            observation.get("observation_kind").and_then(Value::as_str)
+                == Some("capability_resolution")
+        })
+        .expect("verified capability resolution observation");
+    assert_eq!(
+        capability_resolution["requested_capability"],
+        "mcp.fixture.lookup"
+    );
+    assert_eq!(
+        capability_resolution["resolved_capability"],
+        "mcp.fixture.lookup"
+    );
+    assert_eq!(
+        capability_resolution["resolved_tool_or_skill"],
+        "tool:mcp.fixture.lookup"
+    );
+    assert_eq!(capability_resolution["resolution_stage"], "verify");
     let mcp_observation = journal
         .task_observations
         .iter()
@@ -216,6 +237,17 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
     assert!(journal.event_stream_snapshot().iter().any(|event| {
         event.get("event_type").and_then(Value::as_str) == Some("mcp_tool_call")
             && event.pointer("/payload/capability").and_then(Value::as_str)
+                == Some("mcp.fixture.lookup")
+    }));
+    assert!(journal.event_stream_snapshot().iter().any(|event| {
+        event.get("event_type").and_then(Value::as_str) == Some("tool_finished")
+            && event
+                .pointer("/payload/requested_capability")
+                .and_then(Value::as_str)
+                == Some("mcp.fixture.lookup")
+            && event
+                .pointer("/payload/resolved_capability")
+                .and_then(Value::as_str)
                 == Some("mcp.fixture.lookup")
     }));
     let audit_count: u64 = state

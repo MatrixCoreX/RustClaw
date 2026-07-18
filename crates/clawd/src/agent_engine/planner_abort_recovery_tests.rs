@@ -3,13 +3,9 @@ use crate::providers::fixture_replay::{
     clear_cache_for_test, RecordedCall, FIXTURE_CALLS_FILENAME, FIXTURE_LLM_CASE_ENV,
     FIXTURE_LLM_ROOT_ENV, FIXTURE_LLM_SEQUENCE_FALLBACK_ENV,
 };
-use std::sync::Mutex;
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
+    crate::fixture_replay_e2e::fixture_env_lock()
 }
 
 struct FixtureEnv {

@@ -312,6 +312,36 @@ fn text_has_exact_marker_line(text: &str, marker: &str) -> bool {
     !marker.is_empty() && text.lines().map(str::trim).any(|line| line == marker)
 }
 
+fn structured_field_selector_observation_can_finalize(
+    route_result: &IntentOutputContract,
+    loop_state: &LoopState,
+) -> bool {
+    let Some(selector) = route_result
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .map(str::trim)
+        .filter(|selector| !selector.is_empty())
+    else {
+        return false;
+    };
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            step.is_ok()
+                && !matches!(
+                    step.skill.as_str(),
+                    "synthesize_answer" | "respond" | "answer_verifier"
+                )
+        })
+        .filter_map(|step| step.output.as_deref())
+        .any(|output| {
+            crate::machine_kv_projection::structured_json_satisfies_field_selector(selector, output)
+        })
+}
+
 fn should_stop_for_observed_finalize(
     agent_run_context: Option<&AgentRunContext>,
     loop_state: &LoopState,
@@ -328,13 +358,19 @@ fn should_stop_for_observed_finalize(
     if loop_state.execution_recipe.needs_validation() {
         return false;
     }
-    let route_result = agent_run_context.and_then(|ctx| ctx.output_contract());
+    let route_result = loop_state
+        .output_contract
+        .as_ref()
+        .or_else(|| agent_run_context.and_then(|ctx| ctx.output_contract()));
     let Some(route_result) = route_result else {
         return false;
     };
     let output_contract = route_result.clone();
     if false || !loop_state.has_tool_or_skill_output || has_authoritative_delivery(loop_state) {
         return false;
+    }
+    if structured_field_selector_observation_can_finalize(route_result, loop_state) {
+        return true;
     }
     if route_needs_workspace_text_evidence_before_observed_finalize(route_result)
         && !has_discussion_followup_action(actions)
@@ -698,6 +734,25 @@ async fn run_agent_round(
     )
     .await?;
     push_round_trace(loop_state, goal, &prepared_round);
+    for resolution in &prepared_round.verify_result.capability_resolutions {
+        let step_in_round = resolution.plan_step_index + 1;
+        let mut observation = resolution.record.dispatch_observation(
+            loop_state.round_no,
+            loop_state.total_steps_executed + step_in_round,
+            step_in_round,
+        );
+        if let Some(object) = observation.as_object_mut() {
+            object.insert(
+                "plan_step_id".to_string(),
+                serde_json::Value::String(resolution.plan_step_id.clone()),
+            );
+            object.insert(
+                "resolution_stage".to_string(),
+                serde_json::Value::String("verify".to_string()),
+            );
+        }
+        loop_state.task_observations.push(observation);
+    }
     crate::task_event_transport::publish_loop_state_snapshot(state, task, user_text, loop_state);
     record_agent_loop_decision_envelope_output_vars(loop_state, &prepared_round.plan_result);
     if !loop_state

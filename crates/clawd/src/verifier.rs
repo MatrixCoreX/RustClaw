@@ -240,6 +240,14 @@ pub(crate) struct VerifyResult {
     pub(crate) needs_confirmation: bool,
     pub(crate) rewritten_steps: Vec<PlanStep>,
     pub(crate) issues: Vec<VerifyIssue>,
+    pub(crate) capability_resolutions: Vec<VerifiedCapabilityResolution>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct VerifiedCapabilityResolution {
+    pub(crate) plan_step_index: usize,
+    pub(crate) plan_step_id: String,
+    pub(crate) record: crate::capability_resolver::CapabilityResolutionRecord,
 }
 
 fn required_args_for_skill(skill: &str) -> &'static [&'static str] {
@@ -999,6 +1007,7 @@ pub(crate) fn verify_plan(
     mode: VerifyMode,
 ) -> VerifyResult {
     let mut effective_plan_result = input.plan_result.clone();
+    let capability_resolutions = resolve_capability_plan_steps(state, &mut effective_plan_result);
     let mut issues = Vec::new();
     apply_default_creation_targets(state, task, &mut effective_plan_result, &mut issues);
     apply_generated_file_path_report_write_repair(
@@ -1276,7 +1285,43 @@ pub(crate) fn verify_plan(
         needs_confirmation,
         rewritten_steps,
         issues,
+        capability_resolutions,
     }
+}
+
+fn resolve_capability_plan_steps(
+    state: &AppState,
+    plan_result: &mut PlanResult,
+) -> Vec<VerifiedCapabilityResolution> {
+    let mut resolutions = Vec::new();
+    for (plan_step_index, step) in plan_result.steps.iter_mut().enumerate() {
+        if step.action_type != "call_capability" {
+            continue;
+        }
+        let (resolved, record) =
+            crate::capability_resolver::resolve_capability_action_with_record_for_state(
+                state,
+                &step.skill,
+                step.args.clone(),
+            );
+        resolutions.push(VerifiedCapabilityResolution {
+            plan_step_index,
+            plan_step_id: step.step_id.clone(),
+            record,
+        });
+        let Some(resolved) = resolved else {
+            continue;
+        };
+        let resolved =
+            crate::agent_engine::normalize_resolved_planner_action_for_verifier(state, resolved);
+        *step = crate::plan_step_from_agent_action(
+            &resolved,
+            step.step_id.clone(),
+            step.depends_on.clone(),
+            step.why.clone(),
+        );
+    }
+    resolutions
 }
 
 pub(crate) fn skill_sandbox_denial_reason(

@@ -252,6 +252,63 @@ fn response_content_is_json_object(content: &str) -> bool {
     serde_json::from_str::<Value>(content.trim()).is_ok_and(|value| value.is_object())
 }
 
+fn successful_structured_observation_satisfies_selector(
+    agent_run_context: Option<&AgentRunContext>,
+    loop_state: &LoopState,
+    current_action: &AgentAction,
+    remaining_actions: &[AgentAction],
+) -> bool {
+    if !matches!(
+        current_action,
+        AgentAction::CallCapability { .. }
+            | AgentAction::CallTool { .. }
+            | AgentAction::CallSkill { .. }
+    ) || remaining_actions.is_empty()
+        || !remaining_actions.iter().all(|action| {
+            matches!(
+                action,
+                AgentAction::SynthesizeAnswer { .. }
+                    | AgentAction::Respond { .. }
+                    | AgentAction::Think { .. }
+            )
+        })
+        || loop_state.execution_recipe.needs_validation()
+        || loop_state.execution_recipe.is_active()
+            && !matches!(
+                loop_state.execution_recipe.phase,
+                crate::execution_recipe::ExecutionRecipePhase::Done
+            )
+    {
+        return false;
+    }
+    let route = loop_state
+        .output_contract
+        .as_ref()
+        .filter(|route| {
+            route
+                .selection
+                .structured_field_selector
+                .as_deref()
+                .is_some_and(|selector| !selector.trim().is_empty())
+        })
+        .or_else(|| agent_run_context.and_then(AgentRunContext::output_contract));
+    let Some(selector) = route
+        .and_then(|route| route.selection.structured_field_selector.as_deref())
+        .map(str::trim)
+        .filter(|selector| !selector.is_empty())
+    else {
+        return false;
+    };
+    loop_state
+        .executed_step_results
+        .last()
+        .filter(|step| step.is_ok())
+        .and_then(|step| step.output.as_deref())
+        .is_some_and(|output| {
+            crate::machine_kv_projection::structured_json_satisfies_field_selector(selector, output)
+        })
+}
+
 pub(super) async fn execute_actions_once(
     state: &AppState,
     task: &ClaimedTask,
@@ -334,6 +391,25 @@ pub(super) async fn execute_actions_once(
         );
         let executed_limit = policy.max_steps.max(1);
         let remaining_actions = &actions[idx + 1..actions.len().min(executed_limit)];
+        if matches!(
+            decision,
+            ActionLoopDecision::NextAction | ActionLoopDecision::ContinueRound
+        ) && successful_structured_observation_satisfies_selector(
+            agent_run_context,
+            loop_state,
+            action,
+            remaining_actions,
+        ) {
+            info!(
+                "executor_structured_observation_skip_terminal_discussion task_id={} round={} step={} remaining={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                remaining_actions.len()
+            );
+            stop_signal = Some("structured_observation_ready".to_string());
+            break;
+        }
         if matches!(
             decision,
             ActionLoopDecision::NextAction | ActionLoopDecision::ContinueRound

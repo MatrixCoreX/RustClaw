@@ -1,6 +1,7 @@
 use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
     capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
+    successful_structured_observation_satisfies_selector,
     terminal_synthesis_can_skip_remaining_actions,
 };
 use crate::agent_engine::action_fingerprint_for_policy;
@@ -205,6 +206,97 @@ fn terminal_synthesis_does_not_skip_concrete_or_executable_suffix() {
             args: serde_json::json!({"action":"read_range"}),
         }],
         &loop_state,
+    ));
+}
+
+#[test]
+fn complete_structured_observation_skips_terminal_discussion_actions() {
+    let mut loop_state = super::LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some(
+                "checkpoint,diff,failed_verification,repair_attempt,passing_verification,rewind_references"
+                    .to_string(),
+            ),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "task_control".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"extra":{"checkpoint":{"status":"planned"},"diff":{"status":"planned"},"failed_verification":{"status":"failed"},"repair_attempt":{"attempt":1},"passing_verification":{"status":"passed"},"rewind_references":["checkpoint:1"]}}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    let current = crate::AgentAction::CallCapability {
+        capability: "task_control.preview_repair".to_string(),
+        args: serde_json::json!({}),
+    };
+    let remaining = [
+        crate::AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string()],
+        },
+        crate::AgentAction::Respond {
+            content: "{{ last_output }}".to_string(),
+        },
+    ];
+
+    assert!(successful_structured_observation_satisfies_selector(
+        Some(&crate::agent_engine::AgentRunContext {
+            output_contract: Some(crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Free,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        &loop_state,
+        &current,
+        &remaining,
+    ));
+}
+
+#[test]
+fn incomplete_structured_observation_keeps_terminal_discussion_actions() {
+    let mut loop_state = super::LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("checkpoint,diff".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "task_control".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(r#"{"extra":{"checkpoint":{"status":"planned"}}}"#.to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+    assert!(!successful_structured_observation_satisfies_selector(
+        None,
+        &loop_state,
+        &crate::AgentAction::CallCapability {
+            capability: "task_control.preview_repair".to_string(),
+            args: serde_json::json!({}),
+        },
+        &[crate::AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string()],
+        }],
     ));
 }
 

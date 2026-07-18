@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{AgentAction, AppState};
 use claw_core::skill_registry::{
@@ -12,6 +12,7 @@ pub(crate) struct CapabilityResolutionRecord {
     pub(crate) outcome: &'static str,
     pub(crate) source: &'static str,
     pub(crate) capability_ref: String,
+    pub(crate) canonical_capability_ref: Option<String>,
     pub(crate) resolved_ref: Option<String>,
     pub(crate) planner_kind: Option<&'static str>,
     pub(crate) output_semantic_kind: Option<String>,
@@ -31,6 +32,7 @@ impl CapabilityResolutionRecord {
             outcome: "resolved",
             source,
             capability_ref: capability_ref.into(),
+            canonical_capability_ref: None,
             resolved_ref: resolved_action_ref(resolved),
             planner_kind: Some(planner_kind.as_token()),
             output_semantic_kind: None,
@@ -44,6 +46,7 @@ impl CapabilityResolutionRecord {
             outcome: "unresolved",
             source: "none",
             capability_ref: capability_ref.into(),
+            canonical_capability_ref: None,
             resolved_ref: None,
             planner_kind: None,
             output_semantic_kind: None,
@@ -53,6 +56,7 @@ impl CapabilityResolutionRecord {
     fn blocked(
         reason_code: &'static str,
         capability_ref: impl Into<String>,
+        canonical_capability_ref: impl Into<String>,
         skill: &str,
         planner_kind: PlannerCapabilityKind,
     ) -> Self {
@@ -62,10 +66,33 @@ impl CapabilityResolutionRecord {
             outcome: "blocked",
             source: "registry",
             capability_ref: capability_ref.into(),
+            canonical_capability_ref: Some(canonical_capability_ref.into()),
             resolved_ref: Some(resolved_ref_for_skill(planner_kind, skill)),
             planner_kind: Some(planner_kind.as_token()),
             output_semantic_kind: None,
         }
+    }
+
+    pub(crate) fn dispatch_observation(
+        &self,
+        round_no: usize,
+        global_step: usize,
+        step_in_round: usize,
+    ) -> Value {
+        json!({
+            "observation_kind": "capability_resolution",
+            "owner_layer": self.owner_layer,
+            "reason_code": self.reason_code,
+            "outcome": self.outcome,
+            "source": self.source,
+            "requested_capability": self.capability_ref,
+            "resolved_capability": self.canonical_capability_ref,
+            "resolved_tool_or_skill": self.resolved_ref,
+            "planner_kind": self.planner_kind,
+            "round_no": round_no,
+            "global_step": global_step,
+            "step_in_round": step_in_round,
+        })
     }
 }
 
@@ -80,16 +107,6 @@ enum RegistryCapabilityResolution {
     Resolved(ResolvedCapabilityAction),
     Blocked(CapabilityResolutionRecord),
     None,
-}
-
-pub(crate) fn resolve_agent_actions_for_state(
-    state: &AppState,
-    actions: Vec<AgentAction>,
-) -> Vec<AgentAction> {
-    actions
-        .into_iter()
-        .map(|action| resolve_agent_action_for_state(state, action))
-        .collect()
 }
 
 pub(crate) fn resolve_agent_action_for_state(state: &AppState, action: AgentAction) -> AgentAction {
@@ -132,13 +149,14 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
             tool: tool.capability,
             args,
         };
-        let record = CapabilityResolutionRecord::resolved(
+        let mut record = CapabilityResolutionRecord::resolved(
             "capability_resolver_mcp_mapping_resolved",
             "mcp",
-            normalized,
+            normalized.clone(),
             &action,
             PlannerCapabilityKind::Tool,
         );
+        record.canonical_capability_ref = Some(normalized);
         return (Some(action), record);
     }
     (None, CapabilityResolutionRecord::unresolved(normalized))
@@ -147,6 +165,7 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
 #[derive(Debug)]
 struct ResolverCandidate {
     skill: String,
+    capability: String,
     action: Option<String>,
     planner_kind: PlannerCapabilityKind,
     preferred: bool,
@@ -179,6 +198,7 @@ fn resolve_registry_capability_action(
             blocked.push(CapabilityResolutionRecord::blocked(
                 reason_code,
                 normalized_capability.to_string(),
+                mapping.name.clone(),
                 &skill,
                 planner_kind,
             ));
@@ -186,6 +206,7 @@ fn resolve_registry_capability_action(
         }
         candidates.push(ResolverCandidate {
             skill,
+            capability: mapping.name.clone(),
             action: mapping.action.clone(),
             planner_kind,
             preferred: mapping.preferred
@@ -203,6 +224,7 @@ fn resolve_registry_capability_action(
     if let Some(candidate) = candidates.into_iter().next() {
         let planner_kind = candidate.planner_kind;
         let output_semantic_kind = candidate.output_semantic_kind.clone();
+        let canonical_capability_ref = candidate.capability.clone();
         let action = resolve_candidate_action(candidate, args);
         let mut record = CapabilityResolutionRecord::resolved(
             "capability_resolver_registry_mapping_resolved",
@@ -211,6 +233,7 @@ fn resolve_registry_capability_action(
             &action,
             planner_kind,
         );
+        record.canonical_capability_ref = Some(canonical_capability_ref);
         record.output_semantic_kind = output_semantic_kind;
         return RegistryCapabilityResolution::Resolved(ResolvedCapabilityAction { record, action });
     }
@@ -258,7 +281,9 @@ pub(crate) fn bind_unclassified_output_contract_from_capabilities(
         inferred = Some(kind);
     }
 
-    let kind = inferred?;
+    let Some(kind) = inferred else {
+        return output_contract;
+    };
     let contract = output_contract.get_or_insert_with(crate::IntentOutputContract::default);
     contract.semantic_kind = kind;
     Some(contract.clone())

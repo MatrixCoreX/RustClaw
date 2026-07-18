@@ -1841,3 +1841,70 @@ fn step_output_excerpt_ignores_machine_json_hidden_in_text() {
         json!({ "text": hidden_listing }).to_string()
     );
 }
+
+#[test]
+fn step_trace_projects_canonical_capability_from_dispatch_observation() {
+    let mut journal = TaskJournal::for_task("task-capability-trace", "ask", "preview repair");
+    let plan = crate::PlanResult {
+        goal: "preview repair".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "task_control.preview_repair".to_string(),
+            args: json!({"action":"preview_coding_repair"}),
+            depends_on: Vec::new(),
+            why: "preview".to_string(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: json!({
+            "steps": [{
+                "type": "call_capability",
+                "capability": "task_control.preview_repair",
+                "args": {}
+            }]
+        })
+        .to_string(),
+    };
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 1,
+        goal: "preview repair".to_string(),
+        plan_result: Some(plan),
+        ..Default::default()
+    });
+    journal.push_task_observation(json!({
+        "observation_kind": "capability_resolution",
+        "owner_layer": "capability_resolver",
+        "requested_capability": "task_control.preview_repair",
+        "resolved_capability": "coding_workflow.preview_repair",
+        "resolved_tool_or_skill": "skill:task_control",
+        "round_no": 1,
+        "global_step": 1,
+        "step_in_round": 1
+    }));
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "task_control".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(json!({"extra":{"dry_run":true}}).to_string()),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let trace = journal.to_trace_json();
+    let step = trace
+        .pointer("/step_results/0")
+        .expect("step trace should be present");
+    assert_eq!(
+        step.get("requested_capability").and_then(Value::as_str),
+        Some("task_control.preview_repair")
+    );
+    assert_eq!(
+        step.get("resolved_capability").and_then(Value::as_str),
+        Some("coding_workflow.preview_repair")
+    );
+}

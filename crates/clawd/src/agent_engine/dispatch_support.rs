@@ -1167,16 +1167,23 @@ pub(super) async fn dispatch_round_action(
     ended_with_user_visible_output: &mut bool,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<ActionLoopDecision, String> {
-    let resolved_capability_action;
     let resolved_from_call_capability = matches!(action, AgentAction::CallCapability { .. });
-    let action = if resolved_from_call_capability {
-        resolved_capability_action = Some(
-            crate::capability_resolver::resolve_agent_action_for_state(state, action.clone()),
-        );
-        resolved_capability_action.as_ref().unwrap()
-    } else {
-        action
-    };
+    let resolved_capability_action =
+        if let AgentAction::CallCapability { capability, args } = action {
+            let (resolved, record) =
+                crate::capability_resolver::resolve_capability_action_with_record_for_state(
+                    state,
+                    capability,
+                    args.clone(),
+                );
+            loop_state
+                .task_observations
+                .push(record.dispatch_observation(loop_state.round_no, global_step, step_in_round));
+            resolved
+        } else {
+            None
+        };
+    let action = resolved_capability_action.as_ref().unwrap_or(action);
     match action {
         AgentAction::CallTool { tool, args } => {
             handle_call_tool_action(

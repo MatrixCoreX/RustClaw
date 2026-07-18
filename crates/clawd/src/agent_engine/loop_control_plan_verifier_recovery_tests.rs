@@ -25,6 +25,7 @@ fn verify_result(kinds: &[crate::verifier::VerifyIssueKind]) -> crate::verifier:
                 missing_fields: Vec::new(),
             })
             .collect(),
+        capability_resolutions: Vec::new(),
     }
 }
 

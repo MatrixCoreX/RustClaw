@@ -1,13 +1,9 @@
 use super::*;
 use std::path::Path;
-use std::sync::Mutex;
 
 /// 进程内 env 串扰隔离锁：本模块所有用 set_var 的测试串行化。
 fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    crate::fixture_replay_e2e::fixture_env_lock()
 }
 
 /// 简易 RAII tempdir（避开新增 tempfile dev-dep）：drop 时递归删除。

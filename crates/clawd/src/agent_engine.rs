@@ -43,6 +43,13 @@ use self::arg_resolver::{
 };
 use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_action};
 
+pub(crate) fn normalize_resolved_planner_action_for_verifier(
+    state: &AppState,
+    action: AgentAction,
+) -> AgentAction {
+    self::planning_action_normalization::normalize_resolved_executable_action(state, action)
+}
+
 pub(crate) fn local_code_strict_json_projection_from_machine_evidence(
     user_text: &str,
     loop_state: &LoopState,
@@ -1083,7 +1090,7 @@ pub(crate) async fn run_agent_with_tools_seeded(
 }
 
 pub(crate) fn direct_capability_plan(
-    state: &AppState,
+    _state: &AppState,
     capability: &str,
     args: Value,
 ) -> PlanResult {
@@ -1091,30 +1098,14 @@ pub(crate) fn direct_capability_plan(
         capability: capability.to_string(),
         args,
     };
-    let (resolved, resolution) =
-        crate::capability_resolver::resolve_capability_action_with_record_for_state(
-            state,
-            capability,
-            match &requested {
-                AgentAction::CallCapability { args, .. } => args.clone(),
-                _ => Value::Null,
-            },
-        );
-    let mut actions = vec![resolved.unwrap_or(requested)];
+    let mut actions = vec![requested];
     actions.push(AgentAction::SynthesizeAnswer {
         evidence_refs: Vec::new(),
     });
     let raw_plan = json!({
         "plan_source": "direct_capability",
         "capability": capability,
-        "resolution": {
-            "owner_layer": resolution.owner_layer,
-            "reason_code": resolution.reason_code,
-            "outcome": resolution.outcome,
-            "source": resolution.source,
-            "resolved_ref": resolution.resolved_ref,
-            "planner_kind": resolution.planner_kind,
-        }
+        "resolution_stage": "verifier"
     })
     .to_string();
     self::planning_actions::build_plan_result_with_notes(

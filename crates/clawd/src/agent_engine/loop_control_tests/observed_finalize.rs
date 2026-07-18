@@ -71,6 +71,53 @@ fn observed_call_capability_inventory_names_can_stop_loop_without_second_round()
 }
 
 #[test]
+fn complete_structured_selector_stops_after_single_capability_only_plan() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.selection.structured_field_selector = Some(
+        "checkpoint,diff,failed_verification,repair_attempt,passing_verification,rewind_references"
+            .to_string(),
+    );
+    loop_state.output_contract = Some(route);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "task_control",
+        r#"{"extra":{"checkpoint":{"status":"planned"},"diff":{"status":"planned"},"failed_verification":{"status":"failed"},"repair_attempt":{"attempt":1},"passing_verification":{"status":"passed"},"rewind_references":["checkpoint:1"]}}"#,
+    ));
+    let actions = vec![AgentAction::CallCapability {
+        capability: "coding_workflow.preview_repair".to_string(),
+        args: json!({}),
+    }];
+
+    assert!(should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            output_contract: Some(route_result(OutputResponseShape::Free)),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn incomplete_structured_selector_does_not_trigger_shared_round_stop() {
+    let mut loop_state = LoopState::new(2);
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.selection.structured_field_selector = Some("checkpoint,diff".to_string());
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "task_control",
+        r#"{"extra":{"checkpoint":{"status":"planned"}}}"#,
+    ));
+
+    assert!(!structured_field_selector_observation_can_finalize(
+        &route,
+        &loop_state,
+    ));
+}
+
+#[test]
 fn capability_inventory_names_can_stop_without_incremental_planner() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;

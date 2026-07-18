@@ -320,7 +320,7 @@ async fn dynamic_mcp_capability_reaches_resolver_prompt_and_verifier_policy() {
         "mcp.fixture.lookup",
         json!({"query": "machine-token"}),
     );
-    assert_eq!(plan.steps[0].action_type, "call_tool");
+    assert_eq!(plan.steps[0].action_type, "call_capability");
     assert_eq!(plan.steps[0].skill, "mcp.fixture.lookup");
     let verified = crate::verifier::verify_plan(
         &state,
@@ -336,6 +336,15 @@ async fn dynamic_mcp_capability_reaches_resolver_prompt_and_verifier_policy() {
     );
     assert!(verified.approved, "issues={:?}", verified.issues);
     assert!(!verified.needs_confirmation);
+    assert_eq!(verified.approved_steps[0].action_type, "call_tool");
+    assert_eq!(verified.approved_steps[0].skill, "mcp.fixture.lookup");
+    assert_eq!(
+        verified.capability_resolutions[0]
+            .record
+            .canonical_capability_ref
+            .as_deref(),
+        Some("mcp.fixture.lookup")
+    );
     let permission = &verified.permission_decision["steps"][0];
     assert_eq!(permission["decision"], "allow");
     assert_eq!(permission["risk_level"], "low");
