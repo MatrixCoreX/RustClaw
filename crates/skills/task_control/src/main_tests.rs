@@ -160,6 +160,16 @@ fn parse_input_accepts_resume_and_pause_machine_actions() {
 
     assert_eq!(pause.action, "pause");
     assert_eq!(pause.pause_seconds, Some(120));
+
+    let preview = parse_input(&json!({
+        "action": "preview_resume",
+        "task_id": "00000000-0000-4000-8000-000000000012",
+        "checkpoint_id": "ckpt-preview"
+    }))
+    .expect("resume preview input");
+
+    assert_eq!(preview.action, "preview_resume");
+    assert_eq!(preview.checkpoint_id.as_deref(), Some("ckpt-preview"));
 }
 
 #[test]
@@ -216,6 +226,29 @@ fn resume_and_pause_dry_run_extras_are_machine_contracts() {
             .and_then(Value::as_bool),
         Some(false)
     );
+}
+
+#[test]
+fn resume_preview_is_read_only_and_exposes_entrypoint_and_lease_contract() {
+    let preview = parse_input(&json!({
+        "action": "preview_resume",
+        "task_id": "00000000-0000-4000-8000-000000000024",
+        "checkpoint_id": "ckpt-tier1"
+    }))
+    .expect("resume preview input");
+    let extra = resume_preview_extra(&preview);
+
+    assert_eq!(extra["action"], "preview_resume");
+    assert_eq!(extra["status"], "dry_run");
+    assert_eq!(extra["would_mutate"], false);
+    assert_eq!(extra["resume_entrypoint"], "checkpoint_declared");
+    assert_eq!(extra["lease"]["mode"], "renewable");
+    assert_eq!(extra["lease"]["heartbeat_renewal"], true);
+    assert_eq!(
+        extra["field_value"]["checkpoint_id"],
+        serde_json::json!("ckpt-tier1")
+    );
+    assert_eq!(extra["field_value"]["lease_required"], true);
 }
 
 #[test]
