@@ -49,6 +49,28 @@ fn planner_overlays_expand_high_cardinality_placeholders_once() {
 }
 
 #[test]
+fn planner_overlays_require_runtime_observation_for_policy_projections() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    for relative_path in [
+        "single_plan_execution_prompt.md",
+        "loop_incremental_plan_prompt.md",
+    ] {
+        let prompt =
+            std::fs::read_to_string(overlays.join(relative_path)).expect("read prompt overlay");
+        assert!(
+            prompt.contains(
+                "Current permission, policy, risk, confirmation, sandbox, or approval projections are runtime observations"
+            ),
+            "{relative_path} must require a runtime-owned policy projection"
+        );
+        assert!(
+            prompt.contains("never replace it with a guessed `respond`"),
+            "{relative_path} must reject planner-invented permission decisions"
+        );
+    }
+}
+
+#[test]
 fn incremental_prompt_carries_structured_failed_attempt_for_planner_repair() {
     let mut loop_state = LoopState::new(3);
     let err = crate::skills::structured_skill_error_from_parts(
