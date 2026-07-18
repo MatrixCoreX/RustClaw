@@ -107,6 +107,30 @@ fn planner_overlays_keep_independent_reads_out_of_shell_pipelines() {
 }
 
 #[test]
+fn planner_overlays_reserve_scalar_shape_for_one_atomic_result() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    for relative_path in [
+        "single_plan_execution_prompt.md",
+        "loop_incremental_plan_prompt.md",
+    ] {
+        let prompt =
+            std::fs::read_to_string(overlays.join(relative_path)).expect("read prompt overlay");
+        assert!(
+            prompt.contains(
+                "`response_shape=\"scalar\"` is valid only when the complete final answer is exactly one atomic value"
+            ),
+            "{relative_path} must keep scalar projection atomic"
+        );
+        assert!(
+            prompt.contains(
+                "compound result and must use `free` or `strict` so every requested deliverable survives final"
+            ),
+            "{relative_path} must preserve compound final answers"
+        );
+    }
+}
+
+#[test]
 fn incremental_prompt_carries_structured_failed_attempt_for_planner_repair() {
     let mut loop_state = LoopState::new(3);
     let err = crate::skills::structured_skill_error_from_parts(
