@@ -30,6 +30,23 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
     ] {
         assert!(!policy.is_allowed(denied, None), "{denied}");
     }
+    assert!(policy.is_allowed("capability:image.preview_generate", None));
+    assert!(policy.is_any_allowed(
+        &["skill:image_generate", "capability:image.preview_generate"],
+        None
+    ));
+}
+
+#[test]
+fn explicit_skill_deny_overrides_action_capability_allow() {
+    let mut config = ToolsConfig::default();
+    config.deny = vec!["skill:image_generate".to_string()];
+    let policy = ToolsPolicy::from_config(&config).expect("tools policy");
+
+    assert!(!policy.is_any_allowed(
+        &["skill:image_generate", "capability:image.preview_generate"],
+        None
+    ));
 }
 
 #[test]

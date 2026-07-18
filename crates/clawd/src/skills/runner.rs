@@ -3,13 +3,20 @@ use std::path::Path;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+use claw_core::config::ToolSandboxMode;
+use claw_core::skill_registry::{Capability, CapabilityIsolationProfile, PlannerCapabilityMapping};
+
 use crate::{AppState, ClaimedTask};
 
 use super::{
-    apply_skill_runner_env_isolation, current_task_auth_role,
+    action_scoped_planner_mapping, apply_skill_runner_env_isolation, current_task_auth_role,
     place_subprocess_in_own_process_group, run_skill_with_runner_outcome,
     task_allows_path_outside_workspace, task_allows_sudo, terminate_subprocess_group,
 };
+
+#[cfg(test)]
+#[path = "runner_tests.rs"]
+mod tests;
 
 pub(super) fn extract_skill_provider_model(value: &Value) -> Option<(String, String, String)> {
     let extra = value.get("extra")?.as_object()?;
@@ -137,11 +144,13 @@ pub(crate) async fn run_skill_with_runner_once(
     // Manifest capabilities decide which secrets and LLM handles enter the child
     // process. Missing declared secrets fail before spawn instead of becoming
     // empty runtime environment variables.
-    let caps: Vec<claw_core::skill_registry::Capability> = state
+    let action_mapping = action_scoped_planner_mapping(state, canonical_skill_name, args);
+    let caps: Vec<Capability> = state
         .get_skills_registry()
         .as_ref()
         .map(|reg| reg.capabilities(canonical_skill_name).to_vec())
         .unwrap_or_default();
+    let caps = action_scoped_runner_capabilities(caps, action_mapping.as_ref());
     let skill_uses_llm = caps
         .iter()
         .any(|cap| matches!(cap, claw_core::skill_registry::Capability::Llm));
@@ -297,10 +306,14 @@ pub(crate) async fn run_skill_with_runner_once(
     } else {
         crate::process_sandbox::ProcessNetworkPolicy::Deny
     };
+    let sandbox_mode = action_scoped_runner_sandbox_mode(
+        state.skill_rt.tools_policy.sandbox_mode,
+        action_mapping.as_ref(),
+    );
     let prepared = crate::process_sandbox::prepare_process_command(
         &state.skill_rt.skill_runner_path,
         crate::process_sandbox::ProcessSandboxRequest {
-            mode: state.skill_rt.tools_policy.sandbox_mode,
+            mode: sandbox_mode,
             workspace_root: &state.skill_rt.workspace_root,
             execution_root: &state.skill_rt.workspace_root,
             network,
@@ -310,13 +323,13 @@ pub(crate) async fn run_skill_with_runner_once(
     .map_err(|reason_code| {
         format!(
             "skill-runner sandbox unavailable: reason_code={reason_code} sandbox_mode={}",
-            state.skill_rt.tools_policy.sandbox_mode.as_token()
+            sandbox_mode.as_token()
         )
     })?;
     tracing::debug!(
         skill = canonical_skill_name,
         sandbox_backend = prepared.backend,
-        sandbox_mode = state.skill_rt.tools_policy.sandbox_mode.as_token(),
+        sandbox_mode = sandbox_mode.as_token(),
         network_policy = ?network,
         "skill_runner_process_sandbox_prepared"
     );
@@ -463,6 +476,40 @@ pub(crate) async fn run_skill_with_runner_once(
     }
 
     serde_json::from_str(out_line.trim()).map_err(|err| format!("invalid skill-runner json: {err}"))
+}
+
+fn action_scoped_runner_capabilities(
+    mut capabilities: Vec<Capability>,
+    mapping: Option<&PlannerCapabilityMapping>,
+) -> Vec<Capability> {
+    let Some(mapping) = mapping else {
+        return capabilities;
+    };
+    capabilities.retain(|capability| match capability {
+        Capability::Llm => {
+            mapping.network_access != Some(false) && mapping.credential_access != Some(false)
+        }
+        Capability::Net => mapping.network_access != Some(false),
+        Capability::FsWrite => mapping.filesystem_write != Some(false),
+        Capability::Exec | Capability::ExecSudo => mapping.subprocess != Some(false),
+        Capability::Secrets(_) => mapping.credential_access != Some(false),
+        Capability::FsRead => true,
+    });
+    capabilities
+}
+
+fn action_scoped_runner_sandbox_mode(
+    default_mode: ToolSandboxMode,
+    mapping: Option<&PlannerCapabilityMapping>,
+) -> ToolSandboxMode {
+    if mapping.is_some_and(|mapping| {
+        mapping.isolation_profile == Some(CapabilityIsolationProfile::ReadOnly)
+            || mapping.filesystem_write == Some(false)
+    }) {
+        ToolSandboxMode::ReadOnly
+    } else {
+        default_mode
+    }
 }
 
 pub(crate) fn build_runner_skill_context(

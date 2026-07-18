@@ -113,9 +113,9 @@ impl ToolsPolicy {
             .collect();
 
         for p in allow.iter().chain(deny.iter()) {
-            if p != "*" && !p.starts_with("skill:") {
+            if p != "*" && !p.starts_with("skill:") && !p.starts_with("capability:") {
                 return Err(format!(
-                    "invalid tools pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
+                    "invalid tools pattern: {p}; expected '*' or prefix 'skill:'/'capability:' (legacy 'tool:' is auto-converted to 'skill:')"
                 ));
             }
         }
@@ -140,9 +140,9 @@ impl ToolsPolicy {
                 .collect();
 
             for p in allow_scoped.iter().chain(deny_scoped.iter()) {
-                if p != "*" && !p.starts_with("skill:") {
+                if p != "*" && !p.starts_with("skill:") && !p.starts_with("capability:") {
                     return Err(format!(
-                        "invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
+                        "invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:'/'capability:' (legacy 'tool:' is auto-converted to 'skill:')"
                     ));
                 }
             }
@@ -167,15 +167,27 @@ impl ToolsPolicy {
     }
 
     pub(crate) fn is_allowed(&self, token: &str, provider_type: Option<&str>) -> bool {
-        if self.deny.iter().any(|p| wildcard_match(p, token)) {
+        self.is_any_allowed(&[token], provider_type)
+    }
+
+    pub(crate) fn is_any_allowed(&self, tokens: &[&str], provider_type: Option<&str>) -> bool {
+        if tokens.is_empty()
+            || self
+                .deny
+                .iter()
+                .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token)))
+        {
             return false;
         }
 
         if !self.allow.is_empty() {
-            return self.allow.iter().any(|p| wildcard_match(p, token));
+            return self
+                .allow
+                .iter()
+                .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token)));
         }
 
-        let mut allowed = self.default_allowed(token);
+        let mut allowed = tokens.iter().any(|token| self.default_allowed(token));
 
         if !allowed {
             return false;
@@ -185,11 +197,17 @@ impl ToolsPolicy {
             let keys = provider_policy_keys(provider);
             for key in keys {
                 if let Some(scoped) = self.by_provider.get(&key) {
-                    if scoped.deny.iter().any(|p| wildcard_match(p, token)) {
+                    if scoped
+                        .deny
+                        .iter()
+                        .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token)))
+                    {
                         return false;
                     }
                     if !scoped.allow.is_empty()
-                        && !scoped.allow.iter().any(|p| wildcard_match(p, token))
+                        && !scoped.allow.iter().any(|pattern| {
+                            tokens.iter().any(|token| wildcard_match(pattern, token))
+                        })
                     {
                         return false;
                     }
@@ -314,6 +332,7 @@ impl ToolsPolicy {
                 "skill:doc_parse",
                 "skill:transform",
                 "skill:kb",
+                "capability:image.preview_generate",
             ],
             "minimal" => vec![
                 "skill:run_cmd",

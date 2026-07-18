@@ -1299,19 +1299,28 @@ fn skill_action_token(args: &Value) -> Option<String> {
         .map(|value| value.to_ascii_lowercase().replace(['-', ' ', '.'], "_"))
 }
 
-fn action_scoped_isolation_profile(
+fn action_scoped_planner_mapping(
     state: &AppState,
     skill_name: &str,
     args: &Value,
-) -> Option<CapabilityIsolationProfile> {
+) -> Option<claw_core::skill_registry::PlannerCapabilityMapping> {
     let action = skill_action_token(args);
     state.skill_manifest(skill_name).and_then(|manifest| {
         claw_core::skill_registry::select_planner_capability_mapping(
             &manifest.planner_capabilities,
             action.as_deref(),
         )
-        .and_then(|mapping| mapping.isolation_profile)
+        .cloned()
     })
+}
+
+fn action_scoped_isolation_profile(
+    state: &AppState,
+    skill_name: &str,
+    args: &Value,
+) -> Option<CapabilityIsolationProfile> {
+    action_scoped_planner_mapping(state, skill_name, args)
+        .and_then(|mapping| mapping.isolation_profile)
 }
 
 fn skill_execution_isolation_error(skill_name: &str, detail: String) -> String {
@@ -1393,12 +1402,8 @@ fn effective_dispatch_risk_level(
     let Some(manifest) = state.skill_manifest(skill_name) else {
         return SkillRiskLevel::Unknown;
     };
-    let action = skill_action_token(args);
-    let action_risk = claw_core::skill_registry::select_planner_capability_mapping(
-        &manifest.planner_capabilities,
-        action.as_deref(),
-    )
-    .and_then(|mapping| mapping.risk_level);
+    let action_risk = action_scoped_planner_mapping(state, skill_name, args)
+        .and_then(|mapping| mapping.risk_level);
     action_risk
         .or(manifest.risk_level)
         .unwrap_or(SkillRiskLevel::Unknown)
@@ -1494,17 +1499,24 @@ pub(crate) async fn run_skill_with_runner_outcome(
     }
 
     let policy_token = format!("skill:{skill_name}");
+    let capability_policy_token = action_scoped_planner_mapping(state, &skill_name, &args)
+        .map(|mapping| format!("capability:{}", mapping.name));
+    let mut policy_tokens = vec![policy_token.as_str()];
+    if let Some(capability_policy_token) = capability_policy_token.as_deref() {
+        policy_tokens.push(capability_policy_token);
+    }
     if !state
         .skill_rt
         .tools_policy
-        .is_allowed(&policy_token, state.core.active_provider_type.as_deref())
+        .is_any_allowed(&policy_tokens, state.core.active_provider_type.as_deref())
     {
+        let observed_facts = vec![
+            format!("skill: {skill_name}"),
+            format!("policy_token: {policy_token}"),
+        ];
         return Err(policy_block_error(
             "skill_policy_denied",
-            vec![
-                format!("skill: {skill_name}"),
-                format!("policy_token: {policy_token}"),
-            ],
+            observed_facts,
             vec![
                 "action=execute_skill".to_string(),
                 "policy=tools_policy".to_string(),
