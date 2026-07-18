@@ -181,6 +181,34 @@ pub(crate) fn push_unique_machine_kv_surface(surfaces: &mut Vec<String>, value: 
     }
 }
 
+pub(crate) fn parse_machine_kv_units(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .filter_map(|token| {
+            let token = token.trim_start_matches(|ch: char| {
+                matches!(ch, ',' | '.' | ';' | ':' | '(' | '[' | '{')
+            });
+            let (key, value) = token.split_once('=')?;
+            let key = key.trim();
+            let value = trim_machine_unit_value(value);
+            if valid_machine_key(key) && !value.is_empty() {
+                Some(format!("{key}={value}"))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn trim_machine_unit_value(value: &str) -> &str {
+    let value = value.trim();
+    if matches!(value.as_bytes().first(), Some(b'[' | b'{'))
+        && serde_json::from_str::<serde_json::Value>(value).is_ok()
+    {
+        return value;
+    }
+    value.trim_end_matches(|ch: char| matches!(ch, ',' | '.' | ';' | ':' | ')' | ']' | '}'))
+}
+
 pub(crate) fn requested_machine_markers_for_projection(input: &str) -> Vec<String> {
     requested_machine_markers(input)
         .into_iter()

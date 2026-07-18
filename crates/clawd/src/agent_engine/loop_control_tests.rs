@@ -1,5 +1,6 @@
 use super::{
-    answer_contract_for_reply, answer_verifier_gap_has_observed_content_evidence,
+    answer_contract_for_reply, answer_verifier_gap_fields_are_observed,
+    answer_verifier_gap_has_observed_content_evidence,
     answer_verifier_gap_requests_observed_content_rewrite,
     answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_budget_available,
     answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,

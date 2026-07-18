@@ -981,6 +981,37 @@ fn requested_machine_kv_summary_replaces_partial_machine_delivery_for_required_f
 }
 
 #[test]
+fn requested_machine_kv_summary_repairs_array_field_without_truncating_json() {
+    let task = claimed_task("task-machine-kv-array-conflict");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "kb",
+        r#"{"extra":{"count":2,"names":["alpha","beta"]}}"#,
+    ));
+    let mut delivery_messages = vec!["count: 2\nnames: alpha, beta".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return count and names only.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec![
+            r#"count: 2
+names: ["alpha","beta"]"#
+        ]
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_projects_git_status_fields_from_user_request() {
     let task = claimed_task("task-git-status-machine-kv-user-request");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

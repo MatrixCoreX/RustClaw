@@ -1,7 +1,7 @@
 use super::{
     collect_machine_text_fragments_from_output,
     collect_requested_machine_kv_surfaces_from_state_patch,
-    requested_machine_kv_summary_from_observations,
+    parse_machine_kv_units, requested_machine_kv_summary_from_observations,
 };
 
 #[test]
@@ -589,6 +589,22 @@ fn machine_summary_projects_requested_array_marker_from_json_values() {
     assert_eq!(
         summary.as_deref(),
         Some(r#"names=["release_checklist.md","service_notes.md"]"#)
+    );
+}
+
+#[test]
+fn machine_unit_parser_preserves_balanced_json_container_values() {
+    assert_eq!(
+        parse_machine_kv_units(r#"count=4 names=["alpha","beta"] metadata={"source":"observed"}"#),
+        vec![
+            "count=4",
+            r#"names=["alpha","beta"]"#,
+            r#"metadata={"source":"observed"}"#
+        ]
+    );
+    assert_eq!(
+        parse_machine_kv_units("(status=ok) [count=4]"),
+        vec!["status=ok", "count=4"]
     );
 }
 
