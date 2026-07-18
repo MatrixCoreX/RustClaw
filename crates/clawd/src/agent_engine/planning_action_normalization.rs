@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::HashSet;
 use tracing::info;
 
 use crate::{AgentAction, AppState};
@@ -7,6 +8,7 @@ pub(super) fn normalize_planned_actions(
     state: &AppState,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
+    let actions = collapse_redundant_config_preview_reads(actions);
     let actions = crate::capability_resolver::resolve_agent_actions_for_state(state, actions);
     let actions = normalize_action_arg_aliases(state, actions);
     let actions = annotate_readonly_cli_surface_run_cmds(state, actions);
@@ -14,6 +16,81 @@ pub(super) fn normalize_planned_actions(
     super::media_artifact_plan::strip_media_artifact_text_overwrites(
         &state.skill_rt.workspace_root,
         actions,
+    )
+}
+
+fn collapse_redundant_config_preview_reads(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    let preview_targets = actions
+        .iter()
+        .filter_map(|action| config_capability_target(action, config_preview_capability))
+        .collect::<HashSet<_>>();
+    if preview_targets.len() != 1 {
+        return actions;
+    }
+    let capability_call_count = actions
+        .iter()
+        .filter(|action| matches!(action, AgentAction::CallCapability { .. }))
+        .count();
+    let has_direct_call = actions.iter().any(|action| {
+        matches!(
+            action,
+            AgentAction::CallTool { .. } | AgentAction::CallSkill { .. }
+        )
+    });
+    let redundant_read_count = actions
+        .iter()
+        .filter_map(|action| config_capability_target(action, config_read_capability))
+        .filter(|target| preview_targets.contains(target))
+        .count();
+    if capability_call_count != 2 || redundant_read_count != 1 || has_direct_call {
+        return actions;
+    }
+    let actions = actions
+        .into_iter()
+        .filter(|action| {
+            config_capability_target(action, config_read_capability)
+                .is_none_or(|target| !preview_targets.contains(&target))
+        })
+        .map(|action| match action {
+            AgentAction::SynthesizeAnswer { .. } => AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            other => other,
+        })
+        .collect::<Vec<_>>();
+    info!("plan_normalize_redundant_config_preview_read");
+    actions
+}
+
+fn config_capability_target(
+    action: &AgentAction,
+    capability_matches: fn(&str) -> bool,
+) -> Option<(String, String)> {
+    let AgentAction::CallCapability { capability, args } = action else {
+        return None;
+    };
+    if !capability_matches(capability.trim()) {
+        return None;
+    }
+    let path = args.get("path").and_then(Value::as_str)?.trim();
+    let field_path = args.get("field_path").and_then(Value::as_str)?.trim();
+    if path.is_empty() || field_path.is_empty() {
+        return None;
+    }
+    Some((path.to_string(), field_path.to_string()))
+}
+
+fn config_preview_capability(capability: &str) -> bool {
+    matches!(
+        capability,
+        "config.preview_change" | "config.plan_change" | "config.plan_config_change"
+    )
+}
+
+fn config_read_capability(capability: &str) -> bool {
+    matches!(
+        capability,
+        "config.read_field" | "config_basic.read_field" | "config_basic.extract_field"
     )
 }
 
