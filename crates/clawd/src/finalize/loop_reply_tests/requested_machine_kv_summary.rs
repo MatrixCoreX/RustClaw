@@ -1432,6 +1432,41 @@ fn requested_machine_kv_summary_ignores_internal_user_request_machine_tokens() {
 }
 
 #[test]
+fn requested_machine_kv_summary_restores_count_after_grouped_listing_render() {
+    let task = claimed_task("task-machine-kv-structured-listing");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":2,"hidden":0,"total":2},"names_by_kind":{"dirs":[],"files":["release_checklist.md","service_notes.md"],"other":[]}}}"#,
+    ));
+    let grouped = "files:\n- release_checklist.md\n- service_notes.md";
+    loop_state.last_user_visible_respond = Some(grouped.to_string());
+    let mut delivery_messages = vec![grouped.to_string()];
+    let mut finalizer_summary = None;
+    let mut route = free_route_result();
+    route.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return names and count only.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec![r#"names=["release_checklist.md","service_notes.md"] count=2"#]
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_full_structured_contract_json() {
     let task = claimed_task("task-machine-kv-structured-contract");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

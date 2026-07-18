@@ -165,6 +165,10 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     else {
         return false;
     };
+    if current_delivery_already_publishes_single_names_array(agent_run_context, &current, &answer) {
+        loop_state.last_user_visible_respond = Some(current);
+        return false;
+    }
     let answer_is_service_status_selector =
         service_status_selector_only_summary(agent_run_context, &answer);
     let current_is_service_status_selector =
@@ -1383,6 +1387,46 @@ fn marker_only_requested_summary(summary: &str) -> bool {
             .count()
             == 1
         && valid_machine_unit_key(summary)
+}
+
+fn current_delivery_already_publishes_single_names_array(
+    agent_run_context: Option<&AgentRunContext>,
+    current: &str,
+    summary: &str,
+) -> bool {
+    if strict_machine_field_contract_requested(agent_run_context) {
+        return false;
+    }
+    let units = machine_kv_units(summary);
+    let [unit] = units.as_slice() else {
+        return false;
+    };
+    let Some(("names", value)) = unit.split_once('=') else {
+        return false;
+    };
+    let Ok(names) = serde_json::from_str::<Vec<String>>(value) else {
+        return false;
+    };
+    !names.is_empty()
+        && names.iter().all(|name| {
+            current
+                .lines()
+                .map(normalized_listing_name)
+                .any(|line| line.is_some_and(|line| line == name))
+        })
+}
+
+fn normalized_listing_name(line: &str) -> Option<&str> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    for prefix in ["- ", "* ", "+ "] {
+        if let Some(name) = line.strip_prefix(prefix).map(str::trim) {
+            return (!name.is_empty()).then_some(name);
+        }
+    }
+    Some(line)
 }
 
 fn latest_publishable_delivery_for_marker_only_summary(

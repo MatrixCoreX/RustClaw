@@ -1,7 +1,7 @@
 use super::{
     collect_machine_text_fragments_from_output,
-    collect_requested_machine_kv_surfaces_from_state_patch,
-    parse_machine_kv_units, requested_machine_kv_summary_from_observations,
+    collect_requested_machine_kv_surfaces_from_state_patch, parse_machine_kv_units,
+    requested_machine_kv_summary_from_observations,
 };
 
 #[test]
@@ -59,6 +59,23 @@ fn machine_summary_projects_config_preview_before_and_after_fields() {
     assert_eq!(
         summary.as_deref(),
         Some("dry_run=true field_path=llm.selected_vendor before=minimax after=minimax")
+    );
+}
+
+#[test]
+fn machine_summary_projects_structured_directory_listing_aliases() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":2,"hidden":0,"total":2},"names_by_kind":{"dirs":[],"files":["release_checklist.md","service_notes.md"],"other":[]}}}"#,
+        &mut observed,
+    );
+
+    let summary =
+        requested_machine_kv_summary_from_observations("Return names and count only.", &observed);
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(r#"names=["release_checklist.md","service_notes.md"] count=2"#)
     );
 }
 
