@@ -620,17 +620,21 @@ fn loop_state_has_checkpoint_handoff(loop_state: &LoopState) -> bool {
 }
 
 fn recoverable_provider_blocker_resume_reason(loop_state: &LoopState) -> Option<&'static str> {
+    use claw_core::provider_failure_policy::{
+        PROVIDER_WAIT_RECOVERY_ACTION, PROVIDER_WAIT_RESUME_REASON,
+    };
+
     let latest = loop_state
         .attempt_ledger_entries
         .iter()
         .rev()
         .find(|entry| {
             entry.provider_status.is_some()
-                && entry.recovery_action.trim() == "wait_background"
+                && entry.recovery_action.trim() == PROVIDER_WAIT_RECOVERY_ACTION
                 && entry.status.trim() != crate::executor::StepExecutionStatus::Ok.as_str()
         })?;
     latest.provider_status.as_ref()?;
-    Some("provider_blocker_wait_background")
+    Some(PROVIDER_WAIT_RESUME_REASON)
 }
 
 fn worker_soft_checkpoint_after_seconds(worker_timeout_secs: u64) -> Option<u64> {

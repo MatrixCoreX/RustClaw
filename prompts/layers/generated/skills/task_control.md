@@ -8,7 +8,7 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, and resume or pause checkpointed long-running tasks.
+- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, and inspect provider-failure recovery policy without invoking a provider.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Planner-facing selection should use structured capability/action fields from the registry. Do not add phrase-specific routing rules for any user language.
 - Task cancel/resume/pause dry-run or lifecycle-field preview requests must call the skill with `dry_run=true` and return observed machine fields. Do not answer those flows from static prose alone, even when the user has not supplied a concrete `task_id` or index.
@@ -24,6 +24,7 @@
 - `cancel_all` - Cancel all unfinished tasks for this user/chat, excluding the current control task itself.
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 - `preview_resume` - Return the no-mutation resume entrypoint and renewable execution-lease contract for a stable `task_id`.
+- `preview_provider_failure` - Return the shared no-mutation provider failure, retry, waiting-state, and checkpoint policy for a canonical `failure_class`.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
 - `pause` - Delay an existing waiting/background checkpoint by stable `task_id`.
 - Cancellation dry-runs are executable observations, not static prose: use `cancel_all` with `dry_run=true` when no specific index is supplied, or `cancel_one` with both `index` and `dry_run=true` when the user supplied a numbered task.
@@ -31,7 +32,8 @@
 ## Parameter Contract (from interface)
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `resume`, `pause`. |
+| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `resume`, `pause`. |
+| `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider failure token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. |
 | `task_id` | required for `get`, `resume`, `pause` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
 | `checkpoint_id` | optional for `preview_resume` and `resume` | string | - | Restrict resume to a specific checkpoint id. |
@@ -54,6 +56,8 @@ Notes:
 - `cancel_one` without valid `index` -> `error_text=cancel_one_missing_index`.
 - `preview_resume` / `resume` / `pause` without `task_id` -> structured `status=missing_task_id`.
 - `preview_resume` / `resume` / `pause` with an invalid `task_id` shape -> structured `status=invalid_task_id`.
+- `preview_provider_failure` without `failure_class` -> structured `status=missing_failure_class`.
+- `preview_provider_failure` with a non-canonical token -> structured `status=unsupported_failure_class`.
 - Invalid index -> structured `clawd` API error propagated as `error_text`.
 - Missing/invalid auth for task APIs -> readable error text from `clawd` (for example unauthorized user or invalid user key).
 
@@ -164,6 +168,18 @@ Request:
 Response text example:
 ```json
 {"schema_version":1,"action":"pause","status":"dry_run","message_key":"task_control.pause.dry_run","would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","pause_seconds":120,"required_fields":["task_id"],"optional_fields":["pause_seconds"],"result_projection_fields":{"state":"waiting_or_background","db_status":"running","resume_due":false,"resume_wait_seconds":120,"can_poll":true,"can_cancel":true}}
+```
+
+### provider failure preview
+
+Request:
+```json
+{"request_id":"r10","args":{"action":"preview_provider_failure","failure_class":"quota_exhausted"},"user_id":1,"chat_id":2}
+```
+
+Response text example:
+```json
+{"schema_version":1,"action":"preview_provider_failure","status":"dry_run","message_key":"task_control.preview_provider_failure.dry_run","dry_run":true,"would_mutate":false,"failure_class":"quota_exhausted","provider_retryable":false,"provider_blocker":true,"retry_policy":"background_wait","retry_after_seconds":10800,"waiting_state":"waiting","checkpoint":{"required":true,"recovery_action":"wait_background","resume_reason":"provider_blocker_wait_background","resume_entrypoint":"next_planner_round"}}
 ```
 
 ## Output Contract

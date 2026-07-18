@@ -4004,6 +4004,7 @@ name = "task-control-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "claw-core",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

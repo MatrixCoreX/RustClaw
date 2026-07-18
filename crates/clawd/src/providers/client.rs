@@ -14,6 +14,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub(crate) use claw_core::provider_failure_policy::ProviderFailureClass as ProviderErrorKind;
+
 use crate::{LlmProviderRuntime, LLM_RETRY_TIMES};
 
 /// 连接池里每个 host 最大闲置连接数。LLM 调用高峰期常见 2-4 家 provider 同时打，
@@ -92,40 +94,6 @@ pub(crate) enum BreakerImpact {
     Healthy,
     /// 本地或配置层错误，不足以说明 provider 健康或故障。
     Neutral,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProviderErrorKind {
-    Timeout,
-    TransportRetryable,
-    ProviderRetryableResponse,
-    RateLimited,
-    QuotaExhausted,
-    ProviderNonRetryableBusiness,
-    LocalNonRetryable,
-}
-
-impl ProviderErrorKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Timeout => "timeout",
-            Self::TransportRetryable => "transport_retryable",
-            Self::ProviderRetryableResponse => "provider_retryable_response",
-            Self::RateLimited => "rate_limited",
-            Self::QuotaExhausted => "quota_exhausted",
-            Self::ProviderNonRetryableBusiness => "provider_non_retryable_business",
-            Self::LocalNonRetryable => "local_non_retryable",
-        }
-    }
-
-    pub(crate) fn background_wait_seconds(self) -> Option<u64> {
-        match self {
-            Self::QuotaExhausted => Some(3 * 60 * 60),
-            Self::RateLimited => Some(60),
-            Self::Timeout | Self::TransportRetryable | Self::ProviderRetryableResponse => Some(30),
-            Self::ProviderNonRetryableBusiness | Self::LocalNonRetryable => None,
-        }
-    }
 }
 
 impl std::fmt::Display for ProviderError {
