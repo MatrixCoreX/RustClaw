@@ -921,5 +921,8 @@ fn builtin_task_id(task: Option<&ClaimedTask>) -> &str {
 }
 
 #[cfg(test)]
+#[path = "builtin_schedule_tests.rs"]
+mod schedule_tests;
+#[cfg(test)]
 #[path = "builtin_tests.rs"]
 mod tests;

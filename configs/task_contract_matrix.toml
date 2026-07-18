@@ -329,6 +329,17 @@ required_evidence = ["field_value"]
 final_answer_shape = "raw_output_or_short_summary"
 failure_policy = "retry_with_alternatives"
 
+[contracts.schedule_preview]
+semantic_kind = "schedule_preview"
+operation = "inspect"
+target_object = "system"
+delivery_shape = "summary"
+allowed_actions = ["schedule.preview"]
+preferred_actions = ["schedule.preview"]
+required_evidence = ["datetime", "timezone", "title"]
+final_answer_shape = "summary_with_evidence"
+failure_policy = "retry_with_alternatives"
+
 [[contracts.publishing_preview.observation_extractors]]
 source = "x"
 extractor_kind = "text_legacy"

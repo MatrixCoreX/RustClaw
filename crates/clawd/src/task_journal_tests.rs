@@ -10,6 +10,8 @@ use super::{
 #[path = "task_journal_tests/observed_evidence_core_tests.rs"]
 mod observed_evidence_core;
 
+#[path = "task_journal_tests/schedule_preview_evidence.rs"]
+mod schedule_preview_evidence;
 #[path = "task_journal_tests/skill_output_evidence_tests.rs"]
 mod skill_output_evidence;
 

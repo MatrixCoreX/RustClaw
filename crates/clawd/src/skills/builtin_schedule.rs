@@ -51,9 +51,13 @@ pub(super) async fn execute_schedule_workflow_for_task(
     .ok_or_else(|| schedule_workflow_error("schedule_intent_not_detected", None))
 }
 
-fn schedule_workflow_prompt(map: &serde_json::Map<String, Value>, args: &Value) -> String {
+pub(super) fn schedule_workflow_prompt(
+    map: &serde_json::Map<String, Value>,
+    args: &Value,
+) -> String {
     optional_string(map, "text")
         .or_else(|| optional_string(map, "raw"))
+        .or_else(|| args.get("intent").and_then(Value::as_str))
         .or_else(|| {
             args.get("intent")
                 .and_then(|value| value.get("raw"))

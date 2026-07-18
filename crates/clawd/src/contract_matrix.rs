@@ -246,6 +246,7 @@ pub(crate) enum EvidenceToken {
     ContentMatch,
     Count,
     DirectoryStructure,
+    Datetime,
     Exists,
     ExistsFalse,
     ExistsTrue,
@@ -253,6 +254,8 @@ pub(crate) enum EvidenceToken {
     Kind,
     Path,
     SizeBytes,
+    Timezone,
+    Title,
     Valid,
 }
 
@@ -265,6 +268,7 @@ impl EvidenceToken {
         Self::ContentMatch,
         Self::Count,
         Self::DirectoryStructure,
+        Self::Datetime,
         Self::Exists,
         Self::ExistsFalse,
         Self::ExistsTrue,
@@ -272,6 +276,8 @@ impl EvidenceToken {
         Self::Kind,
         Self::Path,
         Self::SizeBytes,
+        Self::Timezone,
+        Self::Title,
         Self::Valid,
     ];
 
@@ -283,6 +289,7 @@ impl EvidenceToken {
             "content_match" => Some(Self::ContentMatch),
             "count" => Some(Self::Count),
             "directory_structure" => Some(Self::DirectoryStructure),
+            "datetime" => Some(Self::Datetime),
             "exists" => Some(Self::Exists),
             "exists_false" => Some(Self::ExistsFalse),
             "exists_true" => Some(Self::ExistsTrue),
@@ -290,6 +297,8 @@ impl EvidenceToken {
             "kind" => Some(Self::Kind),
             "path" => Some(Self::Path),
             "size_bytes" => Some(Self::SizeBytes),
+            "timezone" => Some(Self::Timezone),
+            "title" => Some(Self::Title),
             "valid" => Some(Self::Valid),
             _ => None,
         }
@@ -304,6 +313,7 @@ impl EvidenceToken {
             Self::ContentMatch => "content_match",
             Self::Count => "count",
             Self::DirectoryStructure => "directory_structure",
+            Self::Datetime => "datetime",
             Self::Exists => "exists",
             Self::ExistsFalse => "exists_false",
             Self::ExistsTrue => "exists_true",
@@ -311,6 +321,8 @@ impl EvidenceToken {
             Self::Kind => "kind",
             Self::Path => "path",
             Self::SizeBytes => "size_bytes",
+            Self::Timezone => "timezone",
+            Self::Title => "title",
             Self::Valid => "valid",
         }
     }

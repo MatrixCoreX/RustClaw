@@ -103,7 +103,8 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::FileBasename
         | OutputSemanticKind::ExistenceWithPath
         | OutputSemanticKind::StructuredKeys
-        | OutputSemanticKind::ConfigFieldRead => TaskOperation::Inspect,
+        | OutputSemanticKind::ConfigFieldRead
+        | OutputSemanticKind::SchedulePreview => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
             TaskOperation::Validate
         }
@@ -280,6 +281,11 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::SqliteSchemaVersion
         | OutputSemanticKind::RecentScalarEqualityCheck => {
             fields.insert("field_value");
+        }
+        OutputSemanticKind::SchedulePreview => {
+            fields.insert("datetime");
+            fields.insert("timezone");
+            fields.insert("title");
         }
         OutputSemanticKind::ExecutionFailedStep => {
             fields.insert("command_output");

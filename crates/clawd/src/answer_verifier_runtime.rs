@@ -63,6 +63,18 @@ pub(crate) async fn verify_answer_observe_only(
         return Some(local_gap);
     }
     if let Some(local_gap) =
+        local_structured_record_answer_verifier_gap(route_result, journal, candidate_answer)
+    {
+        tracing::warn!(
+            task_id = %task.task_id,
+            missing_evidence_fields = ?local_gap.missing_evidence_fields,
+            answer_incomplete_reason = %local_gap.answer_incomplete_reason,
+            retry_instruction = %local_gap.retry_instruction,
+            "answer_verifier_local_structured_record_gap"
+        );
+        return Some(local_gap);
+    }
+    if let Some(local_gap) =
         local_compound_listing_answer_verifier_gap(route_result, journal, candidate_answer)
     {
         tracing::warn!(
@@ -655,6 +667,13 @@ pub(super) fn structured_machine_projection_can_skip_answer_verifier(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::SchedulePreview) {
+        return schedule_preview_answer_is_grounded_in_observation(
+            route_result,
+            journal,
+            candidate_answer,
+        );
+    }
     if journal_grounded_local_code_strict_json_projection_can_skip_answer_verifier(
         route_result,
         journal,
