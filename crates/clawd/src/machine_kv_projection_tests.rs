@@ -24,6 +24,25 @@ fn machine_summary_projects_requested_config_fields_without_echoing_target_value
 }
 
 #[test]
+fn machine_summary_projects_config_preview_before_and_after_fields() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"after":"minimax","applied":false,"before":"minimax","dry_run":true,"field_path":"llm.selected_vendor","path":"configs/config.toml","would_change":false}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "dry_run field_path before after",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("dry_run=true field_path=llm.selected_vendor before=minimax after=minimax")
+    );
+}
+
+#[test]
 fn machine_summary_accepts_grounded_command_with_path_continuation() {
     let observed =
         vec!["144|Use the auto-sync script: `python3 scripts/sync_skill_docs.py`.".to_string()];

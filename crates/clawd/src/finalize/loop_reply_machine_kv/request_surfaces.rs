@@ -15,7 +15,13 @@ pub(super) fn requested_machine_kv_request_surfaces(
         .output_contract()
         .and_then(|contract| contract.selection.structured_field_selector.as_deref())
     {
-        crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, selector);
+        let normalized = selector
+            .split(',')
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, &normalized);
     }
     if let Some(state_patch) = ctx
         .turn_analysis

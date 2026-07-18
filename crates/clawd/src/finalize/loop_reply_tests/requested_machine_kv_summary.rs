@@ -49,6 +49,41 @@ fn requested_machine_kv_summary_replaces_raw_observed_delivery() {
 }
 
 #[test]
+fn requested_machine_kv_summary_uses_normalized_config_preview_selector() {
+    let task = claimed_task("task-machine-kv-config-preview-selector");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "synthesize_answer",
+        r#"{"after":"minimax","applied":false,"before":"minimax","dry_run":true,"field_path":"llm.selected_vendor","path":"configs/config.toml","would_change":false}"#,
+    ));
+    let mut delivery_messages = vec!["dry_run=true field_path=llm.selected_vendor".to_string()];
+    let mut finalizer_summary = None;
+    let mut route = free_route_result();
+    route.selection.structured_field_selector = Some("dry_run,field_path,before,after".to_string());
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "preview the config change",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec![
+            "dry_run=true field_path=llm.selected_vendor before=minimax after=minimax".to_string()
+        ]
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_richer_recent_scalar_delivery() {
     let task = claimed_task("task-machine-kv-summary-recent-scalar-richer");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
