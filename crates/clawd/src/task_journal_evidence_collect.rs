@@ -896,6 +896,30 @@ pub(super) fn collect_text_machine_key_value_evidence(
     output: &str,
 ) {
     let mut seen = BTreeSet::new();
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let Some((raw_key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = normalize_evidence_field(raw_key);
+        let value = raw_value.trim();
+        let has_following_pair = value
+            .split_whitespace()
+            .skip(1)
+            .any(|token| token.contains('='));
+        if !has_following_pair
+            && machine_key_value_evidence_key_allowed(&key)
+            && !evidence_field_is_sensitive(&key)
+            && !value.is_empty()
+            && !text_looks_sensitive(value)
+            && seen.insert((key.clone(), value.to_string()))
+        {
+            collector.push(text_extracted_evidence_item(&key, value));
+        }
+    }
     for token in output.lines().flat_map(str::split_whitespace) {
         let token = token
             .trim_matches(|ch: char| {
@@ -945,6 +969,9 @@ pub(super) fn machine_key_value_evidence_key_allowed(key: &str) -> bool {
             | "exit"
             | "exit_code"
             | "error_kind"
+            | "datetime"
+            | "timezone"
+            | "title"
     )
 }
 

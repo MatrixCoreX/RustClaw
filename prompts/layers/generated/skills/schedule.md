@@ -16,7 +16,9 @@ Compile natural-language scheduling requests into structured schedule plans.
 
 ## Planner capabilities
 - `schedule.create`: create a scheduled job. Prefer args `{ "text": "<original user request>" }` unless a complete `intent` object is already available.
-- `schedule.preview`: parse or preview a schedule without mutating state. Runtime forces `compile_only` / `dry_run`.
+- `schedule.preview`: parse or preview a schedule without mutating state. Call this capability with only
+  `{ "text": "<original user request>" }`; runtime forces `compile_only` / `dry_run`, so do not add
+  `action`, `dry_run`, or `preview_only` to capability args.
 - `schedule.list`: list scheduled jobs.
 - `schedule.delete`: delete scheduled jobs; use `target_job_id` when the user names one.
 - `schedule.pause`: pause scheduled jobs; use `target_job_id` when the user names one.
@@ -28,6 +30,10 @@ Compile natural-language scheduling requests into structured schedule plans.
   - `kind`, `timezone`, `schedule`, `task`, `target_job_id`, `confidence`
 - Preview output also exposes stable machine fields `datetime` (for a parsed one-time `run_at`)
   and `title` (the parsed task content), while preserving the canonical schedule/task fields.
+- For a preview whose requested result is `datetime`, `timezone`, and `title`, set
+  `result_kind="schedule_preview"`, `requires_content_evidence=true`,
+  `response_shape="strict"`, and `structured_field_selector="datetime,timezone,title"`.
+  Return those fields only from the observed preview output.
 - If request is not a schedule intent, return an error.
 
 ## Multilingual Reinforcement

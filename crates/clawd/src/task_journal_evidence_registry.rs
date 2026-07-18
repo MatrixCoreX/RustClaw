@@ -740,6 +740,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "task_control.get.structured_json_v1",
         &["field_value", "status"],
     ),
+    step_json_extractor(
+        "schedule.preview",
+        "schedule.preview.structured_json_v1",
+        &["datetime", "timezone", "title"],
+    ),
     step_text_extractor(
         "archive_basic",
         "archive_basic.text_legacy_v1",
@@ -949,6 +954,11 @@ pub(super) fn observed_evidence_from_step_output(step: &TaskJournalStepTrace) ->
                 0,
             );
             collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
+            if normalize_machine_token(&step.skill).replace('-', "_") == "schedule" {
+                if let Some(text) = value.get("text").and_then(Value::as_str) {
+                    collect_text_observed_evidence_fields(&mut collector, text);
+                }
+            }
             let fallback_extractor = evidence_extractor_spec(
                 EvidenceObservationSource::StepOutput,
                 EvidenceExtractorKind::StructuredJson,

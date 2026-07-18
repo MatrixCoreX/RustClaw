@@ -19,6 +19,8 @@ mod answer_verifier_machine_kv;
 mod answer_verifier_runtime;
 #[path = "answer_verifier_scalar.rs"]
 mod answer_verifier_scalar;
+#[path = "answer_verifier_structured_record.rs"]
+mod answer_verifier_structured_record;
 
 use answer_verifier_delivery_raw::*;
 use answer_verifier_evidence_policy::*;
@@ -31,6 +33,7 @@ pub(crate) use answer_verifier_runtime::{
     post_write_content_evidence_missing_before_verifier, verify_answer_observe_only,
 };
 use answer_verifier_scalar::*;
+use answer_verifier_structured_record::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AnswerContract {
@@ -199,6 +202,13 @@ pub(crate) fn structurally_satisfies_answer_contract(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::SchedulePreview) {
+        return schedule_preview_answer_is_grounded_in_observation(
+            route_result,
+            journal,
+            candidate_answer,
+        );
+    }
     if recent_scalar_equality_answer_is_grounded_in_successful_observation(
         route_result,
         journal,
