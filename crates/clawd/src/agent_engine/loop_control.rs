@@ -27,6 +27,8 @@ mod loop_control_local_health_recovery;
 mod loop_control_machine_status_gap;
 #[path = "loop_control_observe_round.rs"]
 mod loop_control_observe_round;
+#[path = "loop_control_plan_verifier_recovery.rs"]
+mod loop_control_plan_verifier_recovery;
 #[path = "loop_control_post_write_evidence_guard.rs"]
 mod loop_control_post_write_evidence_guard;
 #[path = "loop_control_recent_artifacts_recovery.rs"]
@@ -47,6 +49,7 @@ pub(in crate::agent_engine) use loop_control_observe_round::observation_round_ne
 use loop_control_observe_round::{
     observe_only_round_should_continue, read_observe_round_should_continue,
 };
+use loop_control_plan_verifier_recovery::*;
 use loop_control_post_write_evidence_guard::*;
 use loop_control_recent_artifacts_recovery::*;
 use loop_control_structured_clarify::*;
@@ -738,6 +741,20 @@ async fn run_agent_round(
                 final_answer_shape.class().as_str().to_string(),
             );
         }
+    }
+    if let Some(outcome) =
+        recover_plan_verifier_rejection(loop_state, &prepared_round.verify_result)
+    {
+        info!(
+            "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
+            task.task_id,
+            loop_state.round_no,
+            outcome.executed_actions,
+            outcome.no_progress,
+            outcome.stop_signal.as_deref().unwrap_or(""),
+            outcome.next_goal_hint.as_deref().unwrap_or("")
+        );
+        return Ok(outcome);
     }
     if let Some(intent) = structured_respond_terminal_intent_from_plan(&prepared_round.plan_result)
         .filter(|intent| intent.terminal_intent == "clarify")

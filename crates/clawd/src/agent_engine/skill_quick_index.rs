@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 const QUICK_INDEX_MAX_PLANNER_CAPABILITIES: usize = 6;
 const QUICK_INDEX_MAX_SCHEMA_FIELDS: usize = 8;
+const QUICK_INDEX_MAX_OPTIONAL_FIELDS: usize = 8;
 const QUICK_INDEX_MAX_ENUM_FIELDS: usize = 3;
 const QUICK_INDEX_MAX_ENUM_VALUES: usize = 8;
 
@@ -37,6 +38,23 @@ fn compact_token_list(values: Vec<String>, limit: usize) -> String {
     let mut kept = unique.into_iter().take(limit).collect::<Vec<_>>();
     if total > kept.len() {
         kept.push(format!("+{}more", total - kept.len()));
+    }
+    kept.join("|")
+}
+
+fn compact_declared_fields(values: &[String], limit: usize) -> String {
+    let values = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    let mut kept = values
+        .iter()
+        .take(limit)
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    if values.len() > kept.len() {
+        kept.push(format!("+{}more", values.len() - kept.len()));
     }
     kept.join("|")
 }
@@ -240,6 +258,12 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
             }
             if !capability.required.is_empty() {
                 attrs.push(format!("required={}", capability.required.join("|")));
+            }
+            if !capability.optional.is_empty() {
+                attrs.push(format!(
+                    "optional={}",
+                    compact_declared_fields(&capability.optional, QUICK_INDEX_MAX_OPTIONAL_FIELDS)
+                ));
             }
             attrs.extend(capability_enum_constraints(
                 manifest.input_schema.as_ref(),

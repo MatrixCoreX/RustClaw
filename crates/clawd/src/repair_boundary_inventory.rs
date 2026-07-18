@@ -362,6 +362,7 @@ fn inventory_for_reason_alias(reason_code: &str) -> Option<RepairBoundaryInvento
         "verify_skill_not_visible"
         | "verify_capability_unavailable"
         | "verify_missing_required_arg"
+        | "verify_invalid_argument_value"
         | "verify_default_creation_target_applied"
         | "verify_unresolved_template_arg"
         | "verify_invalid_depends_on"
