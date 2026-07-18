@@ -90,7 +90,10 @@ fn dry_run_returns_machine_payload_without_writing_file() {
     let out = root.join("document/out.png");
     assert_eq!(text, "IMAGE_GENERATE_DRY_RUN");
     assert!(!out.exists());
+    assert_eq!(extra["action"], "generate");
+    assert_eq!(extra["status"], "dry_run");
     assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["would_mutate"], false);
     assert_eq!(extra["provider"], "minimax");
     assert_eq!(extra["model"], "image-01");
     assert_eq!(extra["model_kind"], "dry_run");
@@ -101,10 +104,50 @@ fn dry_run_returns_machine_payload_without_writing_file() {
         "media_job_poll"
     );
     assert_eq!(
+        extra["async_contract"]["poll_adapter"]["kind"],
+        "media_job_poll"
+    );
+    assert_eq!(
         extra["planned_outputs"][0]["path"].as_str(),
         Some(out.to_string_lossy().as_ref())
     );
     assert!(extra["outputs"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
+fn preview_generate_forces_no_provider_call_or_file_write() {
+    let root = unique_temp_root("image-generate-preview");
+    let (text, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "preview_generate",
+            "prompt": "minimal status card",
+            "size": "512x512",
+            "output_path": "document/media_dry_run/tier1.png",
+            "vendor": "minimax",
+            "model": "image-01"
+        }),
+    )
+    .expect("preview should not require provider credentials");
+
+    let out = root.join("document/media_dry_run/tier1.png");
+    assert_eq!(text, "IMAGE_GENERATE_DRY_RUN");
+    assert!(!out.exists());
+    assert!(!out.parent().expect("parent").exists());
+    assert_eq!(extra["action"], "preview_generate");
+    assert_eq!(extra["status"], "dry_run");
+    assert_eq!(extra["would_mutate"], false);
+    assert_eq!(extra["provider"], "minimax");
+    assert_eq!(extra["model"], "image-01");
+    assert_eq!(
+        extra["field_value"]["planned_outputs"][0]["path"],
+        json!(out)
+    );
+    assert_eq!(
+        extra["field_value"]["async_contract"]["poll_adapter"]["kind"],
+        "media_job_poll"
+    );
 }
 
 #[test]

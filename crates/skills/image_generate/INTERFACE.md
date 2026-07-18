@@ -7,18 +7,20 @@
 - `image_generate` creates images from a prompt and optional style/render controls.
 - It writes generated assets to an output path and returns file markers in `text`.
 - It also supports optional vendor/model routing and response language selection for the human-readable success text.
-- It supports `dry_run=true` for capability validation without calling a provider or writing an image file.
+- It supports a dedicated planner-facing `image.preview_generate` capability and `preview_generate` action for validation without calling a provider or writing an image file.
 - It exposes provider-neutral async job actions for polling and cancellation: `image.poll` and `image.cancel`.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `model_kind`, and `outputs`.
 
 ## Planner Selection Notes
 - For requests that create a new image from text/style requirements and save or return the result, use `image_generate` / planner capability `image.generate`.
+- For requests that only preview or dry-run image generation, use `image.preview_generate`. This action always remains read-only even when `dry_run` is omitted; do not inspect config files to infer its provider/model/output/async fields.
 - For existing image-generation jobs with a `task_id`, use `image.poll` to inspect status and `image.cancel` to stop the job. Do not infer job ids from prose; pass structured ids from prior tool evidence or user-provided fields.
 - Do not synthesize images through shell drawing commands or local CLI fallbacks unless the user explicitly requests shell/CLI execution or configured image providers are unavailable and an explicit local fallback is enabled.
 - Preserve requested save locations as `output_path`; the skill returns machine-readable path evidence in `extra.outputs`.
 
 ## Actions
 - `generate`: create or plan image generation. This is the default when `action` is omitted.
+- `preview_generate`: resolve and return a no-generation plan. It forces dry-run behavior and never calls a provider or writes an output file.
 - `poll`: inspect a previously accepted async image-generation job by `task_id`.
 - `cancel`: request cancellation for a previously accepted async image-generation job by `task_id`.
 
@@ -38,6 +40,12 @@
 | generate | `dry_run` | no | boolean | `false` | Validate and return planned machine output without provider calls or file writes. |
 | generate | `poll_after_seconds` / `poll_after_ms` | no | integer | 5 seconds | Poll cadence hint for async-preferred dry-run contracts. |
 | generate | `expires_at` | no | integer(unix seconds) | now + 600 | Expiration timestamp for async-preferred dry-run contracts. |
+| preview_generate | `prompt` | yes | string | - | Text prompt used only to build the provider-neutral preview contract. |
+| preview_generate | `size` | no | string | `1024x1024` | Planned output dimensions. |
+| preview_generate | `output_path` | no | string(path) | auto | Planned path; no file or parent directory is created. |
+| preview_generate | `style` / `quality` / `n` | no | mixed | impl defaults | Planned render controls. |
+| preview_generate | `vendor` / `model` | no | string | config default | Optional structured selectors; otherwise the same config resolution as real generation is used. |
+| preview_generate | `poll_after_seconds` / `poll_after_ms` / `expires_at` | no | integer | impl defaults | Async contract timing fields. |
 | poll | `task_id` | yes | string | - | Provider/runtime task id from prior async evidence. |
 | poll | `job_id` | no | string | derived | Provider job id or result ref. |
 | poll | `output_path` | no | string(path) | auto | Planned or final image output path. |
@@ -63,6 +71,8 @@
 - `dry_run`: present and `true` for dry-run validation responses.
 - `planned_outputs`: planned file outputs for dry-run validation responses.
 - `pending_async_job_contract`: async-preferred job contract for dry-run planning; includes `poll_adapter.kind=media_job_poll`.
+- `async_contract`: stable alias of the same async job contract for planner-requested preview fields.
+- `field_value`: compact provider, model, output path, planned outputs, and async contract projection used by final-answer synthesis.
 - `async_poll_adapter_result`: machine-readable poll adapter result for `poll` actions.
 - `async_cancel_adapter_result`: machine-readable cancellation adapter result for `cancel` actions.
 - `provider_cancel_contract`: provider-neutral cancellation request evidence for `cancel` actions.
@@ -87,11 +97,11 @@ Response:
 ### Example 2
 Request:
 ```json
-{"request_id":"demo-2","args":{"prompt":"Minimal black app icon with claw mark","output_path":"tmp/icon.png","dry_run":true}}
+{"request_id":"demo-2","args":{"action":"preview_generate","prompt":"Minimal black app icon with claw mark","output_path":"tmp/icon.png"}}
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","model_kind":"dry_run","output_path":"tmp/icon.png","outputs":[],"planned_outputs":[{"type":"image_file","path":"tmp/icon.png"}],"pending_async_job_contract":{"poll_adapter":{"kind":"media_job_poll"}}},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"IMAGE_GENERATE_DRY_RUN","extra":{"action":"preview_generate","status":"dry_run","dry_run":true,"would_mutate":false,"provider":"minimax","model":"image-01","model_kind":"dry_run","output_path":"tmp/icon.png","outputs":[],"planned_outputs":[{"type":"image_file","path":"tmp/icon.png"}],"async_contract":{"poll_adapter":{"kind":"media_job_poll"}}},"error_text":null}
 ```
 
 ### Example 3
