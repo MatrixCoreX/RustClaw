@@ -171,6 +171,7 @@ def check_helper(root: Path) -> list[str]:
             "--state-file",
             "--init-state",
             "--max-field-chars",
+            "active_task_id",
         ],
         "scripts/nl_tests/print_llm_raw_trace.py",
     )

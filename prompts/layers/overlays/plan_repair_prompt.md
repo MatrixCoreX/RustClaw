@@ -59,7 +59,8 @@ Return exactly one JSON object:
     "delivery_required": false,
     "locator_kind": "none|path|current_workspace|url|filename",
     "delivery_intent": "none|file_single|directory_lookup|directory_batch_files",
-    "result_kind": "<machine result kind or none>"
+    "result_kind": "<machine result kind or none>",
+    "structured_field_selector": null
   },
   "steps": [ <AgentAction JSON>, ... ]
 }
@@ -67,7 +68,9 @@ Return exactly one JSON object:
 Preserve or repair the planner-owned `output_contract` using only machine tokens. Do not derive
 contract fields from localized error text or copy user prose into them. `result_kind` must be an
 exact token from the supplied PlanResult schema; use `none` when no registered result kind exactly
-represents the requested custom shape, and never invent a new token.
+represents the requested custom shape, and never invent a new token. Set
+`structured_field_selector` to a comma-separated list of exact machine field identifiers only when
+the request requires named structured fields; otherwise set it to `null`.
 
 Each step must use one of:
 1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when a matching planner capability exists)
@@ -158,7 +161,7 @@ Repair rules:
 - If the repair reason is `unavailable_skill_requires_replan`, replace unknown, disabled, or unlisted skill calls with enabled skills from the current tool spec. If the bad skill was only rewriting/narrating text, use direct terminal `respond` for free-form text, or `synthesize_answer -> respond` when the answer depends on observed execution evidence.
 - For pure drafting/rewriting requests whose deliverable is only user-visible text and that do not require tools, file delivery, or fresh observation, repair directly to a terminal `respond` containing that text. Do **not** repair them into a one-step rewrite-only skill plan.
 - Text drafting is not filesystem creation. Do not repair a note, article, proposal, summary, thread, checklist, guide, or other user-visible text deliverable into `write_file`, `make_dir`, shell redirection, or final `FILE:<path>` unless the user explicitly requested a saved file/document/path, file attachment delivery, or the execution recipe requires artifact creation. For evidence-grounded drafting, repair toward observation steps followed by `synthesize_answer -> respond`.
-- For explicit command-execution requests that semantically require raw command output only, repair toward the exact `run_cmd` and no summary/rewrite. Either rely on direct runtime passthrough or add a terminal `respond` that passes through `{{last_output}}` only.
+- For explicit command-execution requests that semantically require raw command output only, repair toward the exact `run_cmd` and no summary/rewrite. Set `result_kind="raw_command_output"`. When named command-result machine fields such as `exit_code`, `stdout`, or `stdout_path` are required, preserve those exact identifiers in `structured_field_selector`; runtime will project them from observed execution evidence. Either rely on direct runtime passthrough or add a terminal `respond` that passes through `{{last_output}}` only.
 - If the repaired plan ends with file/document delivery, the terminal `respond` must contain only standalone delivery token lines (`FILE:<absolute-path>` / `IMAGE_FILE:<absolute-path>` / equivalent media tokens). Do not append labels, confirmations, explanations, or any other natural-language text in that same `respond`.
 - If execution is genuinely impossible because a required target or parameter is missing, produce one concise clarification `respond`.
 - Never output zero executable steps.

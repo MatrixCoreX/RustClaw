@@ -28,36 +28,55 @@ LONG_FIELD_NAMES = {
 }
 
 
-def read_state(path: Path | None) -> dict[str, int]:
+def read_state(path: Path | None) -> dict[str, Any]:
     if path is None or not path.exists():
-        return {"offset": 0, "next_index": 1}
+        return {"offset": 0, "next_index": 1, "active_task_id": None}
     raw = path.read_text(encoding="utf-8").strip()
     if not raw:
-        return {"offset": 0, "next_index": 1}
+        return {"offset": 0, "next_index": 1, "active_task_id": None}
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
         try:
-            return {"offset": int(raw), "next_index": 1}
+            return {"offset": int(raw), "next_index": 1, "active_task_id": None}
         except ValueError:
-            return {"offset": 0, "next_index": 1}
+            return {"offset": 0, "next_index": 1, "active_task_id": None}
     if isinstance(value, dict):
         return {
             "offset": max(0, int(value.get("offset") or 0)),
             "next_index": max(1, int(value.get("next_index") or 1)),
+            "active_task_id": value.get("active_task_id"),
         }
     if isinstance(value, int):
-        return {"offset": max(0, value), "next_index": 1}
-    return {"offset": 0, "next_index": 1}
+        return {"offset": max(0, value), "next_index": 1, "active_task_id": None}
+    return {"offset": 0, "next_index": 1, "active_task_id": None}
 
 
-def write_state(path: Path | None, offset: int, next_index: int) -> None:
+def write_state(
+    path: Path | None,
+    offset: int,
+    next_index: int,
+    active_task_id: str | None = None,
+) -> None:
     if path is None:
         return
     path.write_text(
-        json.dumps({"offset": offset, "next_index": next_index}, sort_keys=True),
+        json.dumps(
+            {
+                "active_task_id": active_task_id,
+                "offset": offset,
+                "next_index": next_index,
+            },
+            sort_keys=True,
+        ),
         encoding="utf-8",
     )
+
+
+def next_index_for_task(state: dict[str, Any], task_id: str | None) -> int:
+    if task_id and state.get("active_task_id") != task_id:
+        return 1
+    return max(1, int(state.get("next_index") or 1))
 
 
 def text_value(value: Any) -> str:
@@ -243,7 +262,7 @@ def run_self_test() -> int:
                 parsed = json.loads(raw_line)
                 print_row(parsed, next_index, log_path, row_offset, 600, "  ")
                 next_index += 1
-            write_state(state_path, new_offset, next_index)
+            write_state(state_path, new_offset, next_index, "task-1")
         finally:
             sys.stdout = original_stdout
 
@@ -253,6 +272,9 @@ def run_self_test() -> int:
         assert "finish_reason=stop" in rendered, rendered
         assert 'parsed_json_fields=["action"]' in rendered, rendered
         assert read_state(state_path)["next_index"] == 2
+        assert read_state(state_path)["active_task_id"] == "task-1"
+        assert next_index_for_task(read_state(state_path), "task-1") == 2
+        assert next_index_for_task(read_state(state_path), "task-2") == 1
     print("SELF_TEST_OK")
     return 0
 
@@ -281,7 +303,7 @@ def main(argv: list[str]) -> int:
 
     state = read_state(args.state_file)
     rows, new_offset = read_new_rows(args.log, state["offset"])
-    next_index = state["next_index"]
+    next_index = next_index_for_task(state, args.task_id)
     printed = 0
     for row_offset, raw_line in rows:
         line = raw_line.strip()
@@ -296,7 +318,8 @@ def main(argv: list[str]) -> int:
         print_row(row, next_index, args.log, row_offset, args.max_field_chars, args.indent)
         next_index += 1
         printed += 1
-    write_state(args.state_file, new_offset, next_index)
+    active_task_id = args.task_id or state.get("active_task_id")
+    write_state(args.state_file, new_offset, next_index, active_task_id)
     if printed:
         task_part = f" task_id={args.task_id}" if args.task_id else ""
         print(
