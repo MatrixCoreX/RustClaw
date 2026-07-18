@@ -66,9 +66,6 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::High,
-            required_args: Vec::new(),
-            optional_args: Vec::new(),
-            input_schema: None,
             output_semantic_kind: None,
         },
         ResolverCandidate {
@@ -77,9 +74,6 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::Low,
-            required_args: Vec::new(),
-            optional_args: Vec::new(),
-            input_schema: None,
             output_semantic_kind: None,
         },
     ];
@@ -166,7 +160,7 @@ fn capability_metadata_binds_only_unclassified_output_contract() {
 }
 
 #[test]
-fn optional_enum_arg_outside_registry_schema_is_dropped_before_skill_call() {
+fn optional_enum_arg_outside_registry_schema_is_preserved_for_verifier_repair() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -197,9 +191,10 @@ fn optional_enum_arg_outside_registry_schema_is_dropped_before_skill_call() {
         args.get("request").and_then(Value::as_str),
         Some("Add a reusable local CSV statistics capability")
     );
-    assert!(
-        args.get("mode_hint").is_none(),
-        "invalid optional enum value should be removed so the skill can use its default"
+    assert_eq!(
+        args.get("mode_hint").and_then(Value::as_str),
+        Some("read_only_csv_stats"),
+        "resolver must not silently replace model output with a skill default"
     );
 }
 
