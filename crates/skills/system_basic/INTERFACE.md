@@ -87,7 +87,7 @@
 | `find_path` | `target_kind` | no | string | `any` | `any|file|dir`. |
 | `find_path` | `max_results` | no | integer | `20` | Output cap, clamped to `1..200`. |
 | `read_range` | `path` | yes | string(path) | - | Text file to slice. |
-| `read_range` | `mode` | no | string | `head` | `head|tail|range`. |
+| `read_range` | `mode` | no | string | `head` | `head|tail|range|last_non_empty`; the final mode returns `line_number`, `line_text`, and `exists`. |
 | `read_range` | `n` | no | integer | `20` | Number of lines for `head`/`tail`, or fallback window for `range`. |
 | `read_range` | `start_line` | no | integer | `1` | Range start for `mode=range`. |
 | `read_range` | `end_line` | no | integer | auto | Range end for `mode=range`; derived from `n` when omitted. |

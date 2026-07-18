@@ -1084,6 +1084,58 @@ fn read_range_uses_range_mode_when_line_bounds_are_present() {
 }
 
 #[test]
+fn read_range_last_non_empty_projects_the_final_content_line() {
+    let root = temp_root("read_range_last_non_empty");
+    let target = root.join("service_notes.md");
+    std::fs::write(
+        &target,
+        "# Service Notes\n\nOperators verify the release.\n \n",
+    )
+    .expect("write service notes");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+    obj.insert("mode".to_string(), json!("last_non_empty"));
+
+    let out = read_range(&root, &obj, true).expect("read last non-empty line");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(
+        value.get("mode").and_then(Value::as_str),
+        Some("last_non_empty")
+    );
+    assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+    assert_eq!(value.get("line_number").and_then(Value::as_u64), Some(3));
+    assert_eq!(
+        value.get("line_text").and_then(Value::as_str),
+        Some("Operators verify the release.")
+    );
+    assert_eq!(
+        value.get("excerpt").and_then(Value::as_str),
+        Some("3|Operators verify the release.")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn read_range_last_non_empty_reports_missing_for_blank_file() {
+    let root = temp_root("read_range_last_non_empty_blank");
+    let target = root.join("blank.txt");
+    std::fs::write(&target, "\n \n\t\n").expect("write blank file");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+    obj.insert("mode".to_string(), json!("last_non_empty"));
+
+    let out = read_range(&root, &obj, true).expect("read blank file");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(value.get("exists").and_then(Value::as_bool), Some(false));
+    assert!(value.get("line_number").is_some_and(Value::is_null));
+    assert!(value.get("line_text").is_some_and(Value::is_null));
+    assert_eq!(value.get("excerpt").and_then(Value::as_str), Some(""));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn read_range_title_field_selector_projects_markdown_heading() {
     let root = temp_root("read_range_title_selector");
     let target = root.join("service_notes.md");
