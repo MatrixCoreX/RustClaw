@@ -633,6 +633,27 @@ fn machine_summary_preserves_requested_nested_machine_contract() {
 }
 
 #[test]
+fn machine_summary_preserves_complete_coding_repair_contract() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"field_value":{"checkpoint":{"checkpoint_ref":"dry_run:checkpoint:pre_patch"},"diff":{"diff_ref":"dry_run:diff:repair_patch"},"failed_verification":{"status":"failed"},"repair_attempt":{"attempt":1},"passing_verification":{"status":"passed"},"rewind_references":["dry_run:checkpoint:pre_patch","dry_run:diff:repair_patch"]}}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return checkpoint, diff, failed_verification, repair_attempt, passing_verification, and rewind_references.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(
+            r#"checkpoint={"checkpoint_ref":"dry_run:checkpoint:pre_patch"} diff={"diff_ref":"dry_run:diff:repair_patch"} failed_verification={"status":"failed"} repair_attempt={"attempt":1} passing_verification={"status":"passed"} rewind_references=["dry_run:checkpoint:pre_patch","dry_run:diff:repair_patch"]"#
+        )
+    );
+}
+
+#[test]
 fn machine_summary_projects_requested_media_duration() {
     let mut observed = Vec::new();
     collect_machine_text_fragments_from_output(

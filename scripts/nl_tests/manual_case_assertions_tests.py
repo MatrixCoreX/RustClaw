@@ -8,13 +8,17 @@ from pathlib import Path
 from manual_case_assertions import build_summary_row
 
 
-def result_with_steps(steps: list[dict], completed_side_effect_count: int = 0) -> dict:
+def result_with_steps(
+    steps: list[dict],
+    completed_side_effect_count: int = 0,
+    text: str = "machine result",
+) -> dict:
     return {
         "ok": True,
         "data": {
             "status": "succeeded",
             "result_json": {
-                "text": "machine result",
+                "text": text,
                 "task_journal": {
                     "summary": {
                         "round_count": 1,
@@ -49,14 +53,19 @@ def terminal_step() -> dict:
     }
 
 
-def capability_step(*, dry_run: bool = True) -> dict:
+def capability_step(
+    *,
+    dry_run: bool = True,
+    capability: str = "fixture.preview",
+) -> dict:
     items = []
     if dry_run:
         items.append({"field": "dry_run", "excerpt": "true"})
     return {
         "requested_action_type": "call_capability",
         "action_kind": "call_capability",
-        "resolved_capability": "fixture.preview",
+        "requested_capability": capability,
+        "resolved_capability": capability,
         "status": "ok",
         "observed_evidence": {"items": items},
     }
@@ -105,9 +114,16 @@ def main() -> int:
         )
         capability_row = row_for(
             capability,
-            "covers:fixture,dry_run;requires_tool_call=true;dry_run,no_external_side_effect",
+            "covers:fixture,dry_run,capability:fixture.preview;"
+            "requires_tool_call=true;dry_run,no_external_side_effect",
         )
         assert capability_row["assertion"] == "pass"
+
+        wrong_capability_row = row_for(
+            capability,
+            "capability:fixture.other;requires_tool_call=true;dry_run",
+        )
+        assert wrong_capability_row["assertion"] == "fail"
 
         missing_dry_run = write_result(
             root,
@@ -142,6 +158,36 @@ def main() -> int:
             "requires_tool_call=true;dry_run,no_external_side_effect",
         )
         assert side_effect_row["assertion"] == "fail"
+
+        misleading_field_value = write_result(
+            root,
+            "misleading-field-value.json",
+            result_with_steps(
+                [capability_step()],
+                text='rewind_references=["dry_run:checkpoint:pre_patch"]',
+            ),
+        )
+        misleading_field_row = row_for(
+            misleading_field_value,
+            "final_field:checkpoint;final_field:rewind_references",
+            expect="",
+        )
+        assert misleading_field_row["assertion"] == "fail"
+
+        complete_fields = write_result(
+            root,
+            "complete-fields.json",
+            result_with_steps(
+                [capability_step()],
+                text='{"checkpoint":{},"rewind_references":[]}',
+            ),
+        )
+        complete_fields_row = row_for(
+            complete_fields,
+            "final_field:checkpoint;final_field:rewind_references",
+            expect="",
+        )
+        assert complete_fields_row["assertion"] == "pass"
 
     print("MANUAL_CASE_ASSERTIONS_TESTS ok")
     return 0

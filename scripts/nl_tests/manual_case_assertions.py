@@ -70,6 +70,14 @@ def has_tag(tags: str, name: str) -> bool:
     )
 
 
+def token_tags(tags: str, name: str) -> list[str]:
+    return re.findall(
+        rf"(?:^|[,;])\s*{re.escape(name)}:([a-z0-9_.-]+)\s*(?=$|[,;])",
+        tags,
+        flags=re.IGNORECASE,
+    )
+
+
 def task_journal(result: dict[str, Any]) -> dict[str, Any]:
     journal = result.get("task_journal")
     return journal if isinstance(journal, dict) else {}
@@ -124,8 +132,25 @@ def completed_side_effect_count(result: dict[str, Any]) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
+def final_text_has_machine_field(text: str, field: str) -> bool:
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict) and field in parsed:
+        return True
+    return (
+        re.search(
+            rf"(?m)(?:^|[;\s]){re.escape(field)}\s*[:=]",
+            text,
+        )
+        is not None
+    )
+
+
 def structural_assertions(
     tags: str,
+    text: str,
     result: dict[str, Any],
 ) -> list[dict[str, Any]]:
     details: list[dict[str, Any]] = []
@@ -143,6 +168,27 @@ def structural_assertions(
                 "actual_call_count": len(calls),
                 "successful_call_count": len(successful_calls),
                 "ok": ok,
+            }
+        )
+
+    required_capabilities = token_tags(tags, "capability")
+    for required_capability in required_capabilities:
+        matched_steps = [
+            step
+            for step in calls
+            if required_capability
+            in {
+                str(step.get("requested_capability") or ""),
+                str(step.get("resolved_capability") or ""),
+            }
+        ]
+        details.append(
+            {
+                "kind": "tag",
+                "tag": "capability",
+                "expected": required_capability,
+                "matched_call_count": len(matched_steps),
+                "ok": bool(matched_steps),
             }
         )
 
@@ -179,6 +225,17 @@ def structural_assertions(
             }
         )
 
+    required_final_fields = token_tags(tags, "final_field")
+    for required_field in required_final_fields:
+        details.append(
+            {
+                "kind": "tag",
+                "tag": "final_field",
+                "expected": required_field,
+                "ok": final_text_has_machine_field(text, required_field),
+            }
+        )
+
     return details
 
 
@@ -191,7 +248,7 @@ def evaluate_expectations(
     result: dict[str, Any],
 ) -> tuple[str, list[dict[str, Any]]]:
     spec_text = (spec_text or "").strip()
-    details = structural_assertions(tags, result)
+    details = structural_assertions(tags, text, result)
     has_assertions = bool(spec_text or details)
     if not has_assertions:
         return "-", []

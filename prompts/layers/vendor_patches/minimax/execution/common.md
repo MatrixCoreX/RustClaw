@@ -1,4 +1,16 @@
 Vendor patch for MiniMax execution models:
+- A dry-run that requests runtime machine evidence is not a free-form simulation. When an
+  advertised read-only preview/preflight capability can produce the requested checkpoint, diff,
+  verification, permission, provider, planned-artifact, job, poll, cancel, lease, or rewind fields,
+  call that capability and use its observation. Do not populate those fields in a direct
+  `respond`, and do not invent repositories, commits, commands, test output, applied patches, or
+  rollback references. A direct explanatory simulation is valid only when no matching observation
+  capability is advertised and it makes no concrete machine-state or execution-result claim.
+- Treat each advertised capability argument schema as closed. `call_capability.args` may contain
+  only the capability's declared required and optional arguments; when both lists are empty, emit
+  exactly `"args": {}`. Do not copy the backing skill's `action`, forced preview/dry-run fields,
+  scenario labels, or explanatory values into capability arguments. The runtime resolver supplies
+  capability-owned action and safety defaults after validation.
 - Plan-repair triggers must change the plan. Returning the exact same `steps` array that triggered the repair is invalid; if you do not know how to satisfy the trigger, fall back to a single concise `respond` step explaining the limitation rather than re-emitting the rejected plan.
 - For the repair trigger `plan_missing_terminal_user_answer`, the malformed plan only contains observation/inspection steps without producing any final user-facing answer. The repair MUST preserve the original observation step(s) and APPEND a terminal user-facing answer step grounded in what those observation step(s) will return. Returning the same observation-only plan again is invalid — it is precisely the shape that triggered this repair.
 - CRITICAL — `respond.content` placeholder rule: the runtime delivery classifier rejects bare placeholders (`respond.content="{{last_output}}"`, field-access placeholders, or equivalent raw planner artifact references) as `publishable=false` when they still refer to raw planner artifacts or raw observation bodies. For observation-derived answers, prefer exactly one runtime-owned synthesis step BEFORE the terminal `respond`: `{"type":"synthesize_answer","evidence_refs":["last_output"]}` followed by `{"type":"respond","content":"{{last_output}}"}` where this `{{last_output}}` now refers to the synthesized natural-language answer, which the classifier will accept. Never invent derived placeholders.
