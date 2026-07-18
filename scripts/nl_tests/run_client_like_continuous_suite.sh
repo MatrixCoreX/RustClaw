@@ -938,7 +938,7 @@ def normalize_expected_name(raw: str) -> str:
     return raw
 
 def split_tag_tokens(raw_tags: str) -> list[str]:
-    return [token for token in re.split(r"[\s,]+", raw_tags.strip()) if token]
+    return [token for token in re.split(r"[\s,;]+", raw_tags.strip()) if token]
 
 def expected_contract_from_tags(raw_tags: str) -> dict:
     expected = {
@@ -948,7 +948,7 @@ def expected_contract_from_tags(raw_tags: str) -> dict:
         "requires_tool_call": False,
         "evidence_fields": [],
     }
-    for token in re.split(r"[\s,]+", raw_tags.strip()):
+    for token in split_tag_tokens(raw_tags):
         if token.startswith("builtin_skill:"):
             raw = normalize_expected_name(token[len("builtin_skill:"):])
         elif token.startswith("skill:"):
@@ -970,12 +970,12 @@ def expected_contract_from_tags(raw_tags: str) -> dict:
             continue
         if raw and raw != "chat":
             expected["capabilities"].append(raw)
-    for match in re.finditer(r"(?:^|[\s,])any_skill:([^\s]+)", raw_tags):
+    for match in re.finditer(r"(?:^|[\s,;])any_skill:([^\s;]+)", raw_tags):
         for raw in re.split(r"[,;+]+", match.group(1).strip()):
             name = normalize_expected_name(raw)
             if name and name != "chat":
                 expected["any_skills"].append(name)
-    for match in re.finditer(r"(?:^|[\s,])evidence:([^\s]+)", raw_tags):
+    for match in re.finditer(r"(?:^|[\s,;])evidence:([^\s;]+)", raw_tags):
         for raw in re.split(r"[,;+]+", match.group(1).strip()):
             field = raw.strip()
             if field:
