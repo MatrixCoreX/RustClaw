@@ -6,6 +6,7 @@ pub mod config;
 pub mod hard_rules;
 pub mod model_catalog;
 pub mod prompt_layers;
+pub mod provider_failure_policy;
 pub mod secrets;
 pub mod skill_registry;
 pub mod types;

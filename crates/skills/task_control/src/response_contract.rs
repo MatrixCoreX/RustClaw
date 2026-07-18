@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use claw_core::provider_failure_policy::ProviderFailurePolicy;
+
 use super::{ActiveTaskItem, SkillInput};
 
 pub(super) fn task_detail_input_status_extra(status: &str, task_id: Option<&str>) -> Value {
@@ -94,6 +96,48 @@ pub(super) fn resume_dry_run_extra(input: &SkillInput) -> Value {
 
 pub(super) fn resume_preview_extra(input: &SkillInput) -> Value {
     resume_preview_contract(input, "preview_resume")
+}
+
+pub(super) fn provider_failure_preview_extra(policy: ProviderFailurePolicy) -> Value {
+    let failure_class = policy.failure_class.as_str();
+    json!({
+        "schema_version": 1,
+        "action": "preview_provider_failure",
+        "status": "dry_run",
+        "message_key": "task_control.preview_provider_failure.dry_run",
+        "dry_run": true,
+        "would_mutate": false,
+        "failure_class": failure_class,
+        "provider_retryable": policy.provider_retryable,
+        "provider_blocker": policy.provider_blocker,
+        "retry_policy": policy.retry_policy,
+        "retry_after_seconds": policy.retry_after_seconds,
+        "waiting_state": policy.waiting_state,
+        "provider_message_key": policy.message_key,
+        "checkpoint": {
+            "required": policy.checkpoint_required,
+            "recovery_action": policy.recovery_action,
+            "resume_reason": policy.resume_reason,
+            "resume_entrypoint": policy.resume_entrypoint,
+        },
+        "field_value": {
+            "action": "preview_provider_failure",
+            "status": "dry_run",
+            "message_key": "task_control.preview_provider_failure.dry_run",
+            "dry_run": true,
+            "would_mutate": false,
+            "failure_class": failure_class,
+            "provider_retryable": policy.provider_retryable,
+            "provider_blocker": policy.provider_blocker,
+            "retry_policy": policy.retry_policy,
+            "retry_after_seconds": policy.retry_after_seconds,
+            "waiting_state": policy.waiting_state,
+            "checkpoint_required": policy.checkpoint_required,
+            "recovery_action": policy.recovery_action,
+            "resume_reason": policy.resume_reason,
+            "resume_entrypoint": policy.resume_entrypoint,
+        },
+    })
 }
 
 fn resume_preview_contract(input: &SkillInput, action: &str) -> Value {

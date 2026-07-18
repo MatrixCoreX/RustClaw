@@ -62,6 +62,7 @@ struct ActiveTaskItem {
 #[derive(Debug)]
 struct SkillInput {
     action: String,
+    failure_class: Option<String>,
     index: Option<usize>,
     task_id: Option<String>,
     checkpoint_id: Option<String>,
@@ -164,6 +165,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         "cancel" | "cancel_all" | "stop" | "stop_all" => "cancel_all",
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
         "preview_resume" | "resume_preview" => "preview_resume",
+        "preview_provider_failure" => "preview_provider_failure",
         "resume" | "resume_task" | "continue_task" => "resume",
         "pause" | "pause_task" | "delay_task" => "pause",
         _ => return Err("unsupported_action".to_string()),
@@ -173,6 +175,12 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .get("dry_run")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let failure_class = obj
+        .get("failure_class")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
     let index = obj
         .get("index")
         .or_else(|| obj.get("task_number"))
@@ -219,6 +227,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
     if action == "get" && task_id.is_none() {
         return Ok(SkillInput {
             action,
+            failure_class,
             index,
             task_id,
             checkpoint_id,
@@ -231,6 +240,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
     }
     Ok(SkillInput {
         action,
+        failure_class,
         index,
         task_id,
         checkpoint_id,
@@ -402,6 +412,30 @@ fn execute(
                     return Ok(SkillOutput::structured(extra.to_string(), extra));
                 }
                 let extra = resume_preview_extra(&input);
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
+            "preview_provider_failure" => {
+                let Some(failure_class) = input.failure_class.as_deref() else {
+                    let extra = task_control_input_status_extra(
+                        "preview_provider_failure",
+                        "missing_failure_class",
+                        None,
+                    );
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                };
+                let Some(failure_class) =
+                    claw_core::provider_failure_policy::ProviderFailureClass::from_str(
+                        failure_class,
+                    )
+                else {
+                    let extra = task_control_input_status_extra(
+                        "preview_provider_failure",
+                        "unsupported_failure_class",
+                        None,
+                    );
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                };
+                let extra = provider_failure_preview_extra(failure_class.policy());
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "pause" => {

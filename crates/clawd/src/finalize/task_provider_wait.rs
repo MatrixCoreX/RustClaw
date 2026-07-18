@@ -1,11 +1,11 @@
 use serde_json::{json, Value};
 
+use claw_core::provider_failure_policy::PROVIDER_WAIT_RESUME_REASON;
+
 use crate::task_lifecycle::{
     CheckpointBudgetCounters, ResumeEntrypoint, TaskCheckpoint, TaskLifecycleState,
 };
 use crate::{AppState, ClaimedTask, TaskProviderBlocker};
-
-const PROVIDER_WAIT_RESUME_REASON: &str = "provider_blocker_wait_background";
 
 pub(super) fn record_provider_wait_checkpoint(
     state: &AppState,

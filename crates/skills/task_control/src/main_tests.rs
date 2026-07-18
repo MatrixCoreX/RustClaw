@@ -170,6 +170,18 @@ fn parse_input_accepts_resume_and_pause_machine_actions() {
 
     assert_eq!(preview.action, "preview_resume");
     assert_eq!(preview.checkpoint_id.as_deref(), Some("ckpt-preview"));
+
+    let provider_failure = parse_input(&json!({
+        "action": "preview_provider_failure",
+        "failure_class": "quota_exhausted"
+    }))
+    .expect("provider failure preview input");
+
+    assert_eq!(provider_failure.action, "preview_provider_failure");
+    assert_eq!(
+        provider_failure.failure_class.as_deref(),
+        Some("quota_exhausted")
+    );
 }
 
 #[test]
@@ -249,6 +261,31 @@ fn resume_preview_is_read_only_and_exposes_entrypoint_and_lease_contract() {
         serde_json::json!("ckpt-tier1")
     );
     assert_eq!(extra["field_value"]["lease_required"], true);
+}
+
+#[test]
+fn provider_failure_preview_uses_shared_read_only_wait_contract() {
+    let policy = claw_core::provider_failure_policy::ProviderFailureClass::QuotaExhausted.policy();
+    let extra = provider_failure_preview_extra(policy);
+
+    assert_eq!(extra["action"], "preview_provider_failure");
+    assert_eq!(extra["status"], "dry_run");
+    assert_eq!(extra["would_mutate"], false);
+    assert_eq!(extra["failure_class"], "quota_exhausted");
+    assert_eq!(extra["provider_retryable"], false);
+    assert_eq!(extra["provider_blocker"], true);
+    assert_eq!(extra["retry_policy"], "background_wait");
+    assert_eq!(extra["retry_after_seconds"], 10_800);
+    assert_eq!(extra["waiting_state"], "waiting");
+    assert_eq!(extra["checkpoint"]["required"], true);
+    assert_eq!(
+        extra["checkpoint"]["resume_reason"],
+        "provider_blocker_wait_background"
+    );
+    assert_eq!(
+        extra["checkpoint"]["resume_entrypoint"],
+        "next_planner_round"
+    );
 }
 
 #[test]
