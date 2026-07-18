@@ -353,7 +353,16 @@ async fn direct_run_skill_confirmation_persists_and_consumes_exact_grant() {
     .expect("finalize confirmation");
 
     let (status, result) = task_status_and_result(&state, task_id);
-    assert_eq!(status, "failed");
+    assert_eq!(status, "running");
+    assert_eq!(result["task_lifecycle"]["state"], "needs_user");
+    assert_eq!(
+        result["task_lifecycle"]["resume_reason"],
+        "confirmation_required"
+    );
+    assert_eq!(
+        result["task_journal"]["summary"]["task_checkpoint"]["resume_entrypoint"],
+        "await_user_input"
+    );
     assert_eq!(
         result["resume_context"]["approval_request"]["status"],
         "pending"
@@ -380,10 +389,10 @@ async fn direct_run_skill_confirmation_persists_and_consumes_exact_grant() {
         .get()
         .expect("db")
         .execute(
-            "UPDATE tasks SET status = 'running' WHERE task_id = ?1",
+            "UPDATE tasks SET status = 'running' WHERE task_id = ?1 AND status = 'queued'",
             rusqlite::params![task_id],
         )
-        .expect("simulate worker claim");
+        .expect("simulate resumed worker claim");
 
     let resumed =
         super::super::run_skill_permission::verify_direct_run_skill(&state, &task, "run_cmd", args);

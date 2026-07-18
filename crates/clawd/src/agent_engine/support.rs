@@ -919,7 +919,7 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
     }
 }
 
-pub(super) fn publish_agent_loop_user_input_checkpoint_progress(
+pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
     state: &AppState,
     task: &ClaimedTask,
     loop_state: &mut super::LoopState,

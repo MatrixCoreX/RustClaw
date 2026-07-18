@@ -93,10 +93,36 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     "crates/clawd/src/finalize/task.rs": (
         "journal_has_checkpointed_nonterminal_lifecycle",
         "update_task_checkpointed_result",
-        "answer.resume_context.is_none()",
+        "answer.resume_context.as_ref()",
+        'obj.insert("resume_context".to_string(), resume_context.clone())',
         "finalize_ask_checkpointed",
     ),
+    "crates/clawd/src/finalize/loop_reply_missing_delivery.rs": (
+        "pending_confirmation_resume_payload",
+        'pointer("/approval_request/status")',
+        "publish_agent_loop_user_input_checkpoint_progress",
+        '"confirmation_required"',
+    ),
+    "crates/clawd/src/repo/task_approval.rs": (
+        "task_has_pending_approval_request",
+        'status != "running"',
+        "CheckpointResumeDirective::AwaitUserInput",
+        "ResumeEntrypoint::NextPlannerRound",
+        '"approval_grant_resume"',
+        "WHERE task_id = ?1 AND status = 'running'",
+        "SET status = 'failed'",
+        '"confirmation_timeout"',
+    ),
+    "crates/clawd/src/worker/run_skill_finalize.rs": (
+        "finalize_run_skill_confirmation_required",
+        "TaskLifecycleState::NeedsUser",
+        "ResumeEntrypoint::AwaitUserInput",
+        '"approval_checkpoint_needs_user"',
+        "update_task_checkpointed_result",
+    ),
     "crates/clawd/src/repo/tasks.rs": (
+        "automatic_checkpoint_resume_allowed",
+        "ResumeEntrypoint::AwaitUserInput",
         "paused_lifecycle_owned_by_other_executor",
         "update_task_checkpointed_result",
         "lease_owner = NULL",
@@ -143,8 +169,14 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "crates/clawd/src/finalize/task_tests/checkpoint_finalization.rs": (
         "checkpointed_ask_finalization_overrides_failure_metric",
+        "checkpointed_ask_finalization_preserves_pending_approval_context",
         "lease_owner.is_none()",
         "assert_eq!(lease_expires_at, 0)",
+    ),
+    "crates/clawd/src/repo/task_approval_tests.rs": (
+        "failed_task_pending_approval_compatibility_is_rejected",
+        "approval_resumes_checkpoint_and_consumes_exact_binding_once",
+        "deny_closes_the_exact_request_without_requeueing",
     ),
     "crates/clawd/src/repo/task_resume_execution_tests/resume_lease.rs": (
         "active_resume_dispatch_lease_renews_the_complete_claim_chain",

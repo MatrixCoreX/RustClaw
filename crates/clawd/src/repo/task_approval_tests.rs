@@ -35,18 +35,50 @@ fn binding(arguments_hash: &str) -> ApprovalBinding {
     }
 }
 
+fn approval_checkpoint() -> Value {
+    json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "needs_user",
+            "resume_reason": "confirmation_required",
+            "checkpoint_id": "checkpoint-approval-1"
+        },
+        "task_checkpoint": {
+            "schema_version": 1,
+            "checkpoint_id": "checkpoint-approval-1",
+            "boundary_context": {},
+            "last_successful_round": null,
+            "last_successful_step": null,
+            "pending_action": null,
+            "observations": [],
+            "evidence_refs": [],
+            "artifact_refs": [],
+            "completed_side_effect_refs": [],
+            "budget": {
+                "round": 0,
+                "step": 0,
+                "llm_calls": 0,
+                "tool_calls": 0,
+                "elapsed_ms": 0,
+                "llm_elapsed_ms": 0,
+                "tool_elapsed_ms": 0
+            },
+            "resume_entrypoint": "await_user_input"
+        }
+    })
+}
+
 fn insert_pending(db: &Connection, expires_at: i64) {
-    let result = json!({
-        "resume_context": {
-            "approval_request": {
-                "schema_version": 1,
-                "request_id": "approval-1",
-                "task_id": "task-1",
-                "status": "pending",
-                "action_fingerprint": "sha256:action",
-                "arguments_hash": "sha256:args",
-                "expires_at": expires_at
-            }
+    let mut result = approval_checkpoint();
+    result["resume_context"] = json!({
+        "approval_request": {
+            "schema_version": 1,
+            "request_id": "approval-1",
+            "task_id": "task-1",
+            "status": "pending",
+            "action_fingerprint": "sha256:action",
+            "arguments_hash": "sha256:args",
+            "expires_at": expires_at
         }
     });
     db.execute(
@@ -55,7 +87,7 @@ fn insert_pending(db: &Connection, expires_at: i64) {
             user_id, chat_id, user_key, channel
          )
          VALUES (
-            'task-1', 'failed', ?1, 'approval required', '0',
+            'task-1', 'running', ?1, NULL, '0',
             42, 7, 'actor-key', 'web'
          )",
         params![result.to_string()],
@@ -64,9 +96,9 @@ fn insert_pending(db: &Connection, expires_at: i64) {
 }
 
 fn insert_pending_scope(db: &Connection, expires_at: i64) {
-    let result = json!({
-        "resume_context": {
-            "approval_request": {
+    let mut result = approval_checkpoint();
+    result["resume_context"] = json!({
+        "approval_request": {
                 "schema_version": 1,
                 "request_id": "approval-scope-1",
                 "task_id": "task-1",
@@ -86,7 +118,6 @@ fn insert_pending_scope(db: &Connection, expires_at: i64) {
                         "resources": ["run/example.txt"]
                     }]
                 }
-            }
         }
     });
     db.execute(
@@ -95,7 +126,7 @@ fn insert_pending_scope(db: &Connection, expires_at: i64) {
             user_id, chat_id, user_key, channel
          )
          VALUES (
-            'task-1', 'failed', ?1, 'approval required', '0',
+            'task-1', 'running', ?1, NULL, '0',
             42, 7, 'actor-key', 'web'
          )",
         params![result.to_string()],
@@ -104,7 +135,7 @@ fn insert_pending_scope(db: &Connection, expires_at: i64) {
 }
 
 #[test]
-fn approval_requeues_and_consumes_exact_binding_once() {
+fn approval_resumes_checkpoint_and_consumes_exact_binding_once() {
     let db = db();
     insert_pending(&db, 500);
 
@@ -121,11 +152,24 @@ fn approval_requeues_and_consumes_exact_binding_once() {
     assert_eq!(update.request_id, "approval-1");
     assert_eq!(update.expires_at, 500);
     assert_eq!(update.decision, ApprovalDecision::ApproveOnce);
-    db.execute(
-        "UPDATE tasks SET status = 'running' WHERE task_id = 'task-1'",
-        [],
-    )
-    .expect("claim task");
+    let (status, raw_result, lease_owner, lease_expires_at): (String, String, Option<String>, i64) =
+        db.query_row(
+            "SELECT status, result_json, lease_owner, lease_expires_at
+             FROM tasks
+             WHERE task_id = 'task-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("approved checkpoint");
+    let result = serde_json::from_str::<Value>(&raw_result).expect("result json");
+    assert_eq!(status, "running");
+    assert_eq!(result["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        result["task_checkpoint"]["resume_entrypoint"],
+        "next_planner_round"
+    );
+    assert_eq!(lease_owner, None);
+    assert_eq!(lease_expires_at, 0);
 
     assert_eq!(
         consume_task_approval_grant_in_db(&db, "task-1", &binding("sha256:args"), 110)
@@ -137,6 +181,28 @@ fn approval_requeues_and_consumes_exact_binding_once() {
             .expect("consume replay"),
         TaskApprovalConsumeOutcome::NotApproved
     );
+}
+
+#[test]
+fn failed_task_pending_approval_compatibility_is_rejected() {
+    let db = db();
+    insert_pending(&db, 500);
+    db.execute(
+        "UPDATE tasks SET status = 'failed' WHERE task_id = 'task-1'",
+        [],
+    )
+    .expect("force obsolete failed-task shape");
+
+    assert!(decide_task_approval_request_in_db(
+        &db,
+        "task-1",
+        "approval-1",
+        ApprovalDecision::ApproveOnce,
+        None,
+        100,
+    )
+    .expect("reject obsolete approval shape")
+    .is_none());
 }
 
 #[test]
@@ -153,12 +219,6 @@ fn changed_arguments_do_not_consume_approved_grant() {
     )
     .expect("approve")
     .expect("approval update");
-    db.execute(
-        "UPDATE tasks SET status = 'running' WHERE task_id = 'task-1'",
-        [],
-    )
-    .expect("claim task");
-
     assert_eq!(
         consume_task_approval_grant_in_db(&db, "task-1", &binding("sha256:changed"), 110)
             .expect("consume changed"),
@@ -249,7 +309,7 @@ fn deny_closes_the_exact_request_without_requeueing() {
 }
 
 #[test]
-fn scoped_approval_requires_exact_actor_and_requeues_with_signed_grant() {
+fn scoped_approval_requires_exact_actor_and_resumes_with_signed_grant() {
     let db = db();
     insert_pending_scope(&db, 500);
 
@@ -286,8 +346,12 @@ fn scoped_approval_requires_exact_actor_and_requeues_with_signed_grant() {
         )
         .expect("approved task");
     let result = serde_json::from_str::<Value>(&raw_result).expect("result json");
-    assert_eq!(status, "queued");
-    assert_eq!(result["task_lifecycle"]["state"], "queued");
+    assert_eq!(status, "running");
+    assert_eq!(result["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        result["task_checkpoint"]["resume_entrypoint"],
+        "next_planner_round"
+    );
     assert_eq!(
         result["resume_context"]["approval_request"]["scope_grant_id"],
         grant.grant_id

@@ -43,7 +43,8 @@ pub(crate) use task_admin::{
     TaskResumeControlInput,
 };
 pub(crate) use task_approval::{
-    consume_task_approval_grant, decide_task_approval_request_for_actor, TaskApprovalConsumeOutcome,
+    consume_task_approval_grant, decide_task_approval_request_for_actor,
+    task_has_pending_approval_request, TaskApprovalConsumeOutcome,
 };
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_mutation_ledger::{

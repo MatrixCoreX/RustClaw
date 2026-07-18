@@ -347,13 +347,29 @@ pub(super) async fn resume_task_by_id(
         Ok(target) => target,
         Err(resp) => return resp,
     };
-    if target.status == "failed" {
-        let request_id = req
-            .approval_request_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let Some(decision_token) = req.approval_decision.as_deref() else {
+    let request_id = req
+        .approval_request_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let approval_decision = req
+        .approval_decision
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let has_pending_approval =
+        match crate::repo::task_has_pending_approval_request(&state, &target.task_id) {
+            Ok(value) => value,
+            Err(err) => {
+                error!("task_pending_approval_lookup_failed err={}", err);
+                return super::api_err::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "approval_request_lookup_failed",
+                );
+            }
+        };
+    if has_pending_approval || request_id.is_some() || approval_decision.is_some() {
+        let Some(decision_token) = approval_decision else {
             return super::api_err::<serde_json::Value>(
                 StatusCode::CONFLICT,
                 "approval_grant_explicit_decision_required",
@@ -407,7 +423,7 @@ pub(super) async fn resume_task_by_id(
                     "scope_grant": update.scope_grant,
                     "task_lifecycle": {
                         "state": if update.decision.grants_execution() {
-                            "queued"
+                            "waiting"
                         } else {
                             "failed"
                         },

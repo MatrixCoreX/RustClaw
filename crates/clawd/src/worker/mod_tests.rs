@@ -378,15 +378,14 @@ fn startup_recovery_preserves_paused_checkpoints_before_or_after_next_check() {
 }
 
 #[tokio::test]
-async fn runtime_recovery_tick_materializes_due_checkpoint_without_nl_fields() {
+async fn runtime_recovery_tick_preserves_user_input_checkpoint_without_claiming_it() {
     let state = state_with_runtime_tasks_table();
     let due = json!({
         "task_lifecycle": {
             "schema_version": 1,
-            "state": "waiting",
-            "source": "agent_loop_soft_budget",
-            "resume_reason": "await_user_input",
-            "next_check_after": 1,
+            "state": "needs_user",
+            "source": "approval_checkpoint_needs_user",
+            "resume_reason": "confirmation_required",
             "checkpoint_id": "ckpt-runtime"
         },
         "task_checkpoint": valid_checkpoint_json("ckpt-runtime", "await_user_input")
@@ -445,11 +444,13 @@ async fn runtime_recovery_tick_materializes_due_checkpoint_without_nl_fields() {
     assert!(stale_result.get("text").is_none());
     assert!(stale_result.get("error_text").is_none());
 
-    let (status, raw_result): (String, String) = db
-        .query_row(
-            "SELECT status, result_json FROM tasks WHERE task_id = 'runtime-due'",
+    let (status, raw_result, lease_owner, lease_expires_at): (String, String, Option<String>, i64) =
+        db.query_row(
+            "SELECT status, result_json, lease_owner, lease_expires_at
+             FROM tasks
+             WHERE task_id = 'runtime-due'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .expect("query runtime due task");
     let result: serde_json::Value = serde_json::from_str(&raw_result).expect("parse result");
@@ -461,22 +462,10 @@ async fn runtime_recovery_tick_materializes_due_checkpoint_without_nl_fields() {
     assert_eq!(status, "running");
     assert_eq!(lifecycle["state"], "needs_user");
     assert_eq!(lifecycle["checkpoint_id"], "ckpt-runtime");
-    assert_eq!(
-        lifecycle["resume_work_item"]["resume_directive"],
-        "await_user_input"
-    );
-    assert_eq!(
-        lifecycle["resume_executor"]["executor_state"],
-        "awaiting_user"
-    );
-    assert_eq!(
-        lifecycle["resume_executor"]["resume_directive"],
-        "await_user_input"
-    );
-    assert!(lifecycle["resume_work_item"].get("text").is_none());
-    assert!(lifecycle["resume_work_item"].get("error_text").is_none());
-    assert!(lifecycle["resume_executor"].get("text").is_none());
-    assert!(lifecycle["resume_executor"].get("error_text").is_none());
+    assert!(lifecycle.get("resume_work_item").is_none());
+    assert!(lifecycle.get("resume_executor").is_none());
+    assert_eq!(lease_owner, None);
+    assert_eq!(lease_expires_at, 0);
 }
 
 #[tokio::test]
@@ -613,7 +602,7 @@ async fn runtime_recovery_times_out_current_worker_expired_lease_after_active_re
 }
 
 #[tokio::test]
-async fn runtime_recovery_survives_file_backed_restart_without_duplicate_claim() {
+async fn runtime_recovery_leaves_user_input_checkpoint_unclaimed_across_restart() {
     let temp = TempDirGuard::new("runtime_restart_checkpoint");
     let db_path = temp.path.join("tasks.sqlite");
     let first_state = file_backed_state_with_schema(&db_path);
@@ -622,10 +611,9 @@ async fn runtime_recovery_survives_file_backed_restart_without_duplicate_claim()
     let due = json!({
         "task_lifecycle": {
             "schema_version": 1,
-            "state": "waiting",
-            "source": "agent_loop_soft_budget",
-            "resume_reason": "await_user_input",
-            "next_check_after": 1,
+            "state": "needs_user",
+            "source": "approval_checkpoint_needs_user",
+            "resume_reason": "confirmation_required",
             "checkpoint_id": "ckpt-restart"
         },
         "task_checkpoint": checkpoint
@@ -662,10 +650,25 @@ async fn runtime_recovery_survives_file_backed_restart_without_duplicate_claim()
         first_result["task_checkpoint"]["completed_side_effect_refs"],
         json!(["write_file:tmp/report.txt"])
     );
-    assert_eq!(
-        first_result["task_lifecycle"]["resume_executor"]["executor_state"],
-        "awaiting_user"
-    );
+    assert!(first_result["task_lifecycle"]
+        .get("resume_executor")
+        .is_none());
+    {
+        let db = restarted_state
+            .core
+            .db
+            .get()
+            .expect("get first restarted db");
+        let (lease_owner, lease_expires_at): (Option<String>, i64) = db
+            .query_row(
+                "SELECT lease_owner, lease_expires_at FROM tasks WHERE task_id = 'runtime-restart'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("query first restarted lease");
+        assert_eq!(lease_owner, None);
+        assert_eq!(lease_expires_at, 0);
+    }
     drop(restarted_state);
 
     let second_restarted_state = file_backed_state_with_schema(&db_path);
@@ -678,10 +681,23 @@ async fn runtime_recovery_survives_file_backed_restart_without_duplicate_claim()
         second_result["task_checkpoint"]["completed_side_effect_refs"],
         json!(["write_file:tmp/report.txt"])
     );
-    assert_eq!(
-        second_result["task_lifecycle"]["resume_executor"]["executor_state"],
-        "awaiting_user"
-    );
+    assert!(second_result["task_lifecycle"]
+        .get("resume_executor")
+        .is_none());
+    let db = second_restarted_state
+        .core
+        .db
+        .get()
+        .expect("get second restarted db");
+    let (lease_owner, lease_expires_at): (Option<String>, i64) = db
+        .query_row(
+            "SELECT lease_owner, lease_expires_at FROM tasks WHERE task_id = 'runtime-restart'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query second restarted lease");
+    assert_eq!(lease_owner, None);
+    assert_eq!(lease_expires_at, 0);
 }
 
 #[tokio::test]

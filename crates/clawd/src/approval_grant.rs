@@ -98,7 +98,7 @@ pub(crate) fn binding_for_confirmation_steps(
             "action_type": step.action_type.trim().to_ascii_lowercase(),
             "target": target,
         }));
-        argument_bindings.push(canonical_value(&step.args));
+        argument_bindings.push(canonical_approval_arguments(&step.args));
         targets.push(target);
         match scope_entry_for_step(state, step) {
             Some(entry) => scope_entries.push(entry),
@@ -370,6 +370,27 @@ fn canonical_value(value: &Value) -> Value {
             Value::Object(canonical)
         }
         Value::Array(items) => Value::Array(items.iter().map(canonical_value).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn canonical_approval_arguments(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => {
+            let mut canonical = Map::new();
+            let mut keys = object.keys().collect::<Vec<_>>();
+            keys.sort();
+            for key in keys {
+                if key.starts_with("_clawd_") {
+                    continue;
+                }
+                canonical.insert(key.clone(), canonical_approval_arguments(&object[key]));
+            }
+            Value::Object(canonical)
+        }
+        Value::Array(items) => {
+            Value::Array(items.iter().map(canonical_approval_arguments).collect())
+        }
         _ => value.clone(),
     }
 }

@@ -81,6 +81,43 @@ pub(crate) fn consume_task_approval_grant(
     consume_task_approval_grant_in_db(&db, task_id, binding, crate::now_ts_u64() as i64)
 }
 
+pub(crate) fn task_has_pending_approval_request(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<bool> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
+    let record = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![task_id.trim()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    let Some((status, Some(raw_result_json))) = record else {
+        return Ok(false);
+    };
+    if status != "running" {
+        return Ok(false);
+    }
+    let Ok(result) = serde_json::from_str::<Value>(&raw_result_json) else {
+        return Ok(false);
+    };
+    if !matches!(
+        crate::task_lifecycle::checkpoint_resume_directive(&result, crate::now_ts_u64() as i64),
+        crate::task_lifecycle::CheckpointResumeDirective::AwaitUserInput { .. }
+    ) {
+        return Ok(false);
+    }
+    Ok(result
+        .pointer("/resume_context/approval_request/status")
+        .and_then(Value::as_str)
+        == Some("pending"))
+}
+
 fn decide_task_approval_request_in_db(
     db: &Connection,
     task_id: &str,
@@ -116,13 +153,20 @@ fn decide_task_approval_request_in_db(
     else {
         return Ok(None);
     };
-    if status != "failed" {
+    if status != "running" {
         return Ok(None);
     }
     let mut result = match serde_json::from_str::<Value>(&raw_result_json) {
         Ok(value) if value.is_object() => value,
         _ => return Ok(None),
     };
+    if !matches!(
+        crate::task_lifecycle::checkpoint_resume_directive(&result, now_ts),
+        crate::task_lifecycle::CheckpointResumeDirective::AwaitUserInput { .. }
+    ) {
+        return Ok(None);
+    }
+    let resume_checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(&result);
     let Some(approval) = approval_request_mut(&mut result) else {
         return Ok(None);
     };
@@ -139,14 +183,32 @@ fn decide_task_approval_request_in_db(
     if expires_at <= now_ts {
         approval.insert("status".to_string(), json!("expired"));
         approval.insert("expired_at".to_string(), json!(now_ts));
-        let _ = update_approval_result_cas(&tx, task_id, &raw_result_json, &result, now_ts)?;
+        result["task_lifecycle"] = json!({
+            "schema_version": 1,
+            "state": "failed",
+            "reason_code": "confirmation_timeout",
+            "terminal_reason": "confirmation_timeout",
+            "approval_request_id": request_id,
+        });
+        let _ = tx.execute(
+            "UPDATE tasks
+             SET status = 'failed', result_json = ?2, error_text = NULL, updated_at = ?3,
+                 lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
+             WHERE task_id = ?1 AND status = 'running' AND result_json = ?4",
+            params![
+                task_id,
+                result.to_string(),
+                now_ts.to_string(),
+                raw_result_json
+            ],
+        )?;
         tx.commit()?;
         return Ok(None);
     }
-    let (request_status, reason_code, next_task_status) = match decision {
-        ApprovalDecision::ApproveOnce => ("approved", "approval_grant_approved", "queued"),
-        ApprovalDecision::AlwaysForScope => ("approved", "approval_scope_grant_created", "queued"),
-        ApprovalDecision::Deny => ("denied", "approval_request_denied", "failed"),
+    let (request_status, reason_code) = match decision {
+        ApprovalDecision::ApproveOnce => ("approved", "approval_grant_approved"),
+        ApprovalDecision::AlwaysForScope => ("approved", "approval_scope_grant_created"),
+        ApprovalDecision::Deny => ("denied", "approval_request_denied"),
     };
     let scope_grant = if decision == ApprovalDecision::AlwaysForScope {
         let Some(actor_user_key) = actor_user_key
@@ -189,36 +251,51 @@ fn decide_task_approval_request_in_db(
             json!(grant.expires_at),
         );
     }
-    result["task_lifecycle"] = json!({
-        "schema_version": 1,
-        "state": if decision.grants_execution() { "queued" } else { "failed" },
-        "reason_code": reason_code,
-        "terminal_reason": if decision == ApprovalDecision::Deny {
-            Value::String("approval_request_denied".to_string())
-        } else {
-            Value::Null
-        },
-        "approval_request_id": request_id,
-        "approval_decision": decision.as_token(),
-    });
     let changed = if decision.grants_execution() {
+        let Some(mut checkpoint) = resume_checkpoint else {
+            return Ok(None);
+        };
+        checkpoint.resume_entrypoint = crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound;
+        let checkpoint_id = checkpoint.checkpoint_id.clone();
+        result["task_checkpoint"] = checkpoint.to_machine_json();
+        result["task_lifecycle"] = json!({
+            "schema_version": 1,
+            "state": "waiting",
+            "source": "approval_grant_resume",
+            "resume_reason": reason_code,
+            "next_check_after": now_ts,
+            "checkpoint_id": checkpoint_id,
+            "can_poll": true,
+            "can_cancel": true,
+            "approval_request_id": request_id,
+            "approval_decision": decision.as_token(),
+        });
         tx.execute(
             "UPDATE tasks
-             SET status = ?2, result_json = ?3, error_text = NULL, updated_at = ?4,
+             SET status = 'running', result_json = ?2, error_text = NULL, updated_at = ?3,
                  lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
-             WHERE task_id = ?1 AND status = 'failed' AND result_json = ?5",
+             WHERE task_id = ?1 AND status = 'running' AND result_json = ?4",
             params![
                 task_id,
-                next_task_status,
                 result.to_string(),
                 now_ts.to_string(),
                 raw_result_json
             ],
         )?
     } else {
+        result["task_lifecycle"] = json!({
+            "schema_version": 1,
+            "state": "failed",
+            "reason_code": reason_code,
+            "terminal_reason": "approval_request_denied",
+            "approval_request_id": request_id,
+            "approval_decision": decision.as_token(),
+        });
         tx.execute(
-            "UPDATE tasks SET result_json = ?2, error_text = NULL, updated_at = ?3
-             WHERE task_id = ?1 AND status = 'failed' AND result_json = ?4",
+            "UPDATE tasks
+             SET status = 'failed', result_json = ?2, error_text = NULL, updated_at = ?3,
+                 lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
+             WHERE task_id = ?1 AND status = 'running' AND result_json = ?4",
             params![
                 task_id,
                 result.to_string(),

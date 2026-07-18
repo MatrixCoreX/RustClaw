@@ -1315,6 +1315,16 @@ fn list_due_paused_checkpoint_tasks_filters_and_orders_machine_checkpoints() {
             "next_check_after": now
         }
     });
+    let mut user_input_checkpoint = checkpoint_json("ckpt-user-input", vec![]);
+    user_input_checkpoint["resume_entrypoint"] = json!("await_user_input");
+    let awaiting_user = json!({
+        "task_lifecycle": {
+            "state": "needs_user",
+            "resume_reason": "confirmation_required",
+            "checkpoint_id": "ckpt-user-input"
+        },
+        "task_checkpoint": user_input_checkpoint
+    });
 
     insert_task(
         &state,
@@ -1325,6 +1335,7 @@ fn list_due_paused_checkpoint_tasks_filters_and_orders_machine_checkpoints() {
     );
     insert_task(&state, "future-wait", "running", Some(&future_wait), 20);
     insert_task(&state, "invalid", "running", Some(&invalid_checkpoint), 30);
+    insert_task(&state, "awaiting-user", "running", Some(&awaiting_user), 35);
     insert_task(&state, "due-root", "running", Some(&due_from_root), 40);
     insert_task(
         &state,
@@ -1358,6 +1369,29 @@ fn list_due_paused_checkpoint_tasks_filters_and_orders_machine_checkpoints() {
     assert_eq!(all[1].checkpoint_id, "ckpt-root");
     assert_eq!(all[1].completed_side_effect_count, 0);
     assert!(!all[1].requires_idempotency_guard);
+
+    assert!(
+        claim_due_paused_checkpoint_task_internal(
+            &state,
+            "awaiting-user",
+            "ckpt-user-input",
+            now,
+            30,
+        )
+        .expect("reject automatic user-input checkpoint claim")
+        .is_none(),
+        "user-input checkpoints must only resume after an explicit user decision"
+    );
+    let db = state.core.db.get().expect("get db");
+    let (lease_owner, lease_expires_at): (Option<String>, i64) = db
+        .query_row(
+            "SELECT lease_owner, lease_expires_at FROM tasks WHERE task_id = 'awaiting-user'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query awaiting-user lease");
+    assert_eq!(lease_owner, None);
+    assert_eq!(lease_expires_at, 0);
 }
 
 #[test]

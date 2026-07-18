@@ -129,6 +129,43 @@ fn approval_binding_is_stable_across_capability_resolution() {
 }
 
 #[test]
+fn approval_binding_ignores_runtime_owned_validation_metadata() {
+    let state = state_with_workspace_registry();
+    let ids = vec!["step-1".to_string()];
+    let first = PlanStep {
+        step_id: "step-1".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "run_cmd".to_string(),
+        args: json!({
+            "command": "python3 -m unittest test_calc.py",
+            "_clawd_validation": {
+                "profile": "python_unittest_v1",
+                "validator_type": "test"
+            }
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let replanned = PlanStep {
+        args: json!({
+            "command": "python3 -m unittest test_calc.py",
+            "_clawd_validation": {
+                "profile": "execution_recipe",
+                "validator_type": "test",
+                "validated_target": "test_calc.py"
+            }
+        }),
+        ..first.clone()
+    };
+
+    let first = binding_for_confirmation_steps(&state, &[first], &ids).expect("first binding");
+    let replanned =
+        binding_for_confirmation_steps(&state, &[replanned], &ids).expect("replanned binding");
+
+    assert_eq!(first, replanned);
+}
+
+#[test]
 fn pending_request_is_task_bound_and_expiring() {
     let binding = ApprovalBinding {
         action_fingerprint: "sha256:action".to_string(),

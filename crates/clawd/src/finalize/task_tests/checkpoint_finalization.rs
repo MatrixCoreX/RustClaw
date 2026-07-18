@@ -122,6 +122,7 @@ async fn checkpointed_ask_finalization_overrides_failure_metric() {
         &task,
         r#"{"checkpoint_id":"ckpt-accepted","next_check_after":1781800060}"#,
         &[],
+        None,
         &mut journal,
     )
     .await
@@ -150,6 +151,68 @@ async fn checkpointed_ask_finalization_overrides_failure_metric() {
         .expect("select released lease");
     assert!(lease_owner.is_none());
     assert_eq!(lease_expires_at, 0);
+}
+
+#[tokio::test]
+async fn checkpointed_ask_finalization_preserves_pending_approval_context() {
+    let state = state_with_tasks_table();
+    let task = claimed_ask_task("task-approval-checkpoint-finalize");
+    insert_running_task(&state, &task);
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "mutating task");
+    journal.record_task_lifecycle(json!({
+        "schema_version": 1,
+        "state": "needs_user",
+        "source": "plan_verifier",
+        "resume_reason": "confirmation_required",
+        "checkpoint_id": "ckpt-approval"
+    }));
+    journal.record_task_checkpoint(json!({
+        "schema_version": 1,
+        "checkpoint_id": "ckpt-approval",
+        "boundary_context": {},
+        "last_successful_round": null,
+        "last_successful_step": null,
+        "pending_action": null,
+        "observations": [],
+        "evidence_refs": [],
+        "artifact_refs": [],
+        "completed_side_effect_refs": [],
+        "budget": {
+            "round": 1,
+            "step": 0,
+            "llm_calls": 1,
+            "tool_calls": 0,
+            "elapsed_ms": 1,
+            "llm_elapsed_ms": 1,
+            "tool_elapsed_ms": 0
+        },
+        "resume_entrypoint": "await_user_input"
+    }));
+    let resume_context = json!({
+        "required_decision": "require_confirmation",
+        "approval_request": {
+            "request_id": "approval-1",
+            "status": "pending",
+            "allowed_decisions": ["approve_once", "deny"]
+        }
+    });
+
+    super::finalize_ask_checkpointed(&state, &task, "", &[], Some(&resume_context), &mut journal)
+        .await
+        .expect("approval checkpoint finalize");
+
+    let (status, result) = task_status_and_result(&state, &task.task_id);
+    assert_eq!(status, "running");
+    assert_eq!(result["resume_context"], resume_context);
+    assert_eq!(
+        result["task_journal"]["summary"]["task_lifecycle"]["state"],
+        "needs_user"
+    );
+    assert!(matches!(
+        crate::task_lifecycle::checkpoint_resume_directive(&result, crate::now_ts_u64() as i64 + 1),
+        crate::task_lifecycle::CheckpointResumeDirective::AwaitUserInput { .. }
+    ));
 }
 
 #[tokio::test]

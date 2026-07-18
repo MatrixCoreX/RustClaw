@@ -186,10 +186,14 @@ async fn finalize_ask_checkpointed(
     task: &crate::ClaimedTask,
     answer_text: &str,
     answer_messages: &[String],
+    resume_context: Option<&Value>,
     journal: &mut crate::task_journal::TaskJournal,
 ) -> Result<()> {
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    let result = ask_result_payload(answer_text, answer_messages, Some(journal));
+    let mut result = ask_result_payload(answer_text, answer_messages, Some(journal));
+    if let (Some(obj), Some(resume_context)) = (result.as_object_mut(), resume_context) {
+        obj.insert("resume_context".to_string(), resume_context.clone());
+    }
     repo::update_task_checkpointed_result(state, &task.task_id, &result.to_string())?;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
@@ -540,9 +544,7 @@ pub(crate) async fn finalize_ask_result(
             if let Some(answer_journal) = answer.task_journal.as_ref() {
                 journal.merge_from(answer_journal);
             }
-            if answer.resume_context.is_none()
-                && journal_has_checkpointed_nonterminal_lifecycle(&journal)
-            {
+            if journal_has_checkpointed_nonterminal_lifecycle(&journal) {
                 let answer_text = crate::intercept_response_text_for_delivery(&answer.text);
                 let answer_messages = answer
                     .messages
@@ -558,6 +560,7 @@ pub(crate) async fn finalize_ask_result(
                     task,
                     &answer_text,
                     &answer_messages,
+                    answer.resume_context.as_ref(),
                     &mut journal,
                 )
                 .await?;
@@ -949,15 +952,13 @@ pub(crate) async fn finalize_ask_result(
                     );
                 }
             }
-            if !semantic_clarify
-                && answer.resume_context.is_none()
-                && journal_has_checkpointed_nonterminal_lifecycle(&journal)
-            {
+            if !semantic_clarify && journal_has_checkpointed_nonterminal_lifecycle(&journal) {
                 finalize_ask_checkpointed(
                     state,
                     task,
                     &answer_text,
                     &answer_messages,
+                    answer.resume_context.as_ref(),
                     &mut journal,
                 )
                 .await?;
@@ -1120,7 +1121,7 @@ pub(crate) async fn finalize_ask_result(
                 journal.record_runtime_llm_metrics(state, &task.task_id);
                 journal.record_final_answer("");
                 crate::finalize::ensure_task_metrics(&mut journal, "", &[]);
-                finalize_ask_checkpointed(state, task, "", &[], &mut journal).await?;
+                finalize_ask_checkpointed(state, task, "", &[], None, &mut journal).await?;
                 let transition = crate::log_ask_transition(
                     state,
                     &task.task_id,
@@ -1146,7 +1147,7 @@ pub(crate) async fn finalize_ask_result(
                 journal.record_runtime_llm_metrics(state, &task.task_id);
                 journal.record_final_answer("");
                 crate::finalize::ensure_task_metrics(&mut journal, "", &[]);
-                finalize_ask_checkpointed(state, task, "", &[], &mut journal).await?;
+                finalize_ask_checkpointed(state, task, "", &[], None, &mut journal).await?;
                 let transition = crate::log_ask_transition(
                     state,
                     &task.task_id,

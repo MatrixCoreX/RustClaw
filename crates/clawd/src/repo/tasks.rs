@@ -33,6 +33,15 @@ pub(crate) struct DuePausedCheckpointTask {
     pub(crate) resume_directive: String,
 }
 
+fn automatic_checkpoint_resume_allowed(
+    resume_entrypoint: &crate::task_lifecycle::ResumeEntrypoint,
+) -> bool {
+    !matches!(
+        resume_entrypoint,
+        crate::task_lifecycle::ResumeEntrypoint::AwaitUserInput
+    )
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReadyPausedCheckpointResumeExecutor {
     pub(crate) task_id: String,
@@ -636,6 +645,9 @@ pub(crate) fn list_due_paused_checkpoint_tasks_internal(
         else {
             continue;
         };
+        if !automatic_checkpoint_resume_allowed(&resume_entrypoint) {
+            continue;
+        }
         let checkpoint_resume_directive =
             crate::task_lifecycle::checkpoint_resume_directive(&result_json, now_ts);
         let resume_directive = checkpoint_resume_directive.status_code().to_string();
@@ -719,6 +731,9 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
         return Ok(None);
     };
     if ready_checkpoint_id != checkpoint_id {
+        return Ok(None);
+    }
+    if !automatic_checkpoint_resume_allowed(&resume_entrypoint) {
         return Ok(None);
     }
     let Some(task_checkpoint) =
