@@ -247,6 +247,9 @@ pub(super) fn apply_structured_field_selector_repair(
     let Some(output_contract) = output_contract else {
         return;
     };
+    if output_contract.semantic_kind == crate::OutputSemanticKind::ConfigFieldRead {
+        return;
+    }
     let Some(selector) = output_contract
         .selection
         .structured_field_selector
@@ -545,6 +548,40 @@ mod tests {
         assert_eq!(
             plan.steps[0].args.get("field_path"),
             Some(&json!("workspace.dependencies.toml"))
+        );
+        assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn config_field_read_selector_does_not_replace_input_field_path() {
+        let state = AppState::test_default_with_fixture_provider();
+        let mut contract = contract_with_selector("field_path,value");
+        contract.semantic_kind = crate::OutputSemanticKind::ConfigFieldRead;
+        let mut plan = plan_result(vec![PlanStep {
+            step_id: "s1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "config_basic".to_string(),
+            args: json!({
+                "action": "read_field",
+                "path": "configs/config.toml",
+                "field_path": "llm.selected_vendor",
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }]);
+        let mut issues = Vec::new();
+
+        apply_structured_field_selector_repair(
+            &state,
+            Some(&contract),
+            None,
+            &mut plan,
+            &mut issues,
+        );
+
+        assert_eq!(
+            plan.steps[0].args.get("field_path"),
+            Some(&json!("llm.selected_vendor"))
         );
         assert!(issues.is_empty());
     }
