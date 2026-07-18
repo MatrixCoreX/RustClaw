@@ -168,6 +168,8 @@ pub struct PlannerCapabilityMapping {
     #[serde(default)]
     pub privilege_escalation: Option<bool>,
     #[serde(default)]
+    pub output_semantic_kind: Option<String>,
+    #[serde(default)]
     pub final_answer_shape: Option<String>,
 }
 
@@ -690,6 +692,8 @@ fn normalize_planner_capabilities(
             subprocess: mapping.subprocess,
             package_install: mapping.package_install,
             privilege_escalation: mapping.privilege_escalation,
+            output_semantic_kind: trim_optional_string(mapping.output_semantic_kind.as_deref())
+                .map(|value| normalize_schema_token(&value)),
             final_answer_shape: trim_optional_string(mapping.final_answer_shape.as_deref())
                 .map(|value| normalize_schema_token(&value)),
         });

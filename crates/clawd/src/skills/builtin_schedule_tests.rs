@@ -1,6 +1,4 @@
-use super::builtin_schedule::{
-    schedule_args_contain_structured_intent, schedule_workflow_prompt,
-};
+use super::builtin_schedule::{schedule_args_contain_structured_intent, schedule_workflow_prompt};
 use serde_json::json;
 
 #[test]
