@@ -132,6 +132,26 @@ fn capability_metadata_binds_only_unclassified_output_contract() {
         crate::OutputSemanticKind::SchedulePreview
     );
 
+    plan_result.steps = vec![crate::plan_step_from_agent_action(
+        &AgentAction::CallSkill {
+            skill: "schedule".to_string(),
+            args: json!({
+                "action": "preview",
+                "text": "language-neutral schedule input"
+            }),
+        },
+        "step_1".to_string(),
+        Vec::new(),
+        "resolved schedule preview".to_string(),
+    )];
+    let inferred_from_resolved =
+        bind_unclassified_output_contract_from_capabilities(&state, &plan_result)
+            .expect("resolved schedule preview should bind the same output contract");
+    assert_eq!(
+        inferred_from_resolved.semantic_kind,
+        crate::OutputSemanticKind::SchedulePreview
+    );
+
     plan_result
         .output_contract
         .as_mut()
