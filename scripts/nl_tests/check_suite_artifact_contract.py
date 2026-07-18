@@ -826,8 +826,9 @@ def validate_rollout_metrics_artifact(
     max_avg_llm_calls = safe_float(gate_summary.get("max_avg_llm_calls"), 4.0)
     max_prompt_truncations = safe_int(gate_summary.get("max_prompt_truncations"), 0)
     max_provider_final_errors = safe_int(gate_summary.get("max_provider_final_errors"), 0)
+    turns_total = safe_int(payload.get("turns_total"))
     checks += 10
-    if safe_int(payload.get("turns_total")) <= 0:
+    if turns_total <= 0:
         findings.append(f"agent_parity_gate_metrics_bad_turns:{rel_path}")
     if safe_float(payload.get("pass_rate")) < min_pass_rate:
         findings.append(f"agent_parity_gate_metrics_pass_rate_below_threshold:{rel_path}")
@@ -841,6 +842,120 @@ def validate_rollout_metrics_artifact(
         findings.append(f"agent_parity_gate_metrics_prompt_truncations_above_threshold:{rel_path}")
     if safe_int(nested_get(payload, "llm", "provider_final_error_count")) > max_provider_final_errors:
         findings.append(f"agent_parity_gate_metrics_provider_final_errors_above_threshold:{rel_path}")
+
+    capability_outcomes = payload.get("capability_outcomes")
+    checks += 1
+    if not isinstance(capability_outcomes, dict):
+        findings.append(f"agent_parity_gate_metrics_missing_capability_outcomes:{rel_path}")
+    else:
+        for capability, outcome in capability_outcomes.items():
+            checks += 1
+            if not isinstance(capability, str) or not capability or not isinstance(outcome, dict):
+                findings.append(
+                    f"agent_parity_gate_metrics_bad_capability_outcome:{rel_path}:{capability}"
+                )
+                continue
+            required_outcome_fields = {"total", "ok", "error", "other", "success_rate"}
+            if not required_outcome_fields.issubset(outcome):
+                findings.append(
+                    f"agent_parity_gate_metrics_incomplete_capability_outcome:{rel_path}:{capability}"
+                )
+                continue
+            total = safe_int(outcome.get("total"), -1)
+            ok = safe_int(outcome.get("ok"), -1)
+            error = safe_int(outcome.get("error"), -1)
+            other = safe_int(outcome.get("other"), -1)
+            if min(total, ok, error, other) < 0 or total != ok + error + other:
+                findings.append(
+                    f"agent_parity_gate_metrics_inconsistent_capability_outcome:{rel_path}:{capability}"
+                )
+
+    action_family_counts = payload.get("action_family_counts")
+    checks += 1
+    if not isinstance(action_family_counts, dict) or any(
+        not isinstance(key, str) or not key or safe_int(value, -1) < 0
+        for key, value in (
+            action_family_counts.items() if isinstance(action_family_counts, dict) else ()
+        )
+    ):
+        findings.append(f"agent_parity_gate_metrics_bad_action_family_counts:{rel_path}")
+
+    side_effects = payload.get("side_effects")
+    checks += 1
+    if (
+        not isinstance(side_effects, dict)
+        or safe_int(side_effects.get("completed_total"), -1) < 0
+        or not isinstance(side_effects.get("turn_counts"), dict)
+    ):
+        findings.append(f"agent_parity_gate_metrics_bad_side_effects:{rel_path}")
+    elif sum(safe_int(value, -1) for value in side_effects["turn_counts"].values()) != turns_total:
+        findings.append(f"agent_parity_gate_metrics_inconsistent_side_effect_turns:{rel_path}")
+
+    repairs = payload.get("repairs")
+    checks += 1
+    if (
+        not isinstance(repairs, dict)
+        or safe_int(repairs.get("attempt_total"), -1) < 0
+        or not isinstance(repairs.get("turn_counts"), dict)
+        or not isinstance(repairs.get("signal_status_counts"), dict)
+    ):
+        findings.append(f"agent_parity_gate_metrics_bad_repairs:{rel_path}")
+    elif sum(safe_int(value, -1) for value in repairs["turn_counts"].values()) != turns_total:
+        findings.append(f"agent_parity_gate_metrics_inconsistent_repair_turns:{rel_path}")
+
+    llm = payload.get("llm")
+    required_llm_metrics = {
+        "total_calls",
+        "total_elapsed_ms",
+        "prompt_bytes_before_max",
+        "prompt_bytes_after_max",
+        "prompt_truncated_bytes_total",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "avg_calls_per_turn",
+    }
+    checks += 1
+    if not isinstance(llm, dict) or not required_llm_metrics.issubset(llm):
+        findings.append(f"agent_parity_gate_metrics_incomplete_llm_metrics:{rel_path}")
+
+    execution = payload.get("execution")
+    checks += 1
+    if not isinstance(execution, dict) or "tool_call_count" not in execution:
+        findings.append(f"agent_parity_gate_metrics_incomplete_execution_metrics:{rel_path}")
+
+    wall_time = payload.get("wall_time")
+    checks += 1
+    if not isinstance(wall_time, dict):
+        findings.append(f"agent_parity_gate_metrics_missing_wall_time:{rel_path}")
+    else:
+        recording_status = wall_time.get("recording_status")
+        recorded_turns = safe_int(wall_time.get("recorded_turns"), -1)
+        missing_turns = safe_int(wall_time.get("missing_turns"), -1)
+        required_wall_fields = {
+            "recording_status",
+            "recorded_turns",
+            "missing_turns",
+            "total_ms",
+            "avg_ms",
+            "max_ms",
+        }
+        if (
+            not required_wall_fields.issubset(wall_time)
+            or recording_status not in {"complete", "partial", "not_recorded"}
+            or min(
+                recorded_turns,
+                missing_turns,
+                safe_int(wall_time.get("total_ms"), -1),
+                safe_int(wall_time.get("max_ms"), -1),
+            )
+            < 0
+            or recorded_turns + missing_turns != turns_total
+            or (recording_status == "complete" and missing_turns != 0)
+            or (recording_status == "partial" and (recorded_turns == 0 or missing_turns == 0))
+            or (recording_status == "not_recorded" and recorded_turns != 0)
+        ):
+            findings.append(f"agent_parity_gate_metrics_inconsistent_wall_time:{rel_path}")
     return findings, checks
 
 
@@ -1703,10 +1818,88 @@ def run_self_test() -> int:
             not in metrics_path_finding_set
             or "agent_parity_gate_metrics_bad_source_run_dirs:agent_parity_gate/coding_loop_repair_metrics.json"
             not in metrics_path_finding_set
+            or "agent_parity_gate_metrics_missing_capability_outcomes:agent_parity_gate/coding_loop_repair_metrics.json"
+            not in metrics_path_finding_set
+            or "agent_parity_gate_metrics_missing_wall_time:agent_parity_gate/coding_loop_repair_metrics.json"
+            not in metrics_path_finding_set
         ):
             print(
                 "SELF_TEST_FAIL rollout_metrics_host_path:"
                 f"{metrics_path_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        metrics_family_run = root / "rollout-metrics-families"
+        write_minimal_self_test_run(metrics_family_run, content_checked=True)
+        metrics_family_path = (
+            metrics_family_run / "agent_parity_gate/coding_loop_repair_metrics.json"
+        )
+        metrics_family_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics_family_path.write_text(
+            json.dumps(
+                {
+                    "source_run_dir": "scripts/nl_tests/fixtures/client_like_runs/example",
+                    "turns_total": 1,
+                    "pass_rate": 1.0,
+                    "parse_errors": 0,
+                    "metric_gate": {"passed": True},
+                    "capability_outcomes": {
+                        "fs_basic": {
+                            "total": 1,
+                            "ok": 1,
+                            "error": 0,
+                            "other": 0,
+                            "success_rate": 1.0,
+                        }
+                    },
+                    "action_family_counts": {"fs_basic": 1},
+                    "side_effects": {
+                        "completed_total": 0,
+                        "turn_counts": {"none": 1},
+                    },
+                    "repairs": {
+                        "attempt_total": 0,
+                        "turn_counts": {"none": 1},
+                        "signal_status_counts": {},
+                    },
+                    "wall_time": {
+                        "recording_status": "not_recorded",
+                        "recorded_turns": 0,
+                        "missing_turns": 1,
+                        "total_ms": 0,
+                        "avg_ms": 0.0,
+                        "max_ms": 0,
+                    },
+                    "llm": {
+                        "total_calls": 1,
+                        "total_elapsed_ms": 1,
+                        "avg_calls_per_turn": 1.0,
+                        "prompt_truncation_count": 0,
+                        "provider_final_error_count": 0,
+                        "prompt_bytes_before_max": 1,
+                        "prompt_bytes_after_max": 1,
+                        "prompt_truncated_bytes_total": 0,
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                    "execution": {"tool_call_count": 1},
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        metrics_family_findings, _ = validate_rollout_metrics_artifact(
+            metrics_family_run,
+            "agent_parity_gate/coding_loop_repair_metrics.json",
+            {},
+        )
+        if metrics_family_findings:
+            print(
+                "SELF_TEST_FAIL rollout_metrics_families:"
+                f"{metrics_family_findings}",
                 file=sys.stderr,
             )
             return 1

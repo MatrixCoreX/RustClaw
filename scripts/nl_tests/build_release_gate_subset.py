@@ -17,6 +17,18 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from check_compact_coverage import (
+    REQUIRED_AGENT_PARITY,
+    REQUIRED_ASYNC_LIFECYCLE,
+    REQUIRED_BASIC,
+    REQUIRED_CHINESE_MODEL_ADAPTER,
+    REQUIRED_CODEX_BOUNDARY,
+    REQUIRED_MEDIA_DRY_RUN,
+    REQUIRED_REPAIR_LOOP,
+    REQUIRED_ROUTE_LIFECYCLE,
+    tags_from_field,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = REPO_ROOT / "scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt"
 DEFAULT_OUTPUT = REPO_ROOT / "scripts/nl_tests/cases/nl_cases_client_like_release_gate_equivalent.txt"
@@ -89,6 +101,47 @@ MIN_REPRESENTATIVE_TAGS = {
     "write_and_deliver": 3,
     "zh": 5,
 }
+DECLARED_COVERAGE_TAGS = (
+    REQUIRED_BASIC
+    | REQUIRED_ROUTE_LIFECYCLE
+    | REQUIRED_REPAIR_LOOP
+    | REQUIRED_ASYNC_LIFECYCLE
+    | REQUIRED_MEDIA_DRY_RUN
+    | REQUIRED_CODEX_BOUNDARY
+    | REQUIRED_AGENT_PARITY
+    | REQUIRED_CHINESE_MODEL_ADAPTER
+)
+RELEASE_BEHAVIOR_TAGS = {
+    "background",
+    "bound_path_summary",
+    "conflicting_constraints",
+    "continuous_dev",
+    "correction",
+    "exact_path_list",
+    "failing_command_repair",
+    "follow_up",
+    "interruption",
+    "multi_file_refactor",
+    "multiple_commands",
+    "recent_artifacts_judgment",
+    "rewind",
+    "scope_update",
+    "side_effect",
+    "structured_field_read",
+    "task_append",
+    "task_correct",
+    "task_replace",
+    "task_resume",
+    "worktree",
+    "write_and_deliver",
+}
+MACHINE_CAPABILITY_TAG_PREFIXES = (
+    "any_skill:",
+    "builtin_skill:",
+    "capability:",
+    "skill:",
+    "tool:",
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -217,12 +270,17 @@ def excluded_by_tag(row: CaseRow, excluded_tags: set[str]) -> bool:
 
 
 def coverage_categories(row: CaseRow) -> set[str]:
-    categories = {f"suite:{row.suite}", f"source:{row.source}"}
-    for tag in row.tags:
+    categories = {f"suite:{row.suite}"}
+    normalized_tags = tags_from_field(",".join(row.tags))
+    for tag in normalized_tags:
         if tag in GENERIC_TAGS:
             continue
+        if tag not in DECLARED_COVERAGE_TAGS and tag not in RELEASE_BEHAVIOR_TAGS and not tag.startswith(
+            MACHINE_CAPABILITY_TAG_PREFIXES
+        ):
+            continue
         categories.add(f"tag:{tag}")
-        if tag.startswith(("skill:", "tool:", "any_skill:", "evidence:", "group:")):
+        if tag.startswith(MACHINE_CAPABILITY_TAG_PREFIXES):
             categories.add(tag)
     return categories
 
@@ -327,12 +385,16 @@ def build_subset(rows: list[CaseRow], target_cases: int) -> tuple[list[CaseRow],
     selected.sort(key=lambda row: row.ordinal)
     missing = sorted(universe - covered)
     report = {
+        "coverage_policy": "declared_contract_tags_v2",
         "input_rows": len(rows),
         "target_cases": target_cases,
         "selected_rows": len(selected),
         "coverage_categories": len(universe),
         "covered_categories": len(covered),
         "missing_categories": missing,
+        "declared_tag_count": len(DECLARED_COVERAGE_TAGS | RELEASE_BEHAVIOR_TAGS),
+        "declared_tags": sorted(DECLARED_COVERAGE_TAGS | RELEASE_BEHAVIOR_TAGS),
+        "machine_capability_tag_prefixes": list(MACHINE_CAPABILITY_TAG_PREFIXES),
         "selected_suite_counts": dict(sorted(Counter(row.suite for row in selected).items())),
         "selected_tag_counts": dict(
             sorted(Counter(tag for row in selected for tag in row.tags).items())
@@ -381,6 +443,8 @@ def run_self_test() -> int:
                     "safe|block_skill_x|client_like,skill:x|dry run x skill",
                     "safe|block_media|client_like,image|dry run image",
                     "safe|keep_media_dry_run|client_like,image,image_generate,dry_run,no_external_side_effect|dry run image",
+                    "# source: incidental_source.txt",
+                    "safe|skip_incidental|client_like,incidental_probe|incidental prompt",
                 ]
             )
             + "\n",

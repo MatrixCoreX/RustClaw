@@ -1217,6 +1217,25 @@ print_new_llm_trace() {
     --max-field-chars "${PRINT_LLM_TRACE_MAX_CHARS:-1200}"
 }
 
+annotate_turn_harness_metrics() {
+  local out_file="$1"
+  local wall_time_ms="$2"
+  python3 - "$out_file" "$wall_time_ms" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+wall_time_ms = max(0, int(sys.argv[2]))
+payload = json.loads(path.read_text(encoding="utf-8"))
+payload["harness_metrics"] = {
+    "schema_version": 1,
+    "wall_time_ms": wall_time_ms,
+}
+path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+}
+
 submit_turn() {
   local turn="$1"
   local prompt="$2"
@@ -1230,6 +1249,7 @@ submit_turn() {
   local submit_retry_sleep_seconds="${SUBMIT_RETRY_SLEEP_SECONDS:-30}"
   local infra_retry_count="${7:-0}"
   local max_infra_retries="${LLM_INFRA_TURN_RETRIES_VALUE:-0}"
+  local overall_started_ms="${8:-$(date +%s%3N)}"
 
   [[ "$max_submit_attempts" =~ ^[0-9]+$ ]] || max_submit_attempts=1
   [[ "$submit_retry_sleep_seconds" =~ ^[0-9]+$ ]] || submit_retry_sleep_seconds=30
@@ -1303,6 +1323,9 @@ PY
         ;;
     esac
   fi
+  local turn_finished_ms
+  turn_finished_ms="$(date +%s%3N)"
+  annotate_turn_harness_metrics "$out_file" "$((turn_finished_ms - overall_started_ms))"
   status="$(extract_json_field "$out_file" status)"
   text="$(extract_json_field "$out_file" text)"
   messages="$(extract_json_field "$out_file" messages)"
@@ -1333,7 +1356,7 @@ PY
     print_log_hints "$task_id" >&2
     if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
       echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
-      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))"
+      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
       return $?
     fi
     return 1
@@ -1343,7 +1366,7 @@ PY
     print_log_hints "$task_id" >&2
     if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
       echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
-      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))"
+      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
       return $?
     fi
     return 1
@@ -1364,7 +1387,7 @@ PY
       print_log_hints "$task_id" >&2
       if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
         echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
-        submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))"
+        submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
         return $?
       fi
       return 1
@@ -1393,7 +1416,7 @@ PY
     print_log_hints "$task_id" >&2
     if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
       echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
-      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))"
+      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
       return $?
     fi
     return 1
