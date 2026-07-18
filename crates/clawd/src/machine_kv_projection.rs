@@ -23,6 +23,7 @@ pub(crate) fn requested_machine_kv_summary_from_observations(
         .filter(|marker| !pair_keys.iter().any(|key| key == marker))
         .filter(|marker| !pair_values.iter().any(|value| value == marker))
         .filter(|marker| !marker_is_positional_argument(marker, input))
+        .filter(|marker| !marker_is_machine_value_template_placeholder(marker, input))
         .filter(|marker| !template_markers.iter().any(|key| key == marker))
         .filter(|marker| !machine_request_option_key(marker))
         .filter(|marker| !observed_only_as_machine_identity_value(marker, observed_texts))
@@ -277,6 +278,20 @@ fn marker_is_positional_argument(marker: &str, input: &str) -> bool {
     })
 }
 
+fn marker_is_machine_value_template_placeholder(marker: &str, input: &str) -> bool {
+    input
+        .split_whitespace()
+        .map(trim_machine_kv_token)
+        .filter_map(|token| token.split_once('='))
+        .any(|(_, value)| {
+            let normalized = value
+                .trim()
+                .trim_matches(|ch| matches!(ch, '<' | '>' | '{' | '}'))
+                .trim();
+            normalized == marker && machine_value_template_placeholder(value)
+        })
+}
+
 fn requested_machine_value_template_markers(input: &str) -> Vec<String> {
     let mut markers = Vec::new();
     for token in input.split_whitespace().map(trim_machine_kv_token) {
@@ -464,6 +479,7 @@ fn valid_single_machine_marker(value: &str) -> bool {
             | "weather_code_raw"
             | "city"
             | "query"
+            | "value"
             | "provider"
             | "model"
             | "line"
@@ -529,6 +545,8 @@ fn observed_only_as_machine_identity_value(marker: &str, observed_texts: &[Strin
         "resolved_tool_or_skill=",
         "requested_action_ref=",
         "requested_capability=",
+        "field_path=",
+        "resolved_field_path=",
     ];
     observed_texts.iter().any(|text| {
         identity_prefixes.iter().any(|prefix| {

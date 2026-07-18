@@ -5,6 +5,25 @@ use super::{
 };
 
 #[test]
+fn machine_summary_projects_requested_config_fields_without_echoing_target_value() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"extract_field","exists":true,"field_path":"llm.selected_vendor","resolved_field_path":"llm.selected_vendor","value":"minimax","value_text":"minimax"}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "configs/config.toml에서 llm.selected_vendor 값을 읽고 field_path와 value만 반환하세요.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("field_path=llm.selected_vendor value=minimax")
+    );
+}
+
+#[test]
 fn machine_summary_accepts_grounded_command_with_path_continuation() {
     let observed =
         vec!["144|Use the auto-sync script: `python3 scripts/sync_skill_docs.py`.".to_string()];
