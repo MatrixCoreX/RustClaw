@@ -51,6 +51,12 @@ fn plan_does_not_modify_toml() {
     .expect("plan");
 
     assert_eq!(out["would_change"], true);
+    assert_eq!(out["dry_run"], true);
+    assert_eq!(out["before"], false);
+    assert_eq!(out["after"], true);
+    assert_eq!(out["field_value"]["dry_run"], true);
+    assert_eq!(out["field_value"]["before"], false);
+    assert_eq!(out["field_value"]["after"], true);
     assert_eq!(
         std::fs::read_to_string(&path).expect("read config"),
         original
@@ -166,6 +172,9 @@ fn sensitive_values_are_redacted() {
         false,
     )
     .expect("plan");
+    assert_eq!(out["dry_run"], true);
+    assert_eq!(out["before"], "<redacted>");
+    assert_eq!(out["after"], "<redacted>");
     assert_eq!(out["new_value"], "<redacted>");
     let _ = std::fs::remove_dir_all(root);
 }
