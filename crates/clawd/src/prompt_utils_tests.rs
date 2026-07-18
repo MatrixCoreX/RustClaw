@@ -41,6 +41,7 @@ fn plan_schema_marks_unknown_output_contract_token_as_contract_violation() {
         .expect_err("unknown result_kind must not bypass the planner contract");
     assert!(err.is_contract_violation());
     assert!(err.to_string().contains("$.output_contract.result_kind"));
+    assert!(err.contract_violations_only_under("$.output_contract"));
 }
 
 #[test]
