@@ -81,6 +81,32 @@ fn planner_overlays_require_runtime_observation_for_policy_projections() {
 }
 
 #[test]
+fn planner_overlays_keep_independent_reads_out_of_shell_pipelines() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    for relative_path in [
+        "single_plan_execution_prompt.md",
+        "loop_incremental_plan_prompt.md",
+    ] {
+        let prompt =
+            std::fs::read_to_string(overlays.join(relative_path)).expect("read prompt overlay");
+        assert!(
+            prompt.contains("Independent known targets are not cross-step dependencies"),
+            "{relative_path} must distinguish independent reads from dependent execution"
+        );
+        assert!(
+            prompt.contains("Do not collapse independent reads into `run_cmd`"),
+            "{relative_path} must keep known read targets on dedicated capabilities"
+        );
+        assert!(
+            prompt.contains(
+                "This exception never applies to independent targets whose paths or selectors are already known"
+            ),
+            "{relative_path} must close the shell dependency exception"
+        );
+    }
+}
+
+#[test]
 fn incremental_prompt_carries_structured_failed_attempt_for_planner_repair() {
     let mut loop_state = LoopState::new(3);
     let err = crate::skills::structured_skill_error_from_parts(
