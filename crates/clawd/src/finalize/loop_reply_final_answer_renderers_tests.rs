@@ -149,3 +149,55 @@ fn machine_kv_renderer_replaces_field_selector_with_structured_value() {
         Some("clawd")
     );
 }
+
+#[test]
+fn machine_kv_renderer_preserves_missing_path_error_code() {
+    let task = claimed_task("task-missing-path-machine-kv");
+    let mut route = free_route_result();
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.selection.structured_field_selector = Some("path,exists,error_code".to_string());
+    let ctx = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        original_user_request: Some(
+            "Return path, exists=false, and error_code for missing.md.".to_string(),
+        ),
+        ..crate::agent_engine::AgentRunContext::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","error_code":"path_not_found","exists":false,"kind":"missing","path":"missing.md"}],"include_missing":true}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    loop_state.last_user_visible_respond =
+        Some("path: missing.md\nexists: false\nerror_code: path_not_found".to_string());
+    let mut finalizer_summary = None;
+    let mut delivery_messages =
+        vec!["path: missing.md\nexists: false\nerror_code: path_not_found".to_string()];
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return path, exists=false, and error_code for missing.md.",
+        &mut loop_state,
+        Some(&ctx),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    let answer = delivery_messages.join("\n");
+    assert!(answer.contains("exists=false"));
+    assert!(answer.contains("path=missing.md"));
+    assert!(answer.contains("kind=missing"));
+    assert!(answer.contains("error_code=path_not_found"));
+    assert!(answer.contains("source_action=path_batch_facts"));
+}
