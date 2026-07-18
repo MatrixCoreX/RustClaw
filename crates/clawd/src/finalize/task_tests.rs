@@ -41,6 +41,8 @@ mod final_status;
 mod git_machine_kv_recovery;
 #[path = "task_tests/machine_kv_final_guard.rs"]
 mod machine_kv_final_guard;
+#[path = "task_tests/path_fact_machine_kv.rs"]
+mod path_fact_machine_kv;
 #[path = "task_tests/runtime_failure_payload.rs"]
 mod runtime_failure_payload;
 #[path = "task_tests/tree_summary_recovery.rs"]
