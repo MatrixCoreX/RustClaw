@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 
 const QUICK_INDEX_MAX_PLANNER_CAPABILITIES: usize = 6;
 const QUICK_INDEX_MAX_SCHEMA_FIELDS: usize = 8;
+const QUICK_INDEX_MAX_ENUM_FIELDS: usize = 3;
+const QUICK_INDEX_MAX_ENUM_VALUES: usize = 8;
 
 fn skill_risk_level_token(risk_level: SkillRiskLevel) -> &'static str {
     match risk_level {
@@ -59,6 +61,40 @@ fn schema_property_names(schema: &Value) -> Vec<String> {
         .and_then(Value::as_object)
         .map(|properties| properties.keys().cloned().collect())
         .unwrap_or_default()
+}
+
+fn capability_enum_constraints(
+    schema: Option<&Value>,
+    required: &[String],
+    optional: &[String],
+) -> Vec<String> {
+    let Some(properties) = schema
+        .and_then(|value| value.get("properties"))
+        .and_then(Value::as_object)
+    else {
+        return Vec::new();
+    };
+
+    required
+        .iter()
+        .chain(optional)
+        .flat_map(|field| field.split('|'))
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .filter_map(|field| {
+            let values = properties
+                .get(field)
+                .and_then(|property| property.get("enum"))
+                .and_then(Value::as_array)?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            let values = compact_token_list(values, QUICK_INDEX_MAX_ENUM_VALUES);
+            (!values.is_empty()).then(|| format!("allowed_{field}={values}"))
+        })
+        .take(QUICK_INDEX_MAX_ENUM_FIELDS)
+        .collect()
 }
 
 pub(super) fn output_contract_metadata(manifest: &SkillManifest) -> String {
@@ -205,6 +241,11 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
             if !capability.required.is_empty() {
                 attrs.push(format!("required={}", capability.required.join("|")));
             }
+            attrs.extend(capability_enum_constraints(
+                manifest.input_schema.as_ref(),
+                &capability.required,
+                &capability.optional,
+            ));
             if let Some(effect) = capability.effect {
                 attrs.push(format!("effect={}", effect.as_token()));
             }
