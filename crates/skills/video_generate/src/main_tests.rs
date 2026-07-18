@@ -40,6 +40,8 @@ fn dry_run_returns_request_payload_without_key() {
     assert_eq!(text, "VIDEO_GENERATE_DRY_RUN");
     assert_eq!(extra["provider"], "minimax");
     assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["duration"], 6);
+    assert_eq!(extra["resolution"], DEFAULT_RESOLUTION);
     assert_eq!(extra["adapter_kind"], "media_job_poll");
     assert_eq!(extra["request"]["model"], DEFAULT_MODEL);
     assert_eq!(extra["planned_outputs"][0]["type"], "video_file");
@@ -81,6 +83,7 @@ fn preview_action_forces_dry_run_without_writing_file() {
         json!({
             "action": "preview_generate",
             "prompt": "A status card animation",
+            "duration": 10,
             "output_path": "video/preview.mp4",
             "dry_run": false
         }),
@@ -89,6 +92,7 @@ fn preview_action_forces_dry_run_without_writing_file() {
 
     assert_eq!(text, "VIDEO_GENERATE_DRY_RUN");
     assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["duration"], 10);
     assert!(!root.join("video/preview.mp4").exists());
 }
 

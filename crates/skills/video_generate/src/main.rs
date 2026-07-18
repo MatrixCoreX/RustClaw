@@ -371,6 +371,8 @@ fn execute_generate(
                 "model_kind": adapter_kind_name(adapter_kind_for(vendor, provider_cfg.as_ref())),
                 "adapter_kind": "media_job_poll",
                 "dry_run": true,
+                "duration": duration,
+                "resolution": resolution,
                 "request": payload,
                 "output_path": output,
                 "outputs": [],

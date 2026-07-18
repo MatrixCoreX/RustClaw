@@ -613,6 +613,25 @@ fn machine_summary_preserves_requested_nested_machine_contract() {
 }
 
 #[test]
+fn machine_summary_projects_requested_media_duration() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"provider":"fixture","duration":10,"resolution":"720P"}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return provider, duration, and resolution.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("provider=fixture duration=10 resolution=720P")
+    );
+}
+
+#[test]
 fn machine_summary_rejects_nested_contract_with_visible_text_boundary() {
     let mut observed = Vec::new();
     collect_machine_text_fragments_from_output(
