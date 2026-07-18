@@ -778,6 +778,7 @@ fn schedule_compile_only_response(
         if would_mutate { "true" } else { "false" },
     );
     push_schedule_preview_kv(&mut lines, "timezone", intent.timezone.trim());
+    push_schedule_preview_kv(&mut lines, "datetime", intent.schedule.run_at.trim());
     push_schedule_preview_kv(&mut lines, "schedule.type", intent.schedule.r#type.trim());
     push_schedule_preview_kv(&mut lines, "schedule.run_at", intent.schedule.run_at.trim());
     push_schedule_preview_kv(&mut lines, "schedule.time", intent.schedule.time.trim());
@@ -802,6 +803,7 @@ fn schedule_compile_only_response(
     push_schedule_preview_kv_value(&mut lines, "next_run_human", extra.get("next_run_human"));
     push_schedule_preview_kv_value(&mut lines, "task_kind", extra.get("task_kind"));
     push_schedule_preview_kv_value(&mut lines, "task_content", extra.get("task_content"));
+    push_schedule_preview_kv_value(&mut lines, "title", extra.get("task_content"));
     lines.join("\n")
 }
 
