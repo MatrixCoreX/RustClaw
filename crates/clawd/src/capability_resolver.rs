@@ -242,7 +242,10 @@ pub(crate) fn bind_unclassified_output_contract_from_capabilities(
 
     let mut inferred = None;
     for step in &plan_result.steps {
-        if step.action_type != "call_capability" {
+        if !matches!(
+            step.action_type.as_str(),
+            "call_capability" | "call_skill" | "call_tool"
+        ) {
             continue;
         }
         let (_, record) =
