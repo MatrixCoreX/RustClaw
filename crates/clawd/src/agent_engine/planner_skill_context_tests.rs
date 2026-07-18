@@ -97,6 +97,15 @@ fn first_round_uses_only_budgeted_compact_index() {
         "task_control_line={task_control_line:?}"
     );
     assert!(context.text.contains("coding_workflow.preview_repair"));
+    let task_control_line = task_control_line.expect("task_control compact-index line");
+    assert!(
+        task_control_line.contains("allowed_failure_class="),
+        "task_control_line={task_control_line}"
+    );
+    assert!(
+        task_control_line.contains("quota_exhausted"),
+        "task_control_line={task_control_line}"
+    );
     let schedule_line = context
         .text
         .lines()
