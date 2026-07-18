@@ -948,16 +948,32 @@ run_one_case() {
   append_summary_jsonl "$source_line" "$case_name" "$tags" "$prompt" "$task_id" "$final_file" "$effective_status" "$started_at" "$ended_at" "$expect_substr" "$mode"
 
   # A3: 维护连续坏 case 计数（用于 --fail-fast）
-  local final_status
+  local final_status assertion_status
   final_status="$(extract_status "$final_file" 2>/dev/null || echo "")"
+  assertion_status="$(
+    tail -n 1 "$SUMMARY_JSONL" | python3 -c '
+import json
+import sys
+
+try:
+    row = json.load(sys.stdin)
+except (json.JSONDecodeError, TypeError):
+    print("-")
+else:
+    print(str(row.get("assertion") or "-"))
+'
+  )"
   if [[ -n "$effective_status" ]]; then
     final_status="$effective_status"
   fi
-  case "$final_status" in
-    succeeded)
+  case "${assertion_status}:${final_status}" in
+    fail:*)
+      CONSECUTIVE_BAD=$((CONSECUTIVE_BAD + 1))
+      ;;
+    *:succeeded)
       CONSECUTIVE_BAD=0
       ;;
-    timeout|provider_unavailable|network_error|"")
+    *:timeout|*:provider_unavailable|*:network_error|*:)
       CONSECUTIVE_BAD=$((CONSECUTIVE_BAD + 1))
       ;;
     *)

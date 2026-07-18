@@ -425,6 +425,7 @@ fn valid_single_machine_marker(value: &str) -> bool {
             | "status"
             | "state"
             | "states"
+            | "decision"
             | "target"
             | "task_id"
             | "member"
