@@ -81,22 +81,21 @@ pub(crate) fn executable_unknown_argument_violations(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let declared_by_action =
-        claw_core::skill_registry::select_planner_capability_mapping(
-            &manifest.planner_capabilities,
-            action,
-        )
-        .map(|mapping| {
-            mapping
-                .required
-                .iter()
-                .chain(&mapping.optional)
-                .flat_map(|field| field.split('|'))
-                .map(str::trim)
-                .filter(|field| !field.is_empty())
-                .collect::<std::collections::HashSet<_>>()
-        })
-        .unwrap_or_default();
+    let declared_by_action = claw_core::skill_registry::select_planner_capability_mapping(
+        &manifest.planner_capabilities,
+        action,
+    )
+    .map(|mapping| {
+        mapping
+            .required
+            .iter()
+            .chain(&mapping.optional)
+            .flat_map(|field| field.split('|'))
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .collect::<std::collections::HashSet<_>>()
+    })
+    .unwrap_or_default();
     violations.retain(|violation| !declared_by_action.contains(violation.field.as_str()));
     violations
 }

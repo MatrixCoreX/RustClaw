@@ -144,6 +144,36 @@ def check_run_cmd_async_contract(skills_by_name: dict[str, dict[str, Any]]) -> l
         for field in ["async_start", "poll_after_seconds", "expires_in_seconds"]:
             if field not in optional:
                 findings.append(f"run_cmd.{cap_name}: optional missing {field}")
+    preview = capability_by_name(skill, "system.preview_background_command")
+    if not preview:
+        findings.append("run_cmd: missing system.preview_background_command capability")
+    else:
+        expected = {
+            "action": "preview_background_command",
+            "effect": "observe",
+            "risk_level": "low",
+            "preferred": True,
+            "idempotent": True,
+            "dedup_scope": "args",
+            "execution_mode": "sync_short",
+            "isolation_profile": "read_only",
+            "network_access": False,
+            "filesystem_write": False,
+            "external_publish": False,
+            "credential_access": False,
+            "subprocess": False,
+        }
+        for field, value in expected.items():
+            if preview.get(field) != value:
+                findings.append(
+                    f"run_cmd.system.preview_background_command: {field} must be {value!r}"
+                )
+        optional = optional_tokens(preview)
+        for field in ["cwd", "poll_after_seconds", "expires_in_seconds"]:
+            if field not in optional:
+                findings.append(
+                    f"run_cmd.system.preview_background_command: optional missing {field}"
+                )
     return findings
 
 

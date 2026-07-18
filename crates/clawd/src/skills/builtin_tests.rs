@@ -122,6 +122,49 @@ async fn run_cmd_permission_preview_never_executes_command() {
 }
 
 #[tokio::test]
+async fn run_cmd_background_preview_returns_synthetic_refs_without_starting_process() {
+    let root = TempDirGuard::new("run_cmd_background_preview");
+    let target = root.path.join("must_not_exist");
+    let state = test_state(root.path.clone());
+    let command = format!("sleep 1; touch {}", target.display());
+    let before = crate::now_ts_u64();
+
+    let output = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "action": "preview_background_command",
+            "command": command,
+            "cwd": ".",
+            "poll_after_seconds": 3,
+            "expires_in_seconds": 30
+        }),
+    )
+    .await
+    .expect("background preview should succeed");
+
+    let preview: Value = serde_json::from_str(&output).expect("structured background preview");
+    assert_eq!(preview["status"], "dry_run");
+    assert_eq!(preview["synthetic"], true);
+    assert_eq!(preview["preview_only"], true);
+    assert_eq!(preview["would_execute_command"], false);
+    assert_eq!(preview["would_start_process"], false);
+    assert_eq!(preview["poll_after_seconds"], 3);
+    assert!(preview["next_check_after"]
+        .as_u64()
+        .is_some_and(
+            |value| value >= before.saturating_add(3) && value <= before.saturating_add(4)
+        ));
+    assert!(preview["checkpoint_id"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("dry_run:")));
+    assert!(preview["poll_ref"].as_str().is_some());
+    assert!(preview["cancel_ref"].as_str().is_some());
+    assert!(preview.get("pending_async_job").is_none());
+    assert!(!target.exists(), "background preview started the command");
+}
+
+#[tokio::test]
 async fn list_dir_accepts_names_only_arg() {
     let root = TempDirGuard::new("list_dir_names_only");
     fs::write(root.path.join("b.txt"), "b").expect("write b");

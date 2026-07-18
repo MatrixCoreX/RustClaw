@@ -466,6 +466,57 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 return serde_json::to_string(&preview)
                     .map_err(|err| format!("permission_preflight_serialize_failed:{err}"));
             }
+            if action == "preview_background_command" {
+                let command = required_string(map, "command")?;
+                let cwd = optional_string(map, "cwd").unwrap_or(".");
+                let poll_after_seconds = map
+                    .get("poll_after_seconds")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(2)
+                    .clamp(1, 3_600);
+                let expires_in_seconds = map
+                    .get("expires_in_seconds")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(3_600)
+                    .clamp(poll_after_seconds.saturating_add(1), 86_400);
+                let now_ts = crate::now_ts_u64();
+                let task_ref = task
+                    .map(|claimed| claimed.task_id.as_str())
+                    .unwrap_or("direct");
+                let preview_ref = format!("dry_run:{task_ref}");
+                let permission = crate::verifier::preview_command_permission_decision(
+                    state,
+                    command,
+                    Some(cwd),
+                    crate::skills::task_allows_sudo(state, task),
+                );
+                let preview = serde_json::json!({
+                    "schema_version": 1,
+                    "action": "preview_background_command",
+                    "status": "dry_run",
+                    "message_key": "clawd.run_cmd.preview_background_command.dry_run",
+                    "dry_run": true,
+                    "synthetic": true,
+                    "preview_only": true,
+                    "would_execute_command": false,
+                    "would_start_process": false,
+                    "would_mutate": false,
+                    "command": command,
+                    "cwd": cwd,
+                    "checkpoint_id": format!("{preview_ref}:checkpoint"),
+                    "poll_ref": format!("{preview_ref}:poll"),
+                    "cancel_ref": format!("{preview_ref}:cancel"),
+                    "next_check_after": now_ts.saturating_add(poll_after_seconds),
+                    "poll_after_seconds": poll_after_seconds,
+                    "expires_at": now_ts.saturating_add(expires_in_seconds),
+                    "resume_entrypoint": "poll_async_job",
+                    "checkpoint_state": "background",
+                    "adapter_kind": "local_process_poll",
+                    "permission": permission,
+                });
+                return serde_json::to_string(&preview)
+                    .map_err(|err| format!("background_preview_serialize_failed:{err}"));
+            }
             let cwd = optional_string(map, "cwd").unwrap_or(".");
             let cwd_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
