@@ -766,6 +766,11 @@ fn registry_resolves_legacy_machine_capability_aliases_without_static_fallback()
             "tool:fs_basic",
         ),
         (
+            "filesystem.read_range",
+            json!({"path": "README.md"}),
+            "tool:fs_basic",
+        ),
+        (
             "fs_basic.read_text",
             json!({"path": "README.md"}),
             "tool:fs_basic",
