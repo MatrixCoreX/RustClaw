@@ -67,25 +67,37 @@ fn observed_answer_is_structured_machine_payload(candidate: &str) -> bool {
 }
 
 pub(crate) fn multi_field_machine_record_is_language_neutral(candidate: &str) -> bool {
-    let fields = candidate
+    let lines = candidate
         .lines()
-        .flat_map(|line| line.split(','))
         .map(str::trim)
-        .filter(|field| !field.is_empty())
+        .filter(|line| !line.is_empty())
         .collect::<Vec<_>>();
-    fields.len() >= 2
-        && fields.iter().all(|field| {
-            let mut parts = field.split('=');
-            let (Some(key), Some(value), None) = (parts.next(), parts.next(), parts.next()) else {
-                return false;
-            };
-            !key.is_empty()
-                && !value.is_empty()
-                && key
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-                && value.chars().all(|ch| ch.is_ascii_graphic())
-        })
+    if lines.len() >= 2 {
+        return lines.iter().all(|line| machine_record_field(line));
+    }
+    let Some(line) = lines.first() else {
+        return false;
+    };
+    let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
+    fields.len() >= 2 && fields.iter().all(|field| machine_record_field(field))
+}
+
+fn machine_record_field(field: &str) -> bool {
+    let separator = field.find('=').or_else(|| field.find(':'));
+    let Some(separator) = separator else {
+        return false;
+    };
+    let (key, value_with_separator) = field.split_at(separator);
+    let value = value_with_separator.get(1..).unwrap_or_default().trim();
+    !key.is_empty()
+        && !value.is_empty()
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        && value
+            .split(',')
+            .map(str::trim)
+            .all(|item| !item.is_empty() && item.chars().all(|ch| ch.is_ascii_graphic()))
 }
 
 pub(super) fn observed_answer_language_compatible(

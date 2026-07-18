@@ -118,11 +118,21 @@ fn observed_answer_language_compatibility_accepts_structured_json_machine_output
 fn observed_answer_language_compatibility_accepts_language_neutral_machine_fields() {
     let single_line = "running=0, waiting=0, background=0, needs_user=0";
     let multi_line = "running=0\nwaiting=0\nbackground=0\nneeds_user=0";
+    let mixed_separator_list =
+        "count=4\nnames: alpha_namespace, beta_namespace, release.docs, nl-smoke";
 
     assert!(observed_answer_language_compatible(single_line, "zh-CN"));
     assert!(observed_answer_language_compatible(single_line, "en"));
     assert!(observed_answer_language_compatible(multi_line, "zh-CN"));
     assert!(observed_answer_language_compatible(multi_line, "ja"));
+    assert!(observed_answer_language_compatible(
+        mixed_separator_list,
+        "zh-CN"
+    ));
+    assert!(observed_answer_language_compatible(
+        mixed_separator_list,
+        "ja"
+    ));
 }
 
 #[test]
@@ -132,6 +142,9 @@ fn observed_answer_language_compatibility_does_not_treat_prose_as_machine_fields
     ));
     assert!(!multi_field_machine_record_is_language_neutral(
         "status=ok 当前任务已完成"
+    ));
+    assert!(!multi_field_machine_record_is_language_neutral(
+        "status=ok\nexplanation: task completed"
     ));
 }
 
