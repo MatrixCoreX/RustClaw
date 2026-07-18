@@ -428,6 +428,8 @@ fn valid_single_machine_marker(value: &str) -> bool {
             | "decision"
             | "target"
             | "task_id"
+            | "checkpoint"
+            | "diff"
             | "member"
             | "member_path"
             | "member_count"
