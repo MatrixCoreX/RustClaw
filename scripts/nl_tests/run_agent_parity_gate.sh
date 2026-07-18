@@ -462,6 +462,7 @@ echo "AGENT_PARITY_GATE_STEP nl_suite_checker_self_tests"
   python3 "${SCRIPT_DIR}/check_suite_wrapper_contract.py" --self-test
   python3 "${SCRIPT_DIR}/check_runner_path_ref_contract.py" --self-test
   python3 "${SCRIPT_DIR}/check_compact_coverage.py" --self-test
+  python3 "${SCRIPT_DIR}/manual_case_assertions_tests.py"
 } > "${OUT_DIR}/nl_suite_checker_self_tests.txt"
 
 echo "AGENT_PARITY_GATE_STEP suite_artifact_contract_self_test"
