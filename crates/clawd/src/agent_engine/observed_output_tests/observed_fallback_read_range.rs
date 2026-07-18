@@ -115,6 +115,27 @@ fn observed_answer_language_compatibility_accepts_structured_json_machine_output
 }
 
 #[test]
+fn observed_answer_language_compatibility_accepts_language_neutral_machine_fields() {
+    let single_line = "running=0, waiting=0, background=0, needs_user=0";
+    let multi_line = "running=0\nwaiting=0\nbackground=0\nneeds_user=0";
+
+    assert!(observed_answer_language_compatible(single_line, "zh-CN"));
+    assert!(observed_answer_language_compatible(single_line, "en"));
+    assert!(observed_answer_language_compatible(multi_line, "zh-CN"));
+    assert!(observed_answer_language_compatible(multi_line, "ja"));
+}
+
+#[test]
+fn observed_answer_language_compatibility_does_not_treat_prose_as_machine_fields() {
+    assert!(!multi_field_machine_record_is_language_neutral(
+        "status=ok, explanation=当前任务已完成"
+    ));
+    assert!(!multi_field_machine_record_is_language_neutral(
+        "status=ok 当前任务已完成"
+    ));
+}
+
+#[test]
 fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_machine_output() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

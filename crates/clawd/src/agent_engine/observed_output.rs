@@ -200,6 +200,7 @@ use output_status_json::{
 
 #[path = "observed_output_machine_candidates.rs"]
 mod output_machine_candidates;
+pub(crate) use output_machine_candidates::multi_field_machine_record_is_language_neutral;
 use output_machine_candidates::*;
 
 #[cfg(test)]
