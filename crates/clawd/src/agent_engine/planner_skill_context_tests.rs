@@ -106,6 +106,15 @@ fn first_round_uses_only_budgeted_compact_index() {
         task_control_line.contains("quota_exhausted"),
         "task_control_line={task_control_line}"
     );
+    let run_cmd_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("skill=run_cmd"))
+        .expect("run_cmd compact-index line");
+    assert!(
+        run_cmd_line.contains("system.preview_background_command"),
+        "run_cmd_line={run_cmd_line}"
+    );
     let schedule_line = context
         .text
         .lines()

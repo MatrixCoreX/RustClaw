@@ -9,7 +9,7 @@ Independent base skill for running shell commands. Use `{"type":"call_skill","sk
 ## Parameter contract
 | Param | Required | Type | Default | Description |
 |-------|----------|------|---------|-------------|
-| `action` | no | string | - | Machine action token. Use `preview_command_permission` for a no-execution policy projection or `inspect_cli_help` for bounded read-only CLI help/version/path probes. Leave unset for ordinary shell execution selected through `system.run_command`. |
+| `action` | no | string | - | Machine action token. Use `preview_command_permission` for a no-execution policy projection, `preview_background_command` for a synthetic async lifecycle preview, or `inspect_cli_help` for bounded read-only CLI help/version/path probes. Leave unset for ordinary shell execution selected through `system.run_command`. |
 | `command` | no* | string | - | Full shell command to run. |
 | `request_text` | no* | string | - | Natural language request; when `command` is missing, skill asks LLM to generate one command. |
 | `cwd` | no | string(path) | "." | Working directory. |
@@ -33,6 +33,7 @@ Independent base skill for running shell commands. Use `{"type":"call_skill","sk
 - Non-zero exits are structured errors. `extra.exit_code` is always included when available; `extra.exit_category` is derived from the exit code (`command_not_found` for 127, `command_not_executable` for 126, `command_reported_failure` for 1-125, `terminated_by_signal_or_shell_status` for 128-255), with `extra.exit_classification_source="exit_code"`.
 - Use `extra.exit_category` and `extra.exit_code` for recovery or summaries instead of matching stderr text.
 - For a permission-only request, call capability `system.preview_command_permission` with action `preview_command_permission` and a concrete `command`. It executes no command and returns machine fields including `decision`, `risk_level`, `confirmation_required`, sandbox policy, and `reason_codes`; do not infer these fields in prose.
+- For a no-execution background lifecycle preview, call capability `system.preview_background_command` with a concrete `command` and optional bounded `poll_after_seconds` / `expires_in_seconds`. It returns synthetic `checkpoint_id`, `poll_ref`, `cancel_ref`, `next_check_after`, permission policy, and adapter fields while explicitly setting `preview_only=true`, `would_execute_command=false`, and `would_start_process=false`. These preview references are not real resumable jobs.
 - For current CLI surface checks that only inspect help/version/path availability, set `action="inspect_cli_help"` and include bounded `timeout_seconds` / `max_output_bytes`. Do not use this action for scripts, installers, mutation commands, network calls, or arbitrary shell execution.
 - For CLI subcommand/interface questions, inspect the most specific safe help surface first. If the requested target is a nested command, prefer `<cli> <subcommand> --help` over only `<cli> --help`; use the top-level help only when the request asks about the overall CLI or when the subcommand name is unknown.
 
