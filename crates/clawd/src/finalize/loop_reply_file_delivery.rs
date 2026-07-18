@@ -673,6 +673,15 @@ fn clean_machine_field_value(value: &serde_json::Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn clean_machine_scalar_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(_) => clean_machine_field_value(value),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+}
+
 fn machine_bool_true(value: Option<&serde_json::Value>) -> bool {
     value.and_then(|value| value.as_bool()) == Some(true)
 }
@@ -732,6 +741,12 @@ fn generated_file_path_report_from_dry_run_value(value: &serde_json::Value) -> O
     }
     if let Some(model) = extra.get("model").and_then(clean_machine_field_value) {
         fields.push(format!("model={model}"));
+    }
+    if let Some(duration) = extra.get("duration").and_then(clean_machine_scalar_value) {
+        fields.push(format!("duration={duration}"));
+    }
+    if let Some(resolution) = extra.get("resolution").and_then(clean_machine_field_value) {
+        fields.push(format!("resolution={resolution}"));
     }
     if let Some(model_kind) = extra.get("model_kind").and_then(clean_machine_field_value) {
         fields.push(format!("model_kind={model_kind}"));
