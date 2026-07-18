@@ -491,7 +491,7 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "image_generate",
-        r#"{"text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","model_kind":"dry_run","adapter_kind":"media_job_poll","output_path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png","planned_outputs":[{"type":"image_file","path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]}}"#,
+        r#"{"text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","duration":10,"resolution":"768P","model_kind":"dry_run","adapter_kind":"media_job_poll","output_path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png","planned_outputs":[{"type":"image_file","path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]}}"#,
     ));
 
     let (answer, summary) = direct_generated_file_path_report_from_dry_run_payload(
@@ -503,6 +503,8 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
     assert!(answer.contains("dry_run=true"), "answer: {answer}");
     assert!(answer.contains("provider=minimax"), "answer: {answer}");
     assert!(answer.contains("model=image-01"), "answer: {answer}");
+    assert!(answer.contains("duration=10"), "answer: {answer}");
+    assert!(answer.contains("resolution=768P"), "answer: {answer}");
     assert!(
         answer.contains("adapter_kind=media_job_poll"),
         "answer: {answer}"
