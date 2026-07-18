@@ -140,6 +140,72 @@ pub(super) fn provider_failure_preview_extra(policy: ProviderFailurePolicy) -> V
     })
 }
 
+pub(super) fn coding_repair_preview_extra() -> Value {
+    json!({
+        "schema_version": 1,
+        "action": "preview_coding_repair",
+        "status": "dry_run",
+        "message_key": "task_control.preview_coding_repair.dry_run",
+        "dry_run": true,
+        "synthetic": true,
+        "would_mutate": false,
+        "would_execute_command": false,
+        "checkpoint": {
+            "status": "planned",
+            "checkpoint_ref": "dry_run:checkpoint:pre_patch",
+            "checkpoint_kind": "pre_patch",
+            "restorable": true,
+        },
+        "diff": {
+            "status": "planned",
+            "diff_ref": "dry_run:diff:repair_patch",
+            "patch_ref": "dry_run:patch:repair_attempt_1",
+            "changed_file_count": 1,
+        },
+        "failed_verification": {
+            "status": "failed",
+            "verification_ref": "dry_run:verification:first",
+            "evidence_ref": "dry_run:evidence:failed_verification",
+            "failure_kind": "test_failure",
+        },
+        "repair_attempt": {
+            "status": "planned",
+            "attempt": 1,
+            "repair_ref": "dry_run:repair:attempt_1",
+            "patch_ref": "dry_run:patch:repair_attempt_1",
+            "source_verification_ref": "dry_run:verification:first",
+        },
+        "passing_verification": {
+            "status": "passed",
+            "verification_ref": "dry_run:verification:second",
+            "evidence_ref": "dry_run:evidence:passing_verification",
+            "source_repair_ref": "dry_run:repair:attempt_1",
+        },
+        "rewind_references": [
+            "dry_run:checkpoint:pre_patch",
+            "dry_run:diff:repair_patch",
+        ],
+        "field_value": {
+            "action": "preview_coding_repair",
+            "status": "dry_run",
+            "message_key": "task_control.preview_coding_repair.dry_run",
+            "dry_run": true,
+            "synthetic": true,
+            "would_mutate": false,
+            "would_execute_command": false,
+            "checkpoint_ref": "dry_run:checkpoint:pre_patch",
+            "diff_ref": "dry_run:diff:repair_patch",
+            "failed_verification_ref": "dry_run:verification:first",
+            "repair_attempt_ref": "dry_run:repair:attempt_1",
+            "passing_verification_ref": "dry_run:verification:second",
+            "rewind_references": [
+                "dry_run:checkpoint:pre_patch",
+                "dry_run:diff:repair_patch",
+            ],
+        },
+    })
+}
+
 fn resume_preview_contract(input: &SkillInput, action: &str) -> Value {
     json!({
         "schema_version": 1,

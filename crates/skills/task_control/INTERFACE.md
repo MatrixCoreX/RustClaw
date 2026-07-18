@@ -2,7 +2,7 @@
 
 ## Capability Summary
 
-- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, and inspect provider-failure recovery policy without invoking a provider.
+- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, inspect provider-failure recovery policy, and preview a structured coding repair loop without side effects.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Planner-facing selection should use structured capability/action fields from the registry. Do not add phrase-specific routing rules for any user language.
 - Task cancel/resume/pause dry-run or lifecycle-field preview requests must call the skill with `dry_run=true` and return observed machine fields. Do not answer those flows from static prose alone, even when the user has not supplied a concrete `task_id` or index.
@@ -17,6 +17,7 @@
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 - `preview_resume` - Return the no-mutation resume entrypoint and renewable execution-lease contract for a stable `task_id`.
 - `preview_provider_failure` - Return the shared no-mutation provider failure, retry, waiting-state, and checkpoint policy for a canonical `failure_class`.
+- `preview_coding_repair` - Return a synthetic no-mutation coding-loop contract containing checkpoint, diff, failed verification, repair attempt, passing verification, and rewind references.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
 - `pause` - Delay an existing waiting/background checkpoint by stable `task_id`.
 - Cancellation dry-runs are executable observations, not static prose: use `cancel_all` with `dry_run=true` when no specific index is supplied, or `cancel_one` with both `index` and `dry_run=true` when the user supplied a numbered task.
@@ -25,7 +26,7 @@
 
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `resume`, `pause`. |
+| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_coding_repair`, `resume`, `pause`. |
 | `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider failure token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. |
 | `task_id` | required for `get`, `resume`, `pause` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
@@ -54,6 +55,7 @@ Notes:
 - `cancel_all` / `cancel_one` with `dry_run=true` returns `status=dry_run`, `would_mutate=false`, `required_fields`, and `result_projection_fields` containing `state`, `can_cancel`, `can_poll`, and `db_status`.
 - `preview_resume` always returns `status=dry_run` and `would_mutate=false`, plus `resume_entrypoint` and the renewable `lease` contract. It never calls the resume API.
 - `preview_provider_failure` always returns `status=dry_run` and `would_mutate=false`, plus `failure_class`, `provider_retryable`, `provider_blocker`, `retry_policy`, `retry_after_seconds`, `waiting_state`, and checkpoint recovery fields. It reads the same machine policy used by runtime provider handling and never calls a provider.
+- `preview_coding_repair` always returns `status=dry_run`, `synthetic=true`, `would_mutate=false`, and `would_execute_command=false`. Its structured fields model the fail -> repair -> pass lifecycle without claiming that a real repository, patch, command, or test was executed.
 - `resume` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
 - `pause` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
 
@@ -190,4 +192,16 @@ Request:
 Response text example:
 ```json
 {"schema_version":1,"action":"preview_provider_failure","status":"dry_run","message_key":"task_control.preview_provider_failure.dry_run","dry_run":true,"would_mutate":false,"failure_class":"quota_exhausted","provider_retryable":false,"provider_blocker":true,"retry_policy":"background_wait","retry_after_seconds":10800,"waiting_state":"waiting","checkpoint":{"required":true,"recovery_action":"wait_background","resume_reason":"provider_blocker_wait_background","resume_entrypoint":"next_planner_round"}}
+```
+
+### coding repair preview
+
+Request:
+```json
+{"request_id":"r11","args":{"action":"preview_coding_repair"},"user_id":1,"chat_id":2}
+```
+
+Response text example:
+```json
+{"schema_version":1,"action":"preview_coding_repair","status":"dry_run","synthetic":true,"would_mutate":false,"would_execute_command":false,"checkpoint":{"status":"planned","checkpoint_ref":"dry_run:checkpoint:pre_patch"},"diff":{"status":"planned","diff_ref":"dry_run:diff:repair_patch"},"failed_verification":{"status":"failed","verification_ref":"dry_run:verification:first"},"repair_attempt":{"status":"planned","attempt":1,"repair_ref":"dry_run:repair:attempt_1"},"passing_verification":{"status":"passed","verification_ref":"dry_run:verification:second"},"rewind_references":["dry_run:checkpoint:pre_patch","dry_run:diff:repair_patch"]}
 ```
