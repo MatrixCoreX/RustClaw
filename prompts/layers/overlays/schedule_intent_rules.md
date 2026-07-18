@@ -5,6 +5,12 @@ Do not encode default thresholds, windows, exchange, or direction in schedule ru
 - For user-visible text in `clarify_question`, follow the request language hint when it is clear. Use the configured response language only when the request language is unclear.
 - Do not switch to English merely because downstream args need normalized English values.
 - If the user states explicit monitoring numbers, you may pass **only those** fields—never add skill default placeholders you were not told.
+- For `task.kind=ask`, write the actual task/message content to `task.payload.text` after
+  semantically removing the scheduling wrapper (trigger date/time, recurrence, and reminder
+  instruction). Do not repeat the whole raw scheduling request when a narrower task content is
+  available. This is a multilingual semantic extraction rule, not a phrase-matching rule.
+- Schedule previews derive `title` from that parsed task content. `schedule.content` remains a
+  compatibility alias, but `task.payload.text` is the canonical field for new output.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

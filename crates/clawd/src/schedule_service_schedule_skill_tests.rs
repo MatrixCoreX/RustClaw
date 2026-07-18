@@ -699,7 +699,16 @@ fn schedule_intent_schema_drift() {
         .and_then(|v| v.get("properties"))
         .and_then(|v| v.as_object())
         .expect("schedule.properties must be an object");
-    for field in ["type", "run_at", "time", "weekday", "every_minutes", "cron"] {
+    for field in [
+        "type",
+        "run_at",
+        "time",
+        "weekday",
+        "every_minutes",
+        "cron",
+        "timezone",
+        "content",
+    ] {
         assert!(
             schedule_props.contains_key(field),
             "schema missing nested schedule field `{field}`",
@@ -717,6 +726,15 @@ fn schedule_intent_schema_drift() {
             "schema missing nested task field `{field}`",
         );
     }
+    let task_payload_props = task_props
+        .get("payload")
+        .and_then(|v| v.get("properties"))
+        .and_then(|v| v.as_object())
+        .expect("task.payload.properties must be an object");
+    assert!(
+        task_payload_props.contains_key("text"),
+        "schema missing canonical task.payload.text field",
+    );
 
     let probe = serde_json::json!({
         "kind": "create",

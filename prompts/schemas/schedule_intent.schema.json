@@ -49,6 +49,14 @@
         },
         "cron": {
           "type": "string"
+        },
+        "timezone": {
+          "type": "string",
+          "description": "Optional compatibility alias for the top-level IANA timezone."
+        },
+        "content": {
+          "type": "string",
+          "description": "Optional compatibility alias for parsed ask-task content. New output should prefer task.payload.text."
         }
       }
     },
@@ -63,7 +71,13 @@
         },
         "payload": {
           "type": "object",
-          "description": "Free-form task payload. For `run_skill`, runtime later validates `skill_name` and `args` against the live registry."
+          "description": "Free-form task payload. For `ask`, text contains only the parsed task/message content after removing schedule timing and reminder wrappers. For `run_skill`, runtime later validates `skill_name` and `args` against the live registry.",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Canonical task content for ask schedules and the source of the preview title."
+            }
+          }
         }
       }
     },
