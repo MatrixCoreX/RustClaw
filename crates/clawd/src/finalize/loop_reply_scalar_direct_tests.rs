@@ -258,6 +258,51 @@ async fn scalar_contract_restores_complete_terminal_multi_machine_record() {
 }
 
 #[tokio::test]
+async fn scalar_contract_keeps_single_line_publishable_multi_machine_record() {
+    let state = test_state();
+    let task = claimed_task("task-single-line-machine-record");
+    let mut route = scalar_route_result();
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.requires_content_evidence = false;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+    let complete = "field_a=0, field_b=0, field_c=0, field_d=0";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "task_control",
+        r#"{"action":"list","status":"empty","count":0}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", complete));
+    loop_state.last_publishable_synthesis_output = Some(complete.to_string());
+    loop_state.last_user_visible_respond = Some("field_d".to_string());
+    loop_state.delivery_messages = vec!["field_d".to_string()];
+
+    enforce_delivery_output_contract(
+        &state,
+        &task,
+        "return the requested machine fields",
+        &mut loop_state,
+        Some(&agent_run_context),
+    )
+    .await;
+
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(complete)
+    );
+    assert_eq!(loop_state.delivery_messages, vec![complete.to_string()]);
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_replaces_wrapped_runtime_status_scalar_delivery() {
     let state = test_state();
     let task = claimed_task("task-wrapped-runtime-status-scalar");

@@ -63,7 +63,29 @@ fn observed_answer_is_structured_machine_payload(candidate: &str) -> bool {
     matches!(
         serde_json::from_str::<serde_json::Value>(candidate.trim()),
         Ok(serde_json::Value::Object(_) | serde_json::Value::Array(_))
-    )
+    ) || multi_field_machine_record_is_language_neutral(candidate)
+}
+
+pub(crate) fn multi_field_machine_record_is_language_neutral(candidate: &str) -> bool {
+    let fields = candidate
+        .lines()
+        .flat_map(|line| line.split(','))
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    fields.len() >= 2
+        && fields.iter().all(|field| {
+            let mut parts = field.split('=');
+            let (Some(key), Some(value), None) = (parts.next(), parts.next(), parts.next()) else {
+                return false;
+            };
+            !key.is_empty()
+                && !value.is_empty()
+                && key
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+                && value.chars().all(|ch| ch.is_ascii_graphic())
+        })
 }
 
 pub(super) fn observed_answer_language_compatible(

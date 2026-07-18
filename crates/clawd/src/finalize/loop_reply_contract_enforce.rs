@@ -116,11 +116,22 @@ pub(super) async fn enforce_delivery_output_contract(
         );
         return;
     }
-    let terminal_multi_machine_record =
-        latest_terminal_multi_machine_record_for_scalar(route, loop_state).map(str::to_string);
-    let seed_text = if let Some(record) = terminal_multi_machine_record {
-        record
-    } else if publishable_synthesis.is_some() {
+    if let Some(record) =
+        complete_machine_record_for_scalar(route, loop_state, publishable_synthesis.as_deref())
+            .map(str::to_string)
+    {
+        loop_state.last_user_visible_respond = Some(record.clone());
+        loop_state.delivery_messages = vec![record];
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "final_result_keep_complete_machine_record",
+            "kept",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return;
+    }
+    let seed_text = if publishable_synthesis.is_some() {
         loop_state
             .last_publishable_synthesis_output
             .clone()
@@ -298,9 +309,10 @@ pub(super) async fn enforce_delivery_output_contract(
     loop_state.delivery_messages = normalized_messages;
 }
 
-fn latest_terminal_multi_machine_record_for_scalar<'a>(
+fn complete_machine_record_for_scalar<'a>(
     route: &crate::IntentOutputContract,
     loop_state: &'a LoopState,
+    publishable_synthesis: Option<&'a str>,
 ) -> Option<&'a str> {
     if route.response_shape != crate::OutputResponseShape::Scalar
         || route.delivery_required
@@ -308,32 +320,21 @@ fn latest_terminal_multi_machine_record_for_scalar<'a>(
     {
         return None;
     }
-    loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .filter(|step| step.is_ok() && step.skill == "respond")
-        .filter_map(|step| step.output.as_deref())
+    publishable_synthesis
+        .into_iter()
+        .chain(
+            loop_state
+                .executed_step_results
+                .iter()
+                .rev()
+                .filter(|step| step.is_ok() && step.skill == "respond")
+                .filter_map(|step| step.output.as_deref()),
+        )
         .map(str::trim)
-        .find(|candidate| is_multi_line_machine_record(candidate))
-}
-
-fn is_multi_line_machine_record(candidate: &str) -> bool {
-    let lines = candidate
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>();
-    lines.len() >= 2
-        && lines.iter().all(|line| {
-            let Some((key, value)) = line.split_once('=') else {
-                return false;
-            };
-            !key.is_empty()
-                && !value.trim().is_empty()
-                && key
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        .find(|candidate| {
+            crate::agent_engine::observed_output::multi_field_machine_record_is_language_neutral(
+                candidate,
+            )
         })
 }
 
