@@ -260,7 +260,7 @@ fn machine_summary_preserves_requested_underscore_field_markers_from_json_keys()
     assert_eq!(
         summary.as_deref(),
         Some(
-            "cancel_ref=optional_cancel_reference terminal_projection adapter_kind=local_process_poll status=cancelled"
+            r#"cancel_ref=optional_cancel_reference terminal_projection={"state":"cancelled","terminal":true} adapter_kind=local_process_poll status=cancelled"#
         )
     );
 }
@@ -589,6 +589,41 @@ fn machine_summary_projects_task_control_lifecycle_markers() {
         summary.as_deref(),
         Some("count=0 states=none can_poll=false")
     );
+}
+
+#[test]
+fn machine_summary_preserves_requested_nested_machine_contract() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"resume_entrypoint":"checkpoint_declared","lease":{"required":true,"scope":"resume_execution","mode":"renewable","seconds_source":"runtime_config","heartbeat_renewal":true}}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return resume_entrypoint and lease fields.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(
+            r#"resume_entrypoint=checkpoint_declared lease={"heartbeat_renewal":true,"mode":"renewable","required":true,"scope":"resume_execution","seconds_source":"runtime_config"}"#
+        )
+    );
+}
+
+#[test]
+fn machine_summary_rejects_nested_contract_with_visible_text_boundary() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"lease":{"mode":"renewable","text":"provider response"}}}"#,
+        &mut observed,
+    );
+
+    let summary =
+        requested_machine_kv_summary_from_observations("Return lease.", &observed);
+
+    assert_eq!(summary, None);
 }
 
 #[test]
