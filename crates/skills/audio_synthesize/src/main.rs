@@ -234,6 +234,11 @@ fn execute(
         .unwrap_or("synthesize");
     match action {
         "synthesize" => execute_synthesize(cfg, workspace_root, obj),
+        "preview_synthesize" => {
+            let mut preview_args = obj.clone();
+            preview_args.insert("dry_run".to_string(), Value::Bool(true));
+            execute_synthesize(cfg, workspace_root, &preview_args)
+        }
         "poll" => execute_poll(cfg, workspace_root, obj),
         "cancel" => execute_cancel(cfg, obj),
         _ => Err(format!("unsupported action: {action}")),

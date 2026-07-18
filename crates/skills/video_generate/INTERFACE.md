@@ -20,12 +20,15 @@
 
 ## Actions
 - `generate`: create a video task; optionally wait and download the video file.
+- `preview_generate`: validate and project a video task without provider calls or file writes; this action always forces dry-run.
 - `poll`: query an existing provider video task once and return a machine-readable async poll adapter result.
 - `cancel`: request cancellation for an existing provider video task; dry-run returns a terminal `cancelled` adapter result, while live provider-native cancellation is represented as a structured adapter contract until a concrete provider cancel adapter is available.
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
+| preview_generate | `prompt` | yes | string | - | Video description to validate; this action always forces dry-run. |
+| preview_generate | generation options | no | mixed | config defaults | Uses the same bounded input options as `generate` without provider calls or file writes. |
 | generate | `prompt` | yes | string | - | Video description and optional camera commands accepted by the selected adapter. |
 | generate | `first_frame_image` / `first_frame` / `image` | no | string/object | - | Public URL, data URL, base64 object, or workspace path used as the first frame. |
 | generate | `last_frame_image` / `last_frame` | no | string/object | - | Public URL, data URL, base64 object, or workspace path used as the last frame. |

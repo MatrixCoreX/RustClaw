@@ -231,6 +231,11 @@ fn execute(
         .unwrap_or("generate");
     match action {
         "generate" => execute_generate(cfg, workspace_root, obj),
+        "preview_generate" => {
+            let mut preview_args = obj.clone();
+            preview_args.insert("dry_run".to_string(), Value::Bool(true));
+            execute_generate(cfg, workspace_root, &preview_args)
+        }
         "poll" => execute_poll(cfg, workspace_root, obj),
         "cancel" => execute_cancel(cfg, obj),
         _ => Err(format!("unsupported action: {action}")),
