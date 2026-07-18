@@ -81,9 +81,10 @@ planner_kind = "tool"
 output_kind = "text"
 side_effect = true
 auto_invocable = true
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "read_text_range", "write_text", "make_dir", "remove_path"] }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } }, start_line = { type = "integer" }, end_line = { type = "integer" } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "count_entries", "read_text_range", "write_text", "make_dir", "remove_path"] }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } }, recursive = { type = "boolean" }, include_hidden = { type = "boolean" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, start_line = { type = "integer" }, end_line = { type = "integer" } } }
 planner_capabilities = [
   { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"] },
+  { name = "filesystem.count_entries", action = "count_entries", effect = "observe", required = ["path"], optional = ["recursive", "include_hidden", "files_only", "dirs_only", "kind_filter", "count_files", "count_dirs", "ext_filter"] },
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"] },
   { name = "filesystem.write_file", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, package_install = false, privilege_escalation = false },
   { name = "filesystem.make_dir", action = "make_dir", effect = "mutate", required = ["path"], risk_level = "high" },
