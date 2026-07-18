@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::pipeline_types::OutputSelectionContract;
 use crate::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
     OutputSemanticKind,
@@ -47,6 +48,8 @@ pub(super) fn parse_planner_output_contract(raw: &str) -> Option<IntentOutputCon
         .and_then(Value::as_u64)
         .and_then(|value| usize::try_from(value).ok())
         .filter(|value| (1..=20).contains(value));
+    let structured_field_selector =
+        optional_machine_selector(contract.get("structured_field_selector"))?;
 
     Some(IntentOutputContract {
         response_shape,
@@ -56,6 +59,10 @@ pub(super) fn parse_planner_output_contract(raw: &str) -> Option<IntentOutputCon
         locator_kind,
         delivery_intent,
         semantic_kind,
+        selection: OutputSelectionContract {
+            structured_field_selector,
+            ..OutputSelectionContract::default()
+        },
         ..IntentOutputContract::default()
     })
 }
@@ -65,6 +72,26 @@ fn machine_token(value: Option<&Value>) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn optional_machine_selector(value: Option<&Value>) -> Option<Option<String>> {
+    let Some(value) = value else {
+        return Some(None);
+    };
+    if value.is_null() {
+        return Some(None);
+    }
+    let selector = value.as_str()?.trim();
+    if selector.is_empty()
+        || selector.len() > 256
+        || !selector.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(ch, '_' | '.' | ',' | '*' | '[' | ']' | '-' | ' ')
+        })
+    {
+        return None;
+    }
+    Some(Some(selector.to_string()))
 }
 
 #[cfg(test)]
