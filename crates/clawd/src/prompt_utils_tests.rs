@@ -13,6 +13,34 @@ fn validate_against_schema_rejects_out_of_range_finalizer_confidence() {
     let err = super::validate_against_schema::<Value>(raw, super::PromptSchemaId::FinalizerOut)
         .expect_err("confidence > 1 should fail schema validation");
     assert!(err.to_string().contains("$.confidence"));
+    assert!(err.is_contract_violation());
+}
+
+#[test]
+fn plan_schema_marks_unknown_output_contract_token_as_contract_violation() {
+    let raw = r#"{
+        "output_contract": {
+            "response_shape": "strict",
+            "exact_sentence_count": null,
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "path",
+            "delivery_intent": "none",
+            "result_kind": "file_first_line"
+        },
+        "steps": [
+            {
+                "type": "call_capability",
+                "capability": "filesystem.read_text_range",
+                "args": {"path": "README.md", "start_line": 1, "end_line": 1}
+            }
+        ]
+    }"#;
+
+    let err = super::validate_against_schema::<Value>(raw, super::PromptSchemaId::PlanResult)
+        .expect_err("unknown result_kind must not bypass the planner contract");
+    assert!(err.is_contract_violation());
+    assert!(err.to_string().contains("$.output_contract.result_kind"));
 }
 
 #[test]

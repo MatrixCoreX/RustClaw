@@ -194,6 +194,12 @@ pub(crate) struct SchemaValidationError {
     details: Vec<String>,
 }
 
+impl SchemaValidationError {
+    pub(crate) fn is_contract_violation(&self) -> bool {
+        matches!(self.stage, "schema" | "deserialize")
+    }
+}
+
 impl std::fmt::Display for SchemaValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.details.is_empty() {

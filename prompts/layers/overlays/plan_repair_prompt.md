@@ -65,7 +65,9 @@ Return exactly one JSON object:
 }
 
 Preserve or repair the planner-owned `output_contract` using only machine tokens. Do not derive
-contract fields from localized error text or copy user prose into them.
+contract fields from localized error text or copy user prose into them. `result_kind` must be an
+exact token from the supplied PlanResult schema; use `none` when no registered result kind exactly
+represents the requested custom shape, and never invent a new token.
 
 Each step must use one of:
 1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when a matching planner capability exists)

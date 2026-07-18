@@ -137,7 +137,7 @@ fn direct_config_edit_plan_answer_includes_following_guard_observation() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_edit",
-        r#"{"action":"plan_config_change","path":"configs/config.toml","field_path":"llm.selected_vendor","new_value":"minimax","would_change":true}"#,
+        r#"{"action":"plan_config_change","path":"configs/config.toml","field_path":"llm.selected_vendor","old_value":"mimo","new_value":"minimax","would_change":true}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -174,6 +174,24 @@ fn direct_config_edit_plan_answer_includes_following_guard_observation() {
     assert_eq!(
         payload
             .pointer("/value")
+            .and_then(serde_json::Value::as_str),
+        Some("minimax")
+    );
+    assert_eq!(
+        payload
+            .pointer("/dry_run")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        payload
+            .pointer("/before")
+            .and_then(serde_json::Value::as_str),
+        Some("mimo")
+    );
+    assert_eq!(
+        payload
+            .pointer("/after")
             .and_then(serde_json::Value::as_str),
         Some("minimax")
     );
@@ -257,6 +275,54 @@ fn direct_config_edit_observed_answer_combines_read_field_and_guard_config() {
             .and_then(serde_json::Value::as_u64),
         Some(1)
     );
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
+fn direct_config_edit_observed_answer_projects_plain_read_value() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"extra":{"action":"extract_field","exists":true,"field_path":"llm.selected_vendor","path":"configs/config.toml","value":"minimax","value_text":"minimax"}}"#,
+    ));
+
+    let (answer, summary) =
+        direct_config_edit_observed_answer(&state, "read config field", &loop_state)
+            .expect("plain config read answer");
+    let payload: serde_json::Value = serde_json::from_str(&answer).unwrap();
+
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.config_edit.read")
+    );
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("config_edit_read")
+    );
+    assert_eq!(
+        payload
+            .pointer("/field_path")
+            .and_then(serde_json::Value::as_str),
+        Some("llm.selected_vendor")
+    );
+    assert_eq!(
+        payload
+            .pointer("/value")
+            .and_then(serde_json::Value::as_str),
+        Some("minimax")
+    );
+    assert!(payload.pointer("/current_value").is_none());
+    assert!(payload.pointer("/risk_count").is_none());
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)

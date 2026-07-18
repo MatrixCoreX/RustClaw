@@ -869,6 +869,7 @@ fn direct_answer_formats_missing_path_batch_facts_with_reason() {
     assert!(answer.contains("reason_code=path_fact_observed"));
     assert!(answer.contains("exists=false"));
     assert!(answer.contains("kind=missing"));
+    assert!(answer.contains("error_code=path_not_found"));
     assert!(answer.contains("/tmp/missing.txt"));
 }
 

@@ -418,13 +418,13 @@ async fn observed_execution_without_delivery_preserves_structured_config_payload
         payload
             .pointer("/message_key")
             .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.config_edit.read_guard")
+        Some("clawd.msg.config_edit.read")
     );
     assert_eq!(
         payload
             .pointer("/reason_code")
             .and_then(serde_json::Value::as_str),
-        Some("config_edit_read_guard")
+        Some("config_edit_read")
     );
     assert_eq!(
         payload
@@ -433,11 +433,11 @@ async fn observed_execution_without_delivery_preserves_structured_config_payload
         Some("scripts")
     );
     let current_value = payload
-        .pointer("/current_value")
+        .pointer("/value")
         .and_then(serde_json::Value::as_str)
-        .expect("current_value should be a JSON object string");
+        .expect("value should be a JSON object string");
     let scripts: serde_json::Value =
-        serde_json::from_str(current_value).expect("current_value should parse as JSON");
+        serde_json::from_str(current_value).expect("value should parse as JSON");
     assert_eq!(
         scripts
             .pointer("/build")

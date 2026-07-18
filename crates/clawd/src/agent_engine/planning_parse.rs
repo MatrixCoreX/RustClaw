@@ -10,9 +10,25 @@ fn parse_plan_action_step(step: &Value, state: &AppState) -> Option<AgentAction>
     serde_json::from_value::<AgentAction>(normalized).ok()
 }
 
-fn plan_actions_follow_enum_contract(state: &AppState, actions: &[AgentAction]) -> bool {
+fn plan_actions_follow_machine_contract(state: &AppState, actions: &[AgentAction]) -> bool {
     let mut valid = true;
     for action in actions {
+        if let AgentAction::CallCapability { capability, args } = action {
+            let (resolved, record) =
+                crate::capability_resolver::resolve_capability_action_with_record_for_state(
+                    state,
+                    capability,
+                    args.clone(),
+                );
+            if resolved.is_none() {
+                info!(
+                    "plan_result_capability_contract_rejected capability={} outcome={} reason_code={}",
+                    capability, record.outcome, record.reason_code
+                );
+                valid = false;
+            }
+            continue;
+        }
         let (executable, args) = match action {
             AgentAction::CallTool { tool, args } => (tool.as_str(), args),
             AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
@@ -170,27 +186,37 @@ pub(super) async fn parse_single_plan_actions(
         return None;
     }
     let mut step_values = Vec::new();
-    if let Ok(validated) = crate::prompt_utils::validate_against_schema::<Value>(
+    match crate::prompt_utils::validate_against_schema::<Value>(
         raw,
         crate::prompt_utils::PromptSchemaId::PlanResult,
     ) {
-        if !validated.raw_parse_ok || validated.schema_normalized {
-            info!(
-                "plan_result schema_parse_recovery task_id={} raw_parse_ok={} schema_normalized={}",
-                task.task_id, validated.raw_parse_ok, validated.schema_normalized
-            );
-        }
-        match validated.value {
-            Value::Object(map) => {
-                if let Some(steps) = map.get("steps").and_then(|v| v.as_array()) {
-                    step_values.extend(steps.iter().cloned());
-                } else {
-                    step_values.push(Value::Object(map));
-                }
+        Ok(validated) => {
+            if !validated.raw_parse_ok || validated.schema_normalized {
+                info!(
+                    "plan_result schema_parse_recovery task_id={} raw_parse_ok={} schema_normalized={}",
+                    task.task_id, validated.raw_parse_ok, validated.schema_normalized
+                );
             }
-            Value::Array(arr) => step_values.extend(arr),
-            other => step_values.push(other),
+            match validated.value {
+                Value::Object(map) => {
+                    if let Some(steps) = map.get("steps").and_then(|v| v.as_array()) {
+                        step_values.extend(steps.iter().cloned());
+                    } else {
+                        step_values.push(Value::Object(map));
+                    }
+                }
+                Value::Array(arr) => step_values.extend(arr),
+                other => step_values.push(other),
+            }
         }
+        Err(err) if err.is_contract_violation() => {
+            info!(
+                "plan_result_schema_contract_rejected task_id={} error={}",
+                task.task_id, err
+            );
+            return None;
+        }
+        Err(_) => {}
     }
     if step_values.is_empty() {
         if let Some(value) =
@@ -246,9 +272,9 @@ pub(super) async fn parse_single_plan_actions(
     }
     if actions.is_empty() {
         None
-    } else if !plan_actions_follow_enum_contract(state, &actions) {
+    } else if !plan_actions_follow_machine_contract(state, &actions) {
         info!(
-            "plan_result_registry_contract_rejected task_id={} reason=invalid_enum_value",
+            "plan_result_registry_contract_rejected task_id={} reason=invalid_machine_contract",
             task.task_id
         );
         None

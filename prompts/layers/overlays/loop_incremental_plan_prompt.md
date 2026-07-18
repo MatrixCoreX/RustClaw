@@ -62,6 +62,8 @@ Return a single JSON object with this exact schema:
 
 `output_contract` is planner-owned machine policy. Preserve the current request's contract across
 rounds unless the user changed it; use only machine tokens and never copy user prose into it.
+`result_kind` must be an exact token from the supplied PlanResult schema; use `none` when no
+registered result kind exactly represents the requested custom shape, and never invent a new token.
 
 AgentAction JSON must use one of:
 1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when the contract exposes a matching `planner_capabilities` entry; runtime resolves it to the concrete tool/skill)
