@@ -56,6 +56,10 @@ from the supplied PlanResult schema; use `none` when no registered result kind e
 the requested custom shape, and never invent a new token. Set `structured_field_selector` to a
 comma-separated list of exact machine field identifiers only when the user requests named
 structured fields; otherwise set it to `null`.
+`response_shape="scalar"` is valid only when the complete final answer is exactly one atomic value
+or token. A path plus content, a value plus source, or two or more requested named fields is a
+compound result and must use `free` or `strict` so every requested deliverable survives final
+projection.
 
 AgentAction JSON must use one of:
 1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when the contract exposes a matching `planner_capabilities` entry; runtime resolves it to the concrete tool/skill)
