@@ -116,7 +116,11 @@ pub(super) async fn enforce_delivery_output_contract(
         );
         return;
     }
-    let seed_text = if publishable_synthesis.is_some() {
+    let terminal_multi_machine_record =
+        latest_terminal_multi_machine_record_for_scalar(route, loop_state).map(str::to_string);
+    let seed_text = if let Some(record) = terminal_multi_machine_record {
+        record
+    } else if publishable_synthesis.is_some() {
         loop_state
             .last_publishable_synthesis_output
             .clone()
@@ -292,6 +296,45 @@ pub(super) async fn enforce_delivery_output_contract(
     loop_state.last_user_visible_respond =
         (!normalized_text.trim().is_empty()).then_some(normalized_text);
     loop_state.delivery_messages = normalized_messages;
+}
+
+fn latest_terminal_multi_machine_record_for_scalar<'a>(
+    route: &crate::IntentOutputContract,
+    loop_state: &'a LoopState,
+) -> Option<&'a str> {
+    if route.response_shape != crate::OutputResponseShape::Scalar
+        || route.delivery_required
+        || !route.semantic_kind_is_unclassified()
+    {
+        return None;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "respond")
+        .filter_map(|step| step.output.as_deref())
+        .map(str::trim)
+        .find(|candidate| is_multi_line_machine_record(candidate))
+}
+
+fn is_multi_line_machine_record(candidate: &str) -> bool {
+    let lines = candidate
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    lines.len() >= 2
+        && lines.iter().all(|line| {
+            let Some((key, value)) = line.split_once('=') else {
+                return false;
+            };
+            !key.is_empty()
+                && !value.trim().is_empty()
+                && key
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        })
 }
 
 fn model_language_evidence_summary_should_skip_low_level_reshape(
