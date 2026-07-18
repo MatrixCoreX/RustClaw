@@ -128,20 +128,10 @@ fn schedule_workflow_error(error_kind: &'static str, extra: Option<Value>) -> St
     builtin_error("schedule", error_kind, error_kind, None, None, extra)
 }
 
-fn schedule_args_contain_structured_intent(args: &Value) -> bool {
-    [
-        "kind",
-        "timezone",
-        "schedule",
-        "task",
-        "target_job_id",
-        "mode",
-        "dry_run",
-        "preview_only",
-        "create_real",
-    ]
-    .iter()
-    .any(|key| args.get(*key).is_some())
+pub(super) fn schedule_args_contain_structured_intent(args: &Value) -> bool {
+    ["kind", "schedule", "task", "target_job_id"]
+        .iter()
+        .any(|key| args.get(*key).is_some())
 }
 
 fn schedule_kind_for_action(action: &str) -> &'static str {
