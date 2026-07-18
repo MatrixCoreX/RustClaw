@@ -189,9 +189,11 @@ async fn schedule_compile_only_create_returns_preview_without_insert() {
     assert!(reply.contains("kind=create"));
     assert!(reply.contains("would_mutate=false"));
     assert!(reply.contains("timezone=Asia/Shanghai"));
+    assert!(reply.contains("datetime=2099-01-01 09:00:00"));
     assert!(reply.contains("schedule.type=once"));
     assert!(reply.contains("schedule.run_at=2099-01-01 09:00:00"));
     assert!(reply.contains("task_content=check service"));
+    assert!(reply.contains("title=check service"));
     assert!(!reply.contains("contract_marker"));
     assert!(!reply.contains("semantic_kind"));
     let db = state.core.db.get().expect("db");

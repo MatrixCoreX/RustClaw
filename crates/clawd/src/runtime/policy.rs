@@ -333,6 +333,7 @@ impl ToolsPolicy {
                 "skill:transform",
                 "skill:kb",
                 "capability:image.preview_generate",
+                "capability:schedule.preview",
             ],
             "minimal" => vec![
                 "skill:run_cmd",
