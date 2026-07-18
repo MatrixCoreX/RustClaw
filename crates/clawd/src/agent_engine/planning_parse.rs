@@ -210,11 +210,28 @@ pub(super) async fn parse_single_plan_actions(
             }
         }
         Err(err) if err.is_contract_violation() => {
-            info!(
-                "plan_result_schema_contract_rejected task_id={} error={}",
-                task.task_id, err
-            );
-            return None;
+            if err.contract_violations_only_under("$.output_contract") {
+                if let Some(Value::Object(map)) =
+                    crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
+                {
+                    if let Some(steps) = map.get("steps").and_then(Value::as_array) {
+                        step_values.extend(steps.iter().cloned());
+                        info!(
+                            "plan_result_output_contract_discarded task_id={} reason=invalid_optional_output_contract",
+                            task.task_id
+                        );
+                    }
+                }
+            }
+            if step_values.is_empty() {
+                info!(
+                    "plan_result_schema_contract_rejected task_id={} error={}",
+                    task.task_id, err
+                );
+                return None;
+            }
+            // Each recovered step is still validated below against the action
+            // schema, registry, resolver, and enum contracts.
         }
         Err(_) => {}
     }

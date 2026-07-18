@@ -198,6 +198,15 @@ impl SchemaValidationError {
     pub(crate) fn is_contract_violation(&self) -> bool {
         matches!(self.stage, "schema" | "deserialize")
     }
+
+    pub(crate) fn contract_violations_only_under(&self, path_prefix: &str) -> bool {
+        self.stage == "schema"
+            && !self.details.is_empty()
+            && self
+                .details
+                .iter()
+                .all(|detail| detail.contains(path_prefix))
+    }
 }
 
 impl std::fmt::Display for SchemaValidationError {
