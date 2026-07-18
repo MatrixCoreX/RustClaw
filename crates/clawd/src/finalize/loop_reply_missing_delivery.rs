@@ -19,7 +19,7 @@ pub(super) async fn pending_confirmation_resume_payload(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
-    loop_state: &LoopState,
+    loop_state: &mut LoopState,
 ) -> Option<(String, serde_json::Value)> {
     let round = loop_state.round_traces.last()?;
     let verify = round.verify_result.as_ref()?;
@@ -27,6 +27,10 @@ pub(super) async fn pending_confirmation_resume_payload(
         return None;
     }
     let plan = round.plan_result.as_ref()?;
+    let plan_steps = plan.steps.clone();
+    let goal = round.goal.clone();
+    let subtask_results = loop_state.subtask_results.clone();
+    let delivery_messages = loop_state.delivery_messages.clone();
     let confirmation_step_ids = verify
         .issues
         .iter()
@@ -39,20 +43,41 @@ pub(super) async fn pending_confirmation_resume_payload(
         .find(|issue| issue.kind == crate::verifier::VerifyIssueKind::ConfirmationRequired)
         .map(|issue| issue.detail.as_str())
         .unwrap_or("current plan requires explicit confirmation");
-    Some(
-        crate::agent_engine::build_confirmation_required_resume_context(
-            state,
-            task,
-            &plan.steps,
-            user_text,
-            &round.goal,
-            &loop_state.subtask_results,
-            &loop_state.delivery_messages,
-            detail,
-            &confirmation_step_ids,
-        )
-        .await,
+    let response = crate::agent_engine::build_confirmation_required_resume_context(
+        state,
+        task,
+        &plan_steps,
+        user_text,
+        &goal,
+        &subtask_results,
+        &delivery_messages,
+        detail,
+        &confirmation_step_ids,
     )
+    .await;
+    let pending_approval = response
+        .1
+        .pointer("/approval_request/status")
+        .and_then(serde_json::Value::as_str)
+        == Some("pending");
+    if pending_approval {
+        if let Some(step) = plan_steps
+            .iter()
+            .find(|step| confirmation_step_ids.contains(&step.step_id))
+            .cloned()
+        {
+            crate::agent_engine::publish_agent_loop_user_input_checkpoint_progress(
+                state,
+                task,
+                loop_state,
+                "confirmation_required",
+                &step.skill,
+                &step.skill,
+                &step.args,
+            );
+        }
+    }
+    Some(response)
 }
 
 pub(super) fn verify_summary_requires_resume_confirmation(

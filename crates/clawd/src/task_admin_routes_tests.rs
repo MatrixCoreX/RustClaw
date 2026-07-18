@@ -152,6 +152,34 @@ fn insert_child_task(
 fn set_pending_approval(state: &crate::AppState, task_id: &str, request_id: &str) {
     let expires_at = crate::now_ts_u64().saturating_add(300);
     let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "needs_user",
+            "resume_reason": "confirmation_required",
+            "checkpoint_id": "checkpoint-approval"
+        },
+        "task_checkpoint": {
+            "schema_version": 1,
+            "checkpoint_id": "checkpoint-approval",
+            "boundary_context": {},
+            "last_successful_round": null,
+            "last_successful_step": null,
+            "pending_action": null,
+            "observations": [],
+            "evidence_refs": [],
+            "artifact_refs": [],
+            "completed_side_effect_refs": [],
+            "budget": {
+                "round": 0,
+                "step": 0,
+                "llm_calls": 0,
+                "tool_calls": 0,
+                "elapsed_ms": 0,
+                "llm_elapsed_ms": 0,
+                "tool_elapsed_ms": 0
+            },
+            "resume_entrypoint": "await_user_input"
+        },
         "resume_context": {
             "approval_request": {
                 "schema_version": 1,
@@ -166,7 +194,7 @@ fn set_pending_approval(state: &crate::AppState, task_id: &str, request_id: &str
     });
     let db = state.core.db.get().expect("get db");
     db.execute(
-        "UPDATE tasks SET status = 'failed', result_json = ?2 WHERE task_id = ?1",
+        "UPDATE tasks SET status = 'running', result_json = ?2 WHERE task_id = ?1",
         rusqlite::params![task_id, result.to_string()],
     )
     .expect("set pending approval");
@@ -175,6 +203,34 @@ fn set_pending_approval(state: &crate::AppState, task_id: &str, request_id: &str
 fn set_pending_scope_approval(state: &crate::AppState, task_id: &str, request_id: &str) {
     let expires_at = crate::now_ts_u64().saturating_add(300);
     let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "needs_user",
+            "resume_reason": "confirmation_required",
+            "checkpoint_id": "checkpoint-approval"
+        },
+        "task_checkpoint": {
+            "schema_version": 1,
+            "checkpoint_id": "checkpoint-approval",
+            "boundary_context": {},
+            "last_successful_round": null,
+            "last_successful_step": null,
+            "pending_action": null,
+            "observations": [],
+            "evidence_refs": [],
+            "artifact_refs": [],
+            "completed_side_effect_refs": [],
+            "budget": {
+                "round": 0,
+                "step": 0,
+                "llm_calls": 0,
+                "tool_calls": 0,
+                "elapsed_ms": 0,
+                "llm_elapsed_ms": 0,
+                "tool_elapsed_ms": 0
+            },
+            "resume_entrypoint": "await_user_input"
+        },
         "resume_context": {
             "approval_request": {
                 "schema_version": 1,
@@ -201,7 +257,7 @@ fn set_pending_scope_approval(state: &crate::AppState, task_id: &str, request_id
     });
     let db = state.core.db.get().expect("get db");
     db.execute(
-        "UPDATE tasks SET status = 'failed', result_json = ?2 WHERE task_id = ?1",
+        "UPDATE tasks SET status = 'running', result_json = ?2 WHERE task_id = ?1",
         rusqlite::params![task_id, result.to_string()],
     )
     .expect("set pending scope approval");
@@ -363,7 +419,7 @@ async fn goal_by_task_id_clears_goal_payload_through_authorized_route() {
 }
 
 #[tokio::test]
-async fn resume_failed_task_requires_and_applies_exact_approval_request() {
+async fn resume_needs_user_task_requires_and_applies_exact_approval_request() {
     let task_id = "approval-route-task";
     let request_id = "approval-route-1";
     let state = state_with_goal_task(task_id, json!({"text": "task"}));
@@ -431,15 +487,20 @@ async fn resume_failed_task_requires_and_applies_exact_approval_request() {
         )
         .expect("select approved task");
     let stored_result: Value = serde_json::from_str(&raw_result).expect("result json");
-    assert_eq!(stored_status, "queued");
+    assert_eq!(stored_status, "running");
     assert_eq!(
         stored_result["resume_context"]["approval_request"]["status"],
         "approved"
     );
+    assert_eq!(stored_result["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        stored_result["task_checkpoint"]["resume_entrypoint"],
+        "next_planner_round"
+    );
 }
 
 #[tokio::test]
-async fn resume_failed_task_can_deny_the_exact_approval_request() {
+async fn resume_needs_user_task_can_deny_the_exact_approval_request() {
     let task_id = "approval-route-deny";
     let request_id = "approval-route-deny-1";
     let state = state_with_goal_task(task_id, json!({"text": "task"}));
@@ -506,7 +567,7 @@ async fn scoped_approval_can_be_listed_and_revoked_by_the_same_actor() {
     assert_eq!(status, StatusCode::OK);
     let data = resp.data.expect("scope response");
     assert_eq!(data["status"], "approval_scope_grant_created");
-    assert_eq!(data["task_lifecycle"]["state"], "queued");
+    assert_eq!(data["task_lifecycle"]["state"], "waiting");
     let grant_id = data["scope_grant"]["grant_id"]
         .as_str()
         .expect("grant id")

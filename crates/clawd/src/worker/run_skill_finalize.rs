@@ -799,6 +799,113 @@ pub(super) async fn finalize_run_skill_confirmation_required(
         &[],
     ));
     journal.record_final_answer(&user_error);
+    if required_decision == crate::policy_decision::PolicyDecision::RequireConfirmation
+        && resume_context
+            .pointer("/approval_request/status")
+            .and_then(Value::as_str)
+            == Some("pending")
+    {
+        let now_ts = crate::now_ts_u64() as i64;
+        let checkpoint_id = format!("run-skill:{}:approval", task.task_id);
+        let approval_request = resume_context
+            .get("approval_request")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let budget = CheckpointBudgetCounters {
+            round: 0,
+            step: 0,
+            llm_calls: u32::try_from(state.task_llm_call_count(&task.task_id)).unwrap_or(u32::MAX),
+            tool_calls: 0,
+            elapsed_ms: state.task_llm_elapsed_ms(&task.task_id),
+            llm_elapsed_ms: state.task_llm_elapsed_ms(&task.task_id),
+            tool_elapsed_ms: 0,
+        };
+        let checkpoint = TaskCheckpoint {
+            schema_version: 1,
+            checkpoint_id: checkpoint_id.clone(),
+            boundary_context: json!({
+                "schema_version": 1,
+                "source": "direct_run_skill_plan_verifier",
+                "stage": "permission_request",
+                "decision": required_decision.as_token(),
+                "task_id": task.task_id,
+                "skill": skill_name,
+                "resume_reason": "confirmation_required",
+                "message_key": resume_context.get("message_key").cloned().unwrap_or(Value::Null),
+            }),
+            last_successful_round: None,
+            last_successful_step: None,
+            pending_action: Some(json!({
+                "schema_version": 1,
+                "kind": "approval_request",
+                "request_id": approval_request.get("request_id").cloned().unwrap_or(Value::Null),
+                "action_fingerprint": approval_request
+                    .get("action_fingerprint")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "arguments_hash": approval_request
+                    .get("arguments_hash")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "targets": approval_request.get("targets").cloned().unwrap_or_else(|| json!([])),
+            })),
+            observations: Vec::new(),
+            evidence_refs: Vec::new(),
+            artifact_refs: Vec::new(),
+            completed_side_effect_refs: Vec::new(),
+            budget: budget.clone(),
+            attempt_ledger: None,
+            pending_async_job: None,
+            repair_signal: None,
+            resume_entrypoint: ResumeEntrypoint::AwaitUserInput,
+        };
+        let lifecycle = json!({
+            "schema_version": 1,
+            "state": TaskLifecycleState::NeedsUser,
+            "source": "direct_run_skill_plan_verifier",
+            "resume_reason": "confirmation_required",
+            "checkpoint_id": checkpoint_id,
+            "can_poll": true,
+            "can_cancel": true,
+            "last_heartbeat_ts": now_ts,
+            "message_key": resume_context.get("message_key").cloned().unwrap_or(Value::Null),
+            "decision": required_decision.as_token(),
+            "tool_or_skill": skill_name,
+            "budget": serde_json::to_value(&budget).unwrap_or_else(|_| json!({})),
+        });
+        journal.record_task_lifecycle(lifecycle.clone());
+        journal.record_task_checkpoint(checkpoint.to_machine_json());
+        journal.record_final_stop_signal("approval_checkpoint_needs_user");
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        let result = journal.attach_to_result(json!({
+            "text": user_error,
+            "resume_context": resume_context,
+            "task_lifecycle": lifecycle,
+        }));
+        repo::update_task_checkpointed_result(state, &task.task_id, &result.to_string())?;
+        let _ = repo::insert_audit_log(
+            state,
+            Some(task.user_id),
+            "run_skill",
+            Some(
+                &json!({
+                    "task_id": task.task_id,
+                    "chat_id": task.chat_id,
+                    "skill_name": skill_name,
+                    "status": "needs_user",
+                    "resume_reason": "confirmation_required",
+                })
+                .to_string(),
+            ),
+            None,
+        );
+        info!(
+            "task_call_checkpointed task_id={} kind=run_skill lifecycle_state=needs_user skill={} resume_reason=confirmation_required",
+            task.task_id, skill_name
+        );
+        state.clear_task_llm_call_count(&task.task_id);
+        return Ok(());
+    }
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
     journal.record_final_failure_attribution_from_error(failure_reason);
     let notify_outcome =

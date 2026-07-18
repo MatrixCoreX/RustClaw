@@ -109,12 +109,13 @@ use self::loop_state_contract_evidence::{
 use self::planner_skill_context::build_planner_skill_context;
 use self::prepare_round::{prepare_round_actions, push_round_trace};
 use self::skill_execution::execute_prepared_skill_action;
-pub(crate) use self::support::append_delivery_message;
 use self::support::{
     action_fingerprint_for_policy, append_progress_hint, build_safe_skill_args_summary,
     encode_progress_i18n, load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint,
-    publish_agent_loop_user_input_checkpoint_progress, registry_idempotency_guard_attribution,
-    AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
+    registry_idempotency_guard_attribution, AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
+};
+pub(crate) use self::support::{
+    append_delivery_message, publish_agent_loop_user_input_checkpoint_progress,
 };
 pub(crate) use self::user_output_path::CLAWD_USER_NAMED_OUTPUT_PATH_ARG;
 
