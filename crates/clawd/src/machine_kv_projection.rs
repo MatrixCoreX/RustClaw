@@ -486,6 +486,8 @@ fn valid_single_machine_marker(value: &str) -> bool {
             | "applied"
             | "provider"
             | "model"
+            | "duration"
+            | "resolution"
             | "line"
             | "line_number"
     )
