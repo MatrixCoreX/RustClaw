@@ -102,7 +102,7 @@
 | `compare_paths` | `left_path` | yes | string(path) | - | First path to compare. |
 | `compare_paths` | `right_path` | yes | string(path) | - | Second path to compare. |
 | `path_batch_facts` | `paths` | yes | string[]/string | - | Explicit paths to inspect in batch. |
-| `path_batch_facts` | `include_missing` | no | bool | `true` | Keep missing-path records instead of failing on not found; missing records use machine-readable `exists=false` and `kind="missing"`. |
+| `path_batch_facts` | `include_missing` | no | bool | `true` | Keep missing-path records instead of failing on not found; missing records use machine-readable `exists=false`, `kind="missing"`, and `error_code="path_not_found"`. |
 | `path_batch_facts` | `fields` | no | string[]/string | none | Optional requested metadata field names (for example `exists`, `size`, `kind`, `modified`); echoed back so callers can preserve requested metadata in the final answer. |
 | `diagnose_runtime` | `include_process` | no | bool | `false` | Include top process snapshot. |
 | `diagnose_runtime` | `include_ports` | no | bool | `false` | Include listening ports snapshot when available. |
@@ -152,7 +152,7 @@
   - `comparison` structured comparison fields such as `same_path`, `same_kind`, `same_name`, `same_size`, `size_delta_bytes`, `left_newer`, and `same_content`.
   - `field_value` mirrors the machine comparison facts needed by scalar/verdict contracts, including `same_path`, `left_exists`, and `right_exists`; evidence roles `path`, `status`, and `field_value`.
 - `path_batch_facts` success `extra` fields:
-  - structured path fact objects with `exists`, `kind`, `size`, modified time, and requested fields; evidence roles `path`, `status`, `field_value`, and `count`.
+  - structured path fact objects with `exists`, `kind`, `size`, modified time, and requested fields; missing facts include `error_code="path_not_found"`; evidence roles `path`, `status`, `field_value`, and `count`.
 - `diagnose_runtime` success `extra` fields:
   - selected process, port, and environment summary fields; evidence roles `status`, `entries`, and `count`.
 - Sensitive fields: excerpts, process snapshots, environment summaries, and structured values may include user data. Provider-facing traces should prefer keys, counts, paths, excerpts, or hashes rather than full values unless the user requested the value.

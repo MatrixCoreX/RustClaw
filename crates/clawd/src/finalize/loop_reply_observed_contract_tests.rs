@@ -1228,7 +1228,7 @@ fn scalar_contract_preserves_structured_observed_payload_over_planned_delivery()
         payload
             .pointer("/message_key")
             .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.config_edit.read_guard")
+        Some("clawd.msg.config_edit.read")
     );
     assert_eq!(
         payload
@@ -1238,7 +1238,7 @@ fn scalar_contract_preserves_structured_observed_payload_over_planned_delivery()
     );
     assert_eq!(
         payload
-            .pointer("/current_value")
+            .pointer("/value")
             .and_then(serde_json::Value::as_str),
         Some("0.1.7")
     );

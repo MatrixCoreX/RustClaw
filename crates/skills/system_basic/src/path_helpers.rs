@@ -116,6 +116,7 @@ pub(super) fn path_batch_facts(
                         "path": path,
                         "exists": false,
                         "kind": "missing",
+                        "error_code": "path_not_found",
                         "error": "not found",
                     }))
                 }

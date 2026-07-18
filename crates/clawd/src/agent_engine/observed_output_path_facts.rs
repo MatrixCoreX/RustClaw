@@ -252,6 +252,9 @@ pub(super) fn path_fact_machine_answer(
     if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
         lines.push(format!("kind={kind}"));
     }
+    if !exists {
+        lines.push("error_code=path_not_found".to_string());
+    }
     if let Some(size_bytes) = size_bytes {
         lines.push(format!("size_bytes={size_bytes}"));
     }
@@ -290,6 +293,9 @@ fn path_batch_facts_machine_answer(facts: &[serde_json::Value]) -> Option<String
             .or_else(|| (!exists).then(|| "missing".to_string()));
         if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
             lines.push(format!("{prefix}.kind={kind}"));
+        }
+        if !exists {
+            lines.push(format!("{prefix}.error_code=path_not_found"));
         }
         if let Some(size_bytes) = path_batch_fact_size_bytes(entry) {
             lines.push(format!("{prefix}.size_bytes={size_bytes}"));

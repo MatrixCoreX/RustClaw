@@ -1179,7 +1179,7 @@ fn observe_mode_no_longer_records_semantic_matrix_preferred_action_hint() {
                 step_id: "s1".to_string(),
                 action_type: "call_tool".to_string(),
                 skill: "fs_basic".to_string(),
-                args: json!({"action": "find_entries", "path": "."}),
+                args: json!({"action": "stat_paths", "path": "."}),
                 depends_on: Vec::new(),
                 why: String::new(),
             }]),

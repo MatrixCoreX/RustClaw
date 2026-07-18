@@ -312,6 +312,10 @@ fn path_batch_facts_keeps_ambiguous_stem_missing() {
         .expect("first fact");
     assert_eq!(fact.get("exists").and_then(Value::as_bool), Some(false));
     assert_eq!(fact.get("kind").and_then(Value::as_str), Some("missing"));
+    assert_eq!(
+        fact.get("error_code").and_then(Value::as_str),
+        Some("path_not_found")
+    );
     assert_eq!(fact.get("error").and_then(Value::as_str), Some("not found"));
     let _ = std::fs::remove_dir_all(root);
 }

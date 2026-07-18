@@ -188,15 +188,12 @@ fn config_edit_field_label(value: &serde_json::Value) -> &str {
 }
 
 fn config_edit_value_label(value: &serde_json::Value, primary_key: &str) -> Option<String> {
-    config_edit_string_field(value, "value_text")
-        .map(ToOwned::to_owned)
-        .or_else(|| {
-            value
-                .get(primary_key)
-                .map(execution_summary_value_to_string)
-                .map(|text| text.trim().to_string())
-                .filter(|text| !text.is_empty())
-        })
+    value
+        .get(primary_key)
+        .map(execution_summary_value_to_string)
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .or_else(|| config_edit_string_field(value, "value_text").map(ToOwned::to_owned))
 }
 
 fn config_edit_output_matches_field(
@@ -294,7 +291,8 @@ fn direct_config_edit_plan_answer(
     })?;
     let field_path = config_edit_field_label(&planned.value);
     let path = config_edit_path_label(&planned.value);
-    let value = config_edit_value_label(&planned.value, "new_value");
+    let before = config_edit_value_label(&planned.value, "old_value");
+    let after = config_edit_value_label(&planned.value, "new_value");
     let would_change = planned
         .value
         .get("would_change")
@@ -307,9 +305,14 @@ fn direct_config_edit_plan_answer(
         "path": path,
         "would_change": would_change,
         "applied": false,
+        "dry_run": true,
     });
-    if let Some(value) = value {
-        payload["value"] = serde_json::json!(value);
+    if let Some(before) = before {
+        payload["before"] = serde_json::json!(before);
+    }
+    if let Some(after) = after {
+        payload["after"] = serde_json::json!(after);
+        payload["value"] = serde_json::json!(after);
     }
     if let Some(guard) = outputs.iter().rev().find(|item| {
         item.index > planned.index
@@ -520,6 +523,18 @@ fn direct_config_edit_read_guard_answer(
             && config_edit_output_action(&item.value) == Some("guard_config")
             && config_edit_path_label(&item.value) == path
     });
+    if guard.is_none() {
+        return Some(
+            serde_json::json!({
+                "message_key": "clawd.msg.config_edit.read",
+                "reason_code": "config_edit_read",
+                "path": path,
+                "field_path": field_path,
+                "value": value,
+            })
+            .to_string(),
+        );
+    }
     let risk_count = guard
         .and_then(|item| {
             item.value
