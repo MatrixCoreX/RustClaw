@@ -620,8 +620,7 @@ fn machine_summary_rejects_nested_contract_with_visible_text_boundary() {
         &mut observed,
     );
 
-    let summary =
-        requested_machine_kv_summary_from_observations("Return lease.", &observed);
+    let summary = requested_machine_kv_summary_from_observations("Return lease.", &observed);
 
     assert_eq!(summary, None);
 }

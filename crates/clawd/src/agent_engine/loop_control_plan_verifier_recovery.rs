@@ -1,0 +1,84 @@
+use serde_json::json;
+
+use super::super::{LoopState, RoundOutcome};
+
+fn issue_is_planner_repairable(kind: crate::verifier::VerifyIssueKind) -> bool {
+    matches!(
+        kind,
+        crate::verifier::VerifyIssueKind::SkillNotVisible
+            | crate::verifier::VerifyIssueKind::CapabilityUnavailable
+            | crate::verifier::VerifyIssueKind::InvalidArgumentValue
+            | crate::verifier::VerifyIssueKind::UnresolvedTemplateArg
+            | crate::verifier::VerifyIssueKind::InvalidDependsOn
+            | crate::verifier::VerifyIssueKind::PrimaryFallbackConflict
+            | crate::verifier::VerifyIssueKind::RecipeInspectBeforeMutateRequired
+            | crate::verifier::VerifyIssueKind::RecipeValidationAfterMutateRequired
+            | crate::verifier::VerifyIssueKind::RecipeTargetScopeRequired
+    )
+}
+
+fn planner_repair_signal(
+    verify_result: &crate::verifier::VerifyResult,
+) -> Option<serde_json::Value> {
+    if verify_result.mode != crate::verifier::VerifyMode::Enforce
+        || verify_result.approved
+        || verify_result.needs_confirmation
+        || verify_result.issues.is_empty()
+        || verify_result.issues.iter().any(|issue| {
+            matches!(
+                issue.kind,
+                crate::verifier::VerifyIssueKind::MissingRequiredArg
+                    | crate::verifier::VerifyIssueKind::BoundaryClarifyRequired
+            )
+        })
+        || !verify_result
+            .issues
+            .iter()
+            .all(|issue| issue_is_planner_repairable(issue.kind))
+    {
+        return None;
+    }
+
+    Some(json!({
+        "schema_version": 1,
+        "status_code": "plan_verifier_replan_required",
+        "issues": verify_result
+            .issues
+            .iter()
+            .map(|issue| json!({
+                "step_id": issue.step_id,
+                "verify_issue_kind": issue.kind.as_str(),
+                "status_code": issue.kind.status_code(),
+                "message_key": issue.kind.message_key(),
+                "missing_fields": issue.missing_fields,
+                "machine_detail": crate::truncate_for_agent_trace(&issue.detail),
+            }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+pub(super) fn recover_plan_verifier_rejection(
+    loop_state: &mut LoopState,
+    verify_result: &crate::verifier::VerifyResult,
+) -> Option<RoundOutcome> {
+    let signal = planner_repair_signal(verify_result)?;
+    let serialized = serde_json::to_string(&signal).ok()?;
+    loop_state.history_compact.push(serialized.clone());
+    loop_state.last_output = Some(serialized.clone());
+    loop_state
+        .output_vars
+        .insert("agent_loop.verifier_replan_signal".to_string(), serialized);
+    loop_state.has_recoverable_failure_context = true;
+
+    Some(RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("recoverable_failure_continue_round".to_string()),
+        next_goal_hint: Some("replan_from_verifier_signal".to_string()),
+        no_progress: false,
+    })
+}
+
+#[cfg(test)]
+#[path = "loop_control_plan_verifier_recovery_tests.rs"]
+mod tests;

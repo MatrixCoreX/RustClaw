@@ -115,6 +115,17 @@ fn first_round_uses_only_budgeted_compact_index() {
         run_cmd_line.contains("system.preview_background_command"),
         "run_cmd_line={run_cmd_line}"
     );
+    let video_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("skill=video_generate"))
+        .expect("video_generate compact-index line");
+    assert!(
+        video_line.contains(
+            "optional=first_frame_image|first_frame|image|last_frame_image|last_frame|duration|resolution|output_path"
+        ),
+        "video_line={video_line}"
+    );
     let schedule_line = context
         .text
         .lines()
