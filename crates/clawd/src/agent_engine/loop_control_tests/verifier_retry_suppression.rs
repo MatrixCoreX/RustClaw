@@ -3,7 +3,8 @@ use super::super::loop_control_post_write_evidence_guard::{
     post_write_content_evidence_readback_actions,
 };
 use super::{
-    answer_contract, answer_verifier_gap_requests_observed_content_rewrite,
+    answer_contract, answer_verifier_gap_fields_are_observed,
+    answer_verifier_gap_requests_observed_content_rewrite,
     answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary,
     commit_answer_verifier_retry_answer, commit_local_code_strict_json_projection_after_readback,
     ok_step, post_write_content_evidence_readback_recovery_policy,
@@ -20,6 +21,48 @@ use crate::{
     OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
 };
 use serde_json::json;
+
+#[test]
+fn answer_only_rewrite_requires_each_missing_machine_field_to_be_observed() {
+    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["count".to_string()],
+        answer_incomplete_reason: "required machine field is absent".to_string(),
+        should_retry: true,
+        retry_instruction: "collect the missing field".to_string(),
+        confidence: 0.95,
+    };
+    let mut coverage = crate::task_journal::TaskJournalEvidenceCoverage::default();
+    coverage
+        .observed_fields
+        .insert("extra.metadata.sections_count".to_string());
+
+    assert!(!answer_verifier_gap_fields_are_observed(
+        &verifier, &coverage
+    ));
+
+    coverage.observed_fields.insert("extra.count".to_string());
+    assert!(answer_verifier_gap_fields_are_observed(
+        &verifier, &coverage
+    ));
+}
+
+#[test]
+fn answer_only_rewrite_allows_presentation_only_output_format_gap() {
+    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "visible shape is incomplete".to_string(),
+        should_retry: true,
+        retry_instruction: "render the observed fields".to_string(),
+        confidence: 0.95,
+    };
+
+    assert!(answer_verifier_gap_fields_are_observed(
+        &verifier,
+        &crate::task_journal::TaskJournalEvidenceCoverage::default()
+    ));
+}
 
 #[test]
 fn output_format_machine_payload_gap_detects_structured_or_field_projection_reply() {

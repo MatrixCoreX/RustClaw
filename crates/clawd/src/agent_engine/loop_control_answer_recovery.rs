@@ -13,7 +13,9 @@ mod terminal_format;
 
 pub(super) use http_health::try_recover_http_health_answer_verifier_gap;
 #[cfg(test)]
-pub(super) use observed_rewrite::answer_verifier_gap_has_observed_content_evidence;
+pub(super) use observed_rewrite::{
+    answer_verifier_gap_fields_are_observed, answer_verifier_gap_has_observed_content_evidence,
+};
 pub(super) use observed_rewrite::{
     answer_verifier_gap_requests_observed_content_rewrite,
     try_rewrite_answer_verifier_gap_with_observed_evidence,

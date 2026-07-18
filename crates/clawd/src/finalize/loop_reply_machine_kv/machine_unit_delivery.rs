@@ -445,22 +445,7 @@ pub(super) fn machine_kv_units_strictly_extend(current: &str, requested_summary:
 }
 
 pub(super) fn machine_kv_units(text: &str) -> Vec<String> {
-    text.split_whitespace()
-        .filter_map(|token| {
-            let token = token.trim_matches(|ch: char| {
-                matches!(
-                    ch,
-                    ',' | '.' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
-                )
-            });
-            let (key, value) = token.split_once('=')?;
-            if valid_machine_unit_key(key) && !value.trim().is_empty() {
-                Some(format!("{}={}", key.trim(), value.trim()))
-            } else {
-                None
-            }
-        })
-        .collect()
+    crate::machine_kv_projection::parse_machine_kv_units(text)
 }
 
 fn machine_kv_unit_keys(text: &str) -> Vec<String> {

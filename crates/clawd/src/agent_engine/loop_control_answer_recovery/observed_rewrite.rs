@@ -64,6 +64,36 @@ fn is_observed_content_field(field: &str) -> bool {
     )
 }
 
+pub(in crate::agent_engine::loop_control) fn answer_verifier_gap_fields_are_observed(
+    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+    coverage: &crate::task_journal::TaskJournalEvidenceCoverage,
+) -> bool {
+    !verifier.missing_evidence_fields.is_empty()
+        && verifier.missing_evidence_fields.iter().all(|required| {
+            if required == "output_format" {
+                return true;
+            }
+            if required.contains(['(', ')', '|']) || required == "unsupported_claims" {
+                return false;
+            }
+            coverage
+                .observed_fields
+                .iter()
+                .any(|observed| observed_field_matches_required(observed, required))
+        })
+}
+
+fn observed_field_matches_required(observed: &str, required: &str) -> bool {
+    if observed == required {
+        return true;
+    }
+    observed
+        .rsplit('.')
+        .next()
+        .and_then(|leaf| leaf.split('[').next())
+        .is_some_and(|leaf| leaf == required)
+}
+
 pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_gap_with_observed_evidence(
     state: &AppState,
     task: &ClaimedTask,
@@ -84,14 +114,15 @@ pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_g
     let Some(journal_snapshot) = reply.task_journal.clone() else {
         return false;
     };
-    let coverage_complete = crate::task_journal::evidence_coverage_for_output_contract(
+    let coverage = crate::task_journal::evidence_coverage_for_output_contract(
         &route.effective_output_contract(),
         &journal_snapshot,
-    )
-    .is_complete();
+    );
+    let observed_fields_rewrite =
+        coverage.is_complete() && answer_verifier_gap_fields_are_observed(verifier, &coverage);
     let observed_content_rewrite = answer_verifier_gap_requests_observed_content_rewrite(verifier)
         && answer_verifier_gap_has_observed_content_evidence(&journal_snapshot);
-    if !coverage_complete && !observed_content_rewrite {
+    if !observed_fields_rewrite && !observed_content_rewrite {
         return false;
     }
     let verifier_out = answer_verifier_summary_to_out(verifier);

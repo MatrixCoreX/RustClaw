@@ -976,22 +976,7 @@ fn machine_projection_covers_requested_summary(candidate: &str, requested_summar
 }
 
 fn machine_kv_units(text: &str) -> Vec<String> {
-    text.split_whitespace()
-        .filter_map(|token| {
-            let token = token.trim_matches(|ch: char| {
-                matches!(
-                    ch,
-                    ',' | '.' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
-                )
-            });
-            let (key, value) = token.split_once('=')?;
-            if valid_machine_marker_key(key) && !value.trim().is_empty() {
-                Some(format!("{}={}", key.trim(), value.trim()))
-            } else {
-                None
-            }
-        })
-        .collect()
+    crate::machine_kv_projection::parse_machine_kv_units(text)
 }
 
 fn bare_machine_markers(text: &str) -> Vec<String> {
