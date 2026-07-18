@@ -1348,6 +1348,10 @@ fn read_range(
             }
         })
         .to_ascii_lowercase();
+    let last_non_empty_line = (mode == "last_non_empty")
+        .then(|| lines.iter().rposition(|line| !line.trim().is_empty()))
+        .flatten()
+        .map(|idx| idx + 1);
     let n = u64_arg(obj, "n", 20).clamp(1, 500) as usize;
     let raw = bool_arg(obj, "raw", false) || bool_arg(obj, "verbatim", false);
     let max_line_chars = u64_arg(obj, "max_line_chars", 800).clamp(80, 4000) as usize;
@@ -1361,6 +1365,9 @@ fn read_range(
         (0, 0)
     } else {
         match mode.as_str() {
+            "last_non_empty" => last_non_empty_line
+                .map(|line_no| (line_no, line_no))
+                .unwrap_or((0, 0)),
             "tail" => {
                 let from = total_lines.saturating_sub(n) + 1;
                 (from, total_lines)
@@ -1379,7 +1386,7 @@ fn read_range(
     let mut excerpt_lines = Vec::new();
     let mut compacted_lines = 0usize;
     let mut truncated_lines = 0usize;
-    if total_lines > 0 {
+    if total_lines > 0 && from > 0 {
         for idx in from..=to {
             if let Some(line) = lines.get(idx - 1) {
                 let rendered = render_read_range_line(line, raw, max_line_chars);
@@ -1412,6 +1419,22 @@ fn read_range(
             "truncated_lines": truncated_lines,
         },
     });
+    if mode == "last_non_empty" {
+        if let Some(obj) = output.as_object_mut() {
+            obj.insert(
+                "line_number".to_string(),
+                last_non_empty_line.map_or(Value::Null, |line_no| json!(line_no)),
+            );
+            obj.insert(
+                "line_text".to_string(),
+                last_non_empty_line
+                    .and_then(|line_no| lines.get(line_no - 1))
+                    .map(|line| json!(render_read_range_line(line, raw, max_line_chars).text))
+                    .unwrap_or(Value::Null),
+            );
+            obj.insert("exists".to_string(), json!(last_non_empty_line.is_some()));
+        }
+    }
     if let Some(selector) = field_selector {
         if let Some(obj) = output.as_object_mut() {
             obj.insert("field_selector".to_string(), json!(selector));

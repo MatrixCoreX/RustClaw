@@ -49,7 +49,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `count_entries` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
 | `count_entries` | `ext_filter` | no | string/string[] | - | Count matching file extensions. |
 | `read_text_range` | `path` | yes | string(path) | - | Text file to slice. |
-| `read_text_range` | `mode` | no | string | `head` | `head|tail|range`. |
+| `read_text_range` | `mode` | no | string | `head` | `head|tail|range|last_non_empty`; the final mode returns `line_number`, `line_text`, and `exists`. |
 | `read_text_range` | `n` / `start_line` / `end_line` | no | integer | action default | Bounded line controls. |
 | `read_text_range` | `field_selector` | no | string | - | Use machine token `title` when the requested scalar is the document/markdown heading; runtime returns `field_value` when observed. |
 | `find_entries` | `root` | no | string(path) | workspace | Bounded search root. |
@@ -82,6 +82,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
 - Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned `matches` lines rather than the full file excerpt.
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
+- Last non-empty line of a known file: use `read_text_range` with `mode="last_non_empty"` and answer from observed `line_text`; do not replace this read-only operation with a shell pipeline.
 - Document heading/title scalar from a known text/markdown file: use `read_text_range` with `field_selector="title"` and a bounded head read, then answer from observed `field_value` when present.
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
 - Existing source edits: prefer `apply_patch` over whole-file `write_text`; keep whole-file writes for explicit small replacements or new files.
