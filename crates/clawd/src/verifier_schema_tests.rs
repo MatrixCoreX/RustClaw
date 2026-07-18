@@ -96,3 +96,48 @@ fn undeclared_registry_argument_is_a_blocking_model_error() {
         "error_code=invalid_argument_value field=duration_seconds constraint=declared_property"
     );
 }
+
+#[test]
+fn virtual_count_entries_runtime_arguments_are_declared() {
+    let state = tests::test_state();
+    let task = tests::test_task();
+    let plan = tests::plan_result(vec![PlanStep {
+        step_id: "s1".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "fs_basic".to_string(),
+        args: json!({
+            "action": "count_entries",
+            "path": "scripts/nl_tests/fixtures/device_local",
+            "files_only": true,
+            "dirs_only": false,
+            "include_hidden": false,
+            "ext_filter": ".json"
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }]);
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    let invalid_fields = result
+        .issues
+        .iter()
+        .filter(|issue| issue.kind == VerifyIssueKind::InvalidArgumentValue)
+        .map(|issue| issue.detail.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        invalid_fields.is_empty(),
+        "runtime rewrite arguments must remain valid: {invalid_fields:?}"
+    );
+}
