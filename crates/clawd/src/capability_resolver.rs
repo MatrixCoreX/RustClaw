@@ -14,6 +14,7 @@ pub(crate) struct CapabilityResolutionRecord {
     pub(crate) capability_ref: String,
     pub(crate) resolved_ref: Option<String>,
     pub(crate) planner_kind: Option<&'static str>,
+    pub(crate) output_semantic_kind: Option<String>,
 }
 
 impl CapabilityResolutionRecord {
@@ -32,6 +33,7 @@ impl CapabilityResolutionRecord {
             capability_ref: capability_ref.into(),
             resolved_ref: resolved_action_ref(resolved),
             planner_kind: Some(planner_kind.as_token()),
+            output_semantic_kind: None,
         }
     }
 
@@ -44,6 +46,7 @@ impl CapabilityResolutionRecord {
             capability_ref: capability_ref.into(),
             resolved_ref: None,
             planner_kind: None,
+            output_semantic_kind: None,
         }
     }
 
@@ -61,6 +64,7 @@ impl CapabilityResolutionRecord {
             capability_ref: capability_ref.into(),
             resolved_ref: Some(resolved_ref_for_skill(planner_kind, skill)),
             planner_kind: Some(planner_kind.as_token()),
+            output_semantic_kind: None,
         }
     }
 }
@@ -150,6 +154,7 @@ struct ResolverCandidate {
     required_args: Vec<String>,
     optional_args: Vec<String>,
     input_schema: Option<Value>,
+    output_semantic_kind: Option<String>,
 }
 
 fn resolve_registry_capability_action(
@@ -199,27 +204,69 @@ fn resolve_registry_capability_action(
             input_schema: manifest
                 .as_ref()
                 .and_then(|manifest| manifest.input_schema.clone()),
+            output_semantic_kind: mapping.output_semantic_kind.clone(),
         });
     }
     candidates.sort_by_key(resolver_candidate_rank);
     if let Some(candidate) = candidates.into_iter().next() {
         let planner_kind = candidate.planner_kind;
+        let output_semantic_kind = candidate.output_semantic_kind.clone();
         let action = resolve_candidate_action(candidate, args);
-        return RegistryCapabilityResolution::Resolved(ResolvedCapabilityAction {
-            record: CapabilityResolutionRecord::resolved(
-                "capability_resolver_registry_mapping_resolved",
-                "registry",
-                normalized_capability.to_string(),
-                &action,
-                planner_kind,
-            ),
-            action,
-        });
+        let mut record = CapabilityResolutionRecord::resolved(
+            "capability_resolver_registry_mapping_resolved",
+            "registry",
+            normalized_capability.to_string(),
+            &action,
+            planner_kind,
+        );
+        record.output_semantic_kind = output_semantic_kind;
+        return RegistryCapabilityResolution::Resolved(ResolvedCapabilityAction { record, action });
     }
     if let Some(record) = blocked.into_iter().next() {
         return RegistryCapabilityResolution::Blocked(record);
     }
     RegistryCapabilityResolution::None
+}
+
+pub(crate) fn bind_unclassified_output_contract_from_capabilities(
+    state: &AppState,
+    plan_result: &crate::PlanResult,
+) -> Option<crate::IntentOutputContract> {
+    let mut output_contract = plan_result.output_contract.clone();
+    if output_contract
+        .as_ref()
+        .is_some_and(|contract| !contract.semantic_kind_is_unclassified())
+    {
+        return output_contract;
+    }
+
+    let mut inferred = None;
+    for step in &plan_result.steps {
+        if step.action_type != "call_capability" {
+            continue;
+        }
+        let (_, record) =
+            resolve_capability_action_with_record_for_state(state, &step.skill, step.args.clone());
+        let Some(token) = record.output_semantic_kind.as_deref() else {
+            continue;
+        };
+        let Some(kind) = crate::OutputSemanticKind::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.as_str() == token)
+        else {
+            continue;
+        };
+        if inferred.is_some_and(|existing| existing != kind) {
+            return output_contract;
+        }
+        inferred = Some(kind);
+    }
+
+    let kind = inferred?;
+    let contract = output_contract.get_or_insert_with(crate::IntentOutputContract::default);
+    contract.semantic_kind = kind;
+    Some(contract.clone())
 }
 
 fn skill_resolution_block_reason(
