@@ -750,6 +750,8 @@ aliases = ["image_generation", "generate_image", "draw_image", "text_to_image"]
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_generate.md"
 output_kind = "image"
+description = "Generate images through provider-neutral adapters, or preview provider/model, planned outputs, and async job contracts without calling a provider or writing a file."
+semantic_tags = ["image_generation", "text_to_image", "media_generation", "image_generation_preview", "media_dry_run", "planned_media_output", "async_media_contract"]
 # §P4.1 主体首批示例：image_generate 走外部 LLM provider 生成图，
 # 落盘到 workspace 的输出目录，因此声明 llm + net + fs.write。
 # 注意：image_generation / image_edit / image_vision / [llm]（chat&规划）
@@ -772,11 +774,12 @@ capabilities = [
 # 让 risk 路由 / finalize 决策都能拿到正确信号。
 side_effect = true
 planner_capabilities = [
+  { name = "image.preview_generate", action = "preview_generate", effect = "observe", required = ["prompt"], optional = ["size", "style", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, final_answer_shape = "summary_with_evidence" },
   { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["size", "style", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds", "dry_run", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll" },
   { name = "image.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll" },
   { name = "image.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, prompt = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" }, poll_after_seconds = { type = "integer" }, poll_after_ms = { type = "integer" }, expires_at = { type = "integer" }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["generate", "preview_generate", "poll", "cancel"] }, prompt = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" }, poll_after_seconds = { type = "integer" }, poll_after_ms = { type = "integer" }, expires_at = { type = "integer" }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]

@@ -230,7 +230,8 @@ fn execute(
         .filter(|value| !value.is_empty())
         .unwrap_or("generate");
     match action {
-        "generate" => execute_generate(cfg, workspace_root, obj),
+        "generate" => execute_generate(cfg, workspace_root, obj, false),
+        "preview_generate" => execute_generate(cfg, workspace_root, obj, true),
         "poll" => execute_poll(cfg, workspace_root, obj),
         "cancel" => execute_cancel(cfg, obj),
         _ => Err(format!("unsupported action: {action}")),
@@ -241,6 +242,7 @@ fn execute_generate(
     cfg: &RootConfig,
     workspace_root: &Path,
     obj: &Map<String, Value>,
+    force_preview: bool,
 ) -> Result<(String, Value), String> {
     let prompt = obj
         .get("prompt")
@@ -259,10 +261,11 @@ fn execute_generate(
         .and_then(|v| v.as_u64())
         .unwrap_or(1)
         .clamp(1, 4);
-    let dry_run = obj
-        .get("dry_run")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let dry_run = force_preview
+        || obj
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
     let timeout_seconds = obj
         .get("timeout_seconds")
         .and_then(|v| v.as_u64())
@@ -307,6 +310,11 @@ fn execute_generate(
         let expires_at = image_expires_at(obj);
         let dry_run_job_id = provider_image_job_id(provider, "dry_run");
         return Ok(build_dry_run_response(
+            if force_preview {
+                "preview_generate"
+            } else {
+                "generate"
+            },
             &output_path,
             provider,
             model,

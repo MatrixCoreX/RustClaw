@@ -38,6 +38,7 @@ pub(super) fn build_success_response(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_dry_run_response(
+    action: &str,
     output_path: &Path,
     provider: &str,
     model: &str,
@@ -51,6 +52,16 @@ pub(super) fn build_dry_run_response(
     job_id: &str,
 ) -> (String, Value) {
     let saved_path = output_path.to_string_lossy().to_string();
+    let planned_outputs = json!([{"type":"image_file","path": saved_path}]);
+    let async_contract = image_pending_async_job_contract(
+        provider,
+        model,
+        job_id,
+        "dry_run",
+        &saved_path,
+        poll_after_seconds,
+        expires_at,
+    );
     let mut request = json!({
         "prompt_chars": prompt.chars().count(),
         "size": size,
@@ -66,8 +77,12 @@ pub(super) fn build_dry_run_response(
     (
         "IMAGE_GENERATE_DRY_RUN".to_string(),
         json!({
+            "schema_version": 1,
+            "action": action,
+            "status": "dry_run",
             "message_key": "image_generate.msg.dry_run",
             "dry_run": true,
+            "would_mutate": false,
             "provider": provider,
             "model": model,
             "model_kind": "dry_run",
@@ -75,17 +90,22 @@ pub(super) fn build_dry_run_response(
             "media_type": "image",
             "output_path": saved_path,
             "outputs": [],
-            "planned_outputs": [{"type":"image_file","path": saved_path}],
-            "pending_async_job_contract": image_pending_async_job_contract(
-                provider,
-                model,
-                job_id,
-                "dry_run",
-                &saved_path,
-                poll_after_seconds,
-                expires_at,
-            ),
-            "request": request
+            "planned_outputs": planned_outputs,
+            "pending_async_job_contract": async_contract,
+            "async_contract": async_contract,
+            "request": request,
+            "field_value": {
+                "action": action,
+                "status": "dry_run",
+                "message_key": "image_generate.msg.dry_run",
+                "dry_run": true,
+                "would_mutate": false,
+                "provider": provider,
+                "model": model,
+                "output_path": saved_path,
+                "planned_outputs": planned_outputs,
+                "async_contract": async_contract,
+            },
         }),
     )
 }
