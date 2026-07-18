@@ -88,6 +88,8 @@ pub(crate) fn binding_for_confirmation_steps(
         .iter()
         .filter(|step| confirmation_step_ids.contains(step.step_id.trim()))
     {
+        let canonical_step = canonical_approval_step(state, step);
+        let step = &canonical_step;
         let target = normalized_step_target(state, step);
         if target.is_empty() {
             continue;
@@ -126,6 +128,26 @@ pub(crate) fn binding_for_confirmation_steps(
         targets,
         scope,
     })
+}
+
+fn canonical_approval_step(state: &AppState, step: &PlanStep) -> PlanStep {
+    if step.action_type != "call_capability" {
+        return step.clone();
+    }
+    let Some(action) = crate::capability_resolver::resolve_capability_action_for_state(
+        state,
+        &step.skill,
+        step.args.clone(),
+    ) else {
+        return step.clone();
+    };
+    let action = crate::agent_engine::normalize_resolved_planner_action_for_verifier(state, action);
+    crate::plan_step_from_agent_action(
+        &action,
+        step.step_id.clone(),
+        step.depends_on.clone(),
+        step.why.clone(),
+    )
 }
 
 pub(crate) fn pending_approval_request_json(
