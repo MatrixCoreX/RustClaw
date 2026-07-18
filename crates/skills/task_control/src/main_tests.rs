@@ -193,6 +193,10 @@ fn parse_input_accepts_resume_and_pause_machine_actions() {
 
 #[test]
 fn resume_and_pause_dry_run_extras_are_machine_contracts() {
+    let cancel_extra = cancel_dry_run_extra("cancel_one", Some("task-1"));
+    assert_eq!(cancel_extra["dry_run"], true);
+    assert_eq!(cancel_extra["field_value"]["dry_run"], true);
+
     let resume = parse_input(&json!({
         "action": "resume",
         "task_id": "00000000-0000-4000-8000-000000000010",
@@ -207,6 +211,8 @@ fn resume_and_pause_dry_run_extras_are_machine_contracts() {
         resume_extra.get("message_key").and_then(Value::as_str),
         Some("task_control.resume.dry_run")
     );
+    assert_eq!(resume_extra["dry_run"], true);
+    assert_eq!(resume_extra["field_value"]["dry_run"], true);
     assert_eq!(
         resume_extra
             .pointer("/field_value/checkpoint_id")
@@ -233,6 +239,8 @@ fn resume_and_pause_dry_run_extras_are_machine_contracts() {
         pause_extra.get("message_key").and_then(Value::as_str),
         Some("task_control.pause.dry_run")
     );
+    assert_eq!(pause_extra["dry_run"], true);
+    assert_eq!(pause_extra["field_value"]["dry_run"], true);
     assert_eq!(
         pause_extra
             .pointer("/field_value/pause_seconds")
@@ -259,6 +267,7 @@ fn resume_preview_is_read_only_and_exposes_entrypoint_and_lease_contract() {
 
     assert_eq!(extra["action"], "preview_resume");
     assert_eq!(extra["status"], "dry_run");
+    assert_eq!(extra["dry_run"], true);
     assert_eq!(extra["would_mutate"], false);
     assert_eq!(extra["resume_entrypoint"], "checkpoint_declared");
     assert_eq!(extra["lease"]["mode"], "renewable");
@@ -268,6 +277,7 @@ fn resume_preview_is_read_only_and_exposes_entrypoint_and_lease_contract() {
         serde_json::json!("ckpt-tier1")
     );
     assert_eq!(extra["field_value"]["lease_required"], true);
+    assert_eq!(extra["field_value"]["dry_run"], true);
 }
 
 #[test]

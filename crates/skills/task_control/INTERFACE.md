@@ -53,8 +53,8 @@ Notes:
 - `get` returns a compact JSON text and `extra` object with `action=get`, `task_id`, `db_status`, and `lifecycle`.
 - `cancel_all` returns `canceled_count`, `requested_count`, `items`, and `field_value.task_ids`.
 - `cancel_one` returns `canceled_task` and `field_value.task_id`.
-- `cancel_all` / `cancel_one` with `dry_run=true` returns `status=dry_run`, `would_mutate=false`, `required_fields`, and `result_projection_fields` containing `state`, `can_cancel`, `can_poll`, and `db_status`.
-- `preview_resume` always returns `status=dry_run` and `would_mutate=false`, plus `resume_entrypoint` and the renewable `lease` contract. It never calls the resume API.
+- `cancel_all` / `cancel_one` with `dry_run=true` returns `status=dry_run`, `dry_run=true`, `would_mutate=false`, `required_fields`, and `result_projection_fields` containing `state`, `can_cancel`, `can_poll`, and `db_status`.
+- `preview_resume` always returns `status=dry_run`, `dry_run=true`, and `would_mutate=false`, plus `resume_entrypoint` and the renewable `lease` contract. It never calls the resume API.
 - `preview_provider_failure` always returns `status=dry_run` and `would_mutate=false`, plus `failure_class`, `provider_retryable`, `provider_blocker`, `retry_policy`, `retry_after_seconds`, `waiting_state`, and checkpoint recovery fields. It reads the same machine policy used by runtime provider handling and never calls a provider.
 - `preview_coding_repair` always returns `status=dry_run`, `synthetic=true`, `would_mutate=false`, and `would_execute_command=false`. Its structured fields model the fail -> repair -> pass lifecycle without claiming that a real repository, patch, command, or test was executed.
 - `resume` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
@@ -144,7 +144,7 @@ Request:
 
 Response text example:
 ```json
-{"schema_version":1,"action":"cancel_all","status":"dry_run","message_key":"task_control.cancel_all.dry_run","would_mutate":false,"required_fields":["task_id","state","can_cancel"],"result_projection_fields":{"state":"cancel_requested_or_canceled","can_cancel":false,"can_poll":true,"db_status":"canceled_or_terminal"}}
+{"schema_version":1,"action":"cancel_all","status":"dry_run","message_key":"task_control.cancel_all.dry_run","dry_run":true,"would_mutate":false,"required_fields":["task_id","state","can_cancel"],"result_projection_fields":{"state":"cancel_requested_or_canceled","can_cancel":false,"can_poll":true,"db_status":"canceled_or_terminal"}}
 ```
 
 ### resume dry-run
@@ -156,7 +156,7 @@ Request:
 
 Response text example:
 ```json
-{"schema_version":1,"action":"resume","status":"dry_run","message_key":"task_control.resume.dry_run","would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","checkpoint_id":"ckpt-1","required_fields":["task_id"],"optional_fields":["checkpoint_id","resume_reason","user_message","new_constraints"],"result_projection_fields":{"state":"running_or_background_or_terminal","db_status":"running_or_terminal","resume_due":true,"can_poll":true,"can_cancel":true,"checkpoint_id":"optional"}}
+{"schema_version":1,"action":"resume","status":"dry_run","message_key":"task_control.resume.dry_run","dry_run":true,"would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","checkpoint_id":"ckpt-1","required_fields":["task_id"],"optional_fields":["checkpoint_id","resume_reason","user_message","new_constraints"],"result_projection_fields":{"state":"running_or_background_or_terminal","db_status":"running_or_terminal","resume_due":true,"can_poll":true,"can_cancel":true,"checkpoint_id":"optional"}}
 ```
 
 ### resume preview
@@ -168,7 +168,7 @@ Request:
 
 Response text example:
 ```json
-{"schema_version":1,"action":"preview_resume","status":"dry_run","message_key":"task_control.preview_resume.dry_run","would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","checkpoint_id":"ckpt-1","resume_entrypoint":"checkpoint_declared","lease":{"required":true,"scope":"resume_execution","mode":"renewable","seconds_source":"runtime_config","heartbeat_renewal":true}}
+{"schema_version":1,"action":"preview_resume","status":"dry_run","message_key":"task_control.preview_resume.dry_run","dry_run":true,"would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","checkpoint_id":"ckpt-1","resume_entrypoint":"checkpoint_declared","lease":{"required":true,"scope":"resume_execution","mode":"renewable","seconds_source":"runtime_config","heartbeat_renewal":true}}
 ```
 
 ### pause dry-run
@@ -180,7 +180,7 @@ Request:
 
 Response text example:
 ```json
-{"schema_version":1,"action":"pause","status":"dry_run","message_key":"task_control.pause.dry_run","would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","pause_seconds":120,"required_fields":["task_id"],"optional_fields":["pause_seconds"],"result_projection_fields":{"state":"waiting_or_background","db_status":"running","resume_due":false,"resume_wait_seconds":120,"can_poll":true,"can_cancel":true}}
+{"schema_version":1,"action":"pause","status":"dry_run","message_key":"task_control.pause.dry_run","dry_run":true,"would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","pause_seconds":120,"required_fields":["task_id"],"optional_fields":["pause_seconds"],"result_projection_fields":{"state":"waiting_or_background","db_status":"running","resume_due":false,"resume_wait_seconds":120,"can_poll":true,"can_cancel":true}}
 ```
 
 ### provider failure preview
