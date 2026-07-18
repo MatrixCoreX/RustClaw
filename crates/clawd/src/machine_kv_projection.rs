@@ -696,6 +696,7 @@ fn collect_machine_text_fragments_from_json_path(
 ) {
     match value {
         serde_json::Value::Object(obj) => {
+            push_structured_listing_aliases(obj, values);
             for key in ["excerpt", "content_excerpt", "text", "output"] {
                 if let Some(text) = obj
                     .get(key)
@@ -759,6 +760,64 @@ fn collect_machine_text_fragments_from_json_path(
         serde_json::Value::Number(value) => values.push(value.to_string()),
         serde_json::Value::Bool(value) => values.push(value.to_string()),
         serde_json::Value::Null => {}
+    }
+}
+
+fn push_structured_listing_aliases(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    values: &mut Vec<String>,
+) {
+    let Some(names_by_kind) = obj
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return;
+    };
+
+    if obj
+        .get("count")
+        .and_then(machine_scalar_json_value_as_surface)
+        .is_none()
+    {
+        if let Some(total) = obj
+            .get("counts")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|counts| counts.get("total"))
+            .and_then(machine_scalar_json_value_as_surface)
+        {
+            values.push(format!("count={total}"));
+        }
+    }
+
+    if obj
+        .get("names")
+        .and_then(machine_array_json_value_as_surface)
+        .is_some()
+    {
+        return;
+    }
+    let mut names = Vec::new();
+    for kind in ["dirs", "files", "other"] {
+        push_unique_listing_names(names_by_kind.get(kind), &mut names);
+    }
+    for (kind, value) in names_by_kind {
+        if !matches!(kind.as_str(), "dirs" | "files" | "other") {
+            push_unique_listing_names(Some(value), &mut names);
+        }
+    }
+    if let Ok(serialized) = serde_json::to_string(&names) {
+        values.push(format!("names={serialized}"));
+    }
+}
+
+fn push_unique_listing_names(value: Option<&serde_json::Value>, names: &mut Vec<String>) {
+    let Some(items) = value.and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for name in items.iter().filter_map(serde_json::Value::as_str) {
+        if !names.iter().any(|existing| existing == name) {
+            names.push(name.to_string());
+        }
     }
 }
 
