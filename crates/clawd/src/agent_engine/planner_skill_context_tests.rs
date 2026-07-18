@@ -86,6 +86,36 @@ fn first_round_uses_only_budgeted_compact_index() {
     assert!(context.quick_index_chars <= SKILL_QUICK_INDEX_CHAR_BUDGET);
     assert_eq!(context.playbook_chars, 0);
     assert!(context.text.chars().count() < full_visible_playbook_chars(&state, &task));
+    let task_control_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("skill=task_control"));
+    assert!(
+        context
+            .text
+            .contains("side-effect-free coding-repair previews"),
+        "task_control_line={task_control_line:?}"
+    );
+    assert!(context.text.contains("coding_workflow.preview_repair"));
+}
+
+#[test]
+fn generated_prompt_summary_prefers_capability_content_over_role_boilerplate() {
+    let prompt = r#"
+## Role & Boundaries
+- You are the `demo` skill planner.
+
+## Capability Summary (from interface)
+- Observe a machine contract without side effects.
+
+## Actions
+- `preview`
+"#;
+
+    assert_eq!(
+        first_non_heading_line(prompt).as_deref(),
+        Some("- Observe a machine contract without side effects.")
+    );
 }
 
 #[test]

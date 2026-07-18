@@ -2,6 +2,7 @@
 
 ## Capability Summary
 
+- Task lifecycle, provider-failure, and side-effect-free coding-repair previews.
 - `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, inspect provider-failure recovery policy, and preview a structured coding repair loop without side effects.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Planner-facing selection should use structured capability/action fields from the registry. Do not add phrase-specific routing rules for any user language.

@@ -161,13 +161,23 @@ fn build_skill_playbooks_bundle_scoped(
 }
 
 fn first_non_heading_line(text: &str) -> Option<String> {
-    text.lines()
+    let lines = text.lines().collect::<Vec<_>>();
+    let capability_summary = lines
+        .iter()
+        .position(|line| line.trim().starts_with("## Capability Summary"))
+        .and_then(|index| first_summary_line(lines.iter().skip(index + 1).copied()));
+    capability_summary.or_else(|| first_summary_line(lines.into_iter()))
+}
+
+fn first_summary_line<'a>(lines: impl Iterator<Item = &'a str>) -> Option<String> {
+    lines
         .map(str::trim)
         .find(|line| {
             !line.is_empty()
                 && !line.starts_with('#')
                 && !line.starts_with("```")
                 && !line.starts_with("<!--")
+                && !line.starts_with("Registry metadata:")
         })
         .map(|line| {
             let mut out = line.to_string();
