@@ -43,11 +43,15 @@ Output JSON only. Never output <think> tags, code fences, or extra explanation b
     "time": "HH:MM",
     "weekday": 1,
     "every_minutes": 0,
-    "cron": ""
+    "cron": "",
+    "timezone": "",
+    "content": ""
   },
   "task": {
     "kind": "ask|run_skill",
-    "payload": {}
+    "payload": {
+      "text": ""
+    }
   },
   "target_job_id": "",
   "raw": "__REQUEST__",
@@ -63,6 +67,13 @@ Contract for action kinds:
 - Never emit placeholders in `target_job_id` (forbidden: `ALL`, `*`, `all`, `every`, `everything`).
 - If no concrete id exists for a bulk/pronoun request, keep `target_job_id=""` and explain in `reason`.
 - For `kind=none`, keep schedule fields empty/default and task payload empty.
+- For `task.kind="ask"`, put the actual work/message content in `task.payload.text`. Semantically
+  remove scheduling wrappers such as the trigger date, trigger time, recurrence, and reminder
+  instruction; do not copy the full raw scheduling request when a narrower task content exists.
+  This rule is language-independent. `schedule.content` is an accepted compatibility alias, but
+  `task.payload.text` is preferred.
+- A preview's machine `title` is derived from `task.payload.text` (or the `schedule.content`
+  compatibility alias), never from an unparsed copy of `raw`.
 - Set `mode="execute"` only when the request authorizes changing scheduled jobs. Set `mode="compile_only"` when the request asks to parse, preview, explain required structured fields, test the schedule parser, or otherwise avoid creating/updating/deleting jobs. `mode="dry_run"` is equivalent to `compile_only` for runtime behavior.
 - Do not guess a cron expression when the request is naturally representable as `once`, `daily`, `weekly`, or `interval`.
 - When time/date information is insufficient for `create`, lower confidence and use the most conservative supported parse rather than inventing missing calendar details.
