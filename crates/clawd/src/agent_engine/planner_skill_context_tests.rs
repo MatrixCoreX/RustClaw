@@ -97,6 +97,23 @@ fn first_round_uses_only_budgeted_compact_index() {
         "task_control_line={task_control_line:?}"
     );
     assert!(context.text.contains("coding_workflow.preview_repair"));
+    let schedule_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("skill=schedule"))
+        .expect("schedule compact-index line");
+    assert!(
+        !schedule_line.contains("summary=Shared skill prompt contract:"),
+        "schedule_line={schedule_line}"
+    );
+    assert!(
+        schedule_line.contains("schedule.preview(action=preview"),
+        "schedule_line={schedule_line}"
+    );
+    assert!(
+        schedule_line.contains("output_semantic_kind=schedule_preview"),
+        "schedule_line={schedule_line}"
+    );
 }
 
 #[test]
@@ -115,6 +132,24 @@ fn generated_prompt_summary_prefers_capability_content_over_role_boilerplate() {
     assert_eq!(
         first_non_heading_line(prompt).as_deref(),
         Some("- Observe a machine contract without side effects.")
+    );
+}
+
+#[test]
+fn layered_prompt_summary_prefers_capability_section_over_common_preamble() {
+    let prompt = r#"
+Shared skill prompt contract:
+- Common rules that apply to every skill.
+
+## schedule — schedule semantic compiler
+
+## Capability
+- Compile scheduling requests into structured plans.
+"#;
+
+    assert_eq!(
+        first_non_heading_line(prompt).as_deref(),
+        Some("- Compile scheduling requests into structured plans.")
     );
 }
 
