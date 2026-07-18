@@ -74,7 +74,6 @@ fn test_state(locale: &str) -> AppState {
         policy: crate::PolicyConfig {
             command_intent: CommandIntentRuntime {
                 default_locale: locale.to_string(),
-                verify_enforce_enabled: false,
             },
             schedule: ScheduleRuntime {
                 timezone: "Asia/Shanghai".to_string(),

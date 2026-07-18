@@ -1581,15 +1581,12 @@ impl Default for PersonaConfig {
 pub struct CommandIntentConfig {
     #[serde(default = "default_command_intent_default_locale")]
     pub default_locale: String,
-    #[serde(default = "default_command_intent_verify_enforce_enabled")]
-    pub verify_enforce_enabled: bool,
 }
 
 impl Default for CommandIntentConfig {
     fn default() -> Self {
         Self {
             default_locale: default_command_intent_default_locale(),
-            verify_enforce_enabled: default_command_intent_verify_enforce_enabled(),
         }
     }
 }

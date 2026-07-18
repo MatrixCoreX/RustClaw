@@ -182,10 +182,7 @@ pub(crate) fn load_command_intent_runtime(cfg: &CommandIntentConfig) -> CommandI
     } else {
         cfg.default_locale.trim().to_string()
     };
-    CommandIntentRuntime {
-        default_locale,
-        verify_enforce_enabled: cfg.verify_enforce_enabled,
-    }
+    CommandIntentRuntime { default_locale }
 }
 
 pub(crate) fn load_schedule_runtime(

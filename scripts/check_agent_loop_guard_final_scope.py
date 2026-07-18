@@ -18,6 +18,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT_RS = ROOT / "crates/clawd/src/agent_engine/support.rs"
 AGENT_GUARD_TOML = ROOT / "configs/agent_guard.toml"
+PRODUCTION_VERIFY_FILES = (
+    ROOT / "crates/claw-core/src/config.rs",
+    ROOT / "crates/claw-core/src/config/defaults.rs",
+    ROOT / "crates/clawd/src/agent_engine/prepare_round.rs",
+    ROOT / "crates/clawd/src/bootstrap/config_loaders.rs",
+    ROOT / "crates/clawd/src/runtime/state.rs",
+    ROOT / "crates/clawd/src/runtime/types.rs",
+)
 
 FINAL_SCOPE_KEYS = (
     "answer_verifier_enforce_required_scope",
@@ -40,6 +48,12 @@ FORBIDDEN_SUPPORT_TOKENS = (
     '"selected_agent_loop"',
     "agent_decides_eligible_migration_class(route)",
     "structured_evidence_required_for_selected_contracts",
+)
+
+FORBIDDEN_PRODUCTION_VERIFY_TOKENS = (
+    "verify_enforce_enabled",
+    "default_command_intent_verify_enforce_enabled",
+    "VerifyMode::ObserveOnly",
 )
 
 
@@ -95,10 +109,25 @@ def config_findings(raw: str, rel_path: str) -> list[str]:
     return findings
 
 
+def production_verify_findings(raw: str, rel_path: str) -> list[str]:
+    findings: list[str] = []
+    for line_no, line in enumerate(raw.splitlines(), start=1):
+        for token in FORBIDDEN_PRODUCTION_VERIFY_TOKENS:
+            if token in line:
+                findings.append(
+                    f"{rel_path}:{line_no}: legacy_production_verify_mode_token:{token}"
+                )
+    return findings
+
+
 def scan_repo() -> list[str]:
     findings: list[str] = []
     findings.extend(support_findings(SUPPORT_RS.read_text(encoding="utf-8"), rel(SUPPORT_RS)))
     findings.extend(config_findings(AGENT_GUARD_TOML.read_text(encoding="utf-8"), rel(AGENT_GUARD_TOML)))
+    for path in PRODUCTION_VERIFY_FILES:
+        findings.extend(
+            production_verify_findings(path.read_text(encoding="utf-8"), rel(path))
+        )
     return findings
 
 
@@ -155,6 +184,19 @@ legacy = "text"
     assert any(
         "removed_legacy_section_present:agent.dynamic_rules" in item
         for item in bad_config_findings
+    )
+
+    assert not production_verify_findings(
+        "fn production_verify_mode() -> VerifyMode { VerifyMode::Enforce }",
+        "prepare_round.rs",
+    )
+    bad_verify_findings = production_verify_findings(
+        "if config.verify_enforce_enabled { VerifyMode::Enforce } else { VerifyMode::ObserveOnly }",
+        "prepare_round.rs",
+    )
+    assert len(bad_verify_findings) == 2
+    assert all(
+        "legacy_production_verify_mode_token" in item for item in bad_verify_findings
     )
 
     print("AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok")

@@ -113,7 +113,6 @@ pub(crate) enum AgentAction {
 #[derive(Clone)]
 pub(crate) struct CommandIntentRuntime {
     pub(crate) default_locale: String,
-    pub(crate) verify_enforce_enabled: bool,
 }
 
 #[derive(Clone)]

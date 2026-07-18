@@ -1,6 +1,6 @@
 use super::{
-    planner_user_text, verifier_gate_missing_slots, verifier_gate_needs_clarification,
-    verifier_gate_should_stop_round,
+    planner_user_text, production_verify_mode, verifier_gate_missing_slots,
+    verifier_gate_needs_clarification, verifier_gate_should_stop_round,
 };
 
 #[test]
@@ -14,6 +14,14 @@ fn planner_prefers_raw_current_request_over_pre_route_rewrite() {
     assert_eq!(
         planner_user_text(Some(&context), "fallback request"),
         "raw current request"
+    );
+}
+
+#[test]
+fn production_agent_loop_always_enforces_plan_verification() {
+    assert_eq!(
+        production_verify_mode(),
+        crate::verifier::VerifyMode::Enforce
     );
 }
 
@@ -81,4 +89,16 @@ fn capability_unavailable_does_not_force_clarify_in_observe_mode() {
 
     assert!(!verifier_gate_needs_clarification(&verify_result));
     assert!(!verifier_gate_should_stop_round(&verify_result));
+}
+
+#[test]
+fn confirmation_requirement_stops_production_round_before_execution() {
+    let mut verify_result = verify_result_with_issue(
+        production_verify_mode(),
+        crate::verifier::VerifyIssueKind::ConfirmationRequired,
+    );
+    verify_result.approved = true;
+    verify_result.needs_confirmation = true;
+
+    assert!(verifier_gate_should_stop_round(&verify_result));
 }
