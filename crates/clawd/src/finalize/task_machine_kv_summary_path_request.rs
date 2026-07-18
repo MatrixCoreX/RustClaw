@@ -39,6 +39,9 @@ impl PathBatchFactAnswer {
         if let Some(kind) = kind {
             lines.push(format!("kind={kind}"));
         }
+        if !self.exists {
+            lines.push("error_code=path_not_found".to_string());
+        }
         if let Some(size_bytes) = self.size_bytes {
             lines.push(format!("size_bytes={size_bytes}"));
         }
