@@ -162,10 +162,14 @@ fn build_skill_playbooks_bundle_scoped(
 
 fn first_non_heading_line(text: &str) -> Option<String> {
     let lines = text.lines().collect::<Vec<_>>();
-    let capability_summary = lines
-        .iter()
-        .position(|line| line.trim().starts_with("## Capability Summary"))
-        .and_then(|index| first_summary_line(lines.iter().skip(index + 1).copied()));
+    let capability_summary = ["## Capability Summary", "## Capability"]
+        .into_iter()
+        .find_map(|heading| {
+            lines
+                .iter()
+                .position(|line| line.trim().starts_with(heading))
+                .and_then(|index| first_summary_line(lines.iter().skip(index + 1).copied()))
+        });
     capability_summary.or_else(|| first_summary_line(lines.into_iter()))
 }
 

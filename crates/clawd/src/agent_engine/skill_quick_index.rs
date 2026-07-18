@@ -208,6 +208,25 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
             if let Some(effect) = capability.effect {
                 attrs.push(format!("effect={}", effect.as_token()));
             }
+            if let Some(risk_level) = capability.risk_level.or(manifest.risk_level) {
+                attrs.push(format!("risk={}", skill_risk_level_token(risk_level)));
+            }
+            if capability.preferred {
+                attrs.push("preferred=true".to_string());
+            }
+            if let Some(output_semantic_kind) = capability.output_semantic_kind.as_deref() {
+                if !output_semantic_kind.trim().is_empty() {
+                    attrs.push(format!(
+                        "output_semantic_kind={}",
+                        output_semantic_kind.trim()
+                    ));
+                }
+            }
+            if let Some(final_answer_shape) = capability.final_answer_shape.as_deref() {
+                if !final_answer_shape.trim().is_empty() {
+                    attrs.push(format!("final_answer_shape={}", final_answer_shape.trim()));
+                }
+            }
             if attrs.is_empty() {
                 capability.name.clone()
             } else {
