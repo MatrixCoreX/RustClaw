@@ -432,6 +432,7 @@ fn valid_single_machine_marker(value: &str) -> bool {
             | "member_count"
             | "checkpoint_id"
             | "checkpoint_id_present"
+            | "lease"
             | "can_poll"
             | "can_cancel"
             | "rows"
@@ -752,17 +753,57 @@ fn field_is_visible_text_boundary(key: &str) -> bool {
 }
 
 fn machine_json_value_as_surface_for_key(key: &str, value: &serde_json::Value) -> Option<String> {
-    if !matches!(key, "content_excerpt") {
+    if key == "content_excerpt" {
+        let text = value.as_str()?.trim();
+        if text.is_empty()
+            || text.len() > 240
+            || text.contains(|ch| matches!(ch, '\0' | '\r' | '\n'))
+        {
+            return None;
+        }
+        if valid_machine_scalar_value_atom(text) {
+            return Some(text.to_string());
+        }
+        return serde_json::to_string(text).ok();
+    }
+    if !matches!(
+        value,
+        serde_json::Value::Object(_) | serde_json::Value::Array(_)
+    ) || !bounded_machine_json_value(value, 0)
+    {
         return None;
     }
-    let text = value.as_str()?.trim();
-    if text.is_empty() || text.len() > 240 || text.contains(|ch| matches!(ch, '\0' | '\r' | '\n')) {
-        return None;
+    let serialized = serde_json::to_string(value).ok()?;
+    (serialized.len() <= 2_048).then_some(serialized)
+}
+
+fn bounded_machine_json_value(value: &serde_json::Value, depth: usize) -> bool {
+    if depth > 4 {
+        return false;
     }
-    if valid_machine_scalar_value_atom(text) {
-        return Some(text.to_string());
+    match value {
+        serde_json::Value::Object(object) => {
+            object.len() <= 16
+                && object.iter().all(|(key, child)| {
+                    valid_machine_key(key)
+                        && !field_is_visible_text_boundary(key)
+                        && bounded_machine_json_value(child, depth + 1)
+                })
+        }
+        serde_json::Value::Array(items) => {
+            items.len() <= 16
+                && items
+                    .iter()
+                    .all(|item| bounded_machine_json_value(item, depth + 1))
+        }
+        serde_json::Value::String(text) => {
+            let text = text.trim();
+            !text.is_empty()
+                && text.len() <= 160
+                && !text.contains(|ch| matches!(ch, '\0' | '\r' | '\n'))
+        }
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) | serde_json::Value::Null => true,
     }
-    serde_json::to_string(text).ok()
 }
 
 fn machine_scalar_json_value_as_surface(value: &serde_json::Value) -> Option<String> {
