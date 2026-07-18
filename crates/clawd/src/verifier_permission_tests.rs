@@ -19,6 +19,9 @@ fn command_permission_preview_uses_verifier_policy_tokens() {
 
     assert_eq!(preview["status_code"], "permission_preflight_complete");
     assert_eq!(preview["action"], "preview_command_permission");
+    assert_eq!(preview["command"], "sudo rm -rf /tmp/rustclaw-never-run");
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["preview_only"], true);
     assert_eq!(preview["decision"], "deny");
     assert_eq!(preview["risk_level"], "high");
     assert_eq!(preview["confirmation_required"], false);
@@ -41,6 +44,9 @@ fn command_permission_preview_preserves_confirmation_decision() {
     );
 
     assert_eq!(preview["decision"], "require_confirmation");
+    assert_eq!(preview["command"], "rm -rf target/clawd-preview-never-run");
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["preview_only"], true);
     assert_eq!(preview["risk_level"], "high");
     assert_eq!(preview["confirmation_required"], true);
     assert_eq!(preview["reason_codes"], json!(["confirmation_required"]));
