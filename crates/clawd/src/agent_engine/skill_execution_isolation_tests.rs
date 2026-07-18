@@ -123,6 +123,32 @@ planner_capabilities = [
 }
 
 #[test]
+fn capability_isolation_preflight_allows_local_api_with_read_only_filesystem() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "task_control"
+enabled = true
+kind = "runner"
+planner_kind = "tool"
+capabilities = ["net"]
+planner_capabilities = [
+  { name = "task_control.list", action = "list", effect = "observe", risk_level = "low", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
+]
+"#,
+        &["task_control"],
+    );
+    let args = serde_json::json!({"action": "list"});
+
+    assert!(
+        capability_isolation_policy_error(&state, "task_control", &args).is_none(),
+        "local API access must not imply workspace write access"
+    );
+}
+
+#[test]
 fn capability_isolation_artifact_refs_report_cleanup_workspace() {
     let mut state = test_state();
     state.skill_rt.workspace_root = std::env::temp_dir().join(format!(
