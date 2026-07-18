@@ -28,8 +28,9 @@ Compile natural-language scheduling requests into structured schedule plans.
 ## Output
 - JSON string with fields matching `ScheduleIntentOutput`:
   - `kind`, `timezone`, `schedule`, `task`, `target_job_id`, `confidence`
-- Preview output also exposes stable machine fields `datetime` (for a parsed one-time `run_at`)
-  and `title` (the parsed task content), while preserving the canonical schedule/task fields.
+- Preview output exposes `dry_run=true`, `preview_only=true`, `would_mutate=false`, stable
+  `datetime` (for a parsed one-time `run_at`), and `title` (the parsed task content), while
+  preserving the canonical schedule/task fields.
 - For a preview whose requested result is `datetime`, `timezone`, and `title`, set
   `result_kind="schedule_preview"`, `requires_content_evidence=true`,
   `response_shape="strict"`, and `structured_field_selector="datetime,timezone,title"`.
