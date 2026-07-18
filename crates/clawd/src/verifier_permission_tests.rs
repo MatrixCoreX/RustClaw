@@ -7,6 +7,53 @@ use super::tests::{plan_result, route_result, test_state, test_task};
 use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
 use crate::PlanStep;
 
+#[test]
+fn command_permission_preview_uses_verifier_policy_tokens() {
+    let state = test_state();
+    let preview = super::preview_command_permission_decision(
+        &state,
+        "sudo rm -rf /tmp/rustclaw-never-run",
+        None,
+        false,
+    );
+
+    assert_eq!(preview["status_code"], "permission_preflight_complete");
+    assert_eq!(preview["action"], "preview_command_permission");
+    assert_eq!(preview["decision"], "deny");
+    assert_eq!(preview["risk_level"], "high");
+    assert_eq!(preview["confirmation_required"], false);
+    assert_eq!(preview["would_execute"], false);
+    assert!(preview["reason_codes"]
+        .as_array()
+        .is_some_and(|reasons| reasons.iter().any(|reason| reason == "sudo_not_allowed")));
+    assert!(preview.get("text").is_none());
+    assert!(preview.get("error_text").is_none());
+}
+
+#[test]
+fn command_permission_preview_preserves_confirmation_decision() {
+    let state = test_state();
+    let preview = super::preview_command_permission_decision(
+        &state,
+        "rm -rf target/clawd-preview-never-run",
+        Some("."),
+        true,
+    );
+
+    assert_eq!(preview["decision"], "require_confirmation");
+    assert_eq!(preview["risk_level"], "high");
+    assert_eq!(preview["confirmation_required"], true);
+    assert_eq!(preview["reason_codes"], json!(["confirmation_required"]));
+    assert_eq!(
+        preview.pointer("/workspace_scope/scope"),
+        Some(&json!("unspecified"))
+    );
+    assert_eq!(
+        preview.pointer("/workspace_scope/cwd_present"),
+        Some(&json!(true))
+    );
+}
+
 fn state_with_tool_policy(
     sandbox_mode: ToolSandboxMode,
     approval_policy: ToolApprovalPolicy,

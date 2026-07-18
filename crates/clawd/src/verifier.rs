@@ -1272,6 +1272,15 @@ pub(crate) fn skill_sandbox_denial_reason(
     permission::step_sandbox_denial_reason(state, normalized_skill, args)
 }
 
+pub(crate) fn preview_command_permission_decision(
+    state: &AppState,
+    command: &str,
+    cwd: Option<&str>,
+    sudo_allowed: bool,
+) -> Value {
+    permission::preview_command_permission_decision_json(state, command, cwd, sudo_allowed)
+}
+
 fn planner_internal_tool_is_visible(normalized_skill: &str) -> bool {
     matches!(normalized_skill, "subagent")
 }

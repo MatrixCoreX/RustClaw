@@ -1012,6 +1012,10 @@ pub(crate) fn task_allows_sudo(state: &AppState, task: Option<&ClaimedTask>) -> 
     state.policy.allow_sudo && task.map(|task| task_is_admin(state, task)).unwrap_or(false)
 }
 
+pub(crate) fn command_requests_sudo(command: &str) -> bool {
+    command.split_whitespace().any(|part| part == "sudo")
+}
+
 pub(crate) fn task_allows_path_outside_workspace(
     state: &AppState,
     task: Option<&ClaimedTask>,
