@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard NL shell runners' raw LLM trace printing contract.
+"""Guard NL shell runners' raw LLM trace and harness telemetry contract.
 
 NL/live NL tests must show each case and its numbered `LLM#1..N` raw return
 fields in the Codex chat. The shell runners use `print_llm_raw_trace.py` to
@@ -24,6 +24,7 @@ class RunnerContract:
     poll_marker: str
     init_marker: str
     require_max_chars: bool = False
+    require_harness_wall_time: bool = False
 
 
 RUNNERS = (
@@ -42,6 +43,7 @@ RUNNERS = (
         poll_marker='print_new_llm_trace "$turn" "$task_id"',
         init_marker='init_llm_trace_offset "$LLM_TRACE_STATE_FILE"',
         require_max_chars=True,
+        require_harness_wall_time=True,
     ),
     RunnerContract(
         path="scripts/regression_long_tail_nl_flows.sh",
@@ -154,6 +156,20 @@ def check_runner(root: Path, contract: RunnerContract) -> list[str]:
             failures.append(
                 f"{contract.path}: case parser must split all declared turn fields"
             )
+    if contract.require_harness_wall_time:
+        failures.extend(
+            require_substrings(
+                source,
+                [
+                    "annotate_turn_harness_metrics()",
+                    'payload["harness_metrics"]',
+                    '"wall_time_ms"',
+                    "overall_started_ms",
+                    'annotate_turn_harness_metrics "$out_file"',
+                ],
+                f"{contract.path}: harness wall time",
+            )
+        )
     return failures
 
 
@@ -226,6 +242,9 @@ init_llm_trace_offset "$llm_offset_file"
     assert extract_function(good, "print_new_llm_trace") is not None
     assert "--task-id" in extract_function(good, "print_new_llm_trace")
     assert "--task-id" not in extract_function(bad, "print_new_llm_trace")
+    assert require_substrings(good, ["missing"], "self-test") == [
+        "self-test: missing `missing`"
+    ]
     print("SELF_TEST_OK")
     print("LLM_RAW_TRACE_RUNNER_CONTRACT_SELF_TEST ok")
     return 0

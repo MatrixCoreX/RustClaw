@@ -685,6 +685,122 @@ def step_output_json(step: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def step_capability(step: dict[str, Any]) -> str:
+    for key in (
+        "resolved_capability",
+        "canonical_capability_ref",
+        "requested_capability",
+        "resolved_tool_or_skill",
+        "executed_skill",
+        "skill",
+    ):
+        value = step.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def step_outcome(step: dict[str, Any]) -> str:
+    status = str(step.get("status") or "").strip().lower()
+    if status in {"ok", "success", "succeeded", "completed"}:
+        return "ok"
+    if status in {"error", "failed", "failure", "timeout", "canceled", "cancelled"}:
+        return "error"
+    return "other"
+
+
+def completed_side_effect_count(summary: dict[str, Any], trace: dict[str, Any]) -> int:
+    values: list[int] = []
+    for source in (
+        dict_value(summary.get("coding_workflow")),
+        dict_value(summary.get("task_lifecycle")),
+        dict_value(summary.get("task_checkpoint")),
+        dict_value(trace.get("task_lifecycle")),
+        dict_value(trace.get("task_checkpoint")),
+    ):
+        if "completed_side_effect_count" in source:
+            values.append(safe_int(source.get("completed_side_effect_count")))
+        refs = source.get("completed_side_effect_refs")
+        if isinstance(refs, list):
+            values.append(len(refs))
+    for event in trace_event_stream(trace):
+        payload = dict_value(event.get("payload"))
+        if "completed_side_effect_count" in payload:
+            values.append(safe_int(payload.get("completed_side_effect_count")))
+        refs = payload.get("completed_side_effect_refs")
+        if isinstance(refs, list):
+            values.append(len(refs))
+    return max(values, default=0)
+
+
+def repair_attempt_count(summary: dict[str, Any], trace: dict[str, Any]) -> int:
+    values = [
+        safe_int(dict_value(summary.get("coding_workflow")).get("repair_attempt_count")),
+        safe_int(dict_value(summary.get("task_lifecycle")).get("repair_attempt_count")),
+    ]
+    for observation in task_observations(trace):
+        values.extend(
+            (
+                safe_int(observation.get("repair_attempt_count")),
+                safe_int(observation.get("retry_count")),
+            )
+        )
+    for event in trace_event_stream(trace):
+        payload = dict_value(event.get("payload"))
+        values.extend(
+            (
+                safe_int(payload.get("repair_attempt_count")),
+                safe_int(payload.get("retry_count")),
+            )
+        )
+    signal_count = sum(
+        1
+        for round_item in trace_rounds(trace)
+        for signal in (round_item.get("repair_signals") or [])
+        if isinstance(signal, dict)
+    )
+    values.append(signal_count)
+    return max(values, default=0)
+
+
+def count_bucket(value: int) -> str:
+    if value <= 0:
+        return "none"
+    if value == 1:
+        return "one"
+    return "multiple"
+
+
+def harness_wall_time_ms(obj: dict[str, Any]) -> int | None:
+    candidates = [
+        get_path(obj, "harness_metrics", "wall_time_ms"),
+        get_path(obj, "data", "harness_metrics", "wall_time_ms"),
+    ]
+    for value in candidates:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)) and value >= 0:
+            return int(value)
+    return None
+
+
+def capability_outcome_report(
+    counts: dict[str, Counter[str]],
+) -> dict[str, dict[str, int | float]]:
+    report: dict[str, dict[str, int | float]] = {}
+    for capability, outcomes in sorted(counts.items()):
+        total = sum(outcomes.values())
+        ok = outcomes.get("ok", 0)
+        report[capability] = {
+            "total": total,
+            "ok": ok,
+            "error": outcomes.get("error", 0),
+            "other": outcomes.get("other", 0),
+            "success_rate": ratio(ok, total),
+        }
+    return report
+
+
 def planner_first_action(trace: dict[str, Any]) -> str:
     for round_item in trace_rounds(trace):
         for key in ("first_action_capability_ref", "first_action_decision"):
@@ -929,6 +1045,35 @@ def merge_counter_field(summaries: list[dict[str, Any]], key: str) -> dict[str, 
     return dict(sorted(counts.items()))
 
 
+def merge_capability_outcome_reports(
+    summaries: list[dict[str, Any]],
+) -> dict[str, dict[str, int | float]]:
+    counts: dict[str, Counter[str]] = defaultdict(Counter)
+    for summary in summaries:
+        outcomes = summary.get("capability_outcomes")
+        if not isinstance(outcomes, dict):
+            continue
+        for capability, bucket in outcomes.items():
+            if not isinstance(capability, str) or not isinstance(bucket, dict):
+                continue
+            for outcome in ("ok", "error", "other"):
+                counts[capability][outcome] += safe_int(bucket.get(outcome))
+    return capability_outcome_report(counts)
+
+
+def merge_nested_counter_field(
+    summaries: list[dict[str, Any]], section: str, field: str
+) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for summary in summaries:
+        values = get_path(summary, section, field)
+        if not isinstance(values, dict):
+            continue
+        for key, value in values.items():
+            counts[str(key)] += safe_int(value)
+    return dict(sorted(counts.items()))
+
+
 def merge_by_prompt(summaries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     totals: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"count": 0, "elapsed_ms": 0, "prompt_truncation_count": 0}
@@ -1022,7 +1167,10 @@ def summarize_run(
     contract_match_counts: Counter[str] = Counter()
     final_answer_shape_counts: Counter[str] = Counter()
     capability_counts: Counter[str] = Counter()
+    capability_outcome_counts: dict[str, Counter[str]] = defaultdict(Counter)
     planner_first_action_counts: Counter[str] = Counter()
+    completed_side_effect_turn_counts: Counter[str] = Counter()
+    repair_attempt_turn_counts: Counter[str] = Counter()
     delivery_consistent_counts: Counter[str] = Counter()
     by_prompt_totals: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"count": 0, "elapsed_ms": 0, "prompt_truncation_count": 0}
@@ -1043,6 +1191,11 @@ def summarize_run(
     total_background_states = 0
     total_checkpoint_events = 0
     total_provider_blockers = 0
+    total_completed_side_effects = 0
+    total_repair_attempts = 0
+    wall_time_recorded_turns = 0
+    total_wall_time_ms = 0
+    max_wall_time_ms = 0
 
     for path in paths:
         obj = load_json(path)
@@ -1101,6 +1254,16 @@ def summarize_run(
         final_answer_shape_counts[str(contract.get("final_answer_shape") or "unknown")] += 1
         delivery_consistent_counts[bool_token(metrics.get("delivery_consistent"))] += 1
         planner_first_action_counts[planner_first_action(trace)] += 1
+        turn_side_effect_count = completed_side_effect_count(summary, trace)
+        total_completed_side_effects += turn_side_effect_count
+        completed_side_effect_turn_counts[count_bucket(turn_side_effect_count)] += 1
+        turn_repair_attempt_count = repair_attempt_count(summary, trace)
+        total_repair_attempts += turn_repair_attempt_count
+        repair_attempt_turn_counts[count_bucket(turn_repair_attempt_count)] += 1
+        if (wall_time_ms := harness_wall_time_ms(obj)) is not None:
+            wall_time_recorded_turns += 1
+            total_wall_time_ms += wall_time_ms
+            max_wall_time_ms = max(max_wall_time_ms, wall_time_ms)
 
         total_rounds += safe_int(summary.get("round_count"))
         total_steps += safe_int(summary.get("step_count"))
@@ -1167,14 +1330,10 @@ def summarize_run(
 
         steps = step_results(trace)
         for step in steps:
-            capability = (
-                step.get("resolved_capability")
-                or step.get("requested_capability")
-                or step.get("resolved_tool_or_skill")
-                or step.get("skill")
-            )
-            if isinstance(capability, str) and capability.strip():
-                capability_counts[capability.strip()] += 1
+            capability = step_capability(step)
+            if capability:
+                capability_counts[capability] += 1
+                capability_outcome_counts[capability][step_outcome(step)] += 1
             owner = step.get("execution_surface_owner") or step_output_json(step).get(
                 "execution_surface_owner"
             )
@@ -1261,7 +1420,36 @@ def summarize_run(
         "contract_match_counts": dict(sorted(contract_match_counts.items())),
         "final_answer_shape_counts": dict(sorted(final_answer_shape_counts.items())),
         "capability_counts": dict(sorted(capability_counts.items())),
+        "capability_outcomes": capability_outcome_report(capability_outcome_counts),
         "planner_first_action_counts": dict(sorted(planner_first_action_counts.items())),
+        "action_family_counts": dict(sorted(planner_first_action_counts.items())),
+        "side_effects": {
+            "completed_total": total_completed_side_effects,
+            "turn_counts": dict(sorted(completed_side_effect_turn_counts.items())),
+        },
+        "repairs": {
+            "attempt_total": total_repair_attempts,
+            "turn_counts": dict(sorted(repair_attempt_turn_counts.items())),
+            "signal_status_counts": dict(sorted(repair_signal_status_counts.items())),
+        },
+        "wall_time": {
+            "recording_status": (
+                "complete"
+                if wall_time_recorded_turns == total_turns and total_turns > 0
+                else "partial"
+                if wall_time_recorded_turns > 0
+                else "not_recorded"
+            ),
+            "recorded_turns": wall_time_recorded_turns,
+            "missing_turns": max(0, total_turns - wall_time_recorded_turns),
+            "total_ms": total_wall_time_ms,
+            "avg_ms": (
+                round(total_wall_time_ms / wall_time_recorded_turns, 3)
+                if wall_time_recorded_turns
+                else 0.0
+            ),
+            "max_ms": max_wall_time_ms,
+        },
         "delivery_consistent_counts": dict(sorted(delivery_consistent_counts.items())),
         "rollout_switch_counts": dict(sorted(rollout_switch_counts.items())),
         "rollout_event_counts": dict(sorted(rollout_event_counts.items())),
@@ -1486,6 +1674,23 @@ def summarize_run_dirs(
         safe_int(get_path(summary, "execution", "no_progress_stop_count"))
         for summary in summaries
     )
+    total_completed_side_effects = sum(
+        safe_int(get_path(summary, "side_effects", "completed_total"))
+        for summary in summaries
+    )
+    total_repair_attempts = sum(
+        safe_int(get_path(summary, "repairs", "attempt_total")) for summary in summaries
+    )
+    wall_time_recorded_turns = sum(
+        safe_int(get_path(summary, "wall_time", "recorded_turns")) for summary in summaries
+    )
+    total_wall_time_ms = sum(
+        safe_int(get_path(summary, "wall_time", "total_ms")) for summary in summaries
+    )
+    max_wall_time_ms = max(
+        (safe_int(get_path(summary, "wall_time", "max_ms")) for summary in summaries),
+        default=0,
+    )
     status_counts = merge_counter_field(summaries, "status_counts")
     by_prompt = merge_by_prompt(summaries)
     result: dict[str, Any] = {
@@ -1496,6 +1701,37 @@ def summarize_run_dirs(
         "turns_total": turns_total,
         "parse_errors": parse_errors,
         "pass_rate": ratio(status_counts.get("succeeded", 0), turns_total),
+        "capability_outcomes": merge_capability_outcome_reports(summaries),
+        "action_family_counts": merge_counter_field(summaries, "action_family_counts"),
+        "side_effects": {
+            "completed_total": total_completed_side_effects,
+            "turn_counts": merge_nested_counter_field(summaries, "side_effects", "turn_counts"),
+        },
+        "repairs": {
+            "attempt_total": total_repair_attempts,
+            "turn_counts": merge_nested_counter_field(summaries, "repairs", "turn_counts"),
+            "signal_status_counts": merge_nested_counter_field(
+                summaries, "repairs", "signal_status_counts"
+            ),
+        },
+        "wall_time": {
+            "recording_status": (
+                "complete"
+                if wall_time_recorded_turns == turns_total and turns_total > 0
+                else "partial"
+                if wall_time_recorded_turns > 0
+                else "not_recorded"
+            ),
+            "recorded_turns": wall_time_recorded_turns,
+            "missing_turns": max(0, turns_total - wall_time_recorded_turns),
+            "total_ms": total_wall_time_ms,
+            "avg_ms": (
+                round(total_wall_time_ms / wall_time_recorded_turns, 3)
+                if wall_time_recorded_turns
+                else 0.0
+            ),
+            "max_ms": max_wall_time_ms,
+        },
         "llm": {
             "total_calls": total_llm_calls,
             "total_elapsed_ms": total_llm_elapsed_ms,
@@ -1603,6 +1839,49 @@ def run_self_test() -> int:
     )
     if tool_counts != (3, 0, 3, 1):
         print(f"SELF_TEST_FAIL tool_counts:{tool_counts}")
+        return 1
+    fixture_summary = summarize_run(
+        ROOT / "scripts/nl_tests/fixtures/client_like_runs/coding_loop_repair"
+    )
+    if fixture_summary.get("capability_outcomes") != {
+        "fs_basic": {"total": 1, "ok": 1, "error": 0, "other": 0, "success_rate": 1.0},
+        "run_cmd": {"total": 2, "ok": 1, "error": 1, "other": 0, "success_rate": 0.5},
+    }:
+        print(
+            "SELF_TEST_FAIL capability_outcomes:"
+            f"{fixture_summary.get('capability_outcomes')}"
+        )
+        return 1
+    if fixture_summary.get("action_family_counts") != {"run_cmd": 1}:
+        print(
+            "SELF_TEST_FAIL action_family_counts:"
+            f"{fixture_summary.get('action_family_counts')}"
+        )
+        return 1
+    if get_path(fixture_summary, "wall_time", "recording_status") != "not_recorded":
+        print(f"SELF_TEST_FAIL wall_time:{fixture_summary.get('wall_time')}")
+        return 1
+    if harness_wall_time_ms({"harness_metrics": {"wall_time_ms": 1234}}) != 1234:
+        print("SELF_TEST_FAIL harness_wall_time_ms")
+        return 1
+    if fixture_summary.get("repairs") != {
+        "attempt_total": 1,
+        "turn_counts": {"one": 1},
+        "signal_status_counts": {},
+    }:
+        print(f"SELF_TEST_FAIL repairs:{fixture_summary.get('repairs')}")
+        return 1
+    if completed_side_effect_count(
+        {"coding_workflow": {"completed_side_effect_count": 2}},
+        {},
+    ) != 2:
+        print("SELF_TEST_FAIL completed_side_effect_count")
+        return 1
+    if repair_attempt_count(
+        {"coding_workflow": {"repair_attempt_count": 1}},
+        {},
+    ) != 1:
+        print("SELF_TEST_FAIL repair_attempt_count")
         return 1
     baseline = {
         "source_run_dir": "baseline",
