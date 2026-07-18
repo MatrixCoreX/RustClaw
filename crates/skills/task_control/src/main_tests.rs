@@ -182,6 +182,13 @@ fn parse_input_accepts_resume_and_pause_machine_actions() {
         provider_failure.failure_class.as_deref(),
         Some("quota_exhausted")
     );
+
+    let coding_repair = parse_input(&json!({
+        "action": "preview_coding_repair"
+    }))
+    .expect("coding repair preview input");
+
+    assert_eq!(coding_repair.action, "preview_coding_repair");
 }
 
 #[test]
@@ -285,6 +292,29 @@ fn provider_failure_preview_uses_shared_read_only_wait_contract() {
     assert_eq!(
         extra["checkpoint"]["resume_entrypoint"],
         "next_planner_round"
+    );
+}
+
+#[test]
+fn coding_repair_preview_is_structured_and_side_effect_free() {
+    let extra = coding_repair_preview_extra();
+
+    assert_eq!(extra["action"], "preview_coding_repair");
+    assert_eq!(extra["status"], "dry_run");
+    assert_eq!(extra["synthetic"], true);
+    assert_eq!(extra["would_mutate"], false);
+    assert_eq!(extra["would_execute_command"], false);
+    assert_eq!(
+        extra["checkpoint"]["checkpoint_ref"],
+        "dry_run:checkpoint:pre_patch"
+    );
+    assert_eq!(extra["diff"]["patch_ref"], "dry_run:patch:repair_attempt_1");
+    assert_eq!(extra["failed_verification"]["status"], "failed");
+    assert_eq!(extra["repair_attempt"]["attempt"], 1);
+    assert_eq!(extra["passing_verification"]["status"], "passed");
+    assert_eq!(
+        extra["rewind_references"][0],
+        "dry_run:checkpoint:pre_patch"
     );
 }
 

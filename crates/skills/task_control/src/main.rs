@@ -166,6 +166,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
         "preview_resume" | "resume_preview" => "preview_resume",
         "preview_provider_failure" => "preview_provider_failure",
+        "preview_coding_repair" => "preview_coding_repair",
         "resume" | "resume_task" | "continue_task" => "resume",
         "pause" | "pause_task" | "delay_task" => "pause",
         _ => return Err("unsupported_action".to_string()),
@@ -436,6 +437,10 @@ fn execute(
                     return Ok(SkillOutput::structured(extra.to_string(), extra));
                 };
                 let extra = provider_failure_preview_extra(failure_class.policy());
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
+            "preview_coding_repair" => {
+                let extra = coding_repair_preview_extra();
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "pause" => {
