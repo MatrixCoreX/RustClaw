@@ -140,11 +140,35 @@ pub(in crate::answer_verifier) fn provider_safe_step_evidence(
         "status": step.status.as_str(),
         "observed_evidence": crate::task_journal::observed_evidence_for_step_trace(step),
         "key_numeric_evidence": provider_safe_numeric_evidence(step),
+        "structured_output_projection": provider_safe_structured_output_projection(step),
         "output_excerpt_present": step.output_excerpt.as_deref().is_some_and(|value| !value.trim().is_empty()),
         "output_excerpt_hash": step.output_excerpt.as_deref().map(provider_safe_excerpt_hash),
         "error_excerpt_present": step.error_excerpt.as_deref().is_some_and(|value| !value.trim().is_empty()),
         "error_excerpt_hash": step.error_excerpt.as_deref().map(provider_safe_excerpt_hash),
     })
+}
+
+fn provider_safe_structured_output_projection(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> Option<String> {
+    const MAX_PROJECTION_CHARS: usize = 6_000;
+
+    let output = step.output_excerpt.as_deref()?.trim();
+    serde_json::from_str::<serde_json::Value>(output).ok()?;
+    let normalized =
+        crate::agent_engine::observed_output::normalized_success_body_for_observed_output(output);
+    let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
+    serde_json::from_str::<serde_json::Value>(&sanitized).ok()?;
+    let mut chars = sanitized.chars();
+    let projection = chars
+        .by_ref()
+        .take(MAX_PROJECTION_CHARS)
+        .collect::<String>();
+    if chars.next().is_none() {
+        Some(projection)
+    } else {
+        Some(format!("{projection}...(truncated)"))
+    }
 }
 
 pub(in crate::answer_verifier) fn execution_evidence_prompt_block(

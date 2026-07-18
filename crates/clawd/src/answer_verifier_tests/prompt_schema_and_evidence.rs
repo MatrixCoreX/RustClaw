@@ -222,7 +222,9 @@ fn execution_evidence_prompt_uses_provider_safe_redacted_view() {
         output: Some(
             json!({
                 "path": "/tmp/app.toml",
-                "token": "sk-test-secret-token-that-should-not-leak"
+                "token": "sk-test-secret-token-that-should-not-leak",
+                "job_id": "provider:image_generate:minimax:dry_run",
+                "result_ref": "provider:image_generate:minimax:dry_run"
             })
             .to_string(),
         ),
@@ -234,12 +236,14 @@ fn execution_evidence_prompt_uses_provider_safe_redacted_view() {
     let block = execution_evidence_prompt_block(&journal);
 
     assert!(block.contains("\"observed_evidence\""));
+    assert!(block.contains("\"structured_output_projection\""));
     assert!(block.contains("\"output_excerpt_hash\""));
     assert!(block.contains("\"error_excerpt_hash\""));
     assert!(!block.contains("\"output_excerpt\""));
     assert!(!block.contains("\"error_excerpt\""));
     assert!(!block.contains("sk-test-secret-token-that-should-not-leak"));
     assert!(!block.contains("password=secret-value-that-should-not-leak"));
+    assert!(block.contains("provider:image_generate:minimax:dry_run"));
     assert!(block.contains("\"redacted\": true"));
     assert!(block.contains("\"provider_evidence_view\": \"provider_safe_redacted\""));
     assert!(block.contains("\"raw_excerpt_policy\": \"no_full_raw_excerpt\""));
