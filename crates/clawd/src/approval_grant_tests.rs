@@ -47,6 +47,24 @@ fn step(args: serde_json::Value) -> PlanStep {
     }
 }
 
+fn state_with_workspace_registry() -> AppState {
+    let state = AppState::test_default_with_fixture_provider();
+    let registry_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("load workspace skills registry");
+    let enabled = registry.enabled_names().into_iter().collect::<HashSet<_>>();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = Arc::new(SkillViewsSnapshot {
+        registry: Some(Arc::new(registry)),
+        skills_list: Arc::new(enabled),
+    });
+    state
+}
+
 #[test]
 fn approval_binding_is_stable_across_json_object_key_order() {
     let state = test_state();
@@ -79,6 +97,35 @@ fn approval_binding_changes_when_arguments_change() {
 
     assert_eq!(left.action_fingerprint, right.action_fingerprint);
     assert_ne!(left.arguments_hash, right.arguments_hash);
+}
+
+#[test]
+fn approval_binding_is_stable_across_capability_resolution() {
+    let state = state_with_workspace_registry();
+    let ids = vec!["step-1".to_string()];
+    let capability_step = PlanStep {
+        step_id: "step-1".to_string(),
+        action_type: "call_capability".to_string(),
+        skill: "system.run_command".to_string(),
+        args: json!({"command": "pwd"}),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let resolved_step = PlanStep {
+        step_id: "step-1".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "run_cmd".to_string(),
+        args: json!({"command": "pwd"}),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+
+    let capability =
+        binding_for_confirmation_steps(&state, &[capability_step], &ids).expect("capability");
+    let resolved =
+        binding_for_confirmation_steps(&state, &[resolved_step], &ids).expect("resolved");
+
+    assert_eq!(capability, resolved);
 }
 
 #[test]
