@@ -98,7 +98,7 @@ pub(crate) fn binding_for_confirmation_steps(
             "action_type": step.action_type.trim().to_ascii_lowercase(),
             "target": target,
         }));
-        argument_bindings.push(canonical_approval_arguments(&step.args));
+        argument_bindings.push(canonical_approval_arguments(state, step));
         targets.push(target);
         match scope_entry_for_step(state, step) {
             Some(entry) => scope_entries.push(entry),
@@ -374,7 +374,16 @@ fn canonical_value(value: &Value) -> Value {
     }
 }
 
-fn canonical_approval_arguments(value: &Value) -> Value {
+fn canonical_approval_arguments(state: &AppState, step: &PlanStep) -> Value {
+    let default_cwd_is_implicit =
+        state.resolve_canonical_skill_name(step.skill.trim()) == "run_cmd";
+    canonical_approval_value(
+        &step.args,
+        default_cwd_is_implicit.then_some(state.skill_rt.workspace_root.as_path()),
+    )
+}
+
+fn canonical_approval_value(value: &Value, implicit_cwd_root: Option<&Path>) -> Value {
     match value {
         Value::Object(object) => {
             let mut canonical = Map::new();
@@ -384,15 +393,44 @@ fn canonical_approval_arguments(value: &Value) -> Value {
                 if key.starts_with("_clawd_") {
                     continue;
                 }
-                canonical.insert(key.clone(), canonical_approval_arguments(&object[key]));
+                if key.as_str() == "cwd"
+                    && implicit_cwd_root.is_some_and(|root| {
+                        object[key]
+                            .as_str()
+                            .is_some_and(|cwd| cwd_resolves_to_workspace_root(root, cwd))
+                    })
+                {
+                    continue;
+                }
+                canonical.insert(key.clone(), canonical_approval_value(&object[key], None));
             }
             Value::Object(canonical)
         }
-        Value::Array(items) => {
-            Value::Array(items.iter().map(canonical_approval_arguments).collect())
-        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| canonical_approval_value(item, None))
+                .collect(),
+        ),
         _ => value.clone(),
     }
+}
+
+fn cwd_resolves_to_workspace_root(workspace_root: &Path, raw_cwd: &str) -> bool {
+    let raw_cwd = raw_cwd.trim();
+    if raw_cwd.is_empty() {
+        return false;
+    }
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let cwd = Path::new(raw_cwd);
+    let resolved = if cwd.is_absolute() {
+        cwd.to_path_buf()
+    } else {
+        root.join(cwd)
+    };
+    resolved.canonicalize().unwrap_or(resolved) == root
 }
 
 fn sha256_label(value: String) -> String {

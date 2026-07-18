@@ -166,6 +166,62 @@ fn approval_binding_ignores_runtime_owned_validation_metadata() {
 }
 
 #[test]
+fn approval_binding_treats_explicit_workspace_cwd_as_implicit_default() {
+    let state = state_with_workspace_registry();
+    let ids = vec!["step-1".to_string()];
+    let implicit = PlanStep {
+        step_id: "step-1".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "run_cmd".to_string(),
+        args: json!({"command": "printf approved"}),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let explicit = PlanStep {
+        args: json!({
+            "command": "printf approved",
+            "cwd": state.skill_rt.workspace_root
+        }),
+        ..implicit.clone()
+    };
+
+    let implicit =
+        binding_for_confirmation_steps(&state, &[implicit], &ids).expect("implicit cwd binding");
+    let explicit =
+        binding_for_confirmation_steps(&state, &[explicit], &ids).expect("explicit cwd binding");
+
+    assert_eq!(implicit, explicit);
+}
+
+#[test]
+fn approval_binding_rejects_changed_command_working_directory() {
+    let state = state_with_workspace_registry();
+    let ids = vec!["step-1".to_string()];
+    let root = PlanStep {
+        step_id: "step-1".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "run_cmd".to_string(),
+        args: json!({"command": "printf approved"}),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let changed = PlanStep {
+        args: json!({
+            "command": "printf approved",
+            "cwd": state.skill_rt.workspace_root.join("different")
+        }),
+        ..root.clone()
+    };
+
+    let root = binding_for_confirmation_steps(&state, &[root], &ids).expect("root cwd binding");
+    let changed =
+        binding_for_confirmation_steps(&state, &[changed], &ids).expect("changed cwd binding");
+
+    assert_eq!(root.action_fingerprint, changed.action_fingerprint);
+    assert_ne!(root.arguments_hash, changed.arguments_hash);
+}
+
+#[test]
 fn pending_request_is_task_bound_and_expiring() {
     let binding = ApprovalBinding {
         action_fingerprint: "sha256:action".to_string(),
