@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use super::apply_resume_steering_prompt;
+use super::{apply_resume_steering_prompt, checkpoint_requires_stored_action};
 
 #[test]
 fn resume_steering_prompt_preserves_multilingual_input_as_opaque_json() {
@@ -37,4 +37,41 @@ fn resume_steering_prompt_supports_constraint_only_resume() {
         serde_json::from_str(payload["text"].as_str().expect("steering prompt")).expect("JSON");
     assert!(envelope.get("user_message").is_none());
     assert_eq!(envelope["new_constraints"]["budget_profile"], "long_tail");
+}
+
+#[test]
+fn only_confirmation_checkpoint_requires_private_stored_action() {
+    let mut checkpoint = crate::task_lifecycle::TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: "checkpoint-1".to_string(),
+        boundary_context: json!({}),
+        last_successful_round: None,
+        last_successful_step: None,
+        pending_action: Some(json!({
+            "kind": "agent_hook_pre_tool_use",
+            "action_ref": "system.run_command",
+            "args_keys": ["command"]
+        })),
+        observations: Vec::new(),
+        evidence_refs: Vec::new(),
+        artifact_refs: Vec::new(),
+        completed_side_effect_refs: Vec::new(),
+        budget: crate::task_lifecycle::CheckpointBudgetCounters {
+            round: 1,
+            step: 1,
+            llm_calls: 1,
+            tool_calls: 0,
+            elapsed_ms: 1,
+            llm_elapsed_ms: 1,
+            tool_elapsed_ms: 0,
+        },
+        attempt_ledger: None,
+        pending_async_job: None,
+        repair_signal: None,
+        resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
+    };
+    assert!(checkpoint_requires_stored_action(&checkpoint));
+
+    checkpoint.pending_action = None;
+    assert!(!checkpoint_requires_stored_action(&checkpoint));
 }

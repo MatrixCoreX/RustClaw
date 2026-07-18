@@ -1,4 +1,38 @@
 use super::*;
+
+#[test]
+fn checkpoint_action_plan_preserves_exact_action_and_output_contract() {
+    let mut contract = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+        ..Default::default()
+    };
+    contract.selection.structured_field_selector =
+        Some("command,created_path,stdout,status".to_string());
+    let args = serde_json::json!({
+        "command": "printf checkpoint_ok > run/checkpoint.txt",
+        "cwd": "/workspace"
+    });
+
+    let plan = checkpoint_action_plan(
+        "run_cmd",
+        "system.run_command",
+        args.clone(),
+        Some(contract.clone()),
+    );
+
+    assert_eq!(plan.steps.len(), 2);
+    assert_eq!(plan.steps[0].action_type, "call_skill");
+    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(plan.steps[0].args, args);
+    assert_eq!(plan.steps[1].action_type, "synthesize_answer");
+    assert_eq!(
+        plan.output_contract
+            .as_ref()
+            .and_then(|value| value.selection.structured_field_selector.as_deref()),
+        Some("command,created_path,stdout,status")
+    );
+}
 use claw_core::skill_registry::{
     Capability, CapabilityExecutionMode, CapabilityIsolationProfile, OutputKind,
     PlannerCapabilityEffect, PlannerCapabilityKind, PlannerCapabilityMapping, RegistryDedupScope,

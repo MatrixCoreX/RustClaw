@@ -979,6 +979,29 @@ pub(super) async fn run_agent_with_loop_seeded(
     .await
 }
 
+pub(super) async fn run_agent_with_loop_seeded_direct_plan(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+    resume_checkpoint: &crate::task_lifecycle::TaskCheckpoint,
+    initial_plan: &crate::PlanResult,
+    initial_task_observations: &[Value],
+) -> Result<AskReply, String> {
+    run_agent_with_loop_seeded_and_initial_plan(
+        state,
+        task,
+        goal,
+        user_text,
+        agent_run_context,
+        Some(resume_checkpoint),
+        Some(initial_plan),
+        initial_task_observations,
+    )
+    .await
+}
+
 pub(super) async fn run_agent_with_loop_direct_plan(
     state: &AppState,
     task: &ClaimedTask,

@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::runtime::types::AgentAction;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum OutputResponseShape {
     #[default]
     Free,
@@ -24,7 +26,8 @@ impl OutputResponseShape {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum OutputLocatorKind {
     #[default]
     None,
@@ -46,7 +49,8 @@ impl OutputLocatorKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum OutputDeliveryIntent {
     #[default]
     None,
@@ -66,7 +70,8 @@ impl OutputDeliveryIntent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum OutputSemanticKind {
     #[default]
     None,
@@ -262,13 +267,14 @@ impl OutputSemanticKind {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct OutputSelectionContract {
     pub(crate) list_selector: OutputListSelector,
     pub(crate) structured_field_selector: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum OutputScalarCountTargetKind {
     #[default]
     Any,
@@ -276,7 +282,7 @@ pub(crate) enum OutputScalarCountTargetKind {
     Dir,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub(crate) struct OutputListSelector {
     pub(crate) target_kind: OutputScalarCountTargetKind,
     pub(crate) target_kind_specified: bool,
@@ -286,7 +292,7 @@ pub(crate) struct OutputListSelector {
     pub(crate) include_hidden: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct IntentOutputContract {
     pub(crate) response_shape: OutputResponseShape,
     pub(crate) exact_sentence_count: Option<usize>,

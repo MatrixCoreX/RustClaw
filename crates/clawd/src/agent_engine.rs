@@ -97,7 +97,7 @@ pub(crate) use self::filesystem_lifecycle_contract::{
 };
 use self::loop_control::{
     run_agent_with_loop_direct_plan, run_agent_with_loop_seeded,
-    run_agent_with_loop_with_initial_observations,
+    run_agent_with_loop_seeded_direct_plan, run_agent_with_loop_with_initial_observations,
 };
 use self::loop_state_contract_evidence::{
     active_plan_file_targets_for_loop_seed, boundary_observation_needs_clarify_for_loop_seed,
@@ -1118,6 +1118,39 @@ pub(crate) fn direct_capability_plan(
     )
 }
 
+pub(crate) fn checkpoint_action_plan(
+    tool_or_skill: &str,
+    action_ref: &str,
+    args: Value,
+    output_contract: Option<crate::IntentOutputContract>,
+) -> PlanResult {
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: tool_or_skill.to_string(),
+            args,
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: Vec::new(),
+        },
+    ];
+    let raw_plan = json!({
+        "plan_source": "checkpoint_action",
+        "action_ref": action_ref,
+        "tool_or_skill": tool_or_skill,
+        "resolution_stage": "persisted_checkpoint"
+    })
+    .to_string();
+    let mut plan = self::planning_actions::build_plan_result_with_notes(
+        &format!("checkpoint_action:{action_ref}"),
+        &raw_plan,
+        PlanKind::Single,
+        &actions,
+        "checkpoint_action",
+    );
+    plan.output_contract = output_contract;
+    plan
+}
+
 pub(crate) async fn run_agent_with_tools_direct_plan(
     state: &AppState,
     task: &ClaimedTask,
@@ -1132,6 +1165,28 @@ pub(crate) async fn run_agent_with_tools_direct_plan(
         request_envelope,
         agent_run_context.as_ref(),
         initial_plan,
+    )
+    .await
+}
+
+pub(crate) async fn run_agent_with_tools_seeded_direct_plan(
+    state: &AppState,
+    task: &ClaimedTask,
+    request_envelope: &str,
+    agent_run_context: Option<AgentRunContext>,
+    resume_checkpoint: &crate::task_lifecycle::TaskCheckpoint,
+    initial_task_observations: &[Value],
+    initial_plan: &PlanResult,
+) -> Result<AskReply, String> {
+    run_agent_with_loop_seeded_direct_plan(
+        state,
+        task,
+        &initial_plan.goal,
+        request_envelope,
+        agent_run_context.as_ref(),
+        resume_checkpoint,
+        initial_plan,
+        initial_task_observations,
     )
     .await
 }

@@ -461,7 +461,7 @@ pub(crate) async fn finalize_loop_reply(
     backfill_delivery_from_last_outputs(task, &mut loop_state, agent_run_context);
 
     if let Some((user_error, resume_context)) =
-        pending_confirmation_resume_payload(state, task, user_text, &mut loop_state).await
+        pending_confirmation_resume_payload(state, task, user_text, &mut loop_state).await?
     {
         let delivery_messages = vec![user_error.clone()];
         let delivery_consistent =
