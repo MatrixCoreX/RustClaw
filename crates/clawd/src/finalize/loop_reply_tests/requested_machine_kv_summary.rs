@@ -1099,6 +1099,35 @@ fn requested_machine_kv_summary_projects_observed_field_value_over_marker_only_d
 }
 
 #[test]
+fn requested_machine_kv_summary_projects_exact_config_field_pair_across_languages() {
+    let task = claimed_task("task-machine-kv-config-field-pair-ko");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"extra":{"action":"extract_field","exists":true,"field_path":"llm.selected_vendor","path":"configs/config.toml","resolved_field_path":"llm.selected_vendor","value":"minimax","value_text":"minimax"}}"#,
+    ));
+    let mut delivery_messages =
+        vec!["llm.selected_vendor field_path=llm.selected_vendor".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "configs/config.toml에서 llm.selected_vendor 값을 읽고 field_path와 value만 반환하세요.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec!["field_path=llm.selected_vendor value=minimax"]
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_prefers_observed_field_value_over_marker_only_payload() {
     let task = claimed_task("task-machine-kv-project-field-over-payload-marker");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

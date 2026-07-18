@@ -587,6 +587,17 @@ required_evidence = ["field_value"]
 final_answer_shape = "key_list_or_key_summary"
 failure_policy = "retry_with_alternatives"
 
+[contracts.config_field_read]
+semantic_kind = "config_field_read"
+operation = "read"
+target_object = "config_key"
+delivery_shape = "summary"
+allowed_actions = ["config_basic.read_field", "config_basic.read_fields"]
+preferred_actions = ["config_basic.read_field", "config_basic.read_fields"]
+required_evidence = ["field_value"]
+final_answer_shape = "summary_with_evidence"
+failure_policy = "retry_with_alternatives"
+
 [contracts.config_validation]
 semantic_kind = "config_validation"
 operation = "validate"
