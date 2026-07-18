@@ -516,6 +516,64 @@ fn explicit_extractor_registry_canonicalizes_virtual_tool_outputs() {
 }
 
 #[test]
+fn read_text_range_evidence_preserves_grounding_scalars() {
+    let mut journal = TaskJournal::for_task("task-read-range-evidence", "ask", "read");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "README.md",
+                    "resolved_path": "/workspace/README.md",
+                    "excerpt": "1|# RustClaw",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "total_lines": 1277,
+                    "line_count": 1277,
+                    "first_line": "# RustClaw"
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let trace = journal.to_trace_json();
+    let observed = trace
+        .pointer("/step_results/0/observed_evidence")
+        .expect("observed evidence");
+    assert_eq!(
+        observed
+            .pointer("/extractor/extractor_ref")
+            .and_then(Value::as_str),
+        Some("fs_basic.read_text_range.structured_json_v1")
+    );
+    let fields = observed
+        .get("items")
+        .and_then(Value::as_array)
+        .expect("evidence items")
+        .iter()
+        .filter_map(|item| item.get("field").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    for field in [
+        "extra.first_line",
+        "extra.line_count",
+        "extra.resolved_path",
+        "extra.total_lines",
+    ] {
+        assert!(
+            fields.iter().any(|value| *value == field),
+            "missing evidence field {field}"
+        );
+    }
+}
+
+#[test]
 fn process_basic_port_list_evidence_keeps_public_port_samples() {
     let mut listeners = (0..30)
         .map(|idx| {

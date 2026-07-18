@@ -75,6 +75,45 @@ fn verifier_pass_promotes_latest_terminal_text_over_stale_machine_projection() {
 }
 
 #[test]
+fn verifier_pass_preserves_current_recorded_candidate_over_stale_terminal_step() {
+    let prompt = "Return the requested machine fields with their observed values.";
+    let mut route = route_result();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+
+    let mut journal = verifier_pass_journal("task-current-verified-candidate", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r##"{"extra":{"field_value":{"path":"/workspace/README.md","first_line":"# Project","line_count":1277}}}"##,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "synthesize_answer",
+            "path: /workspace/READM.md\nfirst_line: # Project\nline_count: unavailable",
+        ));
+    let current_candidate = "path: /workspace/README.md\nfirst_line: # Project\nline_count: 1277";
+    journal.record_final_answer(current_candidate);
+    let mut answer_text = current_candidate.to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!promote_verified_terminal_answer_after_verifier_pass(
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+    assert_eq!(answer_text, current_candidate);
+    assert_eq!(answer_messages, vec![current_candidate.to_string()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(current_candidate));
+}
+
+#[test]
 fn verifier_pass_promotes_terminal_json_over_machine_kv_projection() {
     let prompt = "Return only a JSON object with requested machine fields.";
     let mut route = route_result();

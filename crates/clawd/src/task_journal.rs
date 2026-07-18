@@ -372,6 +372,9 @@ fn compact_structured_action_output_for_journal(output: &str) -> Option<String> 
     copy_listing_field(source, &mut compact, "start_line");
     copy_listing_field(source, &mut compact, "end_line");
     copy_listing_field(source, &mut compact, "total_lines");
+    copy_listing_field(source, &mut compact, "line_count");
+    copy_listing_field(source, &mut compact, "first_line");
+    copy_listing_field(source, &mut compact, "line_safety");
     copy_listing_field(source, &mut compact, "mode");
     copy_listing_field(source, &mut compact, "requested_n");
     copy_listing_field(source, &mut compact, "root");

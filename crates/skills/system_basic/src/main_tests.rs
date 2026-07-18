@@ -1076,10 +1076,35 @@ fn read_range_uses_range_mode_when_line_bounds_are_present() {
     assert_eq!(value.get("requested_n").and_then(Value::as_u64), Some(20));
     assert_eq!(value.get("start_line").and_then(Value::as_u64), Some(1));
     assert_eq!(value.get("end_line").and_then(Value::as_u64), Some(8));
+    assert_eq!(value.get("total_lines").and_then(Value::as_u64), Some(10));
+    assert_eq!(value.get("line_count").and_then(Value::as_u64), Some(10));
+    assert_eq!(value.get("first_line").and_then(Value::as_str), Some("1"));
     assert!(value
         .get("excerpt")
         .and_then(Value::as_str)
         .is_some_and(|excerpt| excerpt.contains("8|8") && !excerpt.contains("9|9")));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn read_range_tail_does_not_project_an_unobserved_first_line() {
+    let root = temp_root("read_range_tail_first_line");
+    let target = root.join("README.md");
+    std::fs::write(&target, "first\nsecond\nthird\n").expect("write readme");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+    obj.insert("mode".to_string(), json!("tail"));
+    obj.insert("n".to_string(), json!(1));
+
+    let out = read_range(&root, &obj, true).expect("read range");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(value.get("line_count").and_then(Value::as_u64), Some(3));
+    assert!(value.get("first_line").is_none());
+    assert!(value
+        .get("excerpt")
+        .and_then(Value::as_str)
+        .is_some_and(|excerpt| excerpt == "3|third"));
     let _ = std::fs::remove_dir_all(root);
 }
 

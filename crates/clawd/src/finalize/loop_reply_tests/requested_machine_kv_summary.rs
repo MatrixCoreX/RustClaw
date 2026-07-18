@@ -212,6 +212,65 @@ fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
 }
 
 #[test]
+fn requested_machine_kv_summary_preserves_richer_colon_labeled_delivery() {
+    let task = claimed_task("task-machine-kv-summary-colon-labeled-richer");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","path":"/workspace/README.md","line_count":1277,"first_line":"# RustClaw"}}"##,
+    ));
+    let current = "Observed fields:\n\n- path: /workspace/README.md\n- line_count: 1277\n- first_line: # RustClaw";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", current));
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return only machine fields path and line_count.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(delivery_messages, vec![current.to_string()]);
+}
+
+#[test]
+fn requested_machine_kv_summary_repairs_conflicting_colon_value_without_dropping_fields() {
+    let task = claimed_task("task-machine-kv-summary-colon-conflict");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","path":"/workspace/README.md","line_count":1277,"first_line":"# RustClaw"}}"##,
+    ));
+    let current = "path: /workspace/README.md\nline_count: 20\nfirst_line: # RustClaw";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", current));
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return only machine fields path and line_count.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(
+        delivery_messages,
+        vec!["path: /workspace/README.md\nline_count: 1277\nfirst_line: # RustClaw".to_string()]
+    );
+}
+
+#[test]
 fn hook_runtime_surface_json_can_replace_short_token_delivery() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
