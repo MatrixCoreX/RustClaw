@@ -15,6 +15,7 @@
 - `get` - Query one task detail by stable `task_id`, including `data.lifecycle` machine fields when available.
 - `cancel_all` - Cancel all unfinished tasks for this user/chat, excluding the current control task itself.
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
+- `preview_resume` - Return the no-mutation resume entrypoint and renewable execution-lease contract for a stable `task_id`.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
 - `pause` - Delay an existing waiting/background checkpoint by stable `task_id`.
 - Cancellation dry-runs are executable observations, not static prose: use `cancel_all` with `dry_run=true` when no specific index is supplied, or `cancel_one` with both `index` and `dry_run=true` when the user supplied a numbered task.
@@ -23,10 +24,10 @@
 
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `resume`, `pause`. |
+| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `resume`, `pause`. |
 | `task_id` | required for `get`, `resume`, `pause` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
-| `checkpoint_id` | optional for `resume` | string | - | Restrict resume to a specific checkpoint id. |
+| `checkpoint_id` | optional for `preview_resume` and `resume` | string | - | Restrict resume to a specific checkpoint id. |
 | `resume_reason` | optional for `resume` | string | - | Machine reason token to store with the resume request. |
 | `user_message` | optional for `resume` | string | - | User follow-up text stored as resume metadata; runtime does not parse it for routing. |
 | `new_constraints` | optional for `resume` | object | - | Structured constraints for the resumed task. |
@@ -49,6 +50,7 @@ Notes:
 - `cancel_all` returns `canceled_count`, `requested_count`, `items`, and `field_value.task_ids`.
 - `cancel_one` returns `canceled_task` and `field_value.task_id`.
 - `cancel_all` / `cancel_one` with `dry_run=true` returns `status=dry_run`, `would_mutate=false`, `required_fields`, and `result_projection_fields` containing `state`, `can_cancel`, `can_poll`, and `db_status`.
+- `preview_resume` always returns `status=dry_run` and `would_mutate=false`, plus `resume_entrypoint` and the renewable `lease` contract. It never calls the resume API.
 - `resume` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
 - `pause` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
 
@@ -58,8 +60,8 @@ Notes:
 - `get` without `task_id` -> structured `status=missing_task_id` with lifecycle field slots.
 - `get` with an invalid `task_id` shape -> structured `status=invalid_task_id` with lifecycle field slots.
 - `cancel_one` without valid `index` -> `error_text=cancel_one_missing_index`.
-- `resume` / `pause` without `task_id` -> structured `status=missing_task_id`.
-- `resume` / `pause` with an invalid `task_id` shape -> structured `status=invalid_task_id`.
+- `preview_resume` / `resume` / `pause` without `task_id` -> structured `status=missing_task_id`.
+- `preview_resume` / `resume` / `pause` with an invalid `task_id` shape -> structured `status=invalid_task_id`.
 - Invalid index -> structured `clawd` API error propagated as `error_text`.
 - Missing/invalid auth for task APIs -> readable error text from `clawd` (for example unauthorized user or invalid user key).
 
@@ -147,6 +149,18 @@ Request:
 Response text example:
 ```json
 {"schema_version":1,"action":"resume","status":"dry_run","message_key":"task_control.resume.dry_run","would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","checkpoint_id":"ckpt-1","required_fields":["task_id"],"optional_fields":["checkpoint_id","resume_reason","user_message","new_constraints"],"result_projection_fields":{"state":"running_or_background_or_terminal","db_status":"running_or_terminal","resume_due":true,"can_poll":true,"can_cancel":true,"checkpoint_id":"optional"}}
+```
+
+### resume preview
+
+Request:
+```json
+{"request_id":"r9","args":{"action":"preview_resume","task_id":"00000000-0000-4000-8000-000000000000","checkpoint_id":"ckpt-1"},"user_id":1,"chat_id":2}
+```
+
+Response text example:
+```json
+{"schema_version":1,"action":"preview_resume","status":"dry_run","message_key":"task_control.preview_resume.dry_run","would_mutate":false,"task_id":"00000000-0000-4000-8000-000000000000","checkpoint_id":"ckpt-1","resume_entrypoint":"checkpoint_declared","lease":{"required":true,"scope":"resume_execution","mode":"renewable","seconds_source":"runtime_config","heartbeat_renewal":true}}
 ```
 
 ### pause dry-run

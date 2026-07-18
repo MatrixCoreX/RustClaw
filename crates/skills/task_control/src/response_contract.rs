@@ -89,11 +89,19 @@ pub(super) fn cancel_dry_run_extra(action: &str, task_id: Option<&str>) -> Value
 }
 
 pub(super) fn resume_dry_run_extra(input: &SkillInput) -> Value {
+    resume_preview_contract(input, "resume")
+}
+
+pub(super) fn resume_preview_extra(input: &SkillInput) -> Value {
+    resume_preview_contract(input, "preview_resume")
+}
+
+fn resume_preview_contract(input: &SkillInput, action: &str) -> Value {
     json!({
         "schema_version": 1,
-        "action": "resume",
+        "action": action,
         "status": "dry_run",
-        "message_key": "task_control.resume.dry_run",
+        "message_key": format!("task_control.{action}.dry_run"),
         "would_mutate": false,
         "task_id": input.task_id.as_deref(),
         "checkpoint_id": input.checkpoint_id.as_deref(),
@@ -107,6 +115,14 @@ pub(super) fn resume_dry_run_extra(input: &SkillInput) -> Value {
             "checkpoint_id": "optional",
             "can_poll": true,
         },
+        "resume_entrypoint": "checkpoint_declared",
+        "lease": {
+            "required": true,
+            "scope": "resume_execution",
+            "mode": "renewable",
+            "seconds_source": "runtime_config",
+            "heartbeat_renewal": true,
+        },
         "result_projection_fields": {
             "state": "running_or_background_or_terminal",
             "db_status": "running_or_terminal",
@@ -116,13 +132,19 @@ pub(super) fn resume_dry_run_extra(input: &SkillInput) -> Value {
             "checkpoint_id": "optional",
         },
         "field_value": {
-            "action": "resume",
+            "action": action,
             "status": "dry_run",
-            "message_key": "task_control.resume.dry_run",
+            "message_key": format!("task_control.{action}.dry_run"),
             "would_mutate": false,
             "task_id": input.task_id.as_deref(),
             "checkpoint_id": input.checkpoint_id.as_deref(),
             "resume_reason": input.resume_reason.as_deref(),
+            "resume_entrypoint": "checkpoint_declared",
+            "lease_required": true,
+            "lease_scope": "resume_execution",
+            "lease_mode": "renewable",
+            "lease_seconds_source": "runtime_config",
+            "lease_heartbeat_renewal": true,
             "can_poll": true,
             "can_cancel": true,
         },

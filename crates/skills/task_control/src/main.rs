@@ -163,6 +163,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         "get" | "get_one" | "query_task" | "task_detail" | "detail" => "get",
         "cancel" | "cancel_all" | "stop" | "stop_all" => "cancel_all",
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
+        "preview_resume" | "resume_preview" => "preview_resume",
         "resume" | "resume_task" | "continue_task" => "resume",
         "pause" | "pause_task" | "delay_task" => "pause",
         _ => return Err("unsupported_action".to_string()),
@@ -384,6 +385,23 @@ fn execute(
                 )
                 .await?;
                 let extra = task_control_by_id_result_extra("resume", task_id, value);
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
+            "preview_resume" => {
+                let Some(task_id) = input.task_id.as_deref() else {
+                    let extra =
+                        task_control_input_status_extra("preview_resume", "missing_task_id", None);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                };
+                if !is_task_id_shape(task_id) {
+                    let extra = task_control_input_status_extra(
+                        "preview_resume",
+                        "invalid_task_id",
+                        Some(task_id),
+                    );
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                }
+                let extra = resume_preview_extra(&input);
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "pause" => {
