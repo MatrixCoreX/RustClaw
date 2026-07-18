@@ -181,6 +181,25 @@ fn observed_answer_language_compatibility_accepts_language_neutral_machine_field
 }
 
 #[test]
+fn observed_answer_language_compatibility_accepts_markdown_machine_field_reports() {
+    let inline = "`printf T2_JA_A`: decision=require_confirmation, risk_level=high, confirmation_required=true\n\
+                  `printf T2_JA_B`: decision=require_confirmation, risk_level=high, confirmation_required=true";
+    let multiline = "`printf T2_JA_A`\n\
+                     - command: `printf T2_JA_A`\n\
+                     - decision: require_confirmation\n\
+                     - risk_level: high\n\
+                     - confirmation_required: true\n\n\
+                     `printf T2_JA_B`\n\
+                     - command: `printf T2_JA_B`\n\
+                     - decision: require_confirmation\n\
+                     - risk_level: high\n\
+                     - confirmation_required: true";
+
+    assert!(observed_answer_language_compatible(inline, "ja"));
+    assert!(observed_answer_language_compatible(multiline, "ja"));
+}
+
+#[test]
 fn observed_answer_language_compatibility_does_not_treat_prose_as_machine_fields() {
     assert!(!multi_field_machine_record_is_language_neutral(
         "status=ok, explanation=当前任务已完成"
@@ -190,6 +209,9 @@ fn observed_answer_language_compatibility_does_not_treat_prose_as_machine_fields
     ));
     assert!(!multi_field_machine_record_is_language_neutral(
         "status=ok\nexplanation: task completed"
+    ));
+    assert!(!multi_field_machine_record_is_language_neutral(
+        "`printf T2_JA_A`\n- status: ok\nThe command preview completed successfully"
     ));
 }
 

@@ -113,6 +113,9 @@ async fn run_cmd_permission_preview_never_executes_command() {
     .expect("permission preview should succeed");
 
     let preview: Value = serde_json::from_str(&output).expect("structured permission preview");
+    assert_eq!(preview["command"], command);
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["preview_only"], true);
     assert_eq!(preview["decision"], "deny");
     assert_eq!(preview["would_execute"], false);
     assert!(preview["reason_codes"]

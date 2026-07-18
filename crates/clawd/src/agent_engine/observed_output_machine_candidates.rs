@@ -72,6 +72,9 @@ pub(crate) fn multi_field_machine_record_is_language_neutral(candidate: &str) ->
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>();
+    if markdown_machine_field_report_is_language_neutral(&lines) {
+        return true;
+    }
     if lines.len() >= 2 {
         return lines.iter().all(|line| machine_record_field(line));
     }
@@ -80,6 +83,54 @@ pub(crate) fn multi_field_machine_record_is_language_neutral(candidate: &str) ->
     };
     let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
     fields.len() >= 2 && fields.iter().all(|field| machine_record_field(field))
+}
+
+fn markdown_machine_field_report_is_language_neutral(lines: &[&str]) -> bool {
+    let mut field_count = 0usize;
+    for line in lines {
+        if markdown_code_record_heading(line) {
+            continue;
+        }
+        if let Some(fields) = markdown_code_record_inline_fields(line) {
+            field_count += fields;
+            continue;
+        }
+        let field = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))
+            .unwrap_or(line);
+        if machine_record_field(field) {
+            field_count += 1;
+            continue;
+        }
+        return false;
+    }
+    field_count >= 2
+}
+
+fn markdown_code_record_heading(line: &str) -> bool {
+    let Some(code) = line
+        .strip_prefix('`')
+        .and_then(|line| line.strip_suffix('`'))
+    else {
+        return false;
+    };
+    !code.trim().is_empty()
+        && code
+            .chars()
+            .all(|ch| ch.is_ascii() && !ch.is_ascii_control())
+}
+
+fn markdown_code_record_inline_fields(line: &str) -> Option<usize> {
+    let rest = line.strip_prefix('`')?;
+    let (_, fields) = rest.split_once("`:")?;
+    let fields = fields
+        .split(',')
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    (!fields.is_empty() && fields.iter().all(|field| machine_record_field(field)))
+        .then_some(fields.len())
 }
 
 fn machine_record_field(field: &str) -> bool {
@@ -94,10 +145,23 @@ fn machine_record_field(field: &str) -> bool {
         && key
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-        && value
-            .split(',')
-            .map(str::trim)
-            .all(|item| !item.is_empty() && item.chars().all(|ch| ch.is_ascii_graphic()))
+        && machine_record_value(value)
+}
+
+fn machine_record_value(value: &str) -> bool {
+    if let Some(code) = value
+        .strip_prefix('`')
+        .and_then(|value| value.strip_suffix('`'))
+    {
+        return !code.trim().is_empty()
+            && code
+                .chars()
+                .all(|ch| ch.is_ascii() && !ch.is_ascii_control());
+    }
+    value
+        .split(',')
+        .map(str::trim)
+        .all(|item| !item.is_empty() && item.chars().all(|ch| ch.is_ascii_graphic()))
 }
 
 pub(super) fn observed_answer_language_compatible(
