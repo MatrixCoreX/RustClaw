@@ -1,8 +1,8 @@
 use serde_json::json;
 
 use super::{
-    annotate_readonly_cli_surface_args, collapse_redundant_drafting_synthesis,
-    command_looks_like_readonly_cli_surface_probe,
+    annotate_readonly_cli_surface_args, collapse_redundant_config_preview_reads,
+    collapse_redundant_drafting_synthesis, command_looks_like_readonly_cli_surface_probe,
 };
 use crate::AgentAction;
 
@@ -79,4 +79,67 @@ fn synthesis_before_last_output_passthrough_is_preserved() {
             AgentAction::Respond { content }
         ] if evidence_refs == &["last_output"] && content == "{{last_output}}"
     ));
+}
+
+#[test]
+fn config_preview_drops_redundant_read_for_the_same_target() {
+    let actions = vec![
+        AgentAction::CallCapability {
+            capability: "config.read_field".to_string(),
+            args: json!({
+                "path": "configs/config.toml",
+                "field_path": "llm.selected_vendor"
+            }),
+        },
+        AgentAction::CallCapability {
+            capability: "config.preview_change".to_string(),
+            args: json!({
+                "path": "configs/config.toml",
+                "field_path": "llm.selected_vendor",
+                "value": "minimax"
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["s1".to_string(), "s2".to_string()],
+        },
+    ];
+
+    let normalized = collapse_redundant_config_preview_reads(actions);
+
+    assert_eq!(normalized.len(), 2);
+    assert!(matches!(
+        normalized.first(),
+        Some(AgentAction::CallCapability { capability, .. })
+            if capability == "config.preview_change"
+    ));
+    assert!(matches!(
+        normalized.get(1),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs == &["last_output"]
+    ));
+}
+
+#[test]
+fn config_preview_keeps_reads_for_a_different_target() {
+    let actions = vec![
+        AgentAction::CallCapability {
+            capability: "config.read_field".to_string(),
+            args: json!({
+                "path": "configs/config.toml",
+                "field_path": "server.listen"
+            }),
+        },
+        AgentAction::CallCapability {
+            capability: "config.preview_change".to_string(),
+            args: json!({
+                "path": "configs/config.toml",
+                "field_path": "llm.selected_vendor",
+                "value": "minimax"
+            }),
+        },
+    ];
+
+    let normalized = collapse_redundant_config_preview_reads(actions);
+
+    assert_eq!(normalized.len(), 2);
 }
