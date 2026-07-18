@@ -168,6 +168,39 @@ compute_effective_chat_id_base() {
   printf '%s\n' "$((requested_base + (epoch % 100000000)))"
 }
 
+case_group_key() {
+  local tags="$1"
+  local token
+  local -a tag_tokens=()
+  IFS=',;' read -r -a tag_tokens <<< "$tags"
+  for token in "${tag_tokens[@]}"; do
+    token="${token#"${token%%[![:space:]]*}"}"
+    token="${token%"${token##*[![:space:]]}"}"
+    if [[ "$token" == group:* && -n "${token#group:}" ]]; then
+      printf '%s\n' "${token#group:}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_run_chat_id_base() {
+  local requested_chat_id="$1"
+  local isolate_chat_id_base="$2"
+  local state_file="${RUN_DIR}/chat_id_base.txt"
+  local persisted=""
+  if [[ -f "$state_file" ]]; then
+    persisted="$(tr -d '[:space:]' < "$state_file")"
+    if [[ "$persisted" =~ ^-?[0-9]+$ ]]; then
+      printf '%s\n' "$persisted"
+      return 0
+    fi
+  fi
+  persisted="$(compute_effective_chat_id_base "$requested_chat_id" "$isolate_chat_id_base")"
+  printf '%s\n' "$persisted" > "$state_file"
+  printf '%s\n' "$persisted"
+}
+
 resolve_admin_key() {
   if [[ -n "${USER_KEY_VALUE:-}" ]]; then
     return 0
@@ -1219,7 +1252,7 @@ if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "  user_id:       $USER_ID"
   echo "  chat_id:       $CHAT_ID"
 fi
-BASE_CHAT_ID="$(compute_effective_chat_id_base "$CHAT_ID" "$ISOLATE_CHAT_ID_BASE")"
+BASE_CHAT_ID="$(resolve_run_chat_id_base "$CHAT_ID" "$ISOLATE_CHAT_ID_BASE")"
 if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "  run_chat_id_base: $BASE_CHAT_ID"
   echo "  user_key:      ${USER_KEY:+<set>}"
@@ -1254,10 +1287,19 @@ fi
 
 ordinal=0
 run_count=0
+declare -A GROUP_CHAT_IDS=()
 for row in "${CASE_ROWS[@]}"; do
   IFS=$'\x1f' read -r source_line case_name tags prompt expect_substr confirm_reply <<< "$row"
   ordinal=$((ordinal + 1))
   chat_id_for_case=$((BASE_CHAT_ID + ordinal))
+  group_key="$(case_group_key "$tags" || true)"
+  if [[ -n "$group_key" ]]; then
+    if [[ -n "${GROUP_CHAT_IDS[$group_key]+x}" ]]; then
+      chat_id_for_case="${GROUP_CHAT_IDS[$group_key]}"
+    else
+      GROUP_CHAT_IDS["$group_key"]="$chat_id_for_case"
+    fi
+  fi
 
   if (( source_line <= RESUME_LINE )); then
     LAST_COMPLETED_LINE="$source_line"
