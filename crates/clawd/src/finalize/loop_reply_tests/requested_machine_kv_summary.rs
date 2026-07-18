@@ -84,6 +84,46 @@ fn requested_machine_kv_summary_uses_normalized_config_preview_selector() {
 }
 
 #[test]
+fn requested_machine_kv_summary_preserves_policy_decision_selector() {
+    let task = claimed_task("task-machine-kv-policy-decision-selector");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        r#"{"confirmation_required":false,"decision":"deny","reason_codes":["sudo_not_allowed"],"risk_level":"high","would_execute":false}"#,
+    ));
+    let mut delivery_messages = vec![
+        r#"risk_level=high confirmation_required=false reason_codes=["sudo_not_allowed"]"#
+            .to_string(),
+    ];
+    let mut finalizer_summary = None;
+    let mut route = free_route_result();
+    route.selection.structured_field_selector =
+        Some("decision,risk_level,confirmation_required,reason_codes".to_string());
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Preview the policy fields.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec![
+            r#"decision=deny risk_level=high confirmation_required=false reason_codes=["sudo_not_allowed"]"#
+                .to_string()
+        ]
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_richer_recent_scalar_delivery() {
     let task = claimed_task("task-machine-kv-summary-recent-scalar-richer");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

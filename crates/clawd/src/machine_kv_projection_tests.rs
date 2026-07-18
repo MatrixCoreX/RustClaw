@@ -5,6 +5,26 @@ use super::{
 };
 
 #[test]
+fn machine_summary_projects_policy_decision_fields() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"confirmation_required":false,"decision":"deny","reason_codes":["sudo_not_allowed"],"risk_level":"high","would_execute":false}"#,
+        &mut observed,
+    );
+
+    assert_eq!(
+        requested_machine_kv_summary_from_observations(
+            "decision risk_level confirmation_required reason_codes",
+            &observed,
+        )
+        .as_deref(),
+        Some(
+            r#"decision=deny risk_level=high confirmation_required=false reason_codes=["sudo_not_allowed"]"#
+        )
+    );
+}
+
+#[test]
 fn machine_summary_projects_requested_config_fields_without_echoing_target_value() {
     let mut observed = Vec::new();
     collect_machine_text_fragments_from_output(
