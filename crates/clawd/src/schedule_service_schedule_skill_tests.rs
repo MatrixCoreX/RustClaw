@@ -187,6 +187,8 @@ async fn schedule_compile_only_create_returns_preview_without_insert() {
     assert!(reply.contains("status=ok"));
     assert!(reply.contains("mode=compile_only"));
     assert!(reply.contains("kind=create"));
+    assert!(reply.contains("dry_run=true"));
+    assert!(reply.contains("preview_only=true"));
     assert!(reply.contains("would_mutate=false"));
     assert!(reply.contains("timezone=Asia/Shanghai"));
     assert!(reply.contains("datetime=2099-01-01 09:00:00"));

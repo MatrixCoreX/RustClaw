@@ -772,6 +772,8 @@ fn schedule_compile_only_response(
     push_schedule_preview_kv(&mut lines, "status", "ok");
     push_schedule_preview_kv(&mut lines, "mode", schedule_intent_mode(intent));
     push_schedule_preview_kv(&mut lines, "kind", kind);
+    push_schedule_preview_kv(&mut lines, "dry_run", "true");
+    push_schedule_preview_kv(&mut lines, "preview_only", "true");
     push_schedule_preview_kv(
         &mut lines,
         "would_mutate",

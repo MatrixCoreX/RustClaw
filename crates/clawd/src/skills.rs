@@ -684,6 +684,15 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
             if action.is_empty() {
                 return None;
             }
+            let mode = obj.get("mode").and_then(Value::as_str).unwrap_or_default();
+            let preview_only = action == "preview"
+                || mode == "compile_only"
+                || obj
+                    .get("preview_only")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+            let dry_run =
+                preview_only || obj.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
             Some(json!({
                 "schema_version": 1,
                 "source": "builtin_success_extra",
@@ -691,8 +700,8 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
                 "message_key": "schedule.workflow.completed",
                 "status": "ok",
                 "mode": obj.get("mode").cloned().unwrap_or(Value::Null),
-                "dry_run": obj.get("dry_run").cloned().unwrap_or(Value::Bool(false)),
-                "preview_only": obj.get("preview_only").cloned().unwrap_or(Value::Bool(false)),
+                "dry_run": dry_run,
+                "preview_only": preview_only,
                 "target_job_id": obj.get("target_job_id").cloned().unwrap_or(Value::Null),
                 "intent": obj.get("intent").cloned().unwrap_or(Value::Null),
             }))
@@ -1773,3 +1782,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
 #[cfg(test)]
 #[path = "skills_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "skills_success_extra_tests.rs"]
+mod success_extra_tests;
