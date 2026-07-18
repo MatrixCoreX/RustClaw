@@ -451,6 +451,21 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     "_clawd_async_expires_at",
                 ],
             )?;
+            let action = optional_string(map, "action")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_default();
+            if action == "preview_command_permission" {
+                let command = required_string(map, "command")?;
+                let preview = crate::verifier::preview_command_permission_decision(
+                    state,
+                    command,
+                    optional_string(map, "cwd"),
+                    crate::skills::task_allows_sudo(state, task),
+                );
+                return serde_json::to_string(&preview)
+                    .map_err(|err| format!("permission_preflight_serialize_failed:{err}"));
+            }
             let cwd = optional_string(map, "cwd").unwrap_or(".");
             let cwd_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,

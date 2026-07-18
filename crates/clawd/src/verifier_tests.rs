@@ -32,7 +32,9 @@ side_effect = true
 auto_invocable = true
 input_schema = { type = "object", required = ["command"], properties = { action = { type = "string" }, command = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" } } }
 planner_capabilities = [
+  { name = "system.preview_command_permission", action = "preview_command_permission", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
   { name = "system.inspect_cli_help", action = "inspect_cli_help", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
 
 [[skills]]

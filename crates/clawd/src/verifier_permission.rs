@@ -125,6 +125,80 @@ fn step_permission_decision_json(
     })
 }
 
+pub(super) fn preview_command_permission_decision_json(
+    state: &AppState,
+    command: &str,
+    cwd: Option<&str>,
+    sudo_allowed: bool,
+) -> Value {
+    let mut args = serde_json::Map::from_iter([(
+        "command".to_string(),
+        Value::String(command.trim().to_string()),
+    )]);
+    if let Some(cwd) = cwd.map(str::trim).filter(|value| !value.is_empty()) {
+        args.insert("cwd".to_string(), Value::String(cwd.to_string()));
+    }
+    let step = PlanStep {
+        step_id: "permission_preflight".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "run_cmd".to_string(),
+        args: Value::Object(args),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let raw = step_permission_decision_json(state, &step, false);
+    let raw_decision = raw
+        .get("decision")
+        .and_then(Value::as_str)
+        .and_then(crate::policy_decision::PolicyDecision::parse_token)
+        .unwrap_or(crate::policy_decision::PolicyDecision::Deny);
+    let mut decision = raw_decision;
+    let mut reason_codes = Vec::new();
+
+    if command.trim().is_empty() {
+        decision = crate::policy_decision::PolicyDecision::Deny;
+        reason_codes.push("command_missing");
+    } else if command.len() > state.skill_rt.max_cmd_length {
+        decision = crate::policy_decision::PolicyDecision::Deny;
+        reason_codes.push("command_too_long");
+    }
+    if !sudo_allowed && crate::skills::command_requests_sudo(command) {
+        decision = crate::policy_decision::PolicyDecision::Deny;
+        reason_codes.push("sudo_not_allowed");
+    }
+    if let Some(reason) = raw.get("sandbox_denial_reason").and_then(Value::as_str) {
+        if !reason_codes.contains(&reason) {
+            reason_codes.push(reason);
+        }
+    }
+    if reason_codes.is_empty() {
+        reason_codes.push(match decision {
+            crate::policy_decision::PolicyDecision::Allow => "policy_allowed",
+            crate::policy_decision::PolicyDecision::RequireConfirmation => "confirmation_required",
+            crate::policy_decision::PolicyDecision::Deny => "policy_denied",
+            crate::policy_decision::PolicyDecision::BackgroundWait => "background_wait",
+        });
+    }
+
+    json!({
+        "schema_version": 1,
+        "status_code": "permission_preflight_complete",
+        "action": "preview_command_permission",
+        "target_skill": "run_cmd",
+        "target_action": "run_command",
+        "decision": decision.as_token(),
+        "risk_level": raw.get("risk_level").cloned().unwrap_or(Value::String("unknown".to_string())),
+        "confirmation_required": decision.requires_confirmation(),
+        "approval_policy": raw.get("approval_policy").cloned().unwrap_or(Value::Null),
+        "sandbox_mode": raw.get("global_sandbox_mode").cloned().unwrap_or(Value::Null),
+        "sandbox_profile": raw.get("sandbox_profile").cloned().unwrap_or(Value::Null),
+        "sandbox": raw.get("sandbox").cloned().unwrap_or(Value::Null),
+        "workspace_scope": raw.get("workspace_scope").cloned().unwrap_or(Value::Null),
+        "reason_codes": reason_codes,
+        "would_execute": false,
+    })
+}
+
 pub(super) fn verify_permission_decision_json(
     state: &AppState,
     plan_result: &PlanResult,

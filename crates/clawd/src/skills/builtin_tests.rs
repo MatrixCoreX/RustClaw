@@ -94,6 +94,34 @@ fn assert_workspace_mutation(output: &str, action: &str, target_path: &str) -> V
 }
 
 #[tokio::test]
+async fn run_cmd_permission_preview_never_executes_command() {
+    let root = TempDirGuard::new("run_cmd_permission_preview");
+    let target = root.path.join("must_not_exist");
+    let state = test_state(root.path.clone());
+    let command = format!("sudo touch {}", target.display());
+
+    let output = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "action": "preview_command_permission",
+            "command": command,
+            "cwd": "."
+        }),
+    )
+    .await
+    .expect("permission preview should succeed");
+
+    let preview: Value = serde_json::from_str(&output).expect("structured permission preview");
+    assert_eq!(preview["decision"], "deny");
+    assert_eq!(preview["would_execute"], false);
+    assert!(preview["reason_codes"]
+        .as_array()
+        .is_some_and(|reasons| reasons.iter().any(|reason| reason == "sudo_not_allowed")));
+    assert!(!target.exists(), "permission preview executed the command");
+}
+
+#[tokio::test]
 async fn list_dir_accepts_names_only_arg() {
     let root = TempDirGuard::new("list_dir_names_only");
     fs::write(root.path.join("b.txt"), "b").expect("write b");

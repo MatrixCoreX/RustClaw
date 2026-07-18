@@ -449,7 +449,7 @@ pub(super) async fn run_safe_command_detailed(
         )));
     }
 
-    if !allow_sudo && command.split_whitespace().any(|p| p == "sudo") {
+    if !allow_sudo && crate::skills::command_requests_sudo(command) {
         return Err(RunSafeCommandError::Policy(
             crate::skills::policy_block_error(
                 "sudo_not_allowed",
@@ -686,7 +686,7 @@ pub(super) async fn start_async_command(
             "empty command",
         )));
     }
-    if !allow_sudo && command.split_whitespace().any(|part| part == "sudo") {
+    if !allow_sudo && crate::skills::command_requests_sudo(command) {
         return Err(RunSafeCommandError::Policy(
             crate::skills::policy_block_error(
                 "sudo_not_allowed",
