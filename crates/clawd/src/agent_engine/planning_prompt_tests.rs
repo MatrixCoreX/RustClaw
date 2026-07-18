@@ -67,6 +67,16 @@ fn planner_overlays_require_runtime_observation_for_policy_projections() {
             prompt.contains("never replace it with a guessed `respond`"),
             "{relative_path} must reject planner-invented permission decisions"
         );
+        assert!(
+            prompt.contains("Prefer a matching dedicated read-only preview/preflight capability"),
+            "{relative_path} must prefer the runtime-owned preview contract"
+        );
+        assert!(
+            prompt.contains(
+                "Never simulate a no-mutation preview by running a mutating shell command"
+            ),
+            "{relative_path} must reject side-effecting preview simulation"
+        );
     }
 }
 

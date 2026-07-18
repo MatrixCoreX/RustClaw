@@ -557,10 +557,6 @@ pub(super) fn default_command_intent_default_locale() -> String {
     "zh-CN".to_string()
 }
 
-pub(super) fn default_command_intent_verify_enforce_enabled() -> bool {
-    false
-}
-
 pub(super) fn default_schedule_timezone() -> String {
     "Asia/Shanghai".to_string()
 }

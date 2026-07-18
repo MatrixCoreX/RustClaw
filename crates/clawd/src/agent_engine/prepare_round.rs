@@ -33,12 +33,8 @@ fn build_round_verify_summary(
     }
 }
 
-fn verify_mode_for_state(state: &AppState) -> crate::verifier::VerifyMode {
-    if state.policy.command_intent.verify_enforce_enabled {
-        crate::verifier::VerifyMode::Enforce
-    } else {
-        crate::verifier::VerifyMode::ObserveOnly
-    }
+fn production_verify_mode() -> crate::verifier::VerifyMode {
+    crate::verifier::VerifyMode::Enforce
 }
 
 async fn build_verifier_gate_response(
@@ -209,7 +205,7 @@ pub(super) async fn prepare_round_actions(
         crate::truncate_for_log(&plan_result.raw_plan_text)
     );
     let effective_output_contract = plan_result.output_contract.clone();
-    let verify_mode = verify_mode_for_state(state);
+    let verify_mode = production_verify_mode();
     let verify_result = crate::verifier::verify_plan(
         state,
         task,
