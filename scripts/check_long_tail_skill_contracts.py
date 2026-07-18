@@ -26,6 +26,12 @@ POLLABLE_MEDIA_SKILLS = {
     "video_generate": ("video", "generate"),
     "music_generate": ("music", "generate"),
 }
+MEDIA_PREVIEW_CAPABILITIES = {
+    "image_generate": ("image.preview_generate", "preview_generate"),
+    "audio_synthesize": ("audio.preview_synthesize", "preview_synthesize"),
+    "video_generate": ("video.preview_generate", "preview_generate"),
+    "music_generate": ("music.preview_generate", "preview_generate"),
+}
 
 EXECUTION_MODES = {"sync_short", "async_preferred", "async_required"}
 ASYNC_EXECUTION_MODES = {"async_preferred", "async_required"}
@@ -160,6 +166,39 @@ def check_media_dry_run_contract(skills_by_name: dict[str, dict[str, Any]]) -> l
     return findings
 
 
+def check_media_preview_contract(skills_by_name: dict[str, dict[str, Any]]) -> list[str]:
+    findings: list[str] = []
+    for skill_name, (capability_name, action) in MEDIA_PREVIEW_CAPABILITIES.items():
+        skill = skills_by_name.get(skill_name)
+        if not skill:
+            findings.append(f"{skill_name}: missing registry skill entry")
+            continue
+        capability = capability_by_name(skill, capability_name)
+        if not capability:
+            findings.append(f"{skill_name}: missing {capability_name} capability")
+            continue
+        expected = {
+            "action": action,
+            "effect": "observe",
+            "risk_level": "low",
+            "preferred": True,
+            "idempotent": True,
+            "dedup_scope": "args",
+            "execution_mode": "sync_short",
+            "isolation_profile": "read_only",
+            "network_access": False,
+            "filesystem_write": False,
+            "external_publish": False,
+            "credential_access": False,
+        }
+        for field, value in expected.items():
+            if capability.get(field) != value:
+                findings.append(
+                    f"{skill_name}.{capability_name}: {field} must be {value!r}"
+                )
+    return findings
+
+
 def check_video_poll_contract(skills_by_name: dict[str, dict[str, Any]]) -> list[str]:
     findings: list[str] = []
     skill = skills_by_name.get("video_generate")
@@ -285,6 +324,7 @@ def check_registry(path: Path) -> tuple[int, list[str]]:
         + check_capability_execution_modes(skills)
         + check_run_cmd_async_contract(skills_by_name)
         + check_media_dry_run_contract(skills_by_name)
+        + check_media_preview_contract(skills_by_name)
         + check_video_poll_contract(skills_by_name)
         + check_pollable_media_contracts(skills_by_name)
     )
@@ -335,24 +375,26 @@ def run_self_test() -> int:
     }
     bad_media = {"image_generate": bad_media_skill}
     dry_run_findings = check_media_dry_run_contract(bad_media)
+    preview_findings = check_media_preview_contract(bad_media)
     pollable_findings = check_pollable_media_contracts(bad_media)
     expected_tokens = {
         "input_schema missing dry_run",
         "optional missing dry_run",
+        "missing image.preview_generate capability",
         "execution_mode must be async",
         "missing image.poll capability",
         "missing image.cancel capability",
     }
     observed_tokens = {
         token
-        for finding in dry_run_findings + pollable_findings
+        for finding in dry_run_findings + preview_findings + pollable_findings
         for token in expected_tokens
         if token in finding
     }
     if not expected_tokens.issubset(observed_tokens):
         print(
             "SELF_TEST_FAIL missing_long_tail_findings:"
-            f"{dry_run_findings + pollable_findings}",
+            f"{dry_run_findings + preview_findings + pollable_findings}",
             file=sys.stderr,
         )
         return 1

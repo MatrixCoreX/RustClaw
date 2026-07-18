@@ -18,6 +18,7 @@
 
 ## Planner Selection Notes (from interface)
 - For requests that turn text into spoken audio, voice, narration, or TTS output and save or return an audio file, use `audio_synthesize` / planner capability `audio.synthesize`.
+- For validation, planning, or dry-run requests that must not call a provider or write a file, use `audio.preview_synthesize`; the skill forces dry-run regardless of any caller-supplied `dry_run` value.
 - For existing speech-audio jobs with a `task_id`, use `audio.poll` to inspect status and `audio.cancel` to stop the job. Do not infer job ids from prose; pass structured ids from prior tool evidence or user-provided fields.
 - Do not synthesize speech through shell commands or local CLI tools unless the user explicitly requests shell/CLI execution or the configured audio synthesis providers are unavailable and a deliberate local fallback is enabled.
 - Preserve requested save locations as `output_path`; the skill returns machine-readable path evidence in `extra.output_path` and `extra.outputs`.
@@ -31,12 +32,15 @@
 
 ## Actions (from interface)
 - `synthesize`: generate or plan speech audio from text. This is the default when `action` is omitted.
+- `preview_synthesize`: validate and project speech audio output without provider calls or file writes.
 - `poll`: inspect a previously accepted async speech-audio job by `task_id`.
 - `cancel`: request cancellation for a previously accepted async speech-audio job by `task_id`.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
+| preview_synthesize | `text` (or `input`) | yes | string | - | Source text to validate; this action always forces dry-run. |
+| preview_synthesize | `voice`, `response_format` / `format`, `output_path`, `vendor`, `model` | no | mixed | impl defaults | Preview-only synthesis options; no provider call or file write occurs. |
 | synthesize | `text` (or `input`) | yes | string | - | Source text to speak. |
 | synthesize | `voice` | no | string | impl default | Voice preset. |
 | synthesize | `response_format` or `format` | no | string | impl default | Audio output format (e.g., mp3/wav). |

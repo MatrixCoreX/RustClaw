@@ -20,12 +20,15 @@
 
 ## Actions
 - `generate`: generate a song or instrumental audio file.
+- `preview_generate`: validate and project music generation without provider calls or file writes; this action always forces dry-run.
 - `poll`: poll a provider music generation job through the `media_job_poll` adapter contract.
 - `cancel`: cancel a provider music generation job when a native provider cancel adapter exists; dry-run returns the cancellation contract.
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
+| preview_generate | `prompt` / `description` or `lyrics` | conditional | string | - | Music input to validate; this action always forces dry-run. |
+| preview_generate | generation options | no | mixed | config defaults | Uses the same bounded input options as `generate` without provider calls or file writes. |
 | generate | `prompt` / `description` | conditional | string | - | Music style, mood, and scenario. Required for instrumental or lyrics-optimizer requests. |
 | generate | `lyrics` | conditional | string | - | Song lyrics. Required unless `lyrics_optimizer=true` or `is_instrumental=true`. |
 | generate | `lyrics_optimizer` | no | boolean | auto | When true and lyrics are empty, the selected adapter may generate lyrics from `prompt`. |

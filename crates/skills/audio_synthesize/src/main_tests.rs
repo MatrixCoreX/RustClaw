@@ -88,6 +88,27 @@ fn dry_run_returns_machine_payload_without_writing_file() {
 }
 
 #[test]
+fn preview_action_forces_dry_run_without_writing_file() {
+    let root = unique_temp_root("audio-synthesize-preview");
+    let (text, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "preview_synthesize",
+            "text": "preview only",
+            "output_path": "audio/preview.mp3",
+            "format": "mp3",
+            "dry_run": false
+        }),
+    )
+    .expect("preview should force dry-run");
+
+    assert_eq!(text, "AUDIO_SYNTHESIZE_DRY_RUN");
+    assert_eq!(extra["dry_run"], true);
+    assert!(!root.join("audio/preview.mp3").exists());
+}
+
+#[test]
 fn poll_dry_run_returns_structured_adapter_result() {
     let root = unique_temp_root("audio-synthesize-poll-dry-run");
     let (text, extra) = execute(

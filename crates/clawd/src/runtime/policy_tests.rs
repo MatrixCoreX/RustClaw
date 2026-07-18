@@ -35,6 +35,17 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
         &["skill:image_generate", "capability:image.preview_generate"],
         None
     ));
+    for (skill, capability) in [
+        ("audio_synthesize", "audio.preview_synthesize"),
+        ("video_generate", "video.preview_generate"),
+        ("music_generate", "music.preview_generate"),
+    ] {
+        let skill_token = format!("skill:{skill}");
+        let capability_token = format!("capability:{capability}");
+        assert!(policy.is_allowed(&capability_token, None));
+        assert!(policy.is_any_allowed(&[&skill_token, &capability_token], None));
+        assert!(!policy.is_allowed(&skill_token, None));
+    }
     assert!(policy.is_allowed("capability:schedule.preview", None));
     assert!(policy.is_any_allowed(&["skill:schedule", "capability:schedule.preview"], None));
     assert!(!policy.is_allowed("skill:schedule", None));

@@ -73,6 +73,26 @@ fn dry_run_returns_request_payload_without_key() {
 }
 
 #[test]
+fn preview_action_forces_dry_run_without_writing_file() {
+    let root = unique_temp_root("video-preview");
+    let (text, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "preview_generate",
+            "prompt": "A status card animation",
+            "output_path": "video/preview.mp4",
+            "dry_run": false
+        }),
+    )
+    .expect("preview should force dry-run");
+
+    assert_eq!(text, "VIDEO_GENERATE_DRY_RUN");
+    assert_eq!(extra["dry_run"], true);
+    assert!(!root.join("video/preview.mp4").exists());
+}
+
+#[test]
 fn dry_run_normalizes_dimension_resolution_alias() {
     let root = unique_temp_root("video-dry-run-resolution-alias");
     let (_, extra) = execute(

@@ -333,6 +333,9 @@ impl ToolsPolicy {
                 "skill:transform",
                 "skill:kb",
                 "capability:image.preview_generate",
+                "capability:audio.preview_synthesize",
+                "capability:video.preview_generate",
+                "capability:music.preview_generate",
                 "capability:schedule.preview",
             ],
             "minimal" => vec![

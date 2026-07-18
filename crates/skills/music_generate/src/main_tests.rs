@@ -68,6 +68,26 @@ fn dry_run_can_generate_with_prompt_only_by_enabling_lyrics_optimizer() {
 }
 
 #[test]
+fn preview_action_forces_dry_run_without_writing_file() {
+    let root = unique_temp_root("music-preview");
+    let (text, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "preview_generate",
+            "prompt": "A short ambient cue",
+            "output_path": "music/preview.mp3",
+            "dry_run": false
+        }),
+    )
+    .expect("preview should force dry-run");
+
+    assert_eq!(text, "MUSIC_GENERATE_DRY_RUN");
+    assert_eq!(extra["dry_run"], true);
+    assert!(!root.join("music/preview.mp3").exists());
+}
+
+#[test]
 fn dedicated_provider_empty_key_falls_back_to_shared_minimax_key() {
     let mut cfg = RootConfig::default();
     cfg.llm.minimax = Some(VendorConfig {
