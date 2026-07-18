@@ -139,12 +139,6 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
-    if !force_structured
-        && answer_verifier_passed_publishable_summary(journal, answer_text, answer_messages)
-    {
-        journal.record_final_answer(answer_text.as_str());
-        return false;
-    }
     let request_surfaces = task_machine_kv_request_surfaces(prompt, route_result, journal);
     let requested_summary = requested_machine_kv_summary_from_task_final_answer_with_surfaces(
         &request_surfaces,
@@ -221,6 +215,12 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
             ..Default::default()
         });
         return true;
+    }
+    if !force_structured
+        && answer_verifier_passed_publishable_summary(journal, answer_text, answer_messages)
+    {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
     }
     let search_path_listing = if let Some(summary) = requested_summary.as_deref() {
         crate::finalize::search_path_projection::path_listing_from_marker_summary_outputs(

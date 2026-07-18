@@ -13,6 +13,14 @@ fn missing_path_machine_summary_preserves_stable_error_code() {
             "fs_basic",
             r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","error_code":"path_not_found","exists":false,"kind":"missing","path":"missing.md"}],"include_missing":true}"#,
         ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: true,
+        missing_evidence_fields: Vec::new(),
+        answer_incomplete_reason: String::new(),
+        should_retry: false,
+        retry_instruction: String::new(),
+        confidence: 0.98,
+    });
     let mut answer_text = "exists=false\npath=missing.md".to_string();
     let mut answer_messages = vec![answer_text.clone()];
 
