@@ -141,7 +141,7 @@ These examples are config field examples, not language-trigger rules.
 ### Response: Plan change
 
 ```json
-{"request_id":"demo-plan","status":"ok","text":"{\"action\":\"plan_config_change\",\"path\":\"configs/config.toml\",\"field_path\":\"skills.skill_switches.photo_organize\",\"would_change\":true}","extra":{"action":"plan_config_change","path":"configs/config.toml","field_path":"skills.skill_switches.photo_organize","would_change":true},"error_text":null}
+{"request_id":"demo-plan","status":"ok","text":"{\"action\":\"plan_config_change\",\"path\":\"configs/config.toml\",\"field_path\":\"skills.skill_switches.photo_organize\",\"dry_run\":true,\"before\":false,\"after\":true,\"would_change\":true}","extra":{"action":"plan_config_change","path":"configs/config.toml","field_path":"skills.skill_switches.photo_organize","dry_run":true,"before":false,"after":true,"would_change":true},"error_text":null}
 ```
 
 ### Response: Apply change
@@ -172,6 +172,8 @@ These examples are config field examples, not language-trigger rules.
   - `action`: string, always `plan_config_change`; evidence role `status`.
   - `path`: string config path; evidence role `path`.
   - `field_path`: string structured field path; evidence role `field_value`.
+  - `dry_run`: boolean, always `true`; evidence role `status`.
+  - `before` and `after`: redaction-safe typed values before and after the proposed change; evidence role `field_value`.
   - `would_change`: boolean preview result; evidence role `status`.
 - `apply_config_change` success `extra` fields:
   - `action`: string, always `apply_config_change`; evidence role `status`.
