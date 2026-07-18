@@ -604,7 +604,6 @@ async fn run_workspace_update_job(
         "bash",
         &["./build-all.sh"],
         &workspace_root,
-        WORKSPACE_UPDATE_TIMEOUT_SECONDS,
         shared.clone(),
         control.clone(),
     )
@@ -694,7 +693,6 @@ async fn run_workspace_update_ui_only_job(
         "bash",
         &["./build-ui-nginx.sh"],
         &workspace_root,
-        WORKSPACE_UPDATE_TIMEOUT_SECONDS,
         shared.clone(),
         control.clone(),
     )
@@ -745,7 +743,6 @@ async fn run_workspace_update_clawd_only_job(
             r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
         ],
         &workspace_root,
-        WORKSPACE_UPDATE_TIMEOUT_SECONDS,
         shared.clone(),
         control.clone(),
     )
@@ -827,7 +824,6 @@ async fn run_workspace_update_release_deploy_job(
         "bash",
         &["-lc", release_deploy_script()],
         &workspace_root,
-        WORKSPACE_UPDATE_TIMEOUT_SECONDS,
         shared.clone(),
         control.clone(),
     )
@@ -1401,7 +1397,6 @@ async fn run_workspace_update_command_streaming(
     program: &str,
     args: &[&str],
     cwd: &Path,
-    timeout_seconds: u64,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
     control: Arc<Mutex<WorkspaceUpdateControl>>,
 ) -> Result<WorkspaceUpdateCommandOutput, String> {
@@ -1431,7 +1426,6 @@ async fn run_workspace_update_command_streaming(
     let stdout_task = tokio::spawn(read_workspace_update_stream(stdout, shared.clone(), true));
     let stderr_task = tokio::spawn(read_workspace_update_stream(stderr, shared.clone(), false));
 
-    let started = std::time::Instant::now();
     let status = loop {
         if workspace_update_cancel_requested(&control) {
             if let Some(pid) = child.id() {
@@ -1443,17 +1437,6 @@ async fn run_workspace_update_command_streaming(
             let _ = stderr_task.await;
             finish_workspace_update_canceled(&shared, &control);
             return Err(WORKSPACE_UPDATE_CANCELED_ERROR.to_string());
-        }
-        if started.elapsed() >= std::time::Duration::from_secs(timeout_seconds) {
-            if let Some(pid) = child.id() {
-                terminate_workspace_update_process_tree(pid);
-            }
-            let _ = child.kill().await;
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
-            let mut guard = workspace_update_control_lock(control.as_ref());
-            guard.active_child_pid = None;
-            return Err(format!("{program} timed out after {timeout_seconds}s"));
         }
 
         match tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await {
