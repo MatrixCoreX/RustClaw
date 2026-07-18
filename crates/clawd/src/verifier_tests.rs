@@ -30,7 +30,7 @@ kind = "builtin"
 output_kind = "text"
 side_effect = true
 auto_invocable = true
-input_schema = { type = "object", required = ["command"], properties = { action = { type = "string" }, command = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" } } }
+input_schema = { type = "object", required = ["command"], properties = { action = { type = "string" }, command = { type = "string" }, cwd = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" } } }
 planner_capabilities = [
   { name = "system.preview_command_permission", action = "preview_command_permission", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
   { name = "system.inspect_cli_help", action = "inspect_cli_help", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
@@ -81,7 +81,7 @@ planner_kind = "tool"
 output_kind = "text"
 side_effect = true
 auto_invocable = true
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "read_text_range", "write_text", "make_dir", "remove_path"] }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "read_text_range", "write_text", "make_dir", "remove_path"] }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } }, start_line = { type = "integer" }, end_line = { type = "integer" } } }
 planner_capabilities = [
   { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"] },
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"] },
