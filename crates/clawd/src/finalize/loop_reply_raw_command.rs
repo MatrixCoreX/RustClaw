@@ -247,7 +247,7 @@ pub(super) fn direct_raw_command_output_projection(
     ))
 }
 
-pub(super) fn raw_command_machine_field_delivery_satisfies_request(
+pub(crate) fn raw_command_machine_field_delivery_satisfies_request(
     route: &crate::IntentOutputContract,
     delivery: &str,
 ) -> bool {

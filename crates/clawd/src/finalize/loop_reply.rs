@@ -160,14 +160,16 @@ use execution_summary::{
 
 #[path = "loop_reply_raw_command.rs"]
 mod raw_command;
-pub(crate) use raw_command::raw_command_machine_field_projection_from_journal;
 #[cfg(test)]
 use raw_command::shell_stdout_redirect_target_path;
 use raw_command::{
     direct_raw_command_output_projection, looks_like_raw_command_snapshot,
     looks_like_structured_machine_output, output_contract_requests_exact_delivery,
-    raw_command_machine_field_delivery_satisfies_request,
     raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
+};
+pub(crate) use raw_command::{
+    raw_command_machine_field_delivery_satisfies_request,
+    raw_command_machine_field_projection_from_journal,
 };
 
 #[path = "loop_reply_file_delivery.rs"]

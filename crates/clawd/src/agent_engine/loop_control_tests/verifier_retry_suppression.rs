@@ -1561,6 +1561,47 @@ fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observe
 }
 
 #[test]
+fn terminal_model_answer_does_not_replace_requested_raw_command_fields_with_stdout() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.selection.structured_field_selector =
+        Some("command,created_path,stdout,status".to_string());
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-command-fields-terminal", "ask", "prompt");
+    journal.push_step_result(&ok_step("step_1", "run_cmd", "checkpoint_resume_ok"));
+    journal.push_step_result(&ok_step(
+        "step_2",
+        "synthesize_answer",
+        "checkpoint_resume_ok",
+    ));
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    let observed_projection = "\
+command=mkdir -p generated && printf '%s' checkpoint_resume_ok > generated/result.txt
+created_path=/workspace/generated/result.txt
+stdout=checkpoint_resume_ok
+status=ok";
+    let mut reply = AskReply::non_llm(observed_projection.to_string())
+        .with_messages(vec![observed_projection.to_string()])
+        .with_task_journal(journal);
+
+    assert!(!prefer_terminal_model_answer_for_verifier_candidate(
+        &mut reply,
+        Some(&answer_contract(&route))
+    ));
+    assert_eq!(reply.text, observed_projection);
+}
+
+#[test]
 fn terminal_model_answer_does_not_replace_single_machine_projection_with_observed_scalar() {
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::Path;
