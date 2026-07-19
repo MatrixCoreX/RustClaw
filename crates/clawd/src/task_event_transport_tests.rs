@@ -31,6 +31,81 @@ fn event_schema_is_ordered_deduplicated_and_replayable() {
 }
 
 #[test]
+fn coding_projection_appends_a_new_authoritative_event_after_green_verification() {
+    let state = state();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-red-green-events", "ask", "fix tests");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_red".to_string(),
+        skill: "run_cmd".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(
+            "exit=1 command=python3 -m unittest test_calc.py\n\
+             stderr_ref=artifact:stderr:step_red"
+                .to_string(),
+        ),
+        started_at: 1,
+        finished_at: 2,
+    });
+    publish_journal_snapshot(&state, &journal).unwrap();
+
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_fix".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "write_text",
+                    "path": "calc.py"
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 3,
+        finished_at: 4,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_green".to_string(),
+        skill: "run_cmd".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some("exit=0 command=python3 -m unittest test_calc.py".to_string()),
+        error: None,
+        started_at: 5,
+        finished_at: 6,
+    });
+    publish_journal_snapshot(&state, &journal).unwrap();
+
+    let coding_events = replay_events_after(&state, "task-red-green-events", 0)
+        .unwrap()
+        .events
+        .into_iter()
+        .filter(|event| event["event_type"] == "coding_evidence")
+        .collect::<Vec<_>>();
+    assert_eq!(coding_events.len(), 2);
+    assert_eq!(coding_events[0]["payload"]["verification_status"], "failed");
+    assert_eq!(
+        coding_events[1]["payload"]["verification_status"],
+        "verified"
+    );
+    assert_eq!(
+        coding_events[1]["payload"]["latest_verification_step_ref"],
+        "step_green"
+    );
+    assert!(
+        coding_events[1]["payload"]["projection_revision"]
+            .as_u64()
+            .unwrap()
+            > coding_events[0]["payload"]["projection_revision"]
+                .as_u64()
+                .unwrap()
+    );
+    assert!(coding_events[1]["seq"].as_u64().unwrap() > coding_events[0]["seq"].as_u64().unwrap());
+}
+
+#[test]
 fn secrets_and_raw_teaching_fields_are_redacted_before_persistence() {
     let state = state();
     let event = publish_event(

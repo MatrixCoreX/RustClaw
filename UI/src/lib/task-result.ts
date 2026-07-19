@@ -315,6 +315,10 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "goal_status_source",
     "validation_status",
     "task_id",
+    "projection_revision",
+    "projection_step_count",
+    "projection_observation_count",
+    "latest_verification_step_ref",
     "transition_index",
     "transition_ref",
     "evidence_ref",
@@ -988,14 +992,29 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
 
 function latestCodingSummary(result: TaskQueryResponse): Record<string, unknown> | null {
   const events = taskTraceEvents(result);
-  for (let index = events.length - 1; index >= 0; index -= 1) {
+  let latest: Record<string, unknown> | null = null;
+  let latestRevision = -1;
+  let latestSequence = -1;
+  for (let index = 0; index < events.length; index += 1) {
     const event = events[index];
     const eventType = typeof event.event_type === "string" ? event.event_type : "";
     if (eventType !== "coding_evidence" && eventType !== "coding_task_contract") continue;
     const payload = traceEventPayload(event);
-    if (payload) return payload;
+    if (!payload) continue;
+    const revision = Number(payload.projection_revision);
+    const sequence = Number(event.seq);
+    const comparableRevision = Number.isFinite(revision) ? revision : 0;
+    const comparableSequence = Number.isFinite(sequence) ? sequence : index;
+    if (
+      comparableRevision > latestRevision ||
+      (comparableRevision === latestRevision && comparableSequence >= latestSequence)
+    ) {
+      latest = payload;
+      latestRevision = comparableRevision;
+      latestSequence = comparableSequence;
+    }
   }
-  return null;
+  return latest;
 }
 
 function codingOutcomeMeta(

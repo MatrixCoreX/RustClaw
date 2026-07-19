@@ -6,6 +6,8 @@ use serde_json::{json, Value};
 mod decision_envelope;
 use self::decision_envelope::agent_loop_round_plan_contract_envelope_json;
 
+#[path = "task_journal_coding_commands.rs"]
+mod task_journal_coding_commands;
 #[path = "task_journal_coding_state.rs"]
 mod task_journal_coding_state;
 #[path = "task_journal_coding_workflow.rs"]
@@ -1210,6 +1212,10 @@ mod recent_artifacts_tests;
 #[cfg(test)]
 #[path = "task_journal_coding_state_tests.rs"]
 mod coding_state_tests;
+
+#[cfg(test)]
+#[path = "task_journal_coding_commands_tests.rs"]
+mod coding_commands_tests;
 
 #[cfg(test)]
 #[path = "task_journal_coding_workflow_tests.rs"]

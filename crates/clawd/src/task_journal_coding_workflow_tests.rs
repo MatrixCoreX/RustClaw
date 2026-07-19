@@ -163,6 +163,84 @@ fn summary_json_includes_coding_workflow_repair_contract() {
 }
 
 #[test]
+fn latest_green_verification_supersedes_historical_red_result() {
+    let mut journal = TaskJournal::for_task(
+        "task-coding-workflow-red-green",
+        "ask",
+        "run red test, fix, and verify",
+    );
+    journal.push_step_result(&step_result(
+        "step_red",
+        "run_cmd",
+        crate::executor::StepExecutionStatus::Error,
+        None,
+        Some(
+            "exit=1 command=python3 -m unittest test_calc_core.py -v\n\
+             stderr_ref=artifact:stderr:step_red"
+                .to_string(),
+        ),
+    ));
+    journal.push_step_result(&step_result(
+        "step_fix",
+        "fs_basic",
+        crate::executor::StepExecutionStatus::Ok,
+        Some(
+            json!({
+                "extra": {
+                    "action": "write_text",
+                    "path": "calc_core.py"
+                }
+            })
+            .to_string(),
+        ),
+        None,
+    ));
+    journal.push_step_result(&step_result(
+        "step_green",
+        "run_cmd",
+        crate::executor::StepExecutionStatus::Ok,
+        Some("exit=0 command=python3 -m unittest test_calc_core.py -v 2>&1 | tail -50".to_string()),
+        None,
+    ));
+
+    let workflow = journal.to_summary_json()["coding_workflow"].clone();
+    assert_eq!(workflow["schema_version"], 2);
+    assert_eq!(workflow["projection_revision"], 9);
+    assert_eq!(workflow["latest_verification_step_ref"], "step_green");
+    assert_eq!(workflow["verification_status"], "verified");
+    assert_eq!(workflow["current_phase_hint"], "summarize");
+    assert_eq!(workflow["failure_kind_count"], 0);
+    assert_eq!(workflow["historical_failure_kind_count"], 1);
+    assert_eq!(workflow["historical_failure_kinds"][0], "test");
+    assert_eq!(workflow["validation_gate"]["gate_status"], "satisfied");
+
+    let evidence = journal
+        .event_stream_snapshot()
+        .into_iter()
+        .find(|event| event["event_type"] == "coding_evidence")
+        .expect("coding evidence");
+    assert_eq!(evidence["payload"]["schema_version"], 2);
+    assert_eq!(evidence["payload"]["projection_step_count"], 3);
+    assert_eq!(
+        evidence["payload"]["latest_verification_step_ref"],
+        "step_green"
+    );
+    assert_eq!(evidence["payload"]["changed_files"][0], "calc_core.py");
+    assert_eq!(evidence["payload"]["verification_status"], "verified");
+    assert_eq!(evidence["payload"]["failure_count"], 0);
+    assert!(evidence["payload"]["failures"]
+        .as_array()
+        .is_some_and(Vec::is_empty));
+    assert!(evidence["payload"]["historical_failure_count"]
+        .as_u64()
+        .is_some_and(|count| count > 0));
+    assert_eq!(
+        evidence["payload"]["historical_verification_failure_kinds"][0],
+        "test"
+    );
+}
+
+#[test]
 fn summary_json_marks_changed_files_without_verification_as_gate_required() {
     let mut journal = TaskJournal::for_task("task-coding-workflow-unverified", "ask", "edit only");
     journal.push_step_result(&step_result(

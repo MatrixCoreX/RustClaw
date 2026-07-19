@@ -70,6 +70,8 @@ fn coding_report_json_from_workflow(data: &Value, scanned: &Value) -> Option<Val
     let repair_attempt_count = report_u64(&workflow_value, "/repair_attempt_count");
     let checkpoint_ref_count = report_u64(&workflow_value, "/checkpoint_ref_count");
     let completed_side_effect_count = report_u64(&workflow_value, "/completed_side_effect_count");
+    let historical_failure_kind_count =
+        report_u64(&workflow_value, "/historical_failure_kind_count");
     let verification_status = workflow_value
         .get("verification_status")
         .and_then(Value::as_str)
@@ -82,8 +84,8 @@ fn coding_report_json_from_workflow(data: &Value, scanned: &Value) -> Option<Val
     } else {
         Value::Null
     };
-    Some(json!({
-        "schema_version": 1,
+    let mut report = json!({
+        "schema_version": 2,
         "source": "task_journal_coding_workflow",
         "planned_change_count": report_u64(&workflow_value, "/planned_change_count"),
         "planned_changes": report_value_or_empty_array(&workflow_value, "/planned_changes"),
@@ -107,8 +109,8 @@ fn coding_report_json_from_workflow(data: &Value, scanned: &Value) -> Option<Val
             "has_commands": report_u64(scanned, "/command_count") > 0,
             "has_verification": verification_command_count > 0,
             "has_tests": report_u64(scanned, "/test_count") > 0,
-            "has_failed_step": failure_kind_count > 0 || verification_status == "failed",
-            "has_failed_verification": failure_kind_count > 0 || verification_status == "failed",
+            "has_failed_step": verification_status == "failed",
+            "has_failed_verification": verification_status == "failed",
             "repair_observed": repair_attempt_count > 0,
             "checkpointed": checkpoint_ref_count > 0,
             "resumable": report_u64(scanned, "/state/resume_entrypoint_count") > 0,
@@ -140,13 +142,46 @@ fn coding_report_json_from_workflow(data: &Value, scanned: &Value) -> Option<Val
         "diff_summary_count": report_u64(scanned, "/diff_summary_count"),
         "diff_summaries": report_value_or_empty_array(scanned, "/diff_summaries"),
         "failure_count": if verification_status == "failed" && failure_kind_count == 0 { 1 } else { failure_kind_count },
-        "failures": report_value_or_empty_array(scanned, "/failures"),
+        "failures": if verification_status == "failed" {
+            report_value_or_empty_array(scanned, "/failures")
+        } else {
+            json!([])
+        },
         "retry_count": repair_attempt_count,
         "repair_attempt_refs": report_value_or_empty_array(&workflow_value, "/repair_attempt_refs"),
         "remaining_risks": report_value_or_empty_array(&workflow_value, "/remaining_risks"),
         "done_condition_coverage": report_value_or_empty_array(&workflow_value, "/done_condition_coverage"),
         "unverified_risk": unverified_risk,
-    }))
+    });
+    let report_object = report.as_object_mut()?;
+    report_object.insert(
+        "projection_revision".to_string(),
+        json!(report_u64(&workflow_value, "/projection_revision")),
+    );
+    report_object.insert(
+        "latest_verification_step_ref".to_string(),
+        workflow_value
+            .get("latest_verification_step_ref")
+            .cloned()
+            .unwrap_or(Value::Null),
+    );
+    report_object.insert(
+        "historical_failure_count".to_string(),
+        json!(report_u64(scanned, "/failure_count")),
+    );
+    report_object.insert(
+        "historical_failures".to_string(),
+        report_value_or_empty_array(scanned, "/failures"),
+    );
+    report_object.insert(
+        "historical_verification_failure_kind_count".to_string(),
+        json!(historical_failure_kind_count),
+    );
+    report_object.insert(
+        "historical_verification_failure_kinds".to_string(),
+        report_value_or_empty_array(&workflow_value, "/historical_failure_kinds"),
+    );
+    Some(report)
 }
 
 fn coding_state_json(signals: &CodingReportSignals) -> Value {

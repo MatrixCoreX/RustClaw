@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
+use super::task_journal_coding_commands::{is_test_command_token, is_verification_command_token};
+use super::task_journal_coding_state::coding_state_transition_observation_from_trace;
 use super::{
     capability_resolution_source, next_requested_capability, requested_capability_sequence,
     step_action_kind, TaskJournal, TaskJournalFinalStatus,
@@ -20,7 +22,12 @@ fn task_event_json(seq: &mut u64, event_type: &str, payload: Value) -> Value {
 pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
     let mut seq = 0;
     let mut events = Vec::new();
-    let mut coding_evidence = CodingEvidenceSignals::default();
+    let mut coding_evidence = CodingEvidenceSignals {
+        projection_revision: journal.step_results.len() + journal.task_observations.len(),
+        projection_step_count: journal.step_results.len(),
+        projection_observation_count: journal.task_observations.len(),
+        ..CodingEvidenceSignals::default()
+    };
     if let Some(lifecycle) = journal.task_lifecycle.as_ref() {
         events.push(task_event_json(
             &mut seq,
@@ -454,6 +461,26 @@ struct CodingEvidenceSignals {
     failures: Vec<Value>,
     verification_failure_kinds: BTreeSet<String>,
     retry_count: u64,
+    latest_verification_outcome: Option<VerificationOutcome>,
+    latest_verification_step_ref: Option<String>,
+    projection_revision: usize,
+    projection_step_count: usize,
+    projection_observation_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VerificationOutcome {
+    Failed,
+    Verified,
+}
+
+impl VerificationOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "failed",
+            Self::Verified => "verified",
+        }
+    }
 }
 
 impl CodingEvidenceSignals {
@@ -469,15 +496,21 @@ impl CodingEvidenceSignals {
     }
 
     fn to_payload(&self) -> Value {
+        let verification_status = coding_verification_status(self);
         let unverified_risk = if !self.changed_files.is_empty() && self.tests.is_empty() {
             Value::String("tests_not_observed".to_string())
         } else {
             Value::Null
         };
-        let verification_status = coding_verification_status(self);
+        let current_failures = current_failures(self);
+        let current_failure_kinds = current_verification_failure_kinds(self);
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "evidence_ref": "coding_evidence:summary",
+            "projection_revision": self.projection_revision,
+            "projection_step_count": self.projection_step_count,
+            "projection_observation_count": self.projection_observation_count,
+            "latest_verification_step_ref": self.latest_verification_step_ref,
             "evidence_refs": self.evidence_refs.iter().cloned().collect::<Vec<_>>(),
             "files_read_count": self.files_read.len(),
             "files_read": self.files_read.iter().cloned().collect::<Vec<_>>(),
@@ -494,27 +527,38 @@ impl CodingEvidenceSignals {
             "workspace_checkpoint_ids": self.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
             "patch_ids": self.patch_ids.iter().cloned().collect::<Vec<_>>(),
             "mutation_ids": self.mutation_ids.iter().cloned().collect::<Vec<_>>(),
-            "failure_count": self.failures.len(),
-            "failures": self.failures.clone(),
+            "failure_count": current_failures.len(),
+            "failures": current_failures,
+            "historical_failure_count": self.failures.len(),
+            "historical_failures": self.failures.clone(),
             "verification_status": verification_status,
-            "verification_failure_kind_count": self.verification_failure_kinds.len(),
-            "verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
+            "verification_failure_kind_count": current_failure_kinds.len(),
+            "verification_failure_kinds": current_failure_kinds,
+            "historical_verification_failure_kind_count": self.verification_failure_kinds.len(),
+            "historical_verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
             "retry_count": self.retry_count,
             "unverified_risk": unverified_risk,
         })
     }
 
     fn to_contract_payload(&self) -> Value {
+        let verification_status = coding_verification_status(self);
         let unverified_risk = if !self.changed_files.is_empty() && self.tests.is_empty() {
             Value::String("tests_not_observed".to_string())
         } else {
             Value::Null
         };
         let final_diff_summary = self.diff_summaries.last().cloned().unwrap_or(Value::Null);
+        let current_failures = current_failures(self);
+        let current_failure_kinds = current_verification_failure_kinds(self);
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "contract_ref": "coding_task_contract:summary",
             "evidence_ref": "coding_task_contract:summary",
+            "projection_revision": self.projection_revision,
+            "projection_step_count": self.projection_step_count,
+            "projection_observation_count": self.projection_observation_count,
+            "latest_verification_step_ref": self.latest_verification_step_ref,
             "evidence_refs": self.evidence_refs.iter().cloned().collect::<Vec<_>>(),
             "files_read_count": self.files_read.len(),
             "files_read": self.files_read.iter().cloned().collect::<Vec<_>>(),
@@ -532,8 +576,10 @@ impl CodingEvidenceSignals {
             "tests_run": self.tests.iter().cloned().collect::<Vec<_>>(),
             "test_count": self.tests.len(),
             "tests": self.tests.iter().cloned().collect::<Vec<_>>(),
-            "failure_count": self.failures.len(),
-            "failures": self.failures.clone(),
+            "failure_count": current_failures.len(),
+            "failures": current_failures,
+            "historical_failure_count": self.failures.len(),
+            "historical_failures": self.failures.clone(),
             "retry_count": self.retry_count,
             "final_diff_summary": final_diff_summary,
             "diff_summary_count": self.diff_summaries.len(),
@@ -541,16 +587,20 @@ impl CodingEvidenceSignals {
             "workspace_checkpoint_ids": self.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
             "patch_ids": self.patch_ids.iter().cloned().collect::<Vec<_>>(),
             "mutation_ids": self.mutation_ids.iter().cloned().collect::<Vec<_>>(),
-            "verification_status": coding_verification_status(self),
-            "verification_failure_kind_count": self.verification_failure_kinds.len(),
-            "verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
+            "verification_status": verification_status,
+            "verification_failure_kind_count": current_failure_kinds.len(),
+            "verification_failure_kinds": current_failure_kinds,
+            "historical_verification_failure_kind_count": self.verification_failure_kinds.len(),
+            "historical_verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
             "unverified_risk": unverified_risk,
         })
     }
 }
 
 fn coding_verification_status(signals: &CodingEvidenceSignals) -> &'static str {
-    if !signals.failures.is_empty() {
+    if let Some(outcome) = signals.latest_verification_outcome {
+        outcome.as_str()
+    } else if !signals.failures.is_empty() {
         "failed"
     } else if !signals.verification_commands.is_empty() {
         "verified"
@@ -558,6 +608,22 @@ fn coding_verification_status(signals: &CodingEvidenceSignals) -> &'static str {
         "unverified"
     } else {
         "not_applicable"
+    }
+}
+
+fn current_failures(signals: &CodingEvidenceSignals) -> Vec<Value> {
+    if coding_verification_status(signals) == "failed" {
+        signals.failures.clone()
+    } else {
+        Vec::new()
+    }
+}
+
+fn current_verification_failure_kinds(signals: &CodingEvidenceSignals) -> Vec<String> {
+    if coding_verification_status(signals) == "failed" {
+        signals.verification_failure_kinds.iter().cloned().collect()
+    } else {
+        Vec::new()
     }
 }
 
@@ -572,7 +638,10 @@ fn append_coding_progress_events(
             seq,
             "workspace_diff",
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
+                "projection_revision": signals.projection_revision,
+                "projection_step_count": signals.projection_step_count,
+                "projection_observation_count": signals.projection_observation_count,
                 "evidence_refs": evidence_refs,
                 "changed_files": signals.changed_files.iter().cloned().collect::<Vec<_>>(),
                 "diff_summary_count": signals.diff_summaries.len(),
@@ -591,12 +660,18 @@ fn append_coding_progress_events(
             seq,
             "verification",
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
+                "projection_revision": signals.projection_revision,
+                "projection_step_count": signals.projection_step_count,
+                "projection_observation_count": signals.projection_observation_count,
+                "latest_verification_step_ref": signals.latest_verification_step_ref,
                 "evidence_refs": evidence_refs,
                 "status": coding_verification_status(signals),
                 "verification_commands": signals.verification_commands.iter().cloned().collect::<Vec<_>>(),
-                "failure_count": signals.failures.len(),
-                "failure_kinds": signals.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
+                "failure_count": current_failures(signals).len(),
+                "failure_kinds": current_verification_failure_kinds(signals),
+                "historical_failure_count": signals.failures.len(),
+                "historical_failure_kinds": signals.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
                 "workspace_checkpoint_ids": signals.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
                 "patch_ids": signals.patch_ids.iter().cloned().collect::<Vec<_>>(),
                 "mutation_ids": signals.mutation_ids.iter().cloned().collect::<Vec<_>>(),
@@ -608,7 +683,10 @@ fn append_coding_progress_events(
             seq,
             "retry",
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
+                "projection_revision": signals.projection_revision,
+                "projection_step_count": signals.projection_step_count,
+                "projection_observation_count": signals.projection_observation_count,
                 "evidence_refs": evidence_refs,
                 "retry_count": signals.retry_count,
             }),
@@ -627,7 +705,11 @@ fn append_coding_checkpoint_events(
             seq,
             "coding_checkpoint",
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
+                "projection_revision": signals.projection_revision,
+                "projection_step_count": signals.projection_step_count,
+                "projection_observation_count": signals.projection_observation_count,
+                "latest_verification_step_ref": signals.latest_verification_step_ref,
                 "checkpoint_kind": "file_edit_group",
                 "checkpoint_ref": checkpoint_ref,
                 "evidence_ref": checkpoint_ref,
@@ -648,7 +730,11 @@ fn append_coding_checkpoint_events(
             seq,
             "coding_checkpoint",
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
+                "projection_revision": signals.projection_revision,
+                "projection_step_count": signals.projection_step_count,
+                "projection_observation_count": signals.projection_observation_count,
+                "latest_verification_step_ref": signals.latest_verification_step_ref,
                 "checkpoint_kind": "verified_workspace_checkpoint",
                 "checkpoint_ref": "coding_checkpoint:verified_workspace_checkpoint",
                 "checkpoint_id": signals.workspace_checkpoint_ids.iter().next(),
@@ -669,7 +755,11 @@ fn append_coding_checkpoint_events(
             seq,
             "coding_checkpoint",
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
+                "projection_revision": signals.projection_revision,
+                "projection_step_count": signals.projection_step_count,
+                "projection_observation_count": signals.projection_observation_count,
+                "latest_verification_step_ref": signals.latest_verification_step_ref,
                 "checkpoint_kind": "verification_command",
                 "checkpoint_ref": checkpoint_ref,
                 "evidence_ref": checkpoint_ref,
@@ -678,8 +768,10 @@ fn append_coding_checkpoint_events(
                 "verification_command": command,
                 "verification_command_count": signals.verification_commands.len(),
                 "verification_status": coding_verification_status(signals),
-                "verification_failure_kind_count": signals.verification_failure_kinds.len(),
-                "verification_failure_kinds": signals
+                "verification_failure_kind_count": current_verification_failure_kinds(signals).len(),
+                "verification_failure_kinds": current_verification_failure_kinds(signals),
+                "historical_verification_failure_kind_count": signals.verification_failure_kinds.len(),
+                "historical_verification_failure_kinds": signals
                     .verification_failure_kinds
                     .iter()
                     .cloned()
@@ -696,6 +788,20 @@ fn collect_coding_evidence_from_step(
 ) {
     let step_ref = step.step_id.trim();
     let step_ref = (!step_ref.is_empty()).then_some(step_ref);
+    if let Some(transition) = coding_state_transition_observation_from_trace(step) {
+        collect_coding_evidence_value(&transition, signals, step_ref, 0);
+        if transition
+            .get("verification_command")
+            .and_then(Value::as_str)
+            .is_some_and(|command| !command.trim().is_empty())
+        {
+            signals.latest_verification_outcome = match step.status {
+                crate::executor::StepExecutionStatus::Ok => Some(VerificationOutcome::Verified),
+                crate::executor::StepExecutionStatus::Error => Some(VerificationOutcome::Failed),
+            };
+            signals.latest_verification_step_ref = step_ref.map(str::to_string);
+        }
+    }
     collect_coding_evidence_value(step_trace, signals, step_ref, 0);
     if let Some(output) = step.output_excerpt.as_deref().and_then(parse_json_value) {
         collect_coding_evidence_value(&output, signals, step_ref, 0);
@@ -1059,55 +1165,6 @@ fn is_failure_status_token(status: &str) -> bool {
         status.trim(),
         "error" | "failed" | "failure" | "timeout" | "cancelled" | "canceled"
     )
-}
-
-fn is_test_command_token(command: &str) -> bool {
-    let command = command.trim().to_ascii_lowercase();
-    command.starts_with("cargo test")
-        || command.starts_with("npm test")
-        || command.starts_with("npm run test")
-        || command.starts_with("pnpm test")
-        || command.starts_with("yarn test")
-        || command.starts_with("pytest")
-        || is_python_test_command_token(&command)
-        || command.starts_with("go test")
-}
-
-fn is_verification_command_token(command: &str) -> bool {
-    let command = command.trim().to_ascii_lowercase();
-    is_test_command_token(&command)
-        || command.starts_with("cargo check")
-        || command.starts_with("cargo clippy")
-        || command.starts_with("cargo fmt")
-        || command.starts_with("npm run lint")
-        || command.starts_with("npm run build")
-        || command.starts_with("pnpm lint")
-        || command.starts_with("pnpm build")
-        || command.starts_with("yarn lint")
-        || command.starts_with("yarn build")
-        || command.starts_with("pytest")
-        || is_python_test_command_token(&command)
-        || command.starts_with("ruff check")
-        || command.starts_with("go vet")
-        || command.starts_with("go test")
-}
-
-fn is_python_test_command_token(command: &str) -> bool {
-    let mut parts = command.split_whitespace();
-    let Some(program) = parts.next() else {
-        return false;
-    };
-    if !matches!(program, "python" | "python3") {
-        return false;
-    }
-    let args = parts.collect::<Vec<_>>();
-    if args.starts_with(&["-m", "pytest"]) || args.starts_with(&["-m", "unittest"]) {
-        return true;
-    }
-    args.iter().any(|arg| {
-        let arg = arg.trim_matches('"').trim_matches('\'');
-        arg.starts_with("test_") || arg.ends_with("_test.py") || arg.contains("/test_")
-    })
 }
 
 fn record_verification_failure_kind(command: &str, signals: &mut CodingEvidenceSignals) {

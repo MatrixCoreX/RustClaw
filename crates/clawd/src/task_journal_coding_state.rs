@@ -1,5 +1,7 @@
 use serde_json::{json, Map, Value};
 
+use super::task_journal_coding_commands::{is_test_command_token, is_verification_command_token};
+
 pub(super) fn coding_state_transition_observation(
     step_result: &crate::executor::StepExecutionResult,
 ) -> Option<Value> {
@@ -526,31 +528,4 @@ fn map_action_reads_file(action: Option<&str>) -> bool {
             "read" | "read_text" | "read_range" | "list" | "list_dir" | "find" | "search"
         )
     })
-}
-
-fn is_test_command_token(command: &str) -> bool {
-    let command = command.trim().to_ascii_lowercase();
-    command.starts_with("cargo test")
-        || command.starts_with("npm test")
-        || command.starts_with("npm run test")
-        || command.starts_with("pnpm test")
-        || command.starts_with("yarn test")
-        || command.starts_with("pytest")
-        || command.starts_with("go test")
-}
-
-fn is_verification_command_token(command: &str) -> bool {
-    let command = command.trim().to_ascii_lowercase();
-    is_test_command_token(&command)
-        || command.starts_with("cargo check")
-        || command.starts_with("cargo clippy")
-        || command.starts_with("cargo fmt")
-        || command.starts_with("npm run lint")
-        || command.starts_with("npm run build")
-        || command.starts_with("pnpm lint")
-        || command.starts_with("pnpm build")
-        || command.starts_with("yarn lint")
-        || command.starts_with("yarn build")
-        || command.starts_with("ruff check")
-        || command.starts_with("go vet")
 }

@@ -107,7 +107,7 @@ flowchart TD
 - `Observed-output finalizer`：只有答案形状与证据契约满足后，才发布有观测依据的结果。
 - `Output-contract guard`：保存结果前规范最终文本、`messages` 数组、文件 token、标量/严格输出形状和通道交付一致性。
 - `Journal + session update`：任务状态、观测事实和活跃会话锚点在收尾后持久化；后台记忆任务是可选、非阻塞的。
-- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`task_transition`、`checkpoint_created`、`tool_started`、`tool_step`、`tool_finished`、`coding_checkpoint`、`coding_evidence`、`provider_call`、`agent_hook`、`subagent`、`agent_team_started`、`subagent_finished`、`agent_team_aggregated` 和 `task_final`。CLI 与 UI 直接渲染这些字段，包括 `evidence_ref`、`checkpoint_ref`、`checkpoint_kind`、`pending_async_job_id`、coding 计数、验证命令计数/token、验证状态/失败类别 token、未验证风险 token、`prompt_truncation_count`、`prompt_bytes_before_max` 和 step 时间字段，不读取原始日志或本地化文本来判断状态。
+- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`task_transition`、`checkpoint_created`、`tool_started`、`tool_step`、`tool_finished`、`coding_checkpoint`、`coding_task_contract`、`coding_evidence`、`provider_call`、`agent_hook`、`subagent`、`agent_team_started`、`subagent_finished`、`agent_team_aggregated` 和 `task_final`。CLI 与 UI 直接渲染这些字段，包括 `evidence_ref`、`checkpoint_ref`、`checkpoint_kind`、`pending_async_job_id`、coding 计数、验证命令计数/token、验证状态/失败类别 token、`projection_revision`、`latest_verification_step_ref`、历史失败字段、未验证风险 token、`prompt_truncation_count`、`prompt_bytes_before_max` 和 step 时间字段，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
 
 ### Planner、LLM 与 Capability 流程
 
@@ -554,7 +554,7 @@ flowchart TD
     R --> S[恢复 compensation snapshot<br/>restored_files + compensation_ref]
     S --> B
     P -->|终止| T[结构化失败证据]
-    L --> U[Coding workflow event<br/>verification_status=passed]
+    L --> U[Coding workflow event<br/>verification_status=verified]
     Q --> U
     T --> U
     U --> V[clawcli code diff/report/review + UI 教学时间线]
