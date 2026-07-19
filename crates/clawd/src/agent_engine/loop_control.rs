@@ -7,7 +7,8 @@ use super::support::publish_agent_loop_checkpoint_progress;
 use super::{
     append_progress_hint, attempt_ledger, encode_progress_i18n, ensure_task_running,
     execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
-    AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
+    verifier_confirmation_gate_requires_checkpoint, AgentLoopGuardPolicy, AgentRunContext,
+    LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, AskReply, ClaimedTask, IntentOutputContract};
 
@@ -808,6 +809,20 @@ async fn run_agent_round(
             outcome.no_progress,
             outcome.stop_signal.as_deref().unwrap_or(""),
             outcome.next_goal_hint.as_deref().unwrap_or("")
+        );
+        return Ok(outcome);
+    }
+    if verifier_confirmation_gate_requires_checkpoint(&prepared_round.verify_result) {
+        let outcome = RoundOutcome {
+            executed_actions: 0,
+            had_error: false,
+            stop_signal: Some("confirmation_required".to_string()),
+            next_goal_hint: Some("await_explicit_confirmation".to_string()),
+            no_progress: false,
+        };
+        info!(
+            "loop_round_eval task_id={} round={} executed_actions=0 no_progress=false stop_signal=confirmation_required next_goal_hint=await_explicit_confirmation",
+            task.task_id, loop_state.round_no
         );
         return Ok(outcome);
     }

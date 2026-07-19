@@ -131,7 +131,9 @@ use self::loop_state_contract_evidence::{
     registry_capability_contract_evidence_for_loop_seed, registry_capability_contract_refs,
 };
 use self::planner_skill_context::build_planner_skill_context;
-use self::prepare_round::{prepare_round_actions, push_round_trace};
+use self::prepare_round::{
+    prepare_round_actions, push_round_trace, verifier_confirmation_gate_requires_checkpoint,
+};
 use self::skill_execution::execute_prepared_skill_action;
 use self::support::{
     action_fingerprint_for_policy, append_progress_hint, build_safe_skill_args_summary,

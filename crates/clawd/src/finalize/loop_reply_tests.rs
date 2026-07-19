@@ -47,6 +47,7 @@ use super::{
     observed_execution_without_publishable_delivery_outcome,
     observed_execution_without_publishable_delivery_reply, observed_synthesis_unavailable_reply,
     output_text_from_execution_result, path_batch_size_comparison_answer,
+    pre_execution_confirmation_checkpoint_seed,
     prefer_latest_synthesis_for_compound_observation_delivery,
     prefer_observed_answer_for_exact_contract, preferred_route_clarify_question,
     preserve_compound_content_summary_with_file_token, priority_last_respond_for_final_delivery,

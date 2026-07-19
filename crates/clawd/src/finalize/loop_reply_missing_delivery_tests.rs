@@ -1,6 +1,57 @@
 use super::*;
 
 #[test]
+fn plan_confirmation_checkpoint_preserves_allowed_prefix_before_risky_step() {
+    let steps = vec![
+        crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "filesystem.append_text".to_string(),
+            args: serde_json::json!({"path": "tests/example.py", "text": "test"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_2".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "system.run_command".to_string(),
+            args: serde_json::json!({"command": "python3 -m unittest"}),
+            depends_on: vec!["step_1".to_string()],
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_3".to_string(),
+            action_type: "synthesize_answer".to_string(),
+            skill: "synthesize_answer".to_string(),
+            args: serde_json::json!({"evidence_refs": ["s2"]}),
+            depends_on: vec!["step_2".to_string()],
+            why: String::new(),
+        },
+    ];
+
+    let (checkpoint_step, actions) =
+        pre_execution_confirmation_checkpoint_seed(&steps).expect("checkpoint seed");
+
+    assert_eq!(checkpoint_step.step_id, "step_1");
+    assert_eq!(actions.len(), 3);
+    assert!(matches!(
+        &actions[0],
+        crate::AgentAction::CallCapability { capability, .. }
+            if capability == "filesystem.append_text"
+    ));
+    assert!(matches!(
+        &actions[1],
+        crate::AgentAction::CallCapability { capability, .. }
+            if capability == "system.run_command"
+    ));
+    assert!(matches!(
+        &actions[2],
+        crate::AgentAction::SynthesizeAnswer { evidence_refs }
+            if evidence_refs == &["s2".to_string()]
+    ));
+}
+
+#[test]
 fn pending_user_input_clarify_reason_prefers_structured_machine_fields() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.pending_user_input_required = true;

@@ -1,6 +1,7 @@
 use super::{
-    planner_user_text, production_verify_mode, verifier_gate_missing_slots,
-    verifier_gate_needs_clarification, verifier_gate_should_stop_round,
+    planner_user_text, production_verify_mode, verifier_confirmation_gate_requires_checkpoint,
+    verifier_gate_missing_slots, verifier_gate_needs_clarification,
+    verifier_gate_should_stop_round,
 };
 
 #[test]
@@ -102,4 +103,7 @@ fn confirmation_requirement_stops_production_round_before_execution() {
     verify_result.needs_confirmation = true;
 
     assert!(verifier_gate_should_stop_round(&verify_result));
+    assert!(verifier_confirmation_gate_requires_checkpoint(
+        &verify_result
+    ));
 }
