@@ -70,6 +70,152 @@ fn workspace_patch_excerpt_preserves_bounded_rewind_evidence() {
 }
 
 #[test]
+fn workspace_diff_excerpt_preserves_small_patch_body_exactly() {
+    let patch = "diff --git a/state.txt b/state.txt\n--- a/state.txt\n+++ b/state.txt\n@@ -1 +1 @@\n-value=1\n+value=2\n";
+    let output = json!({
+        "extra": {
+            "schema_version": 1,
+            "source": "workspace_patch",
+            "status": "ok",
+            "action": "diff",
+            "checkpoint_id": "patch_checkpoint_1",
+            "patch_id": "sha256:patch-1",
+            "patch": patch
+        }
+    })
+    .to_string();
+
+    let excerpt: Value =
+        serde_json::from_str(&step_output_excerpt_for_journal(&output)).expect("compact diff");
+    assert_eq!(excerpt.pointer("/extra/patch"), Some(&json!(patch)));
+    assert_eq!(
+        excerpt.pointer("/extra/patch_bytes"),
+        Some(&json!(patch.len()))
+    );
+    assert_eq!(
+        excerpt.pointer("/extra/patch_truncated"),
+        Some(&json!(false))
+    );
+}
+
+#[test]
+fn workspace_diff_excerpt_bounds_large_patch_as_valid_json() {
+    let line = "+界".repeat(40_000);
+    let output = json!({
+        "extra": {
+            "schema_version": 1,
+            "source": "workspace_patch",
+            "status": "ok",
+            "action": "diff",
+            "patch_id": "sha256:large-patch",
+            "patch": line
+        }
+    })
+    .to_string();
+
+    let excerpt = step_output_excerpt_for_journal(&output);
+    let excerpt: Value = serde_json::from_str(&excerpt).expect("bounded diff remains valid JSON");
+    let bounded = excerpt
+        .pointer("/extra/patch")
+        .and_then(Value::as_str)
+        .expect("bounded patch");
+    assert!(bounded.len() <= super::MAX_WORKSPACE_PATCH_JOURNAL_BYTES);
+    assert!(bounded.is_char_boundary(bounded.len()));
+    assert_eq!(
+        excerpt.pointer("/extra/patch_bytes"),
+        Some(&json!(line.len()))
+    );
+    assert_eq!(
+        excerpt.pointer("/extra/patch_truncated"),
+        Some(&json!(true))
+    );
+}
+
+#[test]
+fn workspace_diff_event_does_not_claim_a_file_edit_checkpoint() {
+    let mut journal = TaskJournal::for_task("task-workspace-diff", "ask", "inspect diff");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_diff".to_string(),
+        skill: "workspace_patch".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "schema_version": 1,
+                    "source": "workspace_patch",
+                    "status": "ok",
+                    "action": "diff",
+                    "patch_id": "sha256:patch-1",
+                    "checkpoint_id": "patch_checkpoint_1",
+                    "changed_files": ["src/lib.rs"],
+                    "patch": "diff --git a/src/lib.rs b/src/lib.rs\n"
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let events = journal.event_stream_snapshot();
+    assert!(!events.iter().any(|event| {
+        event["event_type"] == "coding_checkpoint"
+            && event
+                .pointer("/payload/checkpoint_kind")
+                .and_then(Value::as_str)
+                == Some("file_edit_group")
+    }));
+    let evidence = events
+        .iter()
+        .find(|event| event["event_type"] == "coding_evidence")
+        .expect("coding evidence");
+    assert_eq!(evidence["payload"]["changed_file_count"], 0);
+    assert_eq!(
+        evidence["payload"]["workspace_checkpoint_ids"][0],
+        "patch_checkpoint_1"
+    );
+}
+
+#[test]
+fn workspace_rewind_projects_restored_files_as_mutation_evidence() {
+    let mut journal = TaskJournal::for_task("task-workspace-rewind", "ask", "rewind");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_rewind".to_string(),
+        skill: "workspace_patch".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "schema_version": 1,
+                    "source": "workspace_patch",
+                    "status": "ok",
+                    "action": "rewind",
+                    "patch_id": "sha256:patch-1",
+                    "checkpoint_id": "patch_checkpoint_1",
+                    "compensates_patch_id": "sha256:patch-1",
+                    "compensates_checkpoint_id": "patch_checkpoint_1",
+                    "restored_files": ["src/lib.rs"]
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let summary = journal.to_summary_json();
+    assert_eq!(summary["coding_workflow"]["changed_files"][0], "src/lib.rs");
+    let evidence = journal
+        .event_stream_snapshot()
+        .into_iter()
+        .find(|event| event["event_type"] == "coding_evidence")
+        .expect("coding evidence");
+    assert_eq!(evidence["payload"]["changed_files"][0], "src/lib.rs");
+}
+
+#[test]
 fn patch_and_verification_events_reference_the_workspace_checkpoint() {
     let mut journal = TaskJournal::for_task("task-workspace-patch", "ask", "patch and test");
     journal.push_step_result(&crate::executor::StepExecutionResult {

@@ -88,6 +88,20 @@ pub(super) fn coding_state_transition_observation(
     Some(payload)
 }
 
+pub(super) fn coding_state_transition_observation_from_trace(
+    step: &super::TaskJournalStepTrace,
+) -> Option<Value> {
+    coding_state_transition_observation(&crate::executor::StepExecutionResult {
+        step_id: step.step_id.clone(),
+        skill: step.skill.clone(),
+        status: step.status,
+        output: step.output_excerpt.clone(),
+        error: step.error_excerpt.clone(),
+        started_at: step.started_at,
+        finished_at: step.finished_at,
+    })
+}
+
 pub(super) fn coding_milestone_checkpoint_observation(
     transition: &Value,
     prior_observations: &[Value],
@@ -299,6 +313,7 @@ fn collect_map_signals(map: &Map<String, Value>, signals: &mut CodingTransitionS
     if map_action_is_mutating_file(signals.action.as_deref()) {
         collect_string_list_field(map, "changed_files", &mut signals.changed_files);
         collect_string_list_field(map, "files_changed", &mut signals.changed_files);
+        collect_string_list_field(map, "restored_files", &mut signals.changed_files);
         collect_string_list_field(map, "paths", &mut signals.changed_files);
         collect_string_field(map, "path", &mut signals.changed_files);
         collect_string_field(map, "resolved_path", &mut signals.changed_files);
@@ -495,6 +510,8 @@ fn map_action_is_mutating_file(action: Option<&str>) -> bool {
                 | "delete_file"
                 | "move_file"
                 | "copy_file"
+                | "apply_patch"
+                | "rewind"
         )
     })
 }

@@ -722,7 +722,9 @@ fn collect_coding_evidence_value(
         Value::Object(map) => {
             collect_workspace_patch_fields(map, signals, evidence_ref);
             collect_read_file_fields(map, signals, evidence_ref);
-            collect_changed_file_fields(map, signals, evidence_ref);
+            if map.get("action").and_then(Value::as_str) != Some("diff") {
+                collect_changed_file_fields(map, signals, evidence_ref);
+            }
             collect_command_fields(map, signals, evidence_ref);
             collect_diff_summary_fields(map, signals, evidence_ref);
             collect_failure_fields(map, signals, evidence_ref);
@@ -830,6 +832,7 @@ fn collect_changed_file_fields(
         "created_files",
         "deleted_files",
         "touched_files",
+        "restored_files",
     ] {
         collect_path_tokens(map.get(key), &mut paths);
     }
