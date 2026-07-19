@@ -676,6 +676,40 @@ async fn run_cmd_async_job_stops_at_checkpoint_expiry() {
 }
 
 #[cfg(unix)]
+#[tokio::test]
+async fn run_cmd_async_job_preserves_pipeline_failure_status() {
+    let root = TempDirGuard::new("run_cmd_async_pipeline_failure");
+    let state = test_state(root.path.clone());
+    let job_dir = root.path.join("async-job");
+    execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "false | tail -1",
+            "async_start": true,
+            "_clawd_async_job_id": "local_process:test-pipeline-failure",
+            "_clawd_async_job_dir": job_dir.display().to_string()
+        }),
+    )
+    .await
+    .expect("async run_cmd should start");
+
+    let exit_code_path = job_dir.join("exit_code");
+    for _ in 0..40 {
+        if exit_code_path.is_file() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        fs::read_to_string(exit_code_path)
+            .expect("pipeline should publish an exit code")
+            .trim(),
+        "1"
+    );
+}
+
+#[cfg(unix)]
 fn process_group_id(pid: u32) -> Option<u32> {
     let output = std::process::Command::new("ps")
         .arg("-o")
@@ -714,6 +748,46 @@ async fn run_safe_command_rejects_sudo_without_explicit_policy() {
         .await
         .expect_err("sudo must be rejected before process dispatch");
     assert!(err.contains("sudo_not_allowed"), "unexpected error: {err}");
+}
+
+#[tokio::test]
+async fn run_safe_command_preserves_pipeline_failure_status() {
+    let root = TempDirGuard::new("run_cmd_pipeline_failure");
+    let err = super::run_safe_command(
+        &root.path,
+        "printf failure | (cat >/dev/null; false) | tail -1",
+        4096,
+        10,
+        10,
+        8000,
+        false,
+    )
+    .await
+    .expect_err("a failed pipeline stage must fail the command");
+
+    assert!(
+        err.contains("run_cmd.nonzero_exit"),
+        "unexpected error: {err}"
+    );
+    assert!(err.contains("exit_code=1"), "unexpected error: {err}");
+}
+
+#[tokio::test]
+async fn run_safe_command_allows_successful_pipeline() {
+    let root = TempDirGuard::new("run_cmd_pipeline_success");
+    let output = super::run_safe_command(
+        &root.path,
+        "printf 'ok\\n' | tail -1",
+        4096,
+        10,
+        10,
+        8000,
+        false,
+    )
+    .await
+    .expect("successful pipeline should pass");
+
+    assert_eq!(output.trim_end(), "ok");
 }
 
 #[cfg(target_os = "linux")]
