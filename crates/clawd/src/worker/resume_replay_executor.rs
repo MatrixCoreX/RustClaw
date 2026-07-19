@@ -61,6 +61,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
             &stored_action.tool_or_skill,
             &stored_action.action_ref,
             stored_action.args,
+            claimed.task_checkpoint.budget.step as usize,
             output_contract,
         );
         crate::agent_engine::run_agent_with_tools_seeded_direct_plan(

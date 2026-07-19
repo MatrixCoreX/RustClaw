@@ -18,14 +18,18 @@ fn checkpoint_action_plan_preserves_exact_action_and_output_contract() {
         "run_cmd",
         "system.run_command",
         args.clone(),
+        3,
         Some(contract.clone()),
     );
 
     assert_eq!(plan.steps.len(), 2);
+    assert_eq!(plan.steps[0].step_id, "step_4");
     assert_eq!(plan.steps[0].action_type, "call_skill");
     assert_eq!(plan.steps[0].skill, "run_cmd");
     assert_eq!(plan.steps[0].args, args);
     assert_eq!(plan.steps[1].action_type, "synthesize_answer");
+    assert_eq!(plan.steps[1].step_id, "step_5");
+    assert_eq!(plan.steps[1].depends_on, vec!["step_4"]);
     assert_eq!(
         plan.output_contract
             .as_ref()

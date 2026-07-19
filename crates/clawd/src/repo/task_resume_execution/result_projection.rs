@@ -831,9 +831,12 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
 
     let (db_status, error_text, mut terminal_result) =
         terminal_task_projection_result(executor_result_status, projection_payload)?;
-    if let Some(existing_result) =
-        preserved_visible_ask_result_for_terminal_projection(&task_kind, &result_json, db_status)
-    {
+    if let Some(existing_result) = preserved_visible_ask_result_for_terminal_projection(
+        &task_kind,
+        &result_json,
+        db_status,
+        executor_action,
+    ) {
         terminal_result = existing_result;
     } else if let Some(machine_reply_result) = ask_agent_loop_async_poll_terminal_machine_reply(
         &task_kind,
@@ -1057,8 +1060,13 @@ fn preserved_visible_ask_result_for_terminal_projection(
     task_kind: &str,
     result_json: &Value,
     db_status: &str,
+    executor_action: &str,
 ) -> Option<Value> {
-    if task_kind != "ask" || db_status != "succeeded" || !result_has_visible_reply(result_json) {
+    if task_kind != "ask"
+        || db_status != "succeeded"
+        || executor_action == "run_seeded_agent_loop"
+        || !result_has_visible_reply(result_json)
+    {
         return None;
     }
     if result_json
