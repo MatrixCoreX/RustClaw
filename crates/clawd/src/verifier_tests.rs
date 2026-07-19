@@ -339,6 +339,7 @@ fn checkpoint_action_plan_resolves_capability_before_replay() {
         json!({"command": "printf checkpoint_ok"}),
         1,
         Some(stored_contract),
+        Vec::new(),
     );
 
     let output_contract =

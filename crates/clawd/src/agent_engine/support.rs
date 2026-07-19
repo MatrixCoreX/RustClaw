@@ -927,6 +927,7 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
     tool_or_skill: &str,
     action_ref: &str,
     args: &Value,
+    step_in_round: usize,
 ) -> Result<(), String> {
     let now_ts = crate::now_ts_u64() as i64;
     let budget = checkpoint_budget_counters(
@@ -955,6 +956,7 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         .map(serde_json::to_value)
         .transpose()
         .map_err(|_| "checkpoint_action_output_contract_serialize_failed".to_string())?;
+    let continuation_actions = checkpoint_continuation_actions(loop_state, step_in_round)?;
     repo::upsert_task_checkpoint_action(
         &state.core.db,
         &task.task_id,
@@ -963,6 +965,7 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         action_ref,
         args,
         output_contract.as_ref(),
+        continuation_actions.as_ref(),
     )
     .map_err(|_| "checkpoint_action_persist_failed".to_string())?;
     loop_state.output_vars.insert(
@@ -989,6 +992,22 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         task.task_id, checkpoint_id, resume_reason, action_ref
     );
     Ok(())
+}
+
+fn checkpoint_continuation_actions(
+    loop_state: &super::LoopState,
+    step_in_round: usize,
+) -> Result<Option<Value>, String> {
+    let actions = loop_state
+        .active_verified_actions
+        .get(step_in_round..)
+        .unwrap_or_default();
+    if actions.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_value(actions)
+        .map(Some)
+        .map_err(|_| "checkpoint_continuation_actions_serialize_failed".to_string())
 }
 
 pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(

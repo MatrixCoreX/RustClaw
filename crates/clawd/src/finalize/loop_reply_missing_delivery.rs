@@ -72,6 +72,15 @@ pub(super) async fn pending_confirmation_resume_payload(
             .find(|step| confirmation_step_ids.contains(&step.step_id))
             .cloned()
         {
+            loop_state.active_verified_actions = plan_steps
+                .iter()
+                .filter_map(crate::PlanStep::to_agent_action)
+                .collect();
+            let step_in_round = plan_steps
+                .iter()
+                .position(|candidate| candidate.step_id == step.step_id)
+                .map(|index| index + 1)
+                .unwrap_or(1);
             crate::agent_engine::publish_agent_loop_user_input_checkpoint_progress(
                 state,
                 task,
@@ -80,7 +89,9 @@ pub(super) async fn pending_confirmation_resume_payload(
                 &step.skill,
                 &step.skill,
                 &step.args,
+                step_in_round,
             )?;
+            loop_state.active_verified_actions.clear();
         }
     }
     Ok(Some(response))

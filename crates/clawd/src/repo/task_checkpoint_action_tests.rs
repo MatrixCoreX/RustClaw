@@ -28,6 +28,14 @@ fn checkpoint_action_round_trips_exact_private_args_and_contract() {
             "structured_field_selector": "command,created_path,status"
         }
     });
+    let continuation_actions = serde_json::json!([
+        {
+            "type": "call_capability",
+            "capability": "filesystem.write_text",
+            "args": {"path": "run/result.txt", "content": "ok"}
+        },
+        {"type": "synthesize_answer", "evidence_refs": []}
+    ]);
 
     upsert_task_checkpoint_action(
         &pool,
@@ -37,6 +45,7 @@ fn checkpoint_action_round_trips_exact_private_args_and_contract() {
         "system.run_command",
         &args,
         Some(&contract),
+        Some(&continuation_actions),
     )
     .expect("store action");
 
@@ -49,6 +58,10 @@ fn checkpoint_action_round_trips_exact_private_args_and_contract() {
     assert_eq!(stored.action_ref, "system.run_command");
     assert_eq!(stored.args, args);
     assert_eq!(stored.output_contract.as_ref(), Some(&contract));
+    assert_eq!(
+        stored.continuation_actions.as_ref(),
+        Some(&continuation_actions)
+    );
     assert!(
         load_task_checkpoint_action(&pool, "task-1", "other-checkpoint")
             .expect("load other checkpoint")
@@ -67,13 +80,16 @@ fn checkpoint_action_rejects_integrity_mismatch() {
         "system.run_command",
         &serde_json::json!({"command": "printf original"}),
         None,
+        Some(&serde_json::json!([
+            {"type": "synthesize_answer", "evidence_refs": []}
+        ])),
     )
     .expect("store action");
     pool.get()
         .expect("test db")
         .execute(
             "UPDATE task_checkpoint_actions
-             SET args_json = '{\"command\":\"printf tampered\"}'
+             SET continuation_actions_json = '[{\"type\":\"respond\",\"content\":\"tampered\"}]'
              WHERE task_id = 'task-1' AND checkpoint_id = 'checkpoint-1'",
             [],
         )

@@ -1,6 +1,29 @@
 use serde_json::{json, Value};
 
-use super::{apply_resume_steering_prompt, checkpoint_requires_stored_action};
+use super::{
+    apply_resume_steering_prompt, checkpoint_requires_stored_action,
+    parse_checkpoint_continuation_actions,
+};
+
+#[test]
+fn checkpoint_continuation_parser_accepts_actions_and_rejects_malformed_suffix() {
+    let actions = parse_checkpoint_continuation_actions(Some(json!([
+        {
+            "type": "call_capability",
+            "capability": "filesystem.write_text",
+            "args": {"path": "run/result.txt", "content": "ok"}
+        },
+        {"type": "synthesize_answer", "evidence_refs": ["s2"]}
+    ])))
+    .expect("valid continuation");
+    assert_eq!(actions.len(), 2);
+
+    let error = parse_checkpoint_continuation_actions(Some(json!([
+        {"type": "call_capability", "args": {}}
+    ])))
+    .expect_err("malformed continuation must fail closed");
+    assert_eq!(error.to_string(), "checkpoint_continuation_actions_invalid");
+}
 
 #[test]
 fn resume_steering_prompt_preserves_multilingual_input_as_opaque_json() {
