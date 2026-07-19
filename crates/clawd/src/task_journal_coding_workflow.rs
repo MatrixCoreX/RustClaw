@@ -175,6 +175,8 @@ fn current_phase_hint(signals: &CodingWorkflowSignals) -> &'static str {
         "summarize"
     } else if !signals.changed_files.is_empty() {
         "verify"
+    } else if !signals.diff_refs.is_empty() {
+        "review"
     } else if !signals.checkpoint_refs.is_empty() {
         "background"
     } else {
@@ -187,6 +189,7 @@ fn next_step(signals: &CodingWorkflowSignals, verification_status: &str) -> &'st
         "failed" => "repair_failed_verification",
         "unverified" => "run_verification",
         "verified" => "summarize",
+        _ if !signals.diff_refs.is_empty() => "summarize",
         _ if !signals.checkpoint_refs.is_empty() => "resume_from_checkpoint",
         _ => "inspect",
     }

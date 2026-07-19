@@ -235,3 +235,33 @@ fn summary_json_replays_persisted_apply_patch_step_without_observations() {
     assert_eq!(workflow["verification_status"], "unverified");
     assert_eq!(workflow["current_phase_hint"], "verify");
 }
+
+#[test]
+fn summary_json_projects_read_only_workspace_diff_as_review() {
+    let mut journal = TaskJournal::for_task("task-persisted-diff", "ask", "inspect diff");
+    journal.step_results.push(super::TaskJournalStepTrace::ok(
+        "step_diff",
+        "workspace_patch",
+        json!({
+            "extra": {
+                "schema_version": 1,
+                "source": "workspace_patch",
+                "status": "ok",
+                "action": "diff",
+                "patch_id": "sha256:patch-1",
+                "checkpoint_id": "patch_checkpoint_1",
+                "changed_files": ["src/lib.rs"],
+                "patch": "diff --git a/src/lib.rs b/src/lib.rs\n"
+            }
+        })
+        .to_string(),
+    ));
+
+    let workflow = journal.to_summary_json()["coding_workflow"].clone();
+    assert_eq!(workflow["changed_file_count"], 0);
+    assert_eq!(workflow["diff_ref_count"], 1);
+    assert_eq!(workflow["diff_refs"][0], "sha256:patch-1");
+    assert_eq!(workflow["verification_status"], "not_applicable");
+    assert_eq!(workflow["current_phase_hint"], "review");
+    assert_eq!(workflow["next_step"], "summarize");
+}
