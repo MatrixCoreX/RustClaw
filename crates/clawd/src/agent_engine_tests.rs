@@ -20,6 +20,7 @@ fn checkpoint_action_plan_preserves_exact_action_and_output_contract() {
         args.clone(),
         3,
         Some(contract.clone()),
+        Vec::new(),
     );
 
     assert_eq!(plan.steps.len(), 2);
@@ -36,6 +37,43 @@ fn checkpoint_action_plan_preserves_exact_action_and_output_contract() {
             .and_then(|value| value.selection.structured_field_selector.as_deref()),
         Some("command,created_path,stdout,status")
     );
+}
+
+#[test]
+fn checkpoint_action_plan_preserves_verified_continuation_order() {
+    let continuation = vec![
+        AgentAction::CallCapability {
+            capability: "filesystem.write_text".to_string(),
+            args: serde_json::json!({"path": "run/result.txt", "content": "ok"}),
+        },
+        AgentAction::CallCapability {
+            capability: "system.run_command".to_string(),
+            args: serde_json::json!({"command": "python3 run/test_result.py"}),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["s2".to_string(), "s3".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let plan = checkpoint_action_plan(
+        "run_cmd",
+        "system.run_command",
+        serde_json::json!({"command": "mkdir -p run"}),
+        1,
+        None,
+        continuation,
+    );
+
+    assert_eq!(plan.steps.len(), 5);
+    assert_eq!(plan.steps[0].skill, "system.run_command");
+    assert_eq!(plan.steps[1].skill, "filesystem.write_text");
+    assert_eq!(plan.steps[2].skill, "system.run_command");
+    assert_eq!(plan.steps[3].action_type, "synthesize_answer");
+    assert_eq!(plan.steps[4].action_type, "respond");
+    assert_eq!(plan.steps[4].depends_on, vec!["step_5"]);
 }
 
 use claw_core::skill_registry::{

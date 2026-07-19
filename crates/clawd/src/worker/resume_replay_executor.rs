@@ -44,6 +44,8 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
             .map(serde_json::from_value::<crate::IntentOutputContract>)
             .transpose()
             .map_err(|_| anyhow::anyhow!("checkpoint_action_output_contract_invalid"))?;
+        let continuation_actions =
+            parse_checkpoint_continuation_actions(stored_action.continuation_actions)?;
         let request_envelope = json!({
             "protocol": "rustclaw.checkpoint_action.v1",
             "task_id": claimed.task_id,
@@ -63,6 +65,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
             stored_action.args,
             claimed.task_checkpoint.budget.step as usize,
             output_contract,
+            continuation_actions,
         );
         crate::agent_engine::run_agent_with_tools_seeded_direct_plan(
             state,
@@ -88,6 +91,16 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     };
 
     Ok(super::runtime_support::seeded_agent_loop_terminal_dispatch_result_payload(claimed, result))
+}
+
+fn parse_checkpoint_continuation_actions(
+    continuation_actions: Option<Value>,
+) -> Result<Vec<crate::AgentAction>> {
+    continuation_actions
+        .map(serde_json::from_value::<Vec<crate::AgentAction>>)
+        .transpose()
+        .map_err(|_| anyhow::anyhow!("checkpoint_continuation_actions_invalid"))
+        .map(Option::unwrap_or_default)
 }
 
 fn load_required_checkpoint_action(

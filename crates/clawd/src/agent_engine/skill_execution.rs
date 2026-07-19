@@ -947,6 +947,7 @@ pub(super) async fn execute_prepared_skill_action(
             normalized_skill,
             &pre_tool_use_evaluation.outcome.action_ref,
             &exec_args,
+            step_in_round,
         )?;
         return Ok(SkillActionOutcome {
             ended_with_user_visible_output: false,

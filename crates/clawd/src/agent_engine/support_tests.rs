@@ -1,7 +1,7 @@
 use super::{
     action_fingerprint, action_fingerprint_for_policy, append_delivery_message,
     build_agent_loop_checkpoint_progress_payload,
-    build_agent_loop_user_input_checkpoint_progress_payload,
+    build_agent_loop_user_input_checkpoint_progress_payload, checkpoint_continuation_actions,
     collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
     load_agent_loop_guard_policy, AgentLoopGuardPolicy, AnswerVerifierRequiredEvidenceScope,
     LoopBudgetProfile, LoopRecipeOverrides, RegistryIdempotencyGuardScope,
@@ -17,6 +17,47 @@ use crate::{
 };
 use claw_core::skill_registry::SkillsRegistry;
 use std::sync::{Arc, RwLock};
+
+#[test]
+fn checkpoint_continuation_keeps_only_unexecuted_verified_actions() {
+    let mut loop_state = LoopState::new(4);
+    loop_state.active_verified_actions = vec![
+        crate::AgentAction::CallCapability {
+            capability: "system.run_command".to_string(),
+            args: serde_json::json!({"command": "mkdir -p run/example"}),
+        },
+        crate::AgentAction::CallCapability {
+            capability: "filesystem.write_text".to_string(),
+            args: serde_json::json!({"path": "run/example/result.txt", "content": "ok"}),
+        },
+        crate::AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["s2".to_string()],
+        },
+        crate::AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let continuation = checkpoint_continuation_actions(&loop_state, 1)
+        .expect("serialize continuation")
+        .expect("remaining actions");
+    let actions =
+        serde_json::from_value::<Vec<crate::AgentAction>>(continuation).expect("parse actions");
+
+    assert_eq!(actions.len(), 3);
+    assert!(matches!(
+        &actions[0],
+        crate::AgentAction::CallCapability { capability, .. }
+            if capability == "filesystem.write_text"
+    ));
+    assert!(matches!(
+        &actions[2],
+        crate::AgentAction::Respond { content } if content == "{{last_output}}"
+    ));
+    assert!(checkpoint_continuation_actions(&loop_state, 4)
+        .expect("empty continuation")
+        .is_none());
+}
 
 fn base_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {

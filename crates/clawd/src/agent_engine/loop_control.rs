@@ -865,6 +865,7 @@ async fn run_agent_round(
     }
     loop_state.verified_action_window_active =
         prepared_round.verify_result.approved && !actions.is_empty();
+    loop_state.active_verified_actions = actions.clone();
     let execute_result = execute_actions_once(
         state,
         task,
@@ -877,6 +878,7 @@ async fn run_agent_round(
     )
     .await;
     loop_state.verified_action_window_active = false;
+    loop_state.active_verified_actions.clear();
     let mut outcome = execute_result?;
     if outcome.stop_signal.is_none() {
         if let Some(stop_signal) = terminal_user_answer_stop_signal(loop_state) {

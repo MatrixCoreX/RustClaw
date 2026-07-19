@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS task_checkpoint_actions (
     action_ref           TEXT NOT NULL,
     args_json            TEXT NOT NULL,
     output_contract_json TEXT,
+    continuation_actions_json TEXT,
     integrity_hash       TEXT NOT NULL,
     created_at           INTEGER NOT NULL,
     updated_at           INTEGER NOT NULL,
@@ -31,6 +32,7 @@ pub(crate) struct TaskCheckpointAction {
     pub(crate) action_ref: String,
     pub(crate) args: Value,
     pub(crate) output_contract: Option<Value>,
+    pub(crate) continuation_actions: Option<Value>,
 }
 
 pub(crate) fn upsert_task_checkpoint_action(
@@ -41,6 +43,7 @@ pub(crate) fn upsert_task_checkpoint_action(
     action_ref: &str,
     args: &Value,
     output_contract: Option<&Value>,
+    continuation_actions: Option<&Value>,
 ) -> anyhow::Result<()> {
     let task_id = required_text(task_id, "task_id")?;
     let checkpoint_id = required_text(checkpoint_id, "checkpoint_id")?;
@@ -52,12 +55,19 @@ pub(crate) fn upsert_task_checkpoint_action(
     if output_contract.is_some_and(|value| !value.is_object()) {
         return Err(anyhow!("checkpoint_output_contract_not_object"));
     }
+    if continuation_actions.is_some_and(|value| !value.is_array()) {
+        return Err(anyhow!("checkpoint_continuation_actions_not_array"));
+    }
     let args_json =
         serde_json::to_string(args).context("checkpoint_action_args_serialize_failed")?;
     let output_contract_json = output_contract
         .map(serde_json::to_string)
         .transpose()
         .context("checkpoint_output_contract_serialize_failed")?;
+    let continuation_actions_json = continuation_actions
+        .map(serde_json::to_string)
+        .transpose()
+        .context("checkpoint_continuation_actions_serialize_failed")?;
     let integrity_hash = checkpoint_action_integrity_hash(
         task_id,
         checkpoint_id,
@@ -65,20 +75,22 @@ pub(crate) fn upsert_task_checkpoint_action(
         action_ref,
         &args_json,
         output_contract_json.as_deref(),
+        continuation_actions_json.as_deref(),
     );
     let now = crate::now_ts_u64() as i64;
     let db = pool.get().context("checkpoint_action_db_pool_failed")?;
-    db.execute_batch(INIT_TASK_CHECKPOINT_ACTION_SQL)?;
+    ensure_task_checkpoint_action_schema(&db)?;
     db.execute(
         "INSERT INTO task_checkpoint_actions (
              task_id, checkpoint_id, tool_or_skill, action_ref, args_json,
-             output_contract_json, integrity_hash, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+             output_contract_json, continuation_actions_json, integrity_hash, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
          ON CONFLICT(task_id, checkpoint_id) DO UPDATE SET
              tool_or_skill = excluded.tool_or_skill,
              action_ref = excluded.action_ref,
              args_json = excluded.args_json,
              output_contract_json = excluded.output_contract_json,
+             continuation_actions_json = excluded.continuation_actions_json,
              integrity_hash = excluded.integrity_hash,
              updated_at = excluded.updated_at",
         params![
@@ -88,6 +100,7 @@ pub(crate) fn upsert_task_checkpoint_action(
             action_ref,
             args_json,
             output_contract_json,
+            continuation_actions_json,
             integrity_hash,
             now,
         ],
@@ -103,10 +116,11 @@ pub(crate) fn load_task_checkpoint_action(
     let task_id = required_text(task_id, "task_id")?;
     let checkpoint_id = required_text(checkpoint_id, "checkpoint_id")?;
     let db = pool.get().context("checkpoint_action_db_pool_failed")?;
-    db.execute_batch(INIT_TASK_CHECKPOINT_ACTION_SQL)?;
+    ensure_task_checkpoint_action_schema(&db)?;
     let row = db
         .query_row(
-            "SELECT tool_or_skill, action_ref, args_json, output_contract_json, integrity_hash
+            "SELECT tool_or_skill, action_ref, args_json, output_contract_json,
+                    continuation_actions_json, integrity_hash
              FROM task_checkpoint_actions
              WHERE task_id = ?1 AND checkpoint_id = ?2
              LIMIT 1",
@@ -117,12 +131,20 @@ pub(crate) fn load_task_checkpoint_action(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((tool_or_skill, action_ref, args_json, output_contract_json, integrity_hash)) = row
+    let Some((
+        tool_or_skill,
+        action_ref,
+        args_json,
+        output_contract_json,
+        continuation_actions_json,
+        integrity_hash,
+    )) = row
     else {
         return Ok(None);
     };
@@ -135,6 +157,7 @@ pub(crate) fn load_task_checkpoint_action(
         &action_ref,
         &args_json,
         output_contract_json.as_deref(),
+        continuation_actions_json.as_deref(),
     );
     if integrity_hash != expected_hash {
         return Err(anyhow!("checkpoint_action_integrity_mismatch"));
@@ -155,6 +178,17 @@ pub(crate) fn load_task_checkpoint_action(
     {
         return Err(anyhow!("stored_checkpoint_output_contract_not_object"));
     }
+    let continuation_actions = continuation_actions_json
+        .as_deref()
+        .map(serde_json::from_str::<Value>)
+        .transpose()
+        .context("checkpoint_continuation_actions_parse_failed")?;
+    if continuation_actions
+        .as_ref()
+        .is_some_and(|value| !value.is_array())
+    {
+        return Err(anyhow!("stored_checkpoint_continuation_actions_not_array"));
+    }
     Ok(Some(TaskCheckpointAction {
         task_id: task_id.to_string(),
         checkpoint_id: checkpoint_id.to_string(),
@@ -162,7 +196,24 @@ pub(crate) fn load_task_checkpoint_action(
         action_ref,
         args,
         output_contract,
+        continuation_actions,
     }))
+}
+
+fn ensure_task_checkpoint_action_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
+    db.execute_batch(INIT_TASK_CHECKPOINT_ACTION_SQL)?;
+    crate::app_helpers::ensure_column_exists(
+        db,
+        "task_checkpoint_actions",
+        "continuation_actions_json",
+        concat!(
+            "ALTER TABLE ",
+            "task_checkpoint_actions ",
+            "ADD COLUMN ",
+            "continuation_actions_json ",
+            "TEXT"
+        ),
+    )
 }
 
 fn required_text<'a>(value: &'a str, field: &str) -> anyhow::Result<&'a str> {
@@ -192,6 +243,7 @@ fn checkpoint_action_integrity_hash(
     action_ref: &str,
     args_json: &str,
     output_contract_json: Option<&str>,
+    continuation_actions_json: Option<&str>,
 ) -> String {
     let mut hasher = Sha256::new();
     for value in [
@@ -201,6 +253,7 @@ fn checkpoint_action_integrity_hash(
         action_ref,
         args_json,
         output_contract_json.unwrap_or_default(),
+        continuation_actions_json.unwrap_or_default(),
     ] {
         hasher.update(value.as_bytes());
         hasher.update([0]);

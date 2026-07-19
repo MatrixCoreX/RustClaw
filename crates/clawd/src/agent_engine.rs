@@ -287,6 +287,8 @@ pub(crate) struct LoopState {
     /// agent-loop authority model; it must be cleared immediately after action
     /// dispatch returns.
     pub(crate) verified_action_window_active: bool,
+    /// Private in-memory copy used only to persist the unexecuted suffix at an approval checkpoint.
+    pub(crate) active_verified_actions: Vec<AgentAction>,
     /// Machine boundary fact from AGENT_LOOP_BOUNDARY_OBSERVATIONS. This lets
     /// the loop accept a terminal clarification even when legacy IntentOutputContract
     /// fields were normalized back to an execution gate for planner entry.
@@ -1124,16 +1126,19 @@ pub(crate) fn checkpoint_action_plan(
     args: Value,
     completed_step_count: usize,
     output_contract: Option<crate::IntentOutputContract>,
+    continuation_actions: Vec<AgentAction>,
 ) -> PlanResult {
-    let actions = vec![
-        AgentAction::CallCapability {
-            capability: action_ref.to_string(),
-            args,
-        },
-        AgentAction::SynthesizeAnswer {
+    let mut actions = vec![AgentAction::CallCapability {
+        capability: action_ref.to_string(),
+        args,
+    }];
+    if continuation_actions.is_empty() {
+        actions.push(AgentAction::SynthesizeAnswer {
             evidence_refs: Vec::new(),
-        },
-    ];
+        });
+    } else {
+        actions.extend(continuation_actions);
+    }
     let raw_plan = json!({
         "plan_source": "checkpoint_action",
         "action_ref": action_ref,
