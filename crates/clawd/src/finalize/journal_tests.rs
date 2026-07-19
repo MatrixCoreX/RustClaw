@@ -29,6 +29,7 @@ fn ensure_task_metrics_preserves_finalizer_evidence_count() {
 #[test]
 fn build_from_loop_state_records_budget_stop_signal() {
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-budget".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -66,6 +67,7 @@ fn build_from_loop_state_records_budget_stop_signal() {
 #[test]
 fn build_from_loop_state_records_finalizer_recovered_terminal_stop_signal() {
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-finalizer-recovered".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -106,6 +108,7 @@ fn build_from_loop_state_records_finalizer_recovered_terminal_stop_signal() {
 #[test]
 fn build_from_loop_state_records_rollout_switches() {
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-rollout".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -159,6 +162,7 @@ fn build_from_loop_state_records_rollout_switches() {
 #[test]
 fn build_from_loop_state_records_task_observations() {
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-observations".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -203,6 +207,7 @@ fn build_from_loop_state_records_task_observations() {
 async fn terminal_builder_executes_stop_and_session_end_at_real_owner() {
     let state = AppState::test_default_with_fixture_provider();
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-terminal-hooks".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -242,6 +247,7 @@ async fn terminal_builder_executes_stop_and_session_end_at_real_owner() {
 #[test]
 fn build_from_loop_state_persists_lifecycle_checkpoint_projection() {
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-checkpoint".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -302,6 +308,7 @@ fn build_from_loop_state_persists_lifecycle_checkpoint_projection() {
 #[test]
 fn build_from_loop_state_records_rollout_attribution() {
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-rollout-attribution".to_string(),
         user_id: 1,
         chat_id: 1,

@@ -285,6 +285,7 @@ pub(super) fn test_state() -> AppState {
 
 pub(super) fn test_task() -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-verify".to_string(),
         user_id: 1,
         chat_id: 2,

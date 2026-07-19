@@ -65,7 +65,8 @@ pub(crate) fn list_dispatched_paused_checkpoint_resume_executions_internal(
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
-        "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json, result_json
+        "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json, result_json,
+                COALESCE(claim_attempt, 0)
          FROM tasks
          WHERE status = 'running'
            AND result_json IS NOT NULL
@@ -75,6 +76,7 @@ pub(crate) fn list_dispatched_paused_checkpoint_resume_executions_internal(
     let rows = stmt.query_map([], |row| {
         Ok((
             ClaimedTask {
+                claim_attempt: row.get(10)?,
                 task_id: row.get(0)?,
                 user_id: row.get(1)?,
                 chat_id: row.get(2)?,
@@ -149,7 +151,8 @@ pub(crate) fn claim_dispatched_paused_checkpoint_resume_execution_internal(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let task_row = db
         .query_row(
-            "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json, result_json
+            "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json, result_json,
+                    COALESCE(claim_attempt, 0)
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
@@ -158,6 +161,7 @@ pub(crate) fn claim_dispatched_paused_checkpoint_resume_execution_internal(
             |row| {
                 Ok((
                     ClaimedTask {
+                        claim_attempt: row.get(10)?,
                         task_id: row.get(0)?,
                         user_id: row.get(1)?,
                         chat_id: row.get(2)?,

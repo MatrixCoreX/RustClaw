@@ -792,6 +792,7 @@ fn answer_verifier_failure_returns_machine_payload_without_fallback_llm() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.policy.schedule.locale = "en-US".to_string();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-verifier-i18n".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -932,6 +933,7 @@ fn filtered_log_entry_gap_recovers_from_read_range_observation() {
 fn raw_tail_read_failure_recovery_returns_observed_excerpt() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-raw-tail-recovery".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -1060,6 +1062,7 @@ fn tree_summary_rows_failure_recovery_returns_machine_fields() {
 fn content_tail_read_failure_recovery_selects_observed_log_line() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-content-tail-recovery".to_string(),
         user_id: 1,
         chat_id: 1,

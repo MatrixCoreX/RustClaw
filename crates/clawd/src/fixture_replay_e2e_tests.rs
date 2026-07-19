@@ -497,6 +497,7 @@ async fn step4b1_self_check_appstate_with_fixture_provider_routes_through_task()
     // 走 ClaimedTask → task_llm_providers 真路径，保证生产分支里
     // 没有偷偷 fallback 到一条空 provider 列表。
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-step4b1".to_string(),
         user_id: 1,
         chat_id: 1,

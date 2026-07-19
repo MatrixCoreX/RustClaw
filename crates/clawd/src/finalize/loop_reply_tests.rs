@@ -361,6 +361,7 @@ impl TempDirGuard {
 
 fn claimed_task(task_id: &str) -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.to_string(),
         user_id: 1,
         chat_id: 1,

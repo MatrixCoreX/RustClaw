@@ -873,6 +873,7 @@ fn recoverable_nonterminal_failure_with_only_discussion_remaining_continues_next
 fn terminal_direct_respond_publishes_even_when_last_output_matches() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-terminal-direct-respond".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -932,6 +933,7 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
 fn deterministic_status_answer_uses_observed_step_status_before_llm() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-1".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -987,6 +989,7 @@ fn deterministic_status_answer_uses_observed_step_status_before_llm() {
 fn deterministic_status_answer_defers_after_recovery_success() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-recovered".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -1027,6 +1030,7 @@ fn deterministic_status_answer_defers_after_recovery_success() {
 fn deterministic_status_answer_uses_structured_run_cmd_stderr() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-structured-run-cmd".to_string(),
         user_id: 1,
         chat_id: 1,

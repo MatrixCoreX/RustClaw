@@ -332,6 +332,7 @@ fn seed_photo_organize_policy_memory(state: &AppState, user_id: i64, chat_id: i6
 
 fn test_task(payload: serde_json::Value) -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-test".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -994,6 +995,7 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
     let user_key = "user:photo-policy";
     seed_photo_organize_policy_memory(&state, user_id, chat_id, user_key);
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-photo-memory-policy".to_string(),
         user_id,
         chat_id,

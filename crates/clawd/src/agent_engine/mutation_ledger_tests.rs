@@ -5,6 +5,7 @@ use super::{
 
 fn task_fixture() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-mutation-policy".to_string(),
         user_id: 1,
         chat_id: 2,

@@ -122,6 +122,7 @@ impl ChildPatchFixture {
             }),
         );
         let parent = ClaimedTask {
+            claim_attempt: 0,
             task_id: parent_task_id,
             user_id: 42,
             chat_id: 7,

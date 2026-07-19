@@ -508,8 +508,12 @@ fn publish_progress(state: &AppState, task: &ClaimedTask, progress_messages: &[S
             "last_heartbeat_ts": crate::now_ts_u64() as i64,
         },
     });
-    if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
-    {
+    if let Err(err) = repo::update_task_progress_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &payload.to_string(),
+    ) {
         warn!(
             "run_agent_with_tools: task_id={} publish progress failed: {}",
             task.task_id, err
@@ -905,8 +909,12 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         "agent_loop.resume_reason".to_string(),
         resume_reason.to_string(),
     );
-    if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
-    {
+    if let Err(err) = repo::update_task_progress_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &payload.to_string(),
+    ) {
         warn!(
             "run_agent_with_tools: task_id={} publish checkpoint progress failed: {}",
             task.task_id, err
@@ -978,15 +986,19 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         "agent_loop.resume_reason".to_string(),
         resume_reason.to_string(),
     );
-    repo::update_task_progress_result(state, &task.task_id, &payload.to_string()).map_err(
-        |err| {
-            warn!(
-                "run_agent_with_tools: task_id={} publish user-input checkpoint failed: {}",
-                task.task_id, err
-            );
-            "checkpoint_action_progress_publish_failed".to_string()
-        },
-    )?;
+    repo::update_task_progress_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &payload.to_string(),
+    )
+    .map_err(|err| {
+        warn!(
+            "run_agent_with_tools: task_id={} publish user-input checkpoint failed: {}",
+            task.task_id, err
+        );
+        "checkpoint_action_progress_publish_failed".to_string()
+    })?;
     debug!(
         "user-input checkpoint progress published task_id={} checkpoint_id={} reason={} action_ref={}",
         task.task_id, checkpoint_id, resume_reason, action_ref
@@ -1105,9 +1117,12 @@ pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(
         "agent_loop.mutation_reconciliation_required".to_string(),
         "true".to_string(),
     );
-    if let Err(error) =
-        repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
-    {
+    if let Err(error) = repo::update_task_progress_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &payload.to_string(),
+    ) {
         warn!(
             "run_agent_with_tools: task_id={} publish mutation reconciliation checkpoint failed: {}",
             task.task_id, error

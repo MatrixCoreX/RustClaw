@@ -892,6 +892,7 @@ fn repeated_task_append_keeps_single_task_so_far_header() {
 fn authoritative_snapshot_filters_components_by_task_ids() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-2".to_string(),
         user_id: 7,
         chat_id: 9,
@@ -961,6 +962,7 @@ fn authoritative_snapshot_filters_components_by_task_ids() {
 fn replace_active_conversation_state_with_pointers_persists_ids() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-3".to_string(),
         user_id: 11,
         chat_id: 12,
@@ -995,6 +997,7 @@ fn replace_active_conversation_state_with_pointers_persists_ids() {
 fn alias_only_state_patch_clears_stale_active_pointers() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-alias-update".to_string(),
         user_id: 11,
         chat_id: 12,
@@ -1059,6 +1062,7 @@ fn alias_only_state_patch_clears_stale_active_pointers() {
 fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-alias-with-code-workspace".to_string(),
         user_id: 11,
         chat_id: 12,

@@ -64,15 +64,19 @@ pub(super) fn publish_pending_async_job_start_checkpoint(
             loop_state.round_no, step_in_round, normalized_skill, checkpoint_id, job.job_id
         ));
     }
-    repo::update_task_progress_result(state, &task.task_id, &payload.to_string()).map_err(
-        |err| {
-            warn!(
-                "async_start_checkpoint_publish_failed task_id={} skill={} err={}",
-                task.task_id, normalized_skill, err
-            );
-            format!("async_job_start_checkpoint_publish_failed: {err}")
-        },
-    )?;
+    repo::update_task_progress_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &payload.to_string(),
+    )
+    .map_err(|err| {
+        warn!(
+            "async_start_checkpoint_publish_failed task_id={} skill={} err={}",
+            task.task_id, normalized_skill, err
+        );
+        format!("async_job_start_checkpoint_publish_failed: {err}")
+    })?;
     if let Some(visible_reply) = pending_async_job_visible_reply_from_progress_payload(&payload) {
         if let Some(step) = loop_state.executed_step_results.last_mut() {
             step.output = Some(visible_reply);

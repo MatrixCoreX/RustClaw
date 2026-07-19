@@ -145,6 +145,7 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         )
         .expect("mark fixture task running");
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.clone(),
         user_id: 1,
         chat_id: 1,

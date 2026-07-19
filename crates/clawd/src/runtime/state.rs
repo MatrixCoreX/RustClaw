@@ -1561,6 +1561,7 @@ impl AppState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ClaimedTask {
+    pub(crate) claim_attempt: i64,
     pub(crate) task_id: String,
     pub(crate) user_id: i64,
     pub(crate) chat_id: i64,

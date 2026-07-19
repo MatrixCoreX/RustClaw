@@ -25,20 +25,27 @@ pub(crate) struct WorkerTaskWriteRejected {
     pub(crate) status_code: &'static str,
     pub(crate) operation: &'static str,
     pub(crate) task_id: String,
+    pub(crate) expected_claim_attempt: i64,
     pub(crate) task_status: Option<String>,
     pub(crate) lease_owner: Option<String>,
+    pub(crate) active_claim_attempt: Option<i64>,
 }
 
 impl std::fmt::Display for WorkerTaskWriteRejected {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "status_code={} operation={} task_id={} task_status={} lease_owner={}",
+            "status_code={} operation={} task_id={} expected_claim_attempt={} task_status={} lease_owner={} active_claim_attempt={}",
             self.status_code,
             self.operation,
             self.task_id,
+            self.expected_claim_attempt,
             self.task_status.as_deref().unwrap_or("missing"),
-            self.lease_owner.as_deref().unwrap_or("none")
+            self.lease_owner.as_deref().unwrap_or("none"),
+            self.active_claim_attempt
+                .map(|value| value.to_string())
+                .as_deref()
+                .unwrap_or("none")
         )
     }
 }
@@ -49,32 +56,49 @@ fn worker_task_write_rejection(
     db: &rusqlite::Connection,
     state: &AppState,
     task_id: &str,
+    expected_claim_attempt: i64,
     operation: &'static str,
     expected_statuses: &[&str],
 ) -> anyhow::Error {
     let row = match db
         .query_row(
-            "SELECT status, lease_owner FROM tasks WHERE task_id = ?1 LIMIT 1",
+            "SELECT status, lease_owner, COALESCE(claim_attempt, 0)
+             FROM tasks
+             WHERE task_id = ?1
+             LIMIT 1",
             params![task_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
         )
         .optional()
     {
         Ok(row) => row,
         Err(error) => return anyhow::Error::new(error),
     };
-    let (task_status, lease_owner) = match row {
-        Some((status, owner)) => (Some(status), owner),
-        None => (None, None),
+    let (task_status, lease_owner, active_claim_attempt) = match row {
+        Some((status, owner, claim_attempt)) => (Some(status), owner, Some(claim_attempt)),
+        None => (None, None, None),
     };
     let status_code = if task_status
         .as_deref()
         .is_some_and(|status| expected_statuses.contains(&status))
-        && lease_owner.as_deref() != Some(state.worker.worker_id.as_str())
+        && (lease_owner.as_deref() != Some(state.worker.worker_id.as_str())
+            || active_claim_attempt != Some(expected_claim_attempt))
     {
         WORKER_LEASE_LOST_STATUS_CODE
     } else if task_status.is_none() {
         "worker_task_not_found"
+    } else if operation == "update_task_progress_result"
+        && task_status.as_deref() == Some("running")
+        && lease_owner.as_deref() == Some(state.worker.worker_id.as_str())
+        && active_claim_attempt == Some(expected_claim_attempt)
+    {
+        "task_progress_cas_exhausted"
     } else {
         "worker_task_state_conflict"
     };
@@ -82,8 +106,10 @@ fn worker_task_write_rejection(
         status_code,
         operation,
         task_id: task_id.to_string(),
+        expected_claim_attempt,
         task_status,
         lease_owner,
+        active_claim_attempt,
     })
 }
 
@@ -148,7 +174,8 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let mut stmt = db.prepare(
-        "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json
+        "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json,
+                COALESCE(claim_attempt, 0)
          FROM tasks
          WHERE status = 'queued'
          ORDER BY created_at ASC
@@ -157,7 +184,12 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
 
     let candidate = stmt
         .query_row([], |row| {
+            let previous_claim_attempt = row.get::<_, i64>(9)?;
+            let claim_attempt = previous_claim_attempt.checked_add(1).ok_or_else(|| {
+                rusqlite::Error::IntegralValueOutOfRange(9, previous_claim_attempt)
+            })?;
             Ok(ClaimedTask {
+                claim_attempt,
                 task_id: row.get(0)?,
                 user_id: row.get(1)?,
                 chat_id: row.get(2)?,
@@ -185,15 +217,18 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
              lease_owner = ?3,
              claimed_at = ?4,
              lease_expires_at = ?5,
-             claim_attempt = COALESCE(claim_attempt, 0) + 1
+             claim_attempt = ?6
          WHERE task_id = ?1
-           AND status = 'queued'",
+           AND status = 'queued'
+           AND COALESCE(claim_attempt, 0) = ?7",
         params![
             task.task_id,
             now_text,
             state.worker.worker_id,
             claimed_at,
-            lease_expires_at
+            lease_expires_at,
+            task.claim_attempt,
+            task.claim_attempt - 1
         ],
     )?;
 
@@ -215,6 +250,7 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
 pub(crate) fn update_task_success(
     state: &AppState,
     task_id: &str,
+    claim_attempt: i64,
     result_json: &str,
 ) -> anyhow::Result<()> {
     let db = state
@@ -227,12 +263,14 @@ pub(crate) fn update_task_success(
          SET status = 'succeeded', result_json = ?2, error_text = NULL, updated_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
-           AND lease_owner = ?4",
+           AND lease_owner = ?4
+           AND claim_attempt = ?5",
         params![
             task_id,
             result_json,
             now_ts(),
-            state.worker.worker_id.as_str()
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -263,13 +301,15 @@ pub(crate) fn update_task_success(
                      WHERE task_id = ?1
                        AND status = 'succeeded'
                        AND result_json = ?4
-                       AND lease_owner = ?5",
+                       AND lease_owner = ?5
+                       AND claim_attempt = ?6",
                     params![
                         task_id,
                         result_json,
                         now_ts(),
                         existing_result_json,
-                        state.worker.worker_id.as_str()
+                        state.worker.worker_id.as_str(),
+                        claim_attempt
                     ],
                 )?;
                 if changed > 0 {
@@ -281,6 +321,7 @@ pub(crate) fn update_task_success(
             &db,
             state,
             task_id,
+            claim_attempt,
             "update_task_success",
             &["running", "succeeded"],
         ));
@@ -288,7 +329,11 @@ pub(crate) fn update_task_success(
     Ok(())
 }
 
-pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
+pub(crate) fn touch_running_task(
+    state: &AppState,
+    task_id: &str,
+    claim_attempt: i64,
+) -> anyhow::Result<bool> {
     let db = state
         .core
         .db
@@ -302,8 +347,9 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
              WHERE task_id = ?1
                AND status = 'running'
                AND lease_owner = ?2
+               AND claim_attempt = ?3
              LIMIT 1",
-            params![task_id, state.worker.worker_id.as_str()],
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?;
@@ -326,12 +372,14 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
          WHERE task_id = ?1
            AND status = 'running'
            AND lease_owner = ?4
-           AND result_json IS ?5",
+           AND claim_attempt = ?5
+           AND result_json IS ?6",
         params![
             task_id,
             heartbeat_at.to_string(),
             worker_task_lease_expires_at(state, heartbeat_at),
             state.worker.worker_id.as_str(),
+            claim_attempt,
             current_result_json
         ],
     )?;
@@ -412,6 +460,7 @@ pub(crate) fn is_task_still_running_or_pending_ask_success_projection(
 pub(crate) fn update_task_progress_result(
     state: &AppState,
     task_id: &str,
+    claim_attempt: i64,
     result_json: &str,
 ) -> anyhow::Result<()> {
     let db = state
@@ -424,16 +473,25 @@ pub(crate) fn update_task_progress_result(
         let current_result_json = db
             .query_row(
                 "SELECT result_json
-                 FROM tasks
-                 WHERE task_id = ?1
-                   AND status IN ('queued','running')
-                 LIMIT 1",
-                params![task_id],
+             FROM tasks
+             WHERE task_id = ?1
+               AND status = 'running'
+               AND lease_owner = ?2
+               AND claim_attempt = ?3
+             LIMIT 1",
+                params![task_id, state.worker.worker_id.as_str(), claim_attempt],
                 |row| row.get::<_, Option<String>>(0),
             )
             .optional()?;
         let Some(current_result_json) = current_result_json else {
-            return Ok(());
+            return Err(worker_task_write_rejection(
+                &db,
+                state,
+                task_id,
+                claim_attempt,
+                "update_task_progress_result",
+                &["running"],
+            ));
         };
         let now = now_ts().parse::<i64>().unwrap_or_default();
         let merged_result_json = current_result_json
@@ -453,19 +511,36 @@ pub(crate) fn update_task_progress_result(
                  updated_at = ?3
              WHERE task_id = ?1
                AND status IN ('queued','running')
+               AND lease_owner = ?5
+               AND claim_attempt = ?6
                AND result_json IS ?4",
-            params![task_id, merged_result_json, now, current_result_json],
+            params![
+                task_id,
+                merged_result_json,
+                now,
+                current_result_json,
+                state.worker.worker_id.as_str(),
+                claim_attempt
+            ],
         )?;
         if changed > 0 {
             return Ok(());
         }
     }
-    anyhow::bail!("task_progress_cas_exhausted")
+    Err(worker_task_write_rejection(
+        &db,
+        state,
+        task_id,
+        claim_attempt,
+        "update_task_progress_result",
+        &["running"],
+    ))
 }
 
 pub(crate) fn update_task_checkpointed_result(
     state: &AppState,
     task_id: &str,
+    claim_attempt: i64,
     result_json: &str,
 ) -> anyhow::Result<()> {
     let db = state
@@ -481,12 +556,14 @@ pub(crate) fn update_task_checkpointed_result(
              lease_expires_at = 0
          WHERE task_id = ?1
            AND status = 'running'
-           AND lease_owner = ?4",
+           AND lease_owner = ?4
+           AND claim_attempt = ?5",
         params![
             task_id,
             result_json,
             now_ts(),
-            state.worker.worker_id.as_str()
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -494,6 +571,7 @@ pub(crate) fn update_task_checkpointed_result(
             &db,
             state,
             task_id,
+            claim_attempt,
             "update_task_checkpointed_result",
             &["running"],
         ));
@@ -504,6 +582,7 @@ pub(crate) fn update_task_checkpointed_result(
 pub(crate) fn update_task_failure(
     state: &AppState,
     task_id: &str,
+    claim_attempt: i64,
     error_text: &str,
 ) -> anyhow::Result<()> {
     let db = state
@@ -517,13 +596,15 @@ pub(crate) fn update_task_failure(
          SET status = 'failed', result_json = ?2, error_text = ?3, updated_at = ?4
          WHERE task_id = ?1
            AND status = 'running'
-           AND lease_owner = ?5",
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             result_json,
             error_text,
             now_ts(),
-            state.worker.worker_id.as_str()
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -531,6 +612,7 @@ pub(crate) fn update_task_failure(
             &db,
             state,
             task_id,
+            claim_attempt,
             "update_task_failure",
             &["running"],
         ));
@@ -541,6 +623,7 @@ pub(crate) fn update_task_failure(
 pub(crate) fn update_task_failure_with_result(
     state: &AppState,
     task_id: &str,
+    claim_attempt: i64,
     result_json: &str,
     error_text: &str,
 ) -> anyhow::Result<()> {
@@ -554,13 +637,15 @@ pub(crate) fn update_task_failure_with_result(
          SET status = 'failed', result_json = ?2, error_text = ?3, updated_at = ?4
          WHERE task_id = ?1
            AND status = 'running'
-           AND lease_owner = ?5",
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             result_json,
             error_text,
             now_ts(),
-            state.worker.worker_id.as_str()
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -568,6 +653,7 @@ pub(crate) fn update_task_failure_with_result(
             &db,
             state,
             task_id,
+            claim_attempt,
             "update_task_failure_with_result",
             &["running"],
         ));
@@ -578,6 +664,7 @@ pub(crate) fn update_task_failure_with_result(
 pub(crate) fn update_task_timeout(
     state: &AppState,
     task_id: &str,
+    claim_attempt: i64,
     error_text: &str,
 ) -> anyhow::Result<bool> {
     let db = state
@@ -592,8 +679,9 @@ pub(crate) fn update_task_timeout(
              WHERE task_id = ?1
                AND status = 'running'
                AND lease_owner = ?2
+               AND claim_attempt = ?3
              LIMIT 1",
-            params![task_id, state.worker.worker_id.as_str()],
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?;
@@ -602,6 +690,7 @@ pub(crate) fn update_task_timeout(
             &db,
             state,
             task_id,
+            claim_attempt,
             "update_task_timeout",
             &["running"],
         ));
@@ -612,8 +701,14 @@ pub(crate) fn update_task_timeout(
              SET updated_at = ?2
              WHERE task_id = ?1
                AND status = 'running'
-               AND lease_owner = ?3",
-            params![task_id, now_ts(), state.worker.worker_id.as_str()],
+               AND lease_owner = ?3
+               AND claim_attempt = ?4",
+            params![
+                task_id,
+                now_ts(),
+                state.worker.worker_id.as_str(),
+                claim_attempt
+            ],
         )?;
         if changed > 0 {
             warn!(
@@ -629,13 +724,15 @@ pub(crate) fn update_task_timeout(
          SET status = 'timeout', result_json = ?2, error_text = ?3, updated_at = ?4
          WHERE task_id = ?1
            AND status = 'running'
-           AND lease_owner = ?5",
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             result_json,
             error_text,
             now_ts(),
-            state.worker.worker_id.as_str()
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -643,6 +740,7 @@ pub(crate) fn update_task_timeout(
             &db,
             state,
             task_id,
+            claim_attempt,
             "update_task_timeout",
             &["running"],
         ));
@@ -861,18 +959,27 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let task_row = db
         .query_row(
-            "SELECT result_json, lease_expires_at
+            "SELECT result_json, lease_expires_at, COALESCE(claim_attempt, 0)
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
              LIMIT 1",
             params![task_id],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((raw_result_json, task_lease_expires_at)) = task_row else {
+    let Some((raw_result_json, task_lease_expires_at, previous_claim_attempt)) = task_row else {
         return Ok(None);
     };
+    let claim_attempt = previous_claim_attempt
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("task claim attempt overflow: task_id={task_id}"))?;
     let Some(raw_result_json) = raw_result_json else {
         return Ok(None);
     };
@@ -954,18 +1061,23 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
          SET result_json = ?2,
              updated_at = ?3,
              lease_owner = ?5,
-             lease_expires_at = ?6
+             lease_expires_at = ?6,
+             claim_attempt = ?7,
+             claimed_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
            AND result_json = ?4
-           AND lease_expires_at <= ?3",
+           AND lease_expires_at <= ?3
+           AND COALESCE(claim_attempt, 0) = ?8",
         params![
             task_id,
             updated_result_json,
             now_ts,
             raw_result_json,
             state.worker.worker_id,
-            now_ts.saturating_add(lease_seconds)
+            now_ts.saturating_add(lease_seconds),
+            claim_attempt,
+            previous_claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -1300,7 +1412,8 @@ pub(crate) fn claim_ready_paused_checkpoint_resume_executor_internal(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let task_row = db
         .query_row(
-            "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json, result_json
+            "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json, result_json,
+                    COALESCE(claim_attempt, 0)
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
@@ -1309,6 +1422,7 @@ pub(crate) fn claim_ready_paused_checkpoint_resume_executor_internal(
             |row| {
                 Ok((
                     ClaimedTask {
+                        claim_attempt: row.get(10)?,
                         task_id: row.get(0)?,
                         user_id: row.get(1)?,
                         chat_id: row.get(2)?,

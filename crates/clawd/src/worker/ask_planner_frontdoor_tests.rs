@@ -9,6 +9,7 @@ struct FrontdoorFixture {
 
 fn claimed_task(name: &str, payload: &Value) -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: format!("frontdoor-fixture-{name}"),
         user_id: 41,
         chat_id: 73,

@@ -33,6 +33,7 @@ fn state_with_tasks_table() -> crate::AppState {
 
 fn claimed_ask_task(task_id: &str) -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.to_string(),
         user_id: 42,
         chat_id: 7,

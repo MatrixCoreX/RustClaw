@@ -586,6 +586,7 @@ async fn internal_llm_text(
         return api_error_value(StatusCode::BAD_REQUEST, "prompt or system/user is required");
     };
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: token_ctx.task_id,
         user_id: token_ctx.user_id,
         chat_id: token_ctx.chat_id,

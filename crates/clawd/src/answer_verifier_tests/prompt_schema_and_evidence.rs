@@ -12,6 +12,7 @@ use super::*;
 fn answer_verifier_prompt_request_preserves_original_language_over_resolved_intent() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-verifier-language-source".to_string(),
         user_id: 1,
         chat_id: 2,

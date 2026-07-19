@@ -155,7 +155,8 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             task_budget.admin_max_seconds
         );
         let _task_cancellation = state.worker.register_active_task(&task.task_id);
-        let heartbeat_stop = start_task_heartbeat(state.clone(), task.task_id.clone());
+        let heartbeat_stop =
+            start_task_heartbeat(state.clone(), task.task_id.clone(), task.claim_attempt);
         let task_result = tokio::time::timeout(Duration::from_secs(worker_timeout_secs), async {
             process_claimed_task_by_kind(state, &task, &mut payload).await?;
             Ok::<(), anyhow::Error>(())
@@ -169,13 +170,19 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             Ok(Err(error)) => {
                 if let Some(rejection) = error.downcast_ref::<repo::WorkerTaskWriteRejected>() {
                     warn!(
-                        "worker_write_rejected status_code={} lease_lost={} operation={} task_id={} task_status={} lease_owner={}",
+                        "worker_write_rejected status_code={} lease_lost={} operation={} task_id={} expected_claim_attempt={} task_status={} lease_owner={} active_claim_attempt={}",
                         rejection.status_code,
                         rejection.status_code == repo::WORKER_LEASE_LOST_STATUS_CODE,
                         rejection.operation,
                         rejection.task_id,
+                        rejection.expected_claim_attempt,
                         rejection.task_status.as_deref().unwrap_or("missing"),
-                        rejection.lease_owner.as_deref().unwrap_or("none")
+                        rejection.lease_owner.as_deref().unwrap_or("none"),
+                        rejection
+                            .active_claim_attempt
+                            .map(|value| value.to_string())
+                            .as_deref()
+                            .unwrap_or("none")
                     );
                 } else {
                     finalize_worker_runtime_error(state, &task, Some(&payload), &error)?;
@@ -213,7 +220,7 @@ fn finalize_worker_runtime_error(
         task.kind,
         crate::truncate_for_log(&error_text)
     );
-    repo::update_task_failure(state, &task.task_id, &error_text)?;
+    repo::update_task_failure(state, &task.task_id, task.claim_attempt, &error_text)?;
     if payload.is_some_and(repo::child_tasks::is_child_subagent_payload) {
         repo::child_tasks::record_child_task_terminal_projection(
             state,
@@ -275,7 +282,7 @@ async fn process_claimed_task_by_kind(
                 "worker_once: unsupported task kind for task_id={}: {}",
                 task.task_id, other
             );
-            repo::update_task_failure(state, &task.task_id, &err)?;
+            repo::update_task_failure(state, &task.task_id, task.claim_attempt, &err)?;
             info!("{}", crate::LOG_CALL_WRAP);
             info!(
                 "task_call_end task_id={} kind={} status=failed error={}",
@@ -309,7 +316,8 @@ async fn finalize_worker_timeout(
         "worker_once timeout: worker_id={} task_id={} kind={} timeout_seconds={}",
         state.worker.worker_id, task.task_id, task_kind_for_timeout_log, worker_timeout_secs
     );
-    let terminal_timeout = crate::update_task_timeout(state, &task.task_id, &timeout_err)?;
+    let terminal_timeout =
+        crate::update_task_timeout(state, &task.task_id, task.claim_attempt, &timeout_err)?;
     if terminal_timeout {
         let _ = maybe_notify_schedule_result(state, task, payload, false, &timeout_err).await;
     }

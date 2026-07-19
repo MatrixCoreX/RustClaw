@@ -35,6 +35,7 @@ fn known_record(call_index: u64) -> LlmCallCostRecord {
 
 fn task(task_id: &str) -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.to_string(),
         user_id: 7,
         chat_id: 8,

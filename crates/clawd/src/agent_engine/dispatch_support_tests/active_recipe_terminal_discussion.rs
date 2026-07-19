@@ -5,6 +5,7 @@ use crate::AgentAction;
 
 fn test_task(task_id: &str) -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.to_string(),
         user_id: 1,
         chat_id: 1,

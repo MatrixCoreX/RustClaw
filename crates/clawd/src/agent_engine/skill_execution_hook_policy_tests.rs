@@ -53,6 +53,7 @@ fn write_command_hook(
 
 fn claimed_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-skill-exec".to_string(),
         user_id: 42,
         chat_id: 7,

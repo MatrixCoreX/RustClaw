@@ -4,6 +4,7 @@ use crate::{AppState, ClaimedTask};
 
 fn task(task_id: &str, user_id: i64) -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.to_string(),
         user_id,
         chat_id: 8,

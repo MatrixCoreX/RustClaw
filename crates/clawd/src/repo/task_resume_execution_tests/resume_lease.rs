@@ -116,6 +116,7 @@ fn claimed_dispatch_fixture(
     );
     set_task_lease(&state, task_id, &state.worker.worker_id, expires_at, 1, now);
     let task = crate::ClaimedTask {
+        claim_attempt: 1,
         task_id: task_id.to_string(),
         user_id: 42,
         chat_id: 7,
@@ -243,8 +244,13 @@ fn resumed_agent_progress_cannot_erase_dispatch_coordination() {
         "task_checkpoint": checkpoint_json("ckpt-newer", vec![])
     });
 
-    update_task_progress_result(&state, "progress-dispatch", &progress.to_string())
-        .expect("publish resumed progress");
+    update_task_progress_result(
+        &state,
+        "progress-dispatch",
+        claimed.task.claim_attempt,
+        &progress.to_string(),
+    )
+    .expect("publish resumed progress");
     let stored = stored_result_json(&state, "progress-dispatch");
     assert_eq!(
         stored["task_lifecycle"]["checkpoint_id"],

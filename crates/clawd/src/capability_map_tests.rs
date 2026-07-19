@@ -160,6 +160,7 @@ fn compact_capability_map_omits_registry_skill_detail_duplication() {
     let state =
         crate::AppState::test_default_with_fixture_provider().with_minimal_builtin_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "compact-capability-map".to_string(),
         user_id: 1,
         chat_id: 2,

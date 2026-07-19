@@ -6,6 +6,7 @@ use super::record_cost_wait_checkpoint;
 fn hard_cost_ceiling_writes_resumable_policy_checkpoint() {
     let state = AppState::test_default_with_fixture_provider();
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-cost-wait".to_string(),
         user_id: 7,
         chat_id: 8,

@@ -70,8 +70,14 @@ fn record_llm_cost(
     let _ = state.evaluate_llm_cost_budget(task, Some(&provider));
 }
 
-fn touch_llm_task_lease(state: &AppState, task_id: &str, prompt_label: &str, stage: &str) {
-    match crate::repo::touch_running_task(state, task_id) {
+fn touch_llm_task_lease(
+    state: &AppState,
+    task_id: &str,
+    claim_attempt: i64,
+    prompt_label: &str,
+    stage: &str,
+) {
+    match crate::repo::touch_running_task(state, task_id, claim_attempt) {
         Ok(true) => {}
         Ok(false) => warn!(
             "{} [LLM_CALL] stage=lease_touch_skipped task_id={} prompt_label={} touch_stage={} reason=task_not_running",
@@ -103,6 +109,7 @@ fn llm_lease_heartbeat_interval_secs(state: &AppState) -> u64 {
 fn start_llm_task_lease_heartbeat(
     state: AppState,
     task_id: String,
+    claim_attempt: i64,
     prompt_label: &'static str,
 ) -> oneshot::Sender<()> {
     let interval_secs = llm_lease_heartbeat_interval_secs(&state);
@@ -111,7 +118,13 @@ fn start_llm_task_lease_heartbeat(
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
-                    touch_llm_task_lease(&state, &task_id, prompt_label, "provider_wait");
+                    touch_llm_task_lease(
+                        &state,
+                        &task_id,
+                        claim_attempt,
+                        prompt_label,
+                        "provider_wait",
+                    );
                 }
                 _ = &mut stop_rx => {
                     break;
@@ -686,10 +699,17 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     if providers.is_empty() {
         return Err(NO_ELIGIBLE_LLM_PROVIDER_ERR.to_string());
     }
-    touch_llm_task_lease(state, &task.task_id, prompt_label, "call_start");
+    touch_llm_task_lease(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        prompt_label,
+        "call_start",
+    );
     let mut heartbeat_stop = Some(start_llm_task_lease_heartbeat(
         state.clone(),
         task.task_id.clone(),
+        task.claim_attempt,
         prompt_label,
     ));
     let call_started_at = std::time::Instant::now();
@@ -779,11 +799,23 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 call_started_at.elapsed().as_millis() as u64,
             );
             stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
-            touch_llm_task_lease(state, &task.task_id, prompt_label, "cost_policy_wait");
+            touch_llm_task_lease(
+                state,
+                &task.task_id,
+                task.claim_attempt,
+                prompt_label,
+                "cost_policy_wait",
+            );
             return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
         }
         any_provider_attempted = true;
-        touch_llm_task_lease(state, &task.task_id, prompt_label, "provider_attempt_start");
+        touch_llm_task_lease(
+            state,
+            &task.task_id,
+            task.claim_attempt,
+            prompt_label,
+            "provider_attempt_start",
+        );
 
         info!(
             "{} [LLM_CALL] stage=request task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={}",
@@ -804,7 +836,13 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 provider
                     .latency
                     .note_sample(provider_started_at.elapsed().as_millis() as u64);
-                touch_llm_task_lease(state, &task.task_id, prompt_label, "provider_success");
+                touch_llm_task_lease(
+                    state,
+                    &task.task_id,
+                    task.claim_attempt,
+                    prompt_label,
+                    "provider_success",
+                );
                 state.note_task_provider_attempts_with_label(
                     &task.task_id,
                     prompt_label,
@@ -903,14 +941,26 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 );
                 state.clear_task_provider_blocker(&task.task_id);
                 stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
-                touch_llm_task_lease(state, &task.task_id, prompt_label, "call_success");
+                touch_llm_task_lease(
+                    state,
+                    &task.task_id,
+                    task.claim_attempt,
+                    prompt_label,
+                    "call_success",
+                );
                 return Ok(cleaned_text);
             }
             Err(err) => {
                 provider
                     .latency
                     .note_sample(provider_started_at.elapsed().as_millis() as u64);
-                touch_llm_task_lease(state, &task.task_id, prompt_label, "provider_error");
+                touch_llm_task_lease(
+                    state,
+                    &task.task_id,
+                    task.claim_attempt,
+                    prompt_label,
+                    "provider_error",
+                );
                 let error_kind = err.observability_kind();
                 if let Some(retry_after_seconds) = err.background_wait_seconds() {
                     let message_key = match err.kind {
@@ -1023,7 +1073,13 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         call_started_at.elapsed().as_millis() as u64,
     );
     stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
-    touch_llm_task_lease(state, &task.task_id, prompt_label, "call_failed");
+    touch_llm_task_lease(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        prompt_label,
+        "call_failed",
+    );
     if !any_provider_attempted && !skipped_providers.is_empty() {
         // 全员被 breaker 拦下，所有 provider 当前都在 cooldown。
         // 这种情况要给一个**明确的可识别错误**，让上游日志/指标里能看见

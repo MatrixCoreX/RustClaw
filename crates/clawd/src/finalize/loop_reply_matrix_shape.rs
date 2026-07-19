@@ -139,6 +139,7 @@ pub(super) fn evidence_policy_candidate_satisfies_final_shape(
 
 pub(super) fn synthetic_task_for_evidence_policy_shape_check(task_id: &str) -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.to_string(),
         user_id: 0,
         chat_id: 0,

@@ -95,6 +95,7 @@ fn update_task_timeout_records_structured_lifecycle_reason() {
     let terminal_timeout = update_task_timeout(
         &state,
         &task_id.to_string(),
+        1,
         "worker_task_timeout reason_code=tool_timeout_without_async_resume",
     )
     .expect("update timeout");
@@ -169,6 +170,7 @@ fn update_task_timeout_preserves_recoverable_async_checkpoint() {
     let terminal_timeout = update_task_timeout(
         &state,
         &task_id.to_string(),
+        1,
         "worker_task_timeout reason_code=tool_timeout_without_async_resume",
     )
     .expect("update timeout");

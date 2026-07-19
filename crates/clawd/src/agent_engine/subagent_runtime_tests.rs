@@ -309,6 +309,7 @@ fn subagent_action_projects_workspace_context_evidence() {
 fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() {
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-persistent-subagent-parent".to_string(),
         user_id: 42,
         chat_id: 7,
@@ -403,6 +404,7 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
 fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-persistent-writer-parent".to_string(),
         user_id: 42,
         chat_id: 7,

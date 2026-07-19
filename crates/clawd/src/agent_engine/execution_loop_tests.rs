@@ -36,6 +36,7 @@ fn test_policy(registry_idempotency_guard_enabled: bool) -> super::AgentLoopGuar
 
 fn task_fixture(id: &str) -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: id.to_string(),
         user_id: 1,
         chat_id: 2,
