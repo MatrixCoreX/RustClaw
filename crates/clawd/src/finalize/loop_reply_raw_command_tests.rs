@@ -1,5 +1,6 @@
 use super::*;
 use crate::finalize::loop_reply::raw_command_machine_field_delivery_satisfies_request;
+use crate::finalize::loop_reply::raw_command_output_needs_structural_projection;
 use crate::finalize::loop_reply::replace_delivery_with_direct_structured_observed_answer;
 use crate::finalize::loop_reply::shell_stdout_redirect_target_path;
 use crate::finalize::raw_command_machine_field_projection_from_journal;
@@ -407,6 +408,83 @@ fn raw_command_requested_mutation_fields_use_executed_plan_and_workspace_evidenc
     assert!(raw_command_machine_field_delivery_satisfies_request(
         &route, &answer
     ));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn checkpoint_capability_trace_projects_requested_mutation_fields() {
+    let mut state = test_state_with_registry(
+        r#"
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+planner_kind = "skill"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["command"], properties = { command = { type = "string" } } }
+planner_capabilities = [
+  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", output_semantic_kind = "raw_command_output" },
+]
+"#,
+        &["run_cmd"],
+    );
+    let tmp = TempDirGuard::new("checkpoint_capability_projection");
+    state.skill_rt.workspace_root = tmp.path().to_path_buf();
+    let relative_path = PathBuf::from("generated/result.txt");
+    let output_path = tmp.path().join(&relative_path);
+    fs::create_dir_all(output_path.parent().expect("output parent")).expect("create output parent");
+    fs::write(&output_path, "checkpoint_resume_ok").expect("write output");
+    let command = format!(
+        "mkdir -p generated && printf checkpoint_resume_ok > {} && cat {}",
+        relative_path.display(),
+        relative_path.display()
+    );
+    let mut route = free_route_result();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector =
+        Some("command,created_path,stdout,status".to_string());
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "checkpoint_action:system.run_command".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                step_id: "step_2".to_string(),
+                action_type: "call_capability".to_string(),
+                skill: "system.run_command".to_string(),
+                args: serde_json::json!({"command": command}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }])),
+            verify_result: None,
+        });
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "run_cmd",
+        "checkpoint_resume_ok",
+    ));
+
+    assert!(raw_command_output_needs_structural_projection(
+        &route,
+        &loop_state
+    ));
+    let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
+        .expect("checkpoint capability projection");
+
+    assert_eq!(
+        answer,
+        format!(
+            "command={command}\ncreated_path={}\nstdout=checkpoint_resume_ok\nstatus=ok",
+            output_path.canonicalize().unwrap().display()
+        )
+    );
     assert_eq!(summary.grounded_ok, Some(true));
 }
 
