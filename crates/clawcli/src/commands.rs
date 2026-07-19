@@ -111,3 +111,7 @@ mod models_tests;
 #[cfg(test)]
 #[path = "commands_cost_tests.rs"]
 mod cost_tests;
+
+#[cfg(test)]
+#[path = "commands_coding_projection_tests.rs"]
+mod coding_projection_tests;

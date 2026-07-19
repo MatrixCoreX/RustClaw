@@ -108,7 +108,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
-- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. CLI and UI render these fields directly, including `goal_status`, `goal_status_source`, `budget_tier`, `included_ref_count`, `excluded_ref_count`, `record_count`, `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, hook handler/trust/failure/attempt/timing fields, coding counts, verification command counts/tokens, verification status/failure-kind tokens, unverified-risk tokens, subagent team ids, read-only policy tokens, conflict counts, recommended next action tokens, and step timing, instead of reading raw logs or localized text.
+- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. CLI and UI render these fields directly, including `goal_status`, `goal_status_source`, `budget_tier`, `included_ref_count`, `excluded_ref_count`, `record_count`, `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, hook handler/trust/failure/attempt/timing fields, coding counts, verification command counts/tokens, verification status/failure-kind tokens, `projection_revision`, `latest_verification_step_ref`, historical failure fields, unverified-risk tokens, subagent team ids, read-only policy tokens, conflict counts, recommended next action tokens, and step timing, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
 
 ### Planner, LLM, And Capability Flow
 
@@ -763,7 +763,7 @@ flowchart TD
     R --> S[Restore compensation snapshot<br/>restored_files + compensation_ref]
     S --> B
     P -->|terminal| T[Structured failure evidence]
-    L --> U[Coding workflow event<br/>verification_status=passed]
+    L --> U[Coding workflow event<br/>verification_status=verified]
     Q --> U
     T --> U
     U --> V[clawcli code diff/report/review + UI teaching timeline]

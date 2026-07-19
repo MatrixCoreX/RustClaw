@@ -24,15 +24,40 @@ struct CodingWorkflowSignals {
     repair_step_refs: BTreeSet<String>,
     verified_observed: bool,
     failed_observed: bool,
+    latest_verification_outcome: Option<VerificationOutcome>,
+    latest_verification_step_ref: Option<String>,
+    projection_revision: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VerificationOutcome {
+    Failed,
+    Verified,
+}
+
+impl VerificationOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "failed",
+            Self::Verified => "verified",
+        }
+    }
 }
 
 pub(super) fn coding_workflow_summary_json(journal: &TaskJournal) -> Value {
     let signals = coding_workflow_signals(journal);
     let verification_status = verification_status(&signals);
     let changed_files = collapsed_path_values(&signals.changed_files);
+    let current_failure_kinds = if verification_status == "failed" {
+        bounded_set_values(&signals.failure_kinds)
+    } else {
+        Vec::new()
+    };
     json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "source": "task_journal_observations",
+        "projection_revision": signals.projection_revision,
+        "latest_verification_step_ref": signals.latest_verification_step_ref,
         "current_phase_hint": current_phase_hint(&signals),
         "next_step": next_step(&signals, verification_status),
         "planned_change_count": signals.planned_changes.len(),
@@ -44,8 +69,10 @@ pub(super) fn coding_workflow_summary_json(journal: &TaskJournal) -> Value {
         "verification_command_count": signals.verification_commands.len(),
         "verification_commands": bounded_set_values(&signals.verification_commands),
         "verification_status": verification_status,
-        "failure_kind_count": signals.failure_kinds.len(),
-        "failure_kinds": bounded_set_values(&signals.failure_kinds),
+        "failure_kind_count": current_failure_kinds.len(),
+        "failure_kinds": current_failure_kinds,
+        "historical_failure_kind_count": signals.failure_kinds.len(),
+        "historical_failure_kinds": bounded_set_values(&signals.failure_kinds),
         "repair_attempt_count": signals.repair_step_refs.len(),
         "repair_attempt_refs": bounded_set_values(&signals.repair_step_refs),
         "checkpoint_ref_count": signals.checkpoint_refs.len(),
@@ -65,18 +92,29 @@ pub(super) fn coding_workflow_summary_json(journal: &TaskJournal) -> Value {
 }
 
 fn coding_workflow_signals(journal: &TaskJournal) -> CodingWorkflowSignals {
-    let mut signals = CodingWorkflowSignals::default();
+    let mut signals = CodingWorkflowSignals {
+        projection_revision: journal.step_results.len() + journal.task_observations.len(),
+        ..CodingWorkflowSignals::default()
+    };
     for observation in &journal.task_observations {
         collect_observation(observation, &mut signals);
     }
+    let mut authoritative_outcome = None;
     for step in &journal.step_results {
         let Some(transition) = coding_state_transition_observation_from_trace(step) else {
             continue;
         };
         collect_observation(&transition, &mut signals);
+        if let Some(outcome) = verification_outcome_from_transition(&transition) {
+            authoritative_outcome = Some((outcome, step.step_id.clone()));
+        }
         if let Some(checkpoint) = coding_milestone_checkpoint_observation(&transition, &[]) {
             collect_observation(&checkpoint, &mut signals);
         }
+    }
+    if let Some((outcome, step_ref)) = authoritative_outcome {
+        signals.latest_verification_outcome = Some(outcome);
+        signals.latest_verification_step_ref = Some(step_ref);
     }
     signals
 }
@@ -120,6 +158,23 @@ fn collect_transition(map: &Map<String, Value>, signals: &mut CodingWorkflowSign
         signals.failed_observed = true;
         collect_string_field(map.get("failure_kind"), &mut signals.failure_kinds);
     }
+    if map
+        .get("verification_command")
+        .and_then(Value::as_str)
+        .is_some()
+    {
+        match map.get("status").and_then(Value::as_str) {
+            Some("error") => {
+                signals.latest_verification_outcome = Some(VerificationOutcome::Failed)
+            }
+            Some("ok") => signals.latest_verification_outcome = Some(VerificationOutcome::Verified),
+            _ => {}
+        }
+        signals.latest_verification_step_ref = map
+            .get("step_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+    }
 }
 
 fn collect_checkpoint(map: &Map<String, Value>, signals: &mut CodingWorkflowSignals) {
@@ -146,9 +201,25 @@ fn collect_checkpoint(map: &Map<String, Value>, signals: &mut CodingWorkflowSign
         &mut signals.failed_command_stderr_refs,
     );
     match map.get("verification_status").and_then(Value::as_str) {
-        Some("verified") => signals.verified_observed = true,
-        Some("failed") => signals.failed_observed = true,
+        Some("verified") => {
+            signals.verified_observed = true;
+            signals.latest_verification_outcome = Some(VerificationOutcome::Verified);
+        }
+        Some("failed") => {
+            signals.failed_observed = true;
+            signals.latest_verification_outcome = Some(VerificationOutcome::Failed);
+        }
         _ => {}
+    }
+    if map
+        .get("verification_status")
+        .and_then(Value::as_str)
+        .is_some()
+    {
+        signals.latest_verification_step_ref = map
+            .get("source_step_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
     }
     collect_string_field(map.get("failure_kind"), &mut signals.failure_kinds);
     if map.get("checkpoint_kind").and_then(Value::as_str) == Some("fix_applied") {
@@ -157,7 +228,9 @@ fn collect_checkpoint(map: &Map<String, Value>, signals: &mut CodingWorkflowSign
 }
 
 fn verification_status(signals: &CodingWorkflowSignals) -> &'static str {
-    if signals.failed_observed || !signals.failure_kinds.is_empty() {
+    if let Some(outcome) = signals.latest_verification_outcome {
+        outcome.as_str()
+    } else if signals.failed_observed || !signals.failure_kinds.is_empty() {
         "failed"
     } else if signals.verified_observed || !signals.verification_commands.is_empty() {
         "verified"
@@ -169,18 +242,25 @@ fn verification_status(signals: &CodingWorkflowSignals) -> &'static str {
 }
 
 fn current_phase_hint(signals: &CodingWorkflowSignals) -> &'static str {
-    if signals.failed_observed || !signals.failure_kinds.is_empty() {
-        "repair"
-    } else if signals.verified_observed || !signals.verification_commands.is_empty() {
-        "summarize"
-    } else if !signals.changed_files.is_empty() {
-        "verify"
-    } else if !signals.diff_refs.is_empty() {
-        "review"
-    } else if !signals.checkpoint_refs.is_empty() {
-        "background"
-    } else {
-        "idle"
+    match verification_status(signals) {
+        "failed" => "repair",
+        "verified" => "summarize",
+        "unverified" => "verify",
+        _ if !signals.diff_refs.is_empty() => "review",
+        _ if !signals.checkpoint_refs.is_empty() => "background",
+        _ => "idle",
+    }
+}
+
+fn verification_outcome_from_transition(value: &Value) -> Option<VerificationOutcome> {
+    value
+        .get("verification_command")
+        .and_then(Value::as_str)
+        .filter(|command| !command.trim().is_empty())?;
+    match value.get("status").and_then(Value::as_str) {
+        Some("error") => Some(VerificationOutcome::Failed),
+        Some("ok") => Some(VerificationOutcome::Verified),
+        _ => None,
     }
 }
 

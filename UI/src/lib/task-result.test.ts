@@ -193,6 +193,47 @@ test("builds completed task outcome from machine task_outcome fields", () => {
   assert.ok(view.remainingWork.includes("summarize"));
 });
 
+test("uses the highest coding projection revision after checkpoint continuation", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-coding-projection",
+    status: "succeeded",
+    result_json: {
+      task_journal: {
+        summary: {
+          final_status: "success",
+        },
+        trace: {
+          event_stream: [
+            {
+              seq: 14,
+              event_type: "coding_evidence",
+              payload: {
+                projection_revision: 6,
+                verification_status: "verified",
+                verification_failure_kind_count: 0,
+              },
+            },
+            {
+              seq: 8,
+              event_type: "coding_evidence",
+              payload: {
+                projection_revision: 2,
+                verification_status: "failed",
+                verification_failure_kind_count: 1,
+              },
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const view = buildTaskOutcome(result, "en");
+  assert.ok(view.verification.includes("verification_status=verified"));
+  assert.ok(view.verification.includes("verification_failure_kind_count=0"));
+  assert.ok(!view.verification.includes("verification_status=failed"));
+});
+
 test("builds task goal view from query goal projection", () => {
   const result: TaskQueryResponse = {
     task_id: "task-goal-view",

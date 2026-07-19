@@ -114,6 +114,29 @@ fn step_result_records_failed_verification_transition_observation() {
 }
 
 #[test]
+fn python_unittest_pipeline_records_verification_transition() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-python-unittest",
+        "ask",
+        "run verification",
+    );
+    journal.push_step_result(&step_result(
+        "step_python_test",
+        "run_cmd",
+        crate::executor::StepExecutionStatus::Ok,
+        Some("exit=0 command=python3 -m unittest test_calc_core.py -v 2>&1 | tail -50".to_string()),
+        None,
+    ));
+
+    let transition = observation(&journal, "coding_state_transition");
+    assert_eq!(transition["phase"], "verify");
+    assert_eq!(
+        transition["verification_command"],
+        "python3 -m unittest test_calc_core.py -v 2>&1 | tail -50"
+    );
+}
+
+#[test]
 fn edit_after_repair_records_fix_applied_checkpoint() {
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-coding-state-fix",
