@@ -12,6 +12,9 @@ pub(crate) struct ExecutionRecipePlanHint {
 pub(crate) enum ExecutionRecipeKind {
     #[default]
     None,
+    // Planner-owned protocol value; production currently consumes it only after
+    // a structured recipe hint is supplied.
+    #[cfg_attr(not(test), allow(dead_code))]
     OpsClosedLoop,
 }
 
@@ -83,9 +86,11 @@ pub(crate) fn profile_requires_specific_validation(profile: ExecutionRecipeProfi
 pub(crate) enum ExecutionRecipeTargetScope {
     #[default]
     Unknown,
+    #[cfg_attr(not(test), allow(dead_code))]
     System,
     CurrentRepo,
     ExternalWorkspace,
+    #[cfg_attr(not(test), allow(dead_code))]
     Greenfield,
 }
 

@@ -302,7 +302,11 @@ pub(crate) fn is_quota_exhausted_response(body_text: &str) -> bool {
 pub(crate) enum LlmRoutingPreference {
     #[default]
     Balanced,
+    // Non-default preferences are part of the provider-routing contract and
+    // are currently exercised by routing-policy callers and tests.
+    #[cfg_attr(not(test), allow(dead_code))]
     LowCost,
+    #[cfg_attr(not(test), allow(dead_code))]
     LowLatency,
 }
 

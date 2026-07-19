@@ -64,15 +64,18 @@ pub(crate) enum VerifyIssueKind {
     InvalidDependsOn,
     ConfirmationRequired,
     SandboxPolicyDenied,
+    #[cfg_attr(not(test), allow(dead_code))]
     RiskBudgetExceeded,
     PrimaryFallbackConflict,
     BoundaryClarifyRequired,
     RecipeInspectBeforeMutateRequired,
     RecipeValidationAfterMutateRequired,
     RecipeTargetScopeRequired,
+    #[cfg_attr(not(test), allow(dead_code))]
     ContractActionRejected,
     ContractMissing,
     ContractPolicyViolation,
+    #[cfg_attr(not(test), allow(dead_code))]
     ContractPreferredActionAvailable,
 }
 
