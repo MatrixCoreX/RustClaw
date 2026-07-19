@@ -133,6 +133,7 @@ fn workspace_diff_excerpt_bounds_large_patch_as_valid_json() {
 
 #[test]
 fn workspace_diff_event_does_not_claim_a_file_edit_checkpoint() {
+    let patch = "diff --git a/src/lib.rs b/src/lib.rs\n";
     let mut journal = TaskJournal::for_task("task-workspace-diff", "ask", "inspect diff");
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_diff".to_string(),
@@ -148,7 +149,7 @@ fn workspace_diff_event_does_not_claim_a_file_edit_checkpoint() {
                     "patch_id": "sha256:patch-1",
                     "checkpoint_id": "patch_checkpoint_1",
                     "changed_files": ["src/lib.rs"],
-                    "patch": "diff --git a/src/lib.rs b/src/lib.rs\n"
+                    "patch": patch
                 }
             })
             .to_string(),
@@ -174,6 +175,18 @@ fn workspace_diff_event_does_not_claim_a_file_edit_checkpoint() {
     assert_eq!(
         evidence["payload"]["workspace_checkpoint_ids"][0],
         "patch_checkpoint_1"
+    );
+    let diff = events
+        .iter()
+        .find(|event| event["event_type"] == "workspace_diff")
+        .expect("workspace diff event");
+    assert_eq!(
+        diff["payload"]["diff_summaries"][0]["field"],
+        "workspace_diff"
+    );
+    assert_eq!(
+        diff["payload"]["diff_summaries"][0]["value"]["patch_bytes"],
+        patch.len()
     );
 }
 

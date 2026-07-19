@@ -392,6 +392,22 @@ fn collect_diff_summary_fields(map: &Map<String, Value>, signals: &mut CodingRep
     if signals.diff_summaries.len() >= 16 {
         return;
     }
+    if map.get("action").and_then(Value::as_str) == Some("diff")
+        && map.get("source").and_then(Value::as_str) == Some("workspace_patch")
+    {
+        let value = json!({
+            "checkpoint_id": map.get("checkpoint_id").cloned().unwrap_or(Value::Null),
+            "patch_id": map.get("patch_id").cloned().unwrap_or(Value::Null),
+            "patch_bytes": map.get("patch_bytes").cloned().unwrap_or(Value::Null),
+            "patch_truncated": map.get("patch_truncated").cloned().unwrap_or(Value::Null),
+            "changed_files": map.get("changed_files").cloned().unwrap_or_else(|| json!([])),
+        });
+        signals.diff_summaries.push(json!({
+            "field": "workspace_diff",
+            "normalized": normalized_diff_summary_json(&value, map),
+            "value": value,
+        }));
+    }
     for key in [
         "diff_summary",
         "final_diff_summary",

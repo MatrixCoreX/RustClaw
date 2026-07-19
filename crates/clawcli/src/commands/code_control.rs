@@ -7,6 +7,8 @@ use super::exec::{
     exec_exit_class, exec_summary_json, wait_for_exec_task, ExecExitClass, ExecWaitOptions,
 };
 
+const MAX_WORKSPACE_DIFF_PATCH_BYTES: usize = 64 * 1024;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CodeCapabilityOptions {
     pub(crate) detach: bool,
@@ -74,17 +76,70 @@ pub(crate) fn run_code_capability(
     let mut summary = exec_summary_json(&task, outcome, exit_class, None);
     if let Some(map) = summary.as_object_mut() {
         map.insert("capability".to_string(), json!(capability));
+        if capability == "workspace.diff" {
+            map.insert(
+                "workspace_diff".to_string(),
+                workspace_diff_artifact_json(&task.raw_data).unwrap_or(Value::Null),
+            );
+        }
     }
     if options.json_output || options.jsonl_output {
         print_capability_output(&summary, options.json_output, options.jsonl_output)?;
     } else {
         output::print_task_status(&task, false, &EventFilters::default());
+        if capability == "workspace.diff" {
+            if let Some(patch) = workspace_diff_artifact_json(&task.raw_data)
+                .and_then(|artifact| artifact.get("patch").cloned())
+                .and_then(|patch| patch.as_str().map(str::to_string))
+            {
+                print!("{patch}");
+                if !patch.ends_with('\n') {
+                    println!();
+                }
+            }
+        }
         println!("capability: {capability}");
         println!("capability_outcome: {}", outcome.as_str());
         println!("capability_exit_class: {}", exit_class.as_str());
         println!("capability_exit_code: {}", exit_class.code());
     }
     Ok(exit_class.code())
+}
+
+fn workspace_diff_artifact_json(data: &Value) -> Option<Value> {
+    let steps = data
+        .pointer("/result_json/task_journal/trace/step_results")
+        .or_else(|| data.pointer("/task_journal/trace/step_results"))?
+        .as_array()?;
+    for step in steps.iter().rev() {
+        let output = step.get("output_excerpt").and_then(Value::as_str)?;
+        let output = serde_json::from_str::<Value>(output.trim()).ok()?;
+        let artifact = output
+            .get("extra")
+            .filter(|value| value.is_object())
+            .unwrap_or(&output);
+        if artifact.get("source").and_then(Value::as_str) != Some("workspace_patch")
+            || artifact.get("action").and_then(Value::as_str) != Some("diff")
+        {
+            continue;
+        }
+        let patch = artifact.get("patch").and_then(Value::as_str)?;
+        if patch.len() > MAX_WORKSPACE_DIFF_PATCH_BYTES {
+            return None;
+        }
+        return Some(json!({
+            "schema_version": 1,
+            "source": "workspace_patch",
+            "action": "diff",
+            "checkpoint_id": artifact.get("checkpoint_id").cloned().unwrap_or(Value::Null),
+            "patch_id": artifact.get("patch_id").cloned().unwrap_or(Value::Null),
+            "changed_files": artifact.get("changed_files").cloned().unwrap_or_else(|| json!([])),
+            "patch_bytes": artifact.get("patch_bytes").cloned().unwrap_or_else(|| json!(patch.len())),
+            "patch_truncated": artifact.get("patch_truncated").cloned().unwrap_or_else(|| json!(false)),
+            "patch": patch,
+        }));
+    }
+    None
 }
 
 fn print_capability_output(value: &Value, json_output: bool, jsonl_output: bool) -> Result<()> {

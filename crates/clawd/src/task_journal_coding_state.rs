@@ -280,6 +280,9 @@ fn collect_map_signals(map: &Map<String, Value>, signals: &mut CodingTransitionS
     collect_string_list_field(map, "diff_refs", &mut signals.diff_refs);
     collect_string_field(map, "patch_ref", &mut signals.diff_refs);
     collect_string_list_field(map, "patch_refs", &mut signals.diff_refs);
+    if signals.action.as_deref() == Some("diff") {
+        collect_string_field(map, "patch_id", &mut signals.diff_refs);
+    }
     collect_string_list_field(
         map,
         "completed_side_effect_refs",
