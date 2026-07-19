@@ -20,7 +20,8 @@ use dispatch_synthesis_local_code_projection::{
     successful_code_readbacks, successful_fs_readbacks_after_latest_writes, FsReadback,
 };
 pub(super) use dispatch_synthesis_local_code_projection::{
-    local_code_task_strict_json_projection, strict_json_projection_answer_satisfies_request,
+    local_code_task_strict_json_projection, requested_local_code_json_fields,
+    strict_json_projection_answer_satisfies_request,
 };
 use dispatch_synthesis_markdown::{
     markdown_heading_from_read_output, selected_markdown_title_from_read_output,

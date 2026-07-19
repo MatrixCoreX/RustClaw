@@ -6,9 +6,9 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::AgentAction;
 
 use super::dispatch_synthesis_local_code_fields::{
-    current_request_surface, diff_summary_projection_value,
-    local_code_json_projection_field_value_supported, machine_error_code_token,
-    path_size_bytes_by_path, run_cmd_commands_from_task_observations, run_cmd_failure_projection,
+    diff_summary_projection_value, local_code_json_projection_field_value_supported,
+    machine_error_code_token, path_size_bytes_by_path, run_cmd_commands_from_task_observations,
+    run_cmd_failure_projection,
 };
 use super::dispatch_synthesis_local_code_readbacks::readbacks_for_local_code_projection;
 use super::dispatch_synthesis_local_code_writes::{
@@ -19,15 +19,15 @@ use super::dispatch_synthesis_markdown::strip_markdown_read_line_prefix;
 use super::{push_unique_string, skill_output_payload};
 
 pub(in crate::agent_engine) fn local_code_task_strict_json_projection(
-    user_text: &str,
+    _user_text: &str,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let requested_fields = requested_local_code_json_fields(user_text, agent_run_context);
+    let requested_fields = requested_local_code_json_fields(loop_state, agent_run_context);
     if requested_fields.is_empty() {
         return None;
     }
-    if !local_code_task_projection_allowed(agent_run_context, &requested_fields) {
+    if !local_code_task_projection_allowed(loop_state, agent_run_context, &requested_fields) {
         return None;
     }
 
@@ -157,11 +157,12 @@ pub(in crate::agent_engine) fn local_code_task_strict_json_projection(
 }
 
 pub(in crate::agent_engine) fn strict_json_projection_answer_satisfies_request(
-    user_text: &str,
+    _user_text: &str,
     answer: &str,
+    loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let requested_fields = requested_local_code_json_fields(user_text, agent_run_context);
+    let requested_fields = requested_local_code_json_fields(loop_state, agent_run_context);
     if requested_fields.is_empty() {
         return false;
     }
@@ -184,10 +185,15 @@ pub(in crate::agent_engine) fn strict_json_projection_answer_satisfies_request(
 }
 
 fn local_code_task_projection_allowed(
+    loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
     requested_fields: &[String],
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|context| context.output_contract()) else {
+    let Some(route) = loop_state
+        .output_contract
+        .as_ref()
+        .or_else(|| agent_run_context.and_then(|context| context.output_contract()))
+    else {
         return true;
     };
     if !matches!(route.response_shape, crate::OutputResponseShape::FileToken) {
@@ -200,11 +206,22 @@ fn local_code_task_projection_allowed(
             .any(|field| local_code_json_projection_field_supported(field))
 }
 
-fn requested_local_code_json_fields(
-    user_text: &str,
+pub(in crate::agent_engine) fn requested_local_code_json_fields(
+    loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Vec<String> {
-    let mut fields = Vec::new();
+    if let Some(selector) = loop_state
+        .output_contract
+        .as_ref()
+        .or_else(|| agent_run_context.and_then(|context| context.output_contract()))
+        .and_then(|contract| contract.selection.structured_field_selector.as_deref())
+    {
+        let fields = requested_local_code_json_fields_from_selector(selector);
+        if !fields.is_empty() {
+            return fields;
+        }
+    }
+
     if let Some(state_patch) = agent_run_context
         .and_then(|context| context.turn_analysis.as_ref())
         .and_then(|analysis| analysis.state_patch.as_ref())
@@ -215,43 +232,28 @@ fn requested_local_code_json_fields(
             &mut structured_surfaces,
         );
         for surface in structured_surfaces {
-            for marker in requested_local_code_json_fields_from_surface(&surface) {
-                if local_code_json_projection_field_supported(&marker)
-                    && !fields.iter().any(|field| field == &marker)
-                {
-                    fields.push(marker);
-                }
+            let fields = requested_local_code_json_fields_from_surface(&surface);
+            if !fields.is_empty() {
+                return fields;
             }
         }
-        if !fields.is_empty() {
-            return fields;
-        }
     }
+    Vec::new()
+}
 
-    let mut surfaces = Vec::new();
-    if let Some(context) = agent_run_context {
-        for value in [
-            context.original_user_request.as_deref(),
-            context.user_request.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, value);
-        }
-    }
-    crate::machine_kv_projection::push_unique_machine_kv_surface(
-        &mut surfaces,
-        current_request_surface(user_text),
-    );
-    for surface in surfaces {
-        for marker in requested_local_code_json_fields_from_surface(&surface) {
-            if local_code_json_projection_field_supported(&marker)
-                && !fields.iter().any(|field| field == &marker)
-            {
-                fields.push(marker);
-            }
-        }
+fn requested_local_code_json_fields_from_selector(selector: &str) -> Vec<String> {
+    let fields = selector
+        .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';'))
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if fields.is_empty()
+        || fields
+            .iter()
+            .any(|field| !local_code_json_projection_field_supported(field))
+    {
+        return Vec::new();
     }
     fields
 }
@@ -262,11 +264,12 @@ fn requested_local_code_json_fields_from_surface(surface: &str) -> Vec<String> {
         .rev()
         .find_map(|segment| {
             let fields =
-                crate::machine_kv_projection::requested_machine_markers_for_projection(&segment)
-                    .into_iter()
-                    .filter(|marker| local_code_json_projection_field_supported(marker))
-                    .collect::<Vec<_>>();
-            (!fields.is_empty()).then_some(fields)
+                crate::machine_kv_projection::requested_machine_markers_for_projection(&segment);
+            (!fields.is_empty()
+                && fields
+                    .iter()
+                    .all(|field| local_code_json_projection_field_supported(field)))
+            .then_some(fields)
         })
         .unwrap_or_default()
 }

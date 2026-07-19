@@ -39,7 +39,7 @@ use dispatch_synthesis::{
     archive_database_aggregate_structured_answer, deterministic_scalar_markdown_heading_answer,
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
     local_code_task_strict_json_projection, package_docker_probe_structured_answer,
-    route_resolved_intent, step_has_observable_synthesis_fact,
+    requested_local_code_json_fields, route_resolved_intent, step_has_observable_synthesis_fact,
     strict_json_projection_answer_satisfies_request, synthesize_answer_allows_direct_fallback,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
@@ -60,6 +60,9 @@ use skill_call_args::{
     apply_recipe_run_cmd_overrides, read_file_requested_path,
     record_latest_run_cmd_command_output_vars, strip_internal_execution_args,
     strip_unsupported_planner_metadata_args, write_file_effective_path,
+};
+pub(super) use skill_call_args::{
+    record_successful_run_cmd_command_output_var, successful_run_cmd_command_for_step,
 };
 
 pub(super) fn local_code_strict_json_projection_should_defer_observed_synthesis(
@@ -84,16 +87,27 @@ pub(super) fn local_code_strict_json_projection_from_machine_evidence(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let answer = local_code_task_strict_json_projection(user_text, loop_state, agent_run_context)?;
-    strict_json_projection_answer_satisfies_request(user_text, &answer, agent_run_context)
-        .then_some(answer)
+    strict_json_projection_answer_satisfies_request(
+        user_text,
+        &answer,
+        loop_state,
+        agent_run_context,
+    )
+    .then_some(answer)
 }
 
 pub(super) fn local_code_strict_json_answer_satisfies_request(
     user_text: &str,
     answer: &str,
+    loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    strict_json_projection_answer_satisfies_request(user_text, answer, agent_run_context)
+    strict_json_projection_answer_satisfies_request(
+        user_text,
+        answer,
+        loop_state,
+        agent_run_context,
+    )
 }
 
 pub(super) fn apply_skill_action_outcome(
@@ -1015,6 +1029,7 @@ pub(super) async fn handle_synthesize_answer_action(
             if strict_json_projection_answer_satisfies_request(
                 user_text,
                 &answer,
+                loop_state,
                 agent_run_context,
             ) {
                 loop_state.output_vars.insert(

@@ -313,6 +313,13 @@ fn local_code_projection_replaces_readonly_machine_kv_with_requested_json() {
         "run_cmd",
         "Ran 4 tests in 0.000s\nOK\n",
     ));
+    let context = context_with_required_machine_fields(json!([
+        "project_dir",
+        "functions",
+        "error_codes",
+        "test_status",
+        "evidence_files"
+    ]));
     let mut summary = None;
     let mut delivery_deduped = loop_state.delivery_messages.clone();
 
@@ -320,7 +327,7 @@ fn local_code_projection_replaces_readonly_machine_kv_with_requested_json() {
         &task(),
         "Return JSON with project_dir, functions, error_codes, test_status, evidence_files.",
         &mut loop_state,
-        None,
+        Some(&context),
         &mut summary,
         &mut delivery_deduped,
     ));
@@ -361,13 +368,20 @@ fn recorded_local_code_projection_syncs_stale_final_delivery() {
         "project_dir=/workspace functions=[\"add\",\"sub\",\"safe_div\"] error_codes=[\"division_by_zero\"] test_status=passed evidence_files=[\"/workspace/calc_core.py\",\"/workspace/test_calc_core.py\"]"
             .to_string(),
     ];
+    let context = context_with_required_machine_fields(json!([
+        "project_dir",
+        "functions",
+        "error_codes",
+        "test_status",
+        "evidence_files"
+    ]));
     let mut summary = None;
 
     assert!(sync_recorded_local_code_projection_if_needed(
         &task(),
         "Return JSON with project_dir, functions, error_codes, test_status, evidence_files.",
         &mut loop_state,
-        None,
+        Some(&context),
         &mut summary,
         &mut delivery_deduped,
     ));
@@ -444,12 +458,19 @@ fn latest_synthesis_local_code_projection_replaces_file_read_delivery() {
         "FILE:/workspace/test_calc_core.py\n\nassert calc_core.safe_div(1, 0)\n\nmissing_file"
             .to_string(),
     ];
+    let context = context_with_required_machine_fields(json!([
+        "changed_files",
+        "test_command",
+        "test_status",
+        "functions",
+        "error_codes"
+    ]));
 
     assert!(sync_latest_synthesis_local_code_projection_if_needed(
         &task(),
         "继续刚才这个项目：增加 safe_div(a,b)。最后只输出 JSON，包含 changed_files、test_command、test_status、functions、error_codes。",
         &mut loop_state,
-        None,
+        Some(&context),
         &mut summary,
         &mut delivery_deduped,
     ));
@@ -475,6 +496,7 @@ fn latest_synthesis_local_code_projection_replaces_file_read_delivery() {
 
 #[test]
 fn local_code_request_fields_prefer_structured_state_patch_over_user_surface() {
+    let loop_state = LoopState::new(1);
     let context =
         context_with_required_machine_fields(json!(["functions", "error_codes", "test_status"]));
     let user_text =
@@ -487,6 +509,7 @@ fn local_code_request_fields_prefer_structured_state_patch_over_user_surface() {
         crate::agent_engine::local_code_strict_json_answer_satisfies_request(
             user_text,
             partial,
+            &loop_state,
             Some(&context),
         )
     );
@@ -494,6 +517,7 @@ fn local_code_request_fields_prefer_structured_state_patch_over_user_surface() {
         !crate::agent_engine::local_code_strict_json_answer_satisfies_request(
             user_text,
             complete,
+            &loop_state,
             Some(&context),
         )
     );
@@ -746,12 +770,19 @@ fn local_code_projection_replaces_file_delivery_for_current_json_request() {
     ));
     let mut summary = None;
     let user_text = "读取刚才项目的 calc_core.py 和 test_calc_core.py，确认当前有哪些函数、safe_div 的除零错误码是什么，并重新运行 python3 test_calc_core.py。最后只输出 JSON，包含 project_dir、functions、error_codes、test_status、evidence_files。\n\n### ACTIVE_TASK_CONTEXT\nlast_primary_task_output:\n{\"changed_files\":[\"/workspace/project/calc_core.py\"],\"test_command\":\"python3 test_calc_core.py\"}";
+    let context = context_with_required_machine_fields(json!([
+        "project_dir",
+        "functions",
+        "error_codes",
+        "test_status",
+        "evidence_files"
+    ]));
 
     assert!(attach_local_code_strict_json_projection(
         &task(),
         user_text,
         &mut loop_state,
-        None,
+        Some(&context),
         &mut summary,
     ));
 

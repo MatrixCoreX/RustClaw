@@ -389,6 +389,12 @@ fn raw_command_requested_mutation_fields_use_executed_plan_and_workspace_evidenc
             }])),
             verify_result: None,
         });
+    crate::agent_engine::record_successful_run_cmd_command_output_var(
+        &mut loop_state,
+        "run_cmd",
+        "step_1",
+        &serde_json::json!({"command": command}),
+    );
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -465,6 +471,12 @@ planner_capabilities = [
             }])),
             verify_result: None,
         });
+    crate::agent_engine::record_successful_run_cmd_command_output_var(
+        &mut loop_state,
+        "run_cmd",
+        "step_2",
+        &serde_json::json!({"command": command}),
+    );
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "run_cmd",

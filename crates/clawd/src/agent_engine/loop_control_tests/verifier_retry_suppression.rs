@@ -22,6 +22,21 @@ use crate::{
 };
 use serde_json::json;
 
+fn local_code_context_with_required_fields(
+    fields: serde_json::Value,
+) -> crate::agent_engine::AgentRunContext {
+    crate::agent_engine::AgentRunContext {
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(json!({ "required_machine_fields": fields })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    }
+}
+
 #[test]
 fn answer_only_rewrite_requires_each_missing_machine_field_to_be_observed() {
     let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
@@ -510,12 +525,18 @@ fn post_write_readback_projection_replaces_stale_terminal_json() {
         "fs_basic",
         r#"{"extra":{"action":"read_text_range","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py","excerpt":"1|from calc_core import add, sub, mul\n2|def test_mul(self):\n3|    pass"}}"#,
     ));
+    let context = local_code_context_with_required_fields(json!([
+        "changed_files",
+        "test_command",
+        "test_status",
+        "functions"
+    ]));
 
     assert!(commit_local_code_strict_json_projection_after_readback(
         &test_task(),
         "最后只输出 JSON，包含 changed_files、test_command、test_status、functions。",
         &mut loop_state,
-        None,
+        Some(&context),
     ));
     let final_answer = loop_state
         .delivery_messages
@@ -656,13 +677,20 @@ fn local_code_machine_projection_replaces_stale_verifier_candidate_before_verifi
     let mut reply = AskReply::non_llm("calc_core.py\ntest_calc_core.py".to_string())
         .with_messages(vec!["calc_core.py\ntest_calc_core.py".to_string()])
         .with_task_journal(journal);
+    let context = local_code_context_with_required_fields(json!([
+        "changed_files",
+        "test_command",
+        "test_status",
+        "functions",
+        "error_codes"
+    ]));
 
     assert!(
         promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
             &mut reply,
             user_text,
             &loop_state,
-            None,
+            Some(&context),
         )
     );
     let value: serde_json::Value = serde_json::from_str(&reply.text).expect("strict json");

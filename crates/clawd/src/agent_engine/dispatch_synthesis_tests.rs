@@ -137,6 +137,7 @@ fn reusable_terminal_json_rejects_unresolved_machine_values() {
 
 #[test]
 fn strict_json_projection_answer_rejects_unresolved_machine_values() {
+    let loop_state = LoopState::new(1);
     let context = agent_context_with_required_machine_fields(json!([
         "changed_files",
         "test_command",
@@ -147,12 +148,14 @@ fn strict_json_projection_answer_rejects_unresolved_machine_values() {
     assert!(!strict_json_projection_answer_satisfies_request(
         "Return JSON with changed_files, test_command, test_status.",
         answer,
+        &loop_state,
         Some(&context),
     ));
 }
 
 #[test]
 fn strict_json_projection_answer_rejects_structural_error_code_tokens() {
+    let loop_state = LoopState::new(1);
     let context = agent_context_with_required_machine_fields(json!([
         "changed_files",
         "test_command",
@@ -165,6 +168,7 @@ fn strict_json_projection_answer_rejects_structural_error_code_tokens() {
     assert!(!strict_json_projection_answer_satisfies_request(
         "Return JSON with changed_files, test_command, test_status, functions, error_codes.",
         answer,
+        &loop_state,
         Some(&context),
     ));
 }
@@ -299,6 +303,7 @@ fn local_code_task_projection_supports_verification_command_and_diff_summary() {
     assert!(strict_json_projection_answer_satisfies_request(
         "Report changed files, verification command, and concise diff summary.",
         &answer,
+        &loop_state,
         Some(&context),
     ));
 }
@@ -323,11 +328,16 @@ fn local_code_task_projection_builds_created_files_test_command_and_status() {
     loop_state
         .executed_step_results
         .push(ok_step("step_3", "run_cmd", "All tests passed.\n"));
+    let context = agent_context_with_required_machine_fields(json!([
+        "created_files",
+        "test_command",
+        "test_status"
+    ]));
 
     let answer = local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 created_files、test_command、test_status。",
         &loop_state,
-        None,
+        Some(&context),
     )
     .expect("projection should be grounded");
     let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
@@ -341,7 +351,8 @@ fn local_code_task_projection_builds_created_files_test_command_and_status() {
     assert!(strict_json_projection_answer_satisfies_request(
         "最后只输出 JSON，包含 created_files、test_command、test_status。",
         &answer,
-        None,
+        &loop_state,
+        Some(&context),
     ));
 }
 
@@ -360,11 +371,16 @@ fn local_code_task_projection_uses_legacy_write_file_as_changed_file_evidence() 
     loop_state
         .executed_step_results
         .push(ok_step("step_2", "run_cmd", "All tests passed.\n"));
+    let context = agent_context_with_required_machine_fields(json!([
+        "changed_files",
+        "test_command",
+        "test_status"
+    ]));
 
     let answer = local_code_task_strict_json_projection(
         "Return JSON with changed_files, test_command, test_status.",
         &loop_state,
-        None,
+        Some(&context),
     )
     .expect("legacy write_file should project changed files");
     let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
@@ -411,11 +427,18 @@ fn local_code_task_projection_preserves_multiple_validation_commands() {
         "run_cmd",
         "{'ok': False, 'error_code': 'division_by_zero'}\n",
     ));
+    let context = agent_context_with_required_machine_fields(json!([
+        "changed_files",
+        "test_command",
+        "test_status",
+        "functions",
+        "error_codes"
+    ]));
 
     let answer = local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 changed_files、test_command、test_status、functions、error_codes。",
         &loop_state,
-        None,
+        Some(&context),
     )
     .expect("projection should include both validation commands");
     let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
@@ -539,6 +562,7 @@ fn local_code_task_projection_includes_failing_command_repair_fields() {
     assert!(strict_json_projection_answer_satisfies_request(
         "Return JSON with project_dir, changed_files, failed_command, failure_observed, failure_evidence, fix_summary, test_command, test_status.",
         &answer,
+        &loop_state,
         Some(&context),
     ));
 }
@@ -659,10 +683,10 @@ fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
         "run_cmd",
         "Ran 2 tests in 0.000s\nOK\n",
     ));
-    let strict_delivery_context = agent_context_for_route(route_result_with_contract(
-        OutputResponseShape::Strict,
-        true,
-    ));
+    let mut strict_delivery_route = route_result_with_contract(OutputResponseShape::Strict, true);
+    strict_delivery_route.selection.structured_field_selector =
+        Some("created_files,test_command,test_status".to_string());
+    let strict_delivery_context = agent_context_for_route(strict_delivery_route);
 
     let answer = local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 created_files、test_command、test_status。",
@@ -678,10 +702,10 @@ fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
     assert_eq!(value["test_command"], "python3 test_calc_core.py");
     assert_eq!(value["test_status"], "passed");
 
-    let file_token_context = agent_context_for_route(route_result_with_contract(
-        OutputResponseShape::FileToken,
-        true,
-    ));
+    let mut file_token_route = route_result_with_contract(OutputResponseShape::FileToken, true);
+    file_token_route.selection.structured_field_selector =
+        Some("created_files,test_command,test_status".to_string());
+    let file_token_context = agent_context_for_route(file_token_route);
     assert!(local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 created_files、test_command、test_status。",
         &loop_state,
@@ -692,6 +716,9 @@ fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
     let mut executable_file_token_route =
         route_result_with_contract(OutputResponseShape::FileToken, true);
     executable_file_token_route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    executable_file_token_route
+        .selection
+        .structured_field_selector = Some("created_files,test_command,test_status".to_string());
     let executable_file_token_context = agent_context_for_route(executable_file_token_route);
     let answer = local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 created_files、test_command、test_status。",
@@ -707,7 +734,7 @@ fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
 }
 
 #[test]
-fn local_code_task_projection_uses_current_request_fields_before_context_blocks() {
+fn local_code_task_projection_uses_planner_selector_instead_of_context_prose() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
@@ -730,6 +757,8 @@ fn local_code_task_projection_uses_current_request_fields_before_context_blocks(
     ));
     let mut route = route_result_with_contract(OutputResponseShape::FileToken, true);
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.selection.structured_field_selector =
+        Some("project_dir,functions,error_codes,test_status,evidence_files".to_string());
     let context = agent_context_for_route(route);
     let augmented_user_text = "读取刚才项目的 calc_core.py 和 test_calc_core.py，确认当前有哪些函数、safe_div 的除零错误码是什么，并重新运行 python3 test_calc_core.py。最后只输出 JSON，包含 project_dir、functions、error_codes、test_status、evidence_files。\n\n### ACTIVE_TASK_CONTEXT\nlast_primary_task_output:\n{\"changed_files\":[\"/workspace/project/calc_core.py\"],\"test_command\":\"python3 test_calc_core.py\",\"test_status\":\"passed\"}";
 
@@ -768,6 +797,7 @@ fn local_code_task_projection_uses_current_request_fields_before_context_blocks(
     assert!(strict_json_projection_answer_satisfies_request(
         augmented_user_text,
         &answer,
+        &loop_state,
         Some(&context),
     ));
 }
@@ -853,7 +883,7 @@ fn local_code_task_projection_uses_successful_write_plan_content_for_code_fields
 }
 
 #[test]
-fn local_code_task_projection_uses_last_machine_field_segment_only() {
+fn local_code_task_projection_uses_structured_fields_not_ordinary_prose_tokens() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
@@ -879,11 +909,16 @@ fn local_code_task_projection_uses_last_machine_field_segment_only() {
         "fs_basic",
         r#"{"extra":{"action":"read_text_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|def sub(a, b):\n4|    return a - b"}}"#,
     ));
+    let context = agent_context_with_required_machine_fields(json!([
+        "created_files",
+        "test_command",
+        "test_status"
+    ]));
 
     let answer = local_code_task_strict_json_projection(
         "Create tests covering both functions. Return JSON with created_files, test_command, test_status.",
         &loop_state,
-        None,
+        Some(&context),
     )
     .expect("projection should use the final machine-field segment");
     let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
@@ -902,6 +937,40 @@ fn local_code_task_projection_uses_last_machine_field_segment_only() {
 }
 
 #[test]
+fn local_code_task_projection_ignores_multilingual_raw_user_field_words() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "agent_loop.latest_run_cmd_command".to_string(),
+        "python3 test_calc_core.py".to_string(),
+    );
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"read_text_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b"}}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_3", "run_cmd", "Ran 1 test\nOK\n"));
+
+    for request in [
+        "Report the changed files, functions, and actual test result.",
+        "请报告修改文件、函数和实际测试结果。",
+        "変更したファイル、関数、実際のテスト結果を報告してください。",
+        "변경된 파일, 함수 및 실제 테스트 결과를 보고하세요.",
+    ] {
+        assert!(
+            local_code_task_strict_json_projection(request, &loop_state, None).is_none(),
+            "raw multilingual prose must not become a machine field selector"
+        );
+    }
+}
+
+#[test]
 fn local_code_task_projection_refuses_unobserved_content_fields() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_vars.insert(
@@ -916,11 +985,17 @@ fn local_code_task_projection_refuses_unobserved_content_fields() {
     loop_state
         .executed_step_results
         .push(ok_step("step_2", "run_cmd", "All tests passed.\n"));
+    let context = agent_context_with_required_machine_fields(json!([
+        "changed_files",
+        "test_command",
+        "test_status",
+        "functions"
+    ]));
 
     assert!(local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 changed_files、test_command、test_status、functions。",
         &loop_state,
-        None,
+        Some(&context),
     )
     .is_none());
 }
@@ -945,11 +1020,19 @@ fn local_code_task_projection_uses_readbacks_for_functions_errors_and_evidence_f
     loop_state
         .executed_step_results
         .push(ok_step("step_3", "run_cmd", "All tests passed.\n"));
+    let context = agent_context_with_required_machine_fields(json!([
+        "changed_files",
+        "test_command",
+        "test_status",
+        "functions",
+        "error_codes",
+        "evidence_files"
+    ]));
 
     let answer = local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 changed_files、test_command、test_status、functions、error_codes、evidence_files。",
         &loop_state,
-        None,
+        Some(&context),
     )
     .expect("projection should use readbacks");
     let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
@@ -1011,11 +1094,17 @@ fn local_code_task_projection_uses_post_write_readbacks_for_functions() {
         "fs_basic",
         r#"{"extra":{"action":"read_text_range","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py","excerpt":"1|def test_add(self):\n2|    pass\n3|def test_sub(self):\n4|    pass\n5|def test_mul(self):\n6|    pass"}}"#,
     ));
+    let context = agent_context_with_required_machine_fields(json!([
+        "changed_files",
+        "test_command",
+        "test_status",
+        "functions"
+    ]));
 
     let answer = local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 changed_files、test_command、test_status、functions。",
         &loop_state,
-        None,
+        Some(&context),
     )
     .expect("projection should use post-write readbacks");
     let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
