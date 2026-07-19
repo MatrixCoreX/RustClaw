@@ -2,6 +2,9 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Map, Value};
 
+use super::task_journal_coding_state::{
+    coding_milestone_checkpoint_observation, coding_state_transition_observation_from_trace,
+};
 use super::TaskJournal;
 
 const MAX_CODING_ITEMS: usize = 24;
@@ -64,16 +67,29 @@ pub(super) fn coding_workflow_summary_json(journal: &TaskJournal) -> Value {
 fn coding_workflow_signals(journal: &TaskJournal) -> CodingWorkflowSignals {
     let mut signals = CodingWorkflowSignals::default();
     for observation in &journal.task_observations {
-        let Some(map) = observation.as_object() else {
+        collect_observation(observation, &mut signals);
+    }
+    for step in &journal.step_results {
+        let Some(transition) = coding_state_transition_observation_from_trace(step) else {
             continue;
         };
-        match map.get("kind").and_then(Value::as_str) {
-            Some("coding_state_transition") => collect_transition(map, &mut signals),
-            Some("coding_checkpoint") => collect_checkpoint(map, &mut signals),
-            _ => {}
+        collect_observation(&transition, &mut signals);
+        if let Some(checkpoint) = coding_milestone_checkpoint_observation(&transition, &[]) {
+            collect_observation(&checkpoint, &mut signals);
         }
     }
     signals
+}
+
+fn collect_observation(observation: &Value, signals: &mut CodingWorkflowSignals) {
+    let Some(map) = observation.as_object() else {
+        return;
+    };
+    match map.get("kind").and_then(Value::as_str) {
+        Some("coding_state_transition") => collect_transition(map, signals),
+        Some("coding_checkpoint") => collect_checkpoint(map, signals),
+        _ => {}
+    }
 }
 
 fn collect_transition(map: &Map<String, Value>, signals: &mut CodingWorkflowSignals) {

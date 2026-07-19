@@ -71,6 +71,7 @@ const MAX_OBSERVED_EVIDENCE_DEPTH: usize = 3;
 const MAX_OBSERVED_MULTILINE_EXCERPT_LINES: usize = 12;
 const MAX_OBSERVED_ARRAY_SAMPLES: usize = 3;
 const MAX_OBSERVED_ARRAY_VALUE_SAMPLES: usize = 48;
+const MAX_WORKSPACE_PATCH_JOURNAL_BYTES: usize = 64 * 1024;
 
 pub(crate) fn context_compaction_record_observation(record: Value) -> Value {
     task_journal_context_compaction::record_observation(record)
@@ -313,6 +314,20 @@ fn compact_workspace_patch_output_for_journal(output: &str) -> Option<String> {
                 ),
             );
         }
+    }
+    if let Some(patch) = source.get("patch").and_then(Value::as_str) {
+        let patch_bytes = patch.len();
+        let bounded_patch = if patch_bytes <= MAX_WORKSPACE_PATCH_JOURNAL_BYTES {
+            patch
+        } else {
+            crate::utf8_safe_prefix(patch, MAX_WORKSPACE_PATCH_JOURNAL_BYTES)
+        };
+        compact.insert("patch".to_string(), json!(bounded_patch));
+        compact.insert("patch_bytes".to_string(), json!(patch_bytes));
+        compact.insert(
+            "patch_truncated".to_string(),
+            json!(patch_bytes > MAX_WORKSPACE_PATCH_JOURNAL_BYTES),
+        );
     }
     serde_json::to_string(&json!({ "extra": Value::Object(compact) })).ok()
 }

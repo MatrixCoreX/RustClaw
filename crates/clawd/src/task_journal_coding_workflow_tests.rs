@@ -205,3 +205,33 @@ fn summary_json_marks_changed_files_without_verification_as_gate_required() {
         Some(true)
     );
 }
+
+#[test]
+fn summary_json_replays_persisted_apply_patch_step_without_observations() {
+    let mut journal = TaskJournal::for_task("task-persisted-patch", "ask", "apply patch");
+    journal.step_results.push(super::TaskJournalStepTrace::ok(
+        "step_patch",
+        "workspace_patch",
+        json!({
+            "extra": {
+                "schema_version": 1,
+                "source": "workspace_patch",
+                "status": "ok",
+                "action": "apply_patch",
+                "patch_id": "sha256:patch-1",
+                "checkpoint_id": "patch_checkpoint_1",
+                "changed_files": ["src/lib.rs"]
+            }
+        })
+        .to_string(),
+    ));
+
+    let summary = journal.to_summary_json();
+    let workflow = summary.get("coding_workflow").expect("coding workflow");
+
+    assert_eq!(journal.task_observations.len(), 0);
+    assert_eq!(workflow["changed_file_count"], 1);
+    assert_eq!(workflow["changed_files"][0], "src/lib.rs");
+    assert_eq!(workflow["verification_status"], "unverified");
+    assert_eq!(workflow["current_phase_hint"], "verify");
+}
