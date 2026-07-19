@@ -64,7 +64,7 @@ use goal::{
     goal_status_summary_json, goal_status_text_lines,
 };
 #[cfg(test)]
-use llm_trace::llm_trace_text_lines;
+use llm_trace::{llm_trace_text_lines, task_llm_trace_url};
 #[cfg(test)]
 use models::{
     filter_catalog_response, model_catalog_text_lines, model_readiness_json,

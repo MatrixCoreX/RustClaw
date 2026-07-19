@@ -55,9 +55,9 @@ fn fetch_task_llm_trace(base_url: &str, key: &str, task_id: &str) -> Result<Valu
     if task_id.is_empty() {
         anyhow::bail!("llm_trace_task_id_required");
     }
-    let url = format!("{}/debug/tasks/{}", client::base_v1(base_url), task_id);
+    let url = task_llm_trace_url(base_url, task_id)?;
     let resp = client::make_client()?
-        .get(&url)
+        .get(url)
         .header("x-rustclaw-key", key)
         .send()
         .context("llm_trace_request_failed")?;
@@ -71,6 +71,17 @@ fn fetch_task_llm_trace(base_url: &str, key: &str, task_id: &str) -> Result<Valu
         anyhow::bail!("llm_trace_fetch_failed status={} error={}", status, error);
     }
     Ok(body.get("data").cloned().unwrap_or(Value::Null))
+}
+
+pub(super) fn task_llm_trace_url(base_url: &str, task_id: &str) -> Result<reqwest::Url> {
+    let mut url = reqwest::Url::parse(&format!(
+        "{}/debug/tasks/{}",
+        client::base_v1(base_url),
+        task_id
+    ))
+    .context("llm_trace_url_invalid")?;
+    url.query_pairs_mut().append_pair("teaching", "true");
+    Ok(url)
 }
 
 pub(super) fn llm_trace_text_lines(
