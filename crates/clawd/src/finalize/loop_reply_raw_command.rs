@@ -144,7 +144,7 @@ pub(super) fn direct_raw_command_output_projection(
     {
         return None;
     }
-    let outputs = latest_run_cmd_output_group(loop_state);
+    let outputs = latest_run_cmd_output_group(state, loop_state);
     if outputs.is_empty() {
         if let Some((answer, used_evidence_ids_count)) =
             direct_read_range_raw_command_projection(state, route, loop_state)
@@ -473,7 +473,7 @@ fn collapse_identical_raw_command_outputs(outputs: &[String]) -> Option<String> 
         .then(|| first.to_string())
 }
 
-fn latest_run_cmd_output_group(loop_state: &LoopState) -> Vec<String> {
+fn latest_run_cmd_output_group(state: &AppState, loop_state: &LoopState) -> Vec<String> {
     let mut outputs = Vec::new();
     let mut seen_keys = HashSet::new();
     let mut seen_outputs = HashSet::new();
@@ -503,7 +503,7 @@ fn latest_run_cmd_output_group(loop_state: &LoopState) -> Vec<String> {
             }
             started = true;
             let output_key = output.to_string();
-            let command_key = plan_step_for_execution(loop_state, step)
+            let command_key = run_cmd_plan_step_for_execution(state, loop_state, step)
                 .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
                 .or_else(|| run_cmd_machine_command_from_output(output))
                 .map(str::trim)
@@ -561,7 +561,7 @@ fn latest_run_cmd_redirect_existing_file_path(
         .filter(|step| step.is_ok() && step.skill == "run_cmd")
         .find_map(|step| {
             let output = step.output.as_deref().unwrap_or_default();
-            let plan_command = plan_step_for_execution(loop_state, step)
+            let plan_command = run_cmd_plan_step_for_execution(state, loop_state, step)
                 .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)));
             plan_command
                 .into_iter()
@@ -623,7 +623,7 @@ fn requested_raw_command_machine_field_projection_for_loop_state(
         return None;
     }
     let stdout = raw_command_stdout_value(outputs);
-    let command = latest_successful_run_cmd_command(loop_state);
+    let command = latest_successful_run_cmd_command(state, loop_state);
     let created_path = latest_run_cmd_redirect_existing_file_path(state, loop_state);
     let mut lines = Vec::new();
     for field in fields {
@@ -647,7 +647,7 @@ fn requested_raw_command_machine_field_projection_for_loop_state(
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-fn latest_successful_run_cmd_command(loop_state: &LoopState) -> Option<String> {
+fn latest_successful_run_cmd_command(state: &AppState, loop_state: &LoopState) -> Option<String> {
     loop_state
         .executed_step_results
         .iter()
@@ -655,7 +655,7 @@ fn latest_successful_run_cmd_command(loop_state: &LoopState) -> Option<String> {
         .filter(|step| step.is_ok() && step.skill == "run_cmd")
         .find_map(|step| {
             let output = step.output.as_deref().unwrap_or_default();
-            plan_step_for_execution(loop_state, step)
+            run_cmd_plan_step_for_execution(state, loop_state, step)
                 .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
                 .or_else(|| run_cmd_machine_command_from_output(output))
                 .map(str::trim)
@@ -664,6 +664,38 @@ fn latest_successful_run_cmd_command(loop_state: &LoopState) -> Option<String> {
                 })
                 .map(ToOwned::to_owned)
         })
+}
+
+fn run_cmd_plan_step_for_execution<'a>(
+    state: &AppState,
+    loop_state: &'a LoopState,
+    step: &crate::executor::StepExecutionResult,
+) -> Option<&'a crate::PlanStep> {
+    plan_step_for_execution(loop_state, step).or_else(|| {
+        loop_state
+            .round_traces
+            .iter()
+            .rev()
+            .filter_map(|trace| trace.plan_result.as_ref())
+            .flat_map(|plan| plan.steps.iter())
+            .find(|plan_step| {
+                if plan_step.step_id != step.step_id || plan_step.action_type != "call_capability" {
+                    return false;
+                }
+                crate::capability_resolver::resolve_capability_action_for_state(
+                    state,
+                    &plan_step.skill,
+                    plan_step.args.clone(),
+                )
+                .is_some_and(|action| {
+                    matches!(
+                        action,
+                        crate::AgentAction::CallSkill { skill, .. }
+                            if state.resolve_canonical_skill_name(&skill) == "run_cmd"
+                    )
+                })
+            })
+    })
 }
 
 fn requested_raw_command_machine_fields(route: &crate::IntentOutputContract) -> Vec<String> {
@@ -956,7 +988,9 @@ pub(super) fn raw_command_output_needs_structural_projection(
                 )
         })
         .is_some_and(|step| step.skill == "run_cmd");
-    latest_is_run_cmd && latest_plan_declares_structural_projection(loop_state)
+    latest_is_run_cmd
+        && (!requested_raw_command_machine_fields(route).is_empty()
+            || latest_plan_declares_structural_projection(loop_state))
 }
 
 fn latest_plan_declares_structural_projection(loop_state: &LoopState) -> bool {
