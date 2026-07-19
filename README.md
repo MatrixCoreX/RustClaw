@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. The boundary layer binds the turn to identity and session state, builds structured boundary hints, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Ordinary missing-slot decisions stay loop-owned; boundary finalization is limited to explicit schedule, safety, protocol, or already-observed completion paths. The intent normalizer is an initial structured hint, not the final semantic authority. The old pre-agent semantic route switch has been removed from runtime configuration; ordinary ask/chat fallback is handled by the agent loop.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. Before the first planner call, the front door only materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. It does not call a semantic router or decide whether an ordinary request should respond, clarify, or execute. Every ordinary `ask` enters the agent loop, which owns those semantic decisions and can respond, call a capability, synthesize from evidence, repair, continue, checkpoint, or stop. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. The old intent normalizer, contract-repair judge, pre-agent semantic route switch, and route-selected rollback path have been physically removed.
 
 ### Request And Agent Loop Flow
 
@@ -34,16 +34,12 @@ flowchart TD
     E0 --> E1[Claim next queued task]
     E1 --> E{Task kind}
     E -->|run_skill| RS[Direct run_skill path<br/>explicit skill_name only]
-    E -->|ask| F[Resolve identity + session + active task]
-    F --> G[Intent normalizer<br/>structured hint only]
-    G --> H[Ask context bundle<br/>memory + attachments + recent execution]
-    H --> I[Boundary guards<br/>locator + contract + safety + budget + boundary hints]
-    I -->|agent-loop authority| J[Agent-loop semantic authority]
-    I -->|schedule / safety / explicit protocol completion| K[Boundary-owned finalize path]
+    E -->|ask| F[Materialize text/audio/attachments]
+    F --> G[TurnBoundaryEnvelope<br/>identity + explicit machine facts + safety/budget profile]
+    G --> H[Ask context bundle<br/>memory provenance + recent execution + goal/journal refs]
+    H --> J[Agent loop<br/>ordinary semantic authority]
     J --> L{Loop round}
-    L -->|existing observation / explicit protocol| M[Runtime protocol projection]
-    L -->|general work| N[Planner LLM<br/>call_capability preferred]
-    M --> O[CapabilityResolver]
+    L --> N[Planner LLM<br/>respond / clarify / call_capability / synthesize]
     N --> O
     O --> P[PlanVerifier<br/>permission_decision + risk + effect + contract]
     P --> Q{Verified step}
@@ -54,7 +50,7 @@ flowchart TD
     AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
     QP -->|call_tool| T[Tool execution]
     QP -->|call_skill| U[Shared skill dispatch]
-    RS --> RSG[No normalizer / planner / resolver choice<br/>no verifier semantic selection]
+    RS --> RSG[No planner / resolver choice<br/>no verifier semantic selection]
     RSG --> U
     T --> V[Observed result]
     U --> V
@@ -64,7 +60,6 @@ flowchart TD
     WR --> J
     W -->|complete| X[Observed-output finalizer]
     R --> Y[User-visible message assembly]
-    K --> Y
     X --> Y
     Y --> Z[Output-contract guard + task result]
     Z --> AA[Channel delivery]
@@ -81,7 +76,7 @@ flowchart TD
 - `POST /v1/tasks`: channel daemons, the browser UI, and HTTP callers converge on the same persisted task queue.
 - `task_id polling`: API/channel request timeouts only affect how long the caller waits. The background task remains queryable through `GET /v1/tasks/{task_id}` unless worker lifecycle logic marks it terminal.
 - `worker_once recovery tick`: before claiming new queued work, the worker checks stale running tasks, protected paused checkpoints, due resume work, async poll results, and result projections.
-- `Task kind`: `kind=ask` enters the agent-capable natural-language path; `kind=run_skill` bypasses the intent normalizer, planner loop, capability resolver, and plan verifier, then calls the requested skill through the same shared skill dispatcher/protocol used by planner skill calls. Both task kinds persist results under the original `task_id`, so callers can still inspect final state through task query APIs.
+- `Task kind`: `kind=ask` enters the planner-owned natural-language path; `kind=run_skill` bypasses the planner loop, capability selection, and plan verifier, then calls the explicitly requested skill through the same shared skill dispatcher/protocol used by planner skill calls. Both task kinds persist results under the original `task_id`, so callers can still inspect final state through task query APIs.
 
 ### Ask And Run Skill Boundary
 
@@ -89,23 +84,22 @@ This boundary is intentionally explicit because `run_skill` is an API-level task
 
 Quick facts for direct skill tasks:
 
-- `kind=run_skill` does not run the intent normalizer or planner / agent loop. The caller already supplied `payload.skill_name` and args.
+- `kind=run_skill` does not run the planner / agent loop. The caller already supplied `payload.skill_name` and args.
 - `kind=run_skill` still uses the shared skill dispatcher and skill protocol after the explicit skill name is accepted.
 - `kind=run_skill` still creates and updates a normal task row, so the final state and result remain queryable by `task_id`.
 
 | Question | `kind=ask` | `kind=run_skill` |
 | --- | --- | --- |
-| Does it run the intent normalizer? | Yes, as structured hint and compatibility input. | No. The caller already supplied the target skill. |
-| Does it enter the planner / agent loop? | Yes by default for ordinary natural-language work; explicit schedule, safety, protocol, and already-observed completion paths may finalize without asking the planner to choose a capability. | No. It does not ask the planner to choose a skill or action. |
+| Is there a pre-planner semantic LLM/router? | No. The front door only builds `TurnBoundaryEnvelope` and context refs. | No. The caller already supplied the target skill. |
+| Does it enter the planner / agent loop? | Yes for every ordinary natural-language task. | No. It does not ask the planner to choose a skill or action. |
 | Does it use `CapabilityResolver` / `PlanVerifier` as semantic selectors? | No. The planner owns ordinary semantic choice; resolver/verifier resolve and validate planned steps before execution. | No. Direct skill tasks bypass semantic selection; the explicit skill call still uses dispatch/protocol validation. |
 | Does it use the shared skill dispatcher? | Yes when the planner chooses `call_skill` or a capability resolved to a skill. | Yes. It dispatches `payload.skill_name` through the same builtin / external / runner skill protocol. |
 | Is the result queryable by `task_id`? | Yes. | Yes. The direct skill result is saved under the original task row and can be read through `GET /v1/tasks/{task_id}` or `clawcli get`. |
 
 Operationally: use `kind=ask` when the user gave a natural-language request and RustClaw should decide whether to answer, ask, plan, or execute. Use `kind=run_skill` when an API caller already knows the exact skill and args and only wants RustClaw to run that explicit skill under the task queue, auth, lifecycle, and result projection machinery.
 
-- `Intent normalizer`: produces structured hints and compatibility trace fields. It is not the final semantic owner for ordinary eligible work.
-- `Boundary guards`: bind identity/session state, apply locator, contract, safety, budget, confirmation, dry-run, and compatibility checks from machine fields. This layer should stay small and must not grow per-language phrase logic.
-- `Agent-loop semantic authority`: ordinary natural-language work enters the loop by default, where the planner/runtime decides whether to respond, call a capability, execute a tool or skill, synthesize from evidence, repair, or stop.
+- `Planner-owned front door`: materializes text/audio/attachments and builds `TurnBoundaryEnvelope` from task identity, explicit API fields, structured locator facts, and safety/budget profiles. It performs no semantic LLM call and contains no ordinary respond/clarify/execute branch.
+- `Agent-loop semantic authority`: every ordinary natural-language task enters the loop. The planner decides whether to respond, clarify, call a capability, execute a tool or skill, synthesize from evidence, repair, checkpoint, or stop.
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
 - `Async job start`: long-tail tool work can publish a machine reply with `checkpoint_id`, `poll_ref`, `next_check_after`, `can_poll`, and `can_cancel` while the task remains recoverable through checkpoint polling. Media skills expose this shape through registry capabilities such as `image.generate` / `image.poll` / `image.cancel`, `audio.synthesize` / `audio.poll` / `audio.cancel`, `video.generate` / `video.poll` / `video.cancel`, and `music.generate` / `music.poll` / `music.cancel`.
@@ -120,20 +114,12 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 
 ```mermaid
 flowchart TD
-    A[User turn] --> B[Normalizer prompt]
-    B --> C[LLM: structured route hint]
-    C --> D[Parse schema fields]
-    D --> E[Ask context bundle]
-    E --> F[Boundary guards<br/>machine fields only]
-    F -->|agent-loop authority| G[Agent-loop context]
-    F -->|schedule / safety / explicit protocol completion| H[Boundary finalization path]
-    G --> I{Round source}
-    I -->|existing observation / explicit protocol| J[Runtime protocol projection]
-    I -->|runtime async command contract| JA[Async job protocol projection<br/>start / poll / cancel]
-    I -->|needs reasoning| K[LLM: planner round]
+    A[User turn + explicit API fields] --> B[Materialize text/audio/attachments]
+    B --> C[TurnBoundaryEnvelope<br/>machine-owned, no semantic route]
+    C --> D[Context bundle<br/>memory provenance + goal/journal/artifact refs]
+    D --> G[Agent-loop context]
+    G --> K[LLM: planner round]
     K --> L[Plan JSON steps]
-    J --> M[CapabilityResolver]
-    JA --> M
     L --> M
     N[Skill registry<br/>planner_capabilities] --> M
     O[Generated INTERFACE prompts] --> K
@@ -143,7 +129,7 @@ flowchart TD
     Q -->|call_tool / call_skill| QA[Pre-tool hooks + adapter preflight]
     R --> QA
     QA -->|runtime async marker| AR[Allow async_start + strip internal marker]
-    QA -->|subagent tool| SS[Bounded read-only subagent batch<br/>AgentTeamSpec + role/config + aggregation]
+    QA -->|subagent tool| SS[Bounded child team<br/>read-only explorer or isolated worktree writer/tester]
     QA -->|call_tool| S[Tool executor]
     QA -->|call_skill| T[Skill dispatcher]
     AR --> T
@@ -167,24 +153,23 @@ flowchart TD
     ZC -->|complete| ZD[Observed-output finalizer]
     ZB --> ZE[Output-contract guard]
     ZD --> ZE
-    H --> ZE
     ZE --> ZF[Persist result + deliver]
 ```
 
-- `Normalizer prompt`: lets an LLM read the user turn and emit schema-backed fields. Runtime consumes those fields as hints and contracts rather than matching user phrases.
-- `Planner prompt`: is built for loop rounds that need model reasoning. Only explicit protocol or state projections, such as async job polling and safety/status completion, may complete without asking the planner to choose a capability; ordinary semantic capability choice remains planner-owned.
+- `TurnBoundaryEnvelope`: is built deterministically from authenticated task/session state, attachments, explicit API fields, locators, and policy profiles. It is context for the planner, not a semantic route result.
+- `Planner prompt`: is the first semantic LLM call for an ordinary `ask`. Resume and async-poll executors may restore a previously admitted machine checkpoint, but they cannot introduce a new pre-planner semantic decision path.
 - `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
 - `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
 - `Command payload contract repair`: declared command payloads are normalized to `RawCommandOutput` or `CommandOutputSummary` machine contracts when needed, including cases where an upstream hint mislabeled the request as service-status work.
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
 - `Task journal event`: executor observations are projected into stable `task_goal`, `context_budget`, `context_compaction`, `tool_started`, `tool_step`, `tool_finished`, optional `coding_checkpoint`, optional `coding_task_contract`, optional `coding_evidence`, and optional team lifecycle events with refs, counts, status tokens, verification tokens, timing, and failure attribution for CLI/UI progress views.
-- `subagent tool`: planner-authorized subagents stay explicit and read-only. A single child run or a bounded `children` batch is recorded through `AgentTeamSpec`, role/config enforcement, timeout/cancellation policy fields, optional/required failure isolation, and machine-only aggregation (`child_results`, `finding_refs`, `evidence_refs`, `conflict_summary`, `recommended_next_action`). It does not grant write or external-publish permission.
-- `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the normalizer/planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
+- `subagent tool`: planner-authorized child work is explicit. Explorers remain bounded and read-only; an isolated writer/tester may work only in its task-scoped Git worktree and return patch/evidence refs. The parent reviews conflicts, dirty-parent state, and precondition hashes before admitting or rejecting the patch. Children never write directly into the parent worktree or publish externally.
+- `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
 - `RepairEnvelope`: verifier, executor, permission, provider, and checkpoint recovery paths expose structured repair context to the next loop round; user-visible fallback prose should come from i18n, finalizer, UI, or the model, not runtime templates.
-- `Boundary finalization`: remains for explicit schedule, safety, protocol, status, and already-observed completion paths. It is not an ordinary semantic router, and it should not reintroduce route-authority rollback switches.
+- `Observed-output finalization`: publishes only evidence-grounded output after the loop has selected and completed the relevant response or action path. It is not an alternate semantic router.
 
 ### Permission Plane And Command Policy
 
@@ -200,20 +185,19 @@ The permission plane is a structured execution boundary, not a second semantic r
 
 ## Natural Language Contract Boundary
 
-RustClaw keeps natural-language understanding on the LLM side and deterministic execution on the runtime side. The intent normalizer and planner may read user wording, examples, skill docs, and multilingual prompt guidance, but they must turn that understanding into structured fields before runtime code acts on it.
+RustClaw keeps natural-language understanding on the LLM side and deterministic execution on the runtime side. The planner may read user wording, examples, skill docs, and multilingual prompt guidance, but it must turn that understanding into structured actions before runtime code acts on it. The pre-planner front door may only expose authenticated machine facts through `TurnBoundaryEnvelope`; it cannot infer ordinary intent.
 
 Runtime code should consume stable contracts such as:
 
 - evidence-policy answer-shape fields, for example `final_answer_shape = "content_excerpt_summary"` and `final_answer_shape_class = "grounded_summary"`
-- schema compatibility enums for non-capability output shapes, such as `semantic_kind` / `contract_marker`, only when they arrive as machine fields from the normalizer, historical trace, or output-contract compatibility boundary
-- capability refs emitted by the planner or boundary context, for example `capability_ref = "package.detect_manager"` or `call_capability("package.detect_manager")`
+- planner-owned capability refs, for example `capability_ref = "package.detect_manager"` or `call_capability("package.detect_manager")`
 - action names, for example `read_field`, `validate_config`, or `transform_data`
 - registry metadata and `planner_capabilities`
 - `EvidencePolicyContext` / `OutputContract` fields, target locators, and explicit `field_path` values
 - JSON/TOML/YAML field paths, file extensions, structured tool output, exit codes, error kinds, and risk/effect metadata
 - `permission_decision` and `command_policy` machine fields
 
-Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update the normalizer/planner schema, registry capability metadata, `INTERFACE.md`, generated skill prompts, or vendor prompt patch so the LLM emits the same structured contract in any language. Ordinary skills such as weather, web, image, photo, publishing, package manager, Docker, RSS, and market quote must flow through registry capability metadata; stale registry-bridge `semantic_kind` or contract-marker values fall through to generic contract policy and cannot select those capability families. Current planner, verifier, finalizer, and journal diagnostics should expose `final_answer_shape` rather than old marker names except inside isolated normalizer/schema compatibility and historical trace readers. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
+Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update registry capability metadata, `INTERFACE.md`, generated skill prompts, planner schema, or a necessary vendor prompt patch so the LLM emits the same structured action in any language. Ordinary skills such as weather, web, image, photo, publishing, package manager, Docker, RSS, and market quote must flow through registry capability metadata. Historical route/semantic fields may be rendered only by isolated legacy-log readers; they cannot select a capability, modify a contract, or decide final answer shape. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
 
 ## Memory System
 
@@ -226,10 +210,10 @@ Memory is scoped to the authenticated identity first, then to the current conver
 The memory layer has three hard boundaries:
 
 - current user input always wins over recalled memory
-- memory text is background context unless a structured route or state patch explicitly binds it to the current turn
+- memory text is background context unless current task/session state explicitly binds it to the turn
 - runtime code consumes memory through structured fields, source kinds, scores, safety flags, and use-policy decisions rather than per-language phrase branches
 
-This keeps old assistant output, task logs, and knowledge snippets from silently steering execution. If a recalled item conflicts with the current request, the route and planner prompts tell the model to prefer the current request.
+This keeps old assistant output, task logs, and knowledge snippets from silently steering execution. If recalled context conflicts with the current request, the planner prompt and memory-use policy require the current request to win.
 
 ### Storage Model
 
@@ -260,11 +244,9 @@ Memory writes are intentionally after-answer work. The user-visible response is 
 
 ### Recall And Use Policy
 
-Memory recall is built as a structured context and then filtered by a memory use policy for the current stage:
+Memory recall is built as structured context and then filtered by the current consumer's memory use policy:
 
-- route: defaults to a minimal profile with active preferences, relevant facts, and knowledge docs; it omits old assistant results for new tasks
-- follow-up route: can include recent events, assistant results, similar triggers, unfinished goals, and snippets when active session state shows that the user is continuing prior work
-- planner: can use unfinished goals, preferences, facts, and knowledge docs, but avoids fallback long-term summaries and old assistant results by default
+- planner: can use unfinished goals, preferences, relevant facts, and knowledge docs, but excludes fallback long-term summaries, assistant results, similar triggers, and raw recent snippets
 - chat: uses stable preferences and facts; bounded recent context is allowed only when current session state makes it relevant
 - skill: `_memory` is cropped by the skill registry `memory_policy`; skills without a policy get a safe default scoped profile
 
@@ -287,7 +269,7 @@ Hybrid recall uses `memory_retrieval_index` plus optional FTS. Each indexed row 
 
 The default provider is `local-hash-v1`, which runs offline. Unsupported or unavailable embedding providers fall back to local hash so the runtime keeps working. Retrieval only uses cosine scoring when the stored embedding metadata matches the current provider spec; mismatched rows fall back to lexical, salience, recency, and success-state scoring. Set `reindex_on_startup = true` in `configs/memory.toml`, or start with an empty index, to rebuild the retrieval index from short-term records, preferences, fact cards, and KB snapshots.
 
-Retrieval combines several signals instead of trusting a single score: exact / lexical matches, vector similarity when compatible, salience, recency, source kind, success state, safety filter, and the current memory use policy. This makes the index useful for multilingual recall while keeping execution grounded in the route and output contracts.
+Retrieval combines several signals instead of trusting a single score: exact / lexical matches, vector similarity when compatible, salience, recency, source kind, success state, safety filter, and the current memory use policy. This makes the index useful for multilingual recall while keeping execution grounded in planner actions and output/evidence contracts.
 
 ### Knowledge Base Design Flow
 
@@ -315,7 +297,10 @@ flowchart TD
     H -->|list_namespaces / stats| Q[Read namespace snapshots]
     Q --> R[Structured namespace counts<br/>names + docs + chunks]
     M --> S[Memory recall policy<br/>may include knowledge_docs]
-    S --> T[Planner / chat / skill memory context]
+    S --> SP[Retrieval provenance<br/>source_ref + chunk_id + inclusion reason]
+    SP --> SB[Context budget + live compaction]
+    SB --> T[Planner / chat / skill memory context]
+    SP --> ST[memory_trace<br/>refs and budget, no raw copy]
     P --> U[Observation<br/>evidence coverage + finalizer]
     R --> U
 ```
@@ -506,7 +491,7 @@ flowchart LR
 
 ### Detailed Flow Diagrams
 
-The following diagrams break the same runtime into smaller observable flows. They describe current machine fields and UI/CLI behavior; they are not extra routing layers.
+The following diagrams break the same runtime into smaller observable flows. They describe current machine fields and UI/CLI behavior; they are not extra routing layers. The removed intent normalizer, contract-repair judge, pre-route repair, route-selected rollback, and agent-mode switch do not participate in current execution.
 
 Teaching mode per-turn trace flow:
 
@@ -581,8 +566,10 @@ Context budget and compaction flow:
 ```mermaid
 flowchart TD
     A[Current task + session context] --> B[Context builder]
-    B --> C[Inventory input categories<br/>conversation + memory + goal + journal + artifacts + previous results + LLM trace + coding evidence]
-    C --> D[ContextBudgetReport]
+    B --> C[Inventory input categories<br/>conversation + memory/KB + goal + journal + artifacts + previous results + coding evidence]
+    C --> CP[Retrieval/use policy<br/>current request wins + source scope]
+    CP --> CR[Provenance records<br/>source_ref + source_kind + inclusion reason + memory_trace]
+    CR --> D[ContextBudgetReport]
     D --> E{Budget policy}
     E -->|fits| F[Included refs]
     E -->|over budget / light profile / long session| G[Excluded refs]
@@ -590,11 +577,14 @@ flowchart TD
     H --> I[Risk flags<br/>budget_excluded_context + old_assistant_output_not_instruction]
     F --> J[Prompt machine block<br/>CONTEXT_BUDGET_REPORT]
     H --> J
+    CR --> J
     J --> K[Task journal summary]
     K --> L[context_budget event]
     K --> M[context_compaction event]
+    K --> MP[memory_trace<br/>refs and budget, no raw memory copy]
     L --> N[Teaching mode + clawcli report]
     M --> N
+    MP --> N
 ```
 
 Subagent team orchestration flow:
@@ -603,23 +593,27 @@ Subagent team orchestration flow:
 flowchart TD
     A[Planner action<br/>subagent children batch] --> B[Subagent runtime]
     B --> C[Load agent_guard subagent config]
-    C --> D[Validate role tokens]
-    D --> E[Apply max_parallel_readonly]
-    E --> F[Build AgentTeamSpec<br/>team_id + child_task_ids + role + scope + required + timeout + read_only]
-    F --> G[Run bounded read-only child observations]
-    G --> H{Child result}
-    H -->|completed| I[subagent_finished]
-    H -->|invalid role / disabled / parallel limit| J[subagent_failed]
-    I --> K[Aggregate findings + evidence refs]
-    J --> K
-    K --> L{Conflict count or required failure?}
-    L -->|conflict| M[agent_team_conflict_detected<br/>recommended_next_action=resolve_child_conflicts]
-    L -->|required failure| N[parent stop signal<br/>subagent_required_child_failed]
-    L -->|ready| O[recommended_next_action=synthesize_from_child_findings]
-    M --> P[agent_team_aggregated]
-    N --> P
-    O --> P
-    P --> Q[clawcli subagents + UI task trace]
+    C --> D[Validate role, scope, timeout, required flag]
+    D --> E{Child isolation}
+    E -->|explorer| F[Bounded read-only child<br/>finding/evidence refs]
+    E -->|writer/tester| G[Create task-scoped Git worktree<br/>base commit + write boundary]
+    G --> H[Child edits and verifies in isolation]
+    H --> I[Persist child patch record<br/>patch_ref + precondition hashes + evidence]
+    F --> J[Aggregate child results]
+    I --> J
+    J --> K{Parent review}
+    K -->|overlap / stale / dirty parent| L[Machine reject<br/>agent_team_conflict_detected]
+    K -->|required child failed| M[Parent stop signal<br/>subagent_required_child_failed]
+    K -->|read-only findings ready| N[Synthesize from child findings]
+    K -->|patch admissible| O[workspace.review_child_patch]
+    O --> P[Exact parent approval]
+    P --> Q[workspace.apply_child_patch<br/>parent-owned mutation]
+    Q --> R[Parent diff + verification evidence]
+    L --> S[agent_team_aggregated]
+    M --> S
+    N --> S
+    R --> S
+    S --> T[clawcli subagents/review + UI task trace]
 ```
 
 Goal, checkpoint, and resume flow:
@@ -676,6 +670,26 @@ flowchart TD
 
 Trusted lifecycle hooks are configured in `configs/agent_guard.toml` and remain disabled by default. Administrators can inspect the safe status projection at `GET /v1/admin/hooks/status` or in the browser Models page. The status contract reports setup state, enabled/valid/invalid counts, trust/hash readiness, and all supported stages; handler arguments, endpoint URLs, environment references, and credentials are not returned. The browser exposes only refresh and progressively disclosed `redacted_config`. Enabling or trusting a hook still requires reviewed repository configuration, so the UI cannot turn an unreviewed script into an execution boundary.
 
+MCP and lifecycle-hook trust flow:
+
+```mermaid
+flowchart TD
+    A[Planner capability/tool step] --> B[CapabilityResolver + PlanVerifier]
+    B --> C{Execution source}
+    C -->|local tool/skill| D[Registry policy + permission decision]
+    C -->|MCP tool| E[MCP server allowlist + schema validation]
+    E -->|untrusted / invalid / disconnected| F[Fail closed<br/>structured blocker, no tool replay]
+    E -->|trusted| D
+    D -->|denied / confirmation needed| G[Block or exact approval checkpoint]
+    D -->|allowed| H[Pre-tool lifecycle-hook stage]
+    H --> I{Hook handler trusted?<br/>enabled + reviewed hash + timeout policy}
+    I -->|no / hash changed / fail-closed timeout| F
+    I -->|yes or no configured hook| J[Adapter/tool execution]
+    J --> K[Post-tool hook + observation]
+    K --> L[Journal machine fields<br/>server/handler/trust/attempt/duration]
+    L --> M[CLI/UI status<br/>redacted config only]
+```
+
 Skill registry and runner protocol flow:
 
 ```mermaid
@@ -727,26 +741,32 @@ Coding edit, verify, and repair flow:
 
 ```mermaid
 flowchart TD
-    A[Coding request or goal] --> B[Planner loop]
-    B --> C[Planned change contract]
-    C --> D[Edit tool / file operation]
-    D --> E[Changed-file refs + side-effect fingerprints]
-    E --> F[Diff summary<br/>file path + change kind + bounded hunks]
-    F --> G[Verification command contract]
-    G --> H{Verification observed?}
-    H -->|pass| I[verified evidence refs]
-    H -->|fail| J[repair_signal<br/>failure kind + command + attempt ledger]
-    H -->|missing| K[validation_gate<br/>cannot report fully verified]
-    J --> L[Repair round in agent loop]
-    K --> L
-    L --> M{Repair budget / blocker}
-    M -->|retry| B
-    M -->|provider/tool wait| N[checkpoint + resume state]
-    M -->|terminal| O[structured failure evidence]
-    I --> P[Coding workflow event<br/>verification_status=passed]
-    N --> P
-    O --> P
-    P --> Q[clawcli report/review + UI teaching timeline]
+    A[Coding request or goal] --> B[Inspect workspace + relevant evidence]
+    B --> C[Planner change contract]
+    C --> D[Patch preview<br/>paths + precondition hashes]
+    D --> E[PlanVerifier + exact mutation approval]
+    E --> F[workspace.apply_patch adapter]
+    F --> G[Capture compensation snapshot<br/>then apply once]
+    G --> H[Patch checkpoint<br/>checkpoint_id + patch_id + changed files]
+    H --> I[workspace.diff<br/>bounded exact unified diff artifact]
+    I --> J[Verification command contract]
+    J --> K{Verification observed?}
+    K -->|pass| L[Verified evidence refs]
+    K -->|fail| M[repair_signal<br/>failure kind + command + attempt ledger]
+    K -->|missing| N[validation_gate<br/>cannot report fully verified]
+    M --> O[Repair round in agent loop]
+    N --> O
+    O --> P{Repair budget / blocker}
+    P -->|retry| B
+    P -->|provider/tool wait| Q[Checkpoint + resume state]
+    P -->|undo admitted edit| R[workspace.revert_checkpoint<br/>exact approval]
+    R --> S[Restore compensation snapshot<br/>restored_files + compensation_ref]
+    S --> B
+    P -->|terminal| T[Structured failure evidence]
+    L --> U[Coding workflow event<br/>verification_status=passed]
+    Q --> U
+    T --> U
+    U --> V[clawcli code diff/report/review + UI teaching timeline]
 ```
 
 Memory write and recall policy flow:
@@ -766,8 +786,9 @@ flowchart TD
     H --> K[Hybrid retrieval<br/>lexical + vector-compatible + salience + recency]
     K --> J
     J --> L[Filtered context refs<br/>preferences + facts + knowledge docs]
-    L --> M[Prompt machine context]
-    L --> N[memory_trace<br/>stage + policy + refs + budget]
+    L --> LB[Context budget + deterministic live compaction]
+    LB --> M[Prompt machine context<br/>included/excluded source refs]
+    L --> N[memory_trace<br/>stage + policy + provenance refs + budget]
     M --> O[Planner/chat/skill]
     N --> P[Teaching mode + debug task trace]
 ```
@@ -894,7 +915,7 @@ The same gate writes `agent_parity_gate_inventory_contracts.txt` and records `ag
 
 The same gate also writes `task_lifecycle_contracts.txt` and records `task_lifecycle_contracts=1`. This artifact comes from `scripts/check_task_lifecycle_contracts.py --self-test` plus the main check, and must include `TASK_LIFECYCLE_CONTRACT_SELF_TEST ok` and `TASK_LIFECYCLE_CONTRACT_CHECK findings=0`. It keeps background execution, checkpoint/resume, resume executor leases, seeded agent-loop resume, async poll/cancel projection, and CLI/UI task lifecycle display tied to machine fields instead of localized `text/error_text`.
 
-The same gate also writes `task_event_context_team_contracts.txt` and records `task_event_context_team_contracts=1`. This artifact comes from `scripts/check_task_event_context_team_contracts.py --self-test` plus the main check, and must include `TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok` and `TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0`. It keeps `task_goal`, `context_budget`, `context_compaction`, provider prompt-budget metrics, coding evidence, and read-only subagent/team lifecycle events available as structured event-stream fields for CLI, UI, teaching mode, and replay tooling.
+The same gate also writes `task_event_context_team_contracts.txt` and records `task_event_context_team_contracts=1`. This artifact comes from `scripts/check_task_event_context_team_contracts.py --self-test` plus the main check, and must include `TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok` and `TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0`. It keeps `task_goal`, `context_budget`, `context_compaction`, provider prompt-budget metrics, coding evidence, and subagent/team lifecycle events available as structured event-stream fields for CLI, UI, teaching mode, and replay tooling; write-enabled children remain isolated in task-scoped worktrees and require parent admission.
 
 The same gate also writes `clawcli_exec_replay_contracts.txt` and records `clawcli_exec_replay_contracts=1`. This artifact comes from `scripts/check_clawcli_exec_replay_contracts.py --self-test` plus the main check, and must include `CLAWCLI_EXEC_REPLAY_CONTRACT_SELF_TEST ok` and `CLAWCLI_EXEC_REPLAY_CONTRACT_CHECK findings=0`. It keeps `clawcli exec`/`clawcli code` CI artifacts (`summary.json`, `task.json`, `events.jsonl`, `verification.json`, `diff_summary.json`, `llm_summary.json`, `resume.json`, `index.json`), `exec_compact_*` output, and `clawcli replay export/run/diff` recorded_only coverage/view/diff-class behavior tied to machine fields.
 
