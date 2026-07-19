@@ -152,6 +152,10 @@ pub(crate) fn task_event_lines(data: &serde_json::Value) -> Vec<TaskEventLine> {
     events
 }
 
+pub(crate) fn task_event_lines_from_raw(events: &[serde_json::Value]) -> Vec<TaskEventLine> {
+    events.iter().filter_map(task_event_line).collect()
+}
+
 pub(crate) fn live_task_event_output_line(
     raw_event: &serde_json::Value,
     mode: LiveEventOutputMode,
@@ -218,6 +222,38 @@ where
         return Err(TaskEventHttpStatusError { status, body }.into());
     }
     consume_sse(BufReader::new(response), &mut on_event)
+}
+
+pub(crate) fn read_task_event_snapshot(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    cursor: u64,
+) -> Result<Vec<serde_json::Value>> {
+    let url = format!(
+        "{}/tasks/{}/events?cursor={}&follow=false",
+        client::base_v1(base_url),
+        task_id,
+        cursor
+    );
+    let response = client::make_stream_client_with_timeout(None)?
+        .get(url)
+        .header("x-rustclaw-key", key)
+        .header("accept", "text/event-stream")
+        .header("last-event-id", cursor.to_string())
+        .send()
+        .context("task_event_snapshot_open_failed")?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        return Err(TaskEventHttpStatusError { status, body }.into());
+    }
+    let mut events = Vec::new();
+    consume_sse(BufReader::new(response), &mut |event| {
+        events.push(event.clone());
+        Ok(true)
+    })?;
+    Ok(events)
 }
 
 #[derive(Debug)]
@@ -479,8 +515,11 @@ fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
         "test_count",
         "diff_summary_count",
         "failure_count",
+        "projection_revision",
+        "latest_verification_step_ref",
         "verification_status",
         "verification_failure_kind_count",
+        "historical_verification_failure_kind_count",
         "retry_count",
         "unverified_risk",
         "final_status",
