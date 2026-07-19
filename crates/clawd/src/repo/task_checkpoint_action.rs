@@ -47,16 +47,17 @@ pub(crate) fn upsert_task_checkpoint_action(
     let tool_or_skill = required_machine_ref(tool_or_skill, "tool_or_skill")?;
     let action_ref = required_machine_ref(action_ref, "action_ref")?;
     if !args.is_object() {
-        return Err(anyhow!("checkpoint action args must be an object"));
+        return Err(anyhow!("checkpoint_action_args_not_object"));
     }
     if output_contract.is_some_and(|value| !value.is_object()) {
-        return Err(anyhow!("checkpoint output contract must be an object"));
+        return Err(anyhow!("checkpoint_output_contract_not_object"));
     }
-    let args_json = serde_json::to_string(args).context("serialize checkpoint action args")?;
+    let args_json =
+        serde_json::to_string(args).context("checkpoint_action_args_serialize_failed")?;
     let output_contract_json = output_contract
         .map(serde_json::to_string)
         .transpose()
-        .context("serialize checkpoint output contract")?;
+        .context("checkpoint_output_contract_serialize_failed")?;
     let integrity_hash = checkpoint_action_integrity_hash(
         task_id,
         checkpoint_id,
@@ -66,7 +67,7 @@ pub(crate) fn upsert_task_checkpoint_action(
         output_contract_json.as_deref(),
     );
     let now = crate::now_ts_u64() as i64;
-    let db = pool.get().context("checkpoint action db pool")?;
+    let db = pool.get().context("checkpoint_action_db_pool_failed")?;
     db.execute_batch(INIT_TASK_CHECKPOINT_ACTION_SQL)?;
     db.execute(
         "INSERT INTO task_checkpoint_actions (
@@ -101,7 +102,7 @@ pub(crate) fn load_task_checkpoint_action(
 ) -> anyhow::Result<Option<TaskCheckpointAction>> {
     let task_id = required_text(task_id, "task_id")?;
     let checkpoint_id = required_text(checkpoint_id, "checkpoint_id")?;
-    let db = pool.get().context("checkpoint action db pool")?;
+    let db = pool.get().context("checkpoint_action_db_pool_failed")?;
     db.execute_batch(INIT_TASK_CHECKPOINT_ACTION_SQL)?;
     let row = db
         .query_row(
@@ -125,8 +126,8 @@ pub(crate) fn load_task_checkpoint_action(
     else {
         return Ok(None);
     };
-    required_machine_ref(&tool_or_skill, "stored tool_or_skill")?;
-    required_machine_ref(&action_ref, "stored action_ref")?;
+    required_machine_ref(&tool_or_skill, "stored_tool_or_skill")?;
+    required_machine_ref(&action_ref, "stored_action_ref")?;
     let expected_hash = checkpoint_action_integrity_hash(
         task_id,
         checkpoint_id,
@@ -136,24 +137,23 @@ pub(crate) fn load_task_checkpoint_action(
         output_contract_json.as_deref(),
     );
     if integrity_hash != expected_hash {
-        return Err(anyhow!("checkpoint action integrity mismatch"));
+        return Err(anyhow!("checkpoint_action_integrity_mismatch"));
     }
-    let args = serde_json::from_str::<Value>(&args_json).context("parse checkpoint action args")?;
+    let args =
+        serde_json::from_str::<Value>(&args_json).context("checkpoint_action_args_parse_failed")?;
     if !args.is_object() {
-        return Err(anyhow!("stored checkpoint action args must be an object"));
+        return Err(anyhow!("stored_checkpoint_action_args_not_object"));
     }
     let output_contract = output_contract_json
         .as_deref()
         .map(serde_json::from_str::<Value>)
         .transpose()
-        .context("parse checkpoint output contract")?;
+        .context("checkpoint_output_contract_parse_failed")?;
     if output_contract
         .as_ref()
         .is_some_and(|value| !value.is_object())
     {
-        return Err(anyhow!(
-            "stored checkpoint output contract must be an object"
-        ));
+        return Err(anyhow!("stored_checkpoint_output_contract_not_object"));
     }
     Ok(Some(TaskCheckpointAction {
         task_id: task_id.to_string(),
@@ -168,7 +168,7 @@ pub(crate) fn load_task_checkpoint_action(
 fn required_text<'a>(value: &'a str, field: &str) -> anyhow::Result<&'a str> {
     let value = value.trim();
     if value.is_empty() {
-        return Err(anyhow!("{field} is required"));
+        return Err(anyhow!("{field}_required"));
     }
     Ok(value)
 }
@@ -180,7 +180,7 @@ fn required_machine_ref<'a>(value: &'a str, field: &str) -> anyhow::Result<&'a s
             ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | '-' | '.' | ':')
         })
     {
-        return Err(anyhow!("{field} is not a valid machine reference"));
+        return Err(anyhow!("{field}_invalid_machine_reference"));
     }
     Ok(value)
 }

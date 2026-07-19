@@ -81,5 +81,5 @@ fn checkpoint_action_rejects_integrity_mismatch() {
 
     let error = load_task_checkpoint_action(&pool, "task-1", "checkpoint-1")
         .expect_err("integrity mismatch");
-    assert!(error.to_string().contains("integrity mismatch"));
+    assert_eq!(error.to_string(), "checkpoint_action_integrity_mismatch");
 }
