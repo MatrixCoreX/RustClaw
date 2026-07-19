@@ -109,6 +109,15 @@ fn verifier_gate_needs_confirmation(verify_result: &crate::verifier::VerifyResul
     })
 }
 
+pub(super) fn verifier_confirmation_gate_requires_checkpoint(
+    verify_result: &crate::verifier::VerifyResult,
+) -> bool {
+    matches!(verify_result.mode, crate::verifier::VerifyMode::Enforce)
+        && verify_result.approved
+        && verify_result.needs_confirmation
+        && verifier_gate_needs_confirmation(verify_result)
+}
+
 fn verifier_gate_needs_clarification(verify_result: &crate::verifier::VerifyResult) -> bool {
     verify_result.issues.iter().any(|issue| {
         matches!(
@@ -263,7 +272,9 @@ pub(super) async fn prepare_round_actions(
         loop_state.round_no,
         journal.to_log_json()
     );
-    let actions = if verifier_gate_should_stop_round(&verify_result) {
+    let actions = if verifier_confirmation_gate_requires_checkpoint(&verify_result) {
+        Vec::new()
+    } else if verifier_gate_should_stop_round(&verify_result) {
         let content = build_verifier_gate_response(
             state,
             task,

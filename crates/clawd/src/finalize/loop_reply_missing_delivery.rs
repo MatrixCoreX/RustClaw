@@ -15,6 +15,17 @@ use super::{
     route_resolved_intent, route_structured_clarify_context,
 };
 
+pub(super) fn pre_execution_confirmation_checkpoint_seed(
+    plan_steps: &[crate::PlanStep],
+) -> Option<(crate::PlanStep, Vec<crate::AgentAction>)> {
+    let first_step = plan_steps.first()?.clone();
+    let actions = plan_steps
+        .iter()
+        .map(crate::PlanStep::to_agent_action)
+        .collect::<Option<Vec<_>>>()?;
+    (!actions.is_empty()).then_some((first_step, actions))
+}
+
 pub(super) async fn pending_confirmation_resume_payload(
     state: &AppState,
     task: &ClaimedTask,
@@ -67,20 +78,8 @@ pub(super) async fn pending_confirmation_resume_payload(
         .and_then(serde_json::Value::as_str)
         == Some("pending");
     if pending_approval {
-        if let Some(step) = plan_steps
-            .iter()
-            .find(|step| confirmation_step_ids.contains(&step.step_id))
-            .cloned()
-        {
-            loop_state.active_verified_actions = plan_steps
-                .iter()
-                .filter_map(crate::PlanStep::to_agent_action)
-                .collect();
-            let step_in_round = plan_steps
-                .iter()
-                .position(|candidate| candidate.step_id == step.step_id)
-                .map(|index| index + 1)
-                .unwrap_or(1);
+        if let Some((step, actions)) = pre_execution_confirmation_checkpoint_seed(&plan_steps) {
+            loop_state.active_verified_actions = actions;
             crate::agent_engine::publish_agent_loop_user_input_checkpoint_progress(
                 state,
                 task,
@@ -89,7 +88,7 @@ pub(super) async fn pending_confirmation_resume_payload(
                 &step.skill,
                 &step.skill,
                 &step.args,
-                step_in_round,
+                1,
             )?;
             loop_state.active_verified_actions.clear();
         }
