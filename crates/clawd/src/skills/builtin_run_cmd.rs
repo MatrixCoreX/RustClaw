@@ -466,7 +466,7 @@ pub(super) async fn run_safe_command_detailed(
 
     let mut cmd = prepare_run_cmd_process(cwd, sandbox_mode, workspace_root)?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
-    cmd.arg("-lc").arg(command);
+    cmd.args(["-o", "pipefail", "-lc"]).arg(command);
     cmd.current_dir(cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -712,7 +712,7 @@ pub(super) async fn start_async_command(
     let run_script_path = job_dir.join("run.sh");
     let max_runtime_seconds = max_runtime_seconds.clamp(1, 86_400);
     let script = format!(
-        "#!/usr/bin/env bash\nset +e\nprintf '%s\\n' \"$(date +%s)\" > {}\nif command -v timeout >/dev/null 2>&1; then\n  timeout -k 5 {} bash -lc {} > {} 2> {}\nelse\n  bash -lc {} > {} 2> {}\nfi\ncode=$?\nprintf '%s\\n' \"$code\" > {}\nprintf '%s\\n' \"$(date +%s)\" > {}\n",
+        "#!/usr/bin/env bash\nset +e\nprintf '%s\\n' \"$(date +%s)\" > {}\nif command -v timeout >/dev/null 2>&1; then\n  timeout -k 5 {} bash -o pipefail -lc {} > {} 2> {}\nelse\n  bash -o pipefail -lc {} > {} 2> {}\nfi\ncode=$?\nprintf '%s\\n' \"$code\" > {}\nprintf '%s\\n' \"$(date +%s)\" > {}\n",
         shell_single_quote(&started_path.display().to_string()),
         max_runtime_seconds,
         shell_single_quote(command),
