@@ -1126,8 +1126,8 @@ pub(crate) fn checkpoint_action_plan(
     output_contract: Option<crate::IntentOutputContract>,
 ) -> PlanResult {
     let actions = vec![
-        AgentAction::CallSkill {
-            skill: tool_or_skill.to_string(),
+        AgentAction::CallCapability {
+            capability: action_ref.to_string(),
             args,
         },
         AgentAction::SynthesizeAnswer {

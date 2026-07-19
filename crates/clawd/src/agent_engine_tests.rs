@@ -24,8 +24,8 @@ fn checkpoint_action_plan_preserves_exact_action_and_output_contract() {
 
     assert_eq!(plan.steps.len(), 2);
     assert_eq!(plan.steps[0].step_id, "step_4");
-    assert_eq!(plan.steps[0].action_type, "call_skill");
-    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(plan.steps[0].action_type, "call_capability");
+    assert_eq!(plan.steps[0].skill, "system.run_command");
     assert_eq!(plan.steps[0].args, args);
     assert_eq!(plan.steps[1].action_type, "synthesize_answer");
     assert_eq!(plan.steps[1].step_id, "step_5");
@@ -37,6 +37,7 @@ fn checkpoint_action_plan_preserves_exact_action_and_output_contract() {
         Some("command,created_path,stdout,status")
     );
 }
+
 use claw_core::skill_registry::{
     Capability, CapabilityExecutionMode, CapabilityIsolationProfile, OutputKind,
     PlannerCapabilityEffect, PlannerCapabilityKind, PlannerCapabilityMapping, RegistryDedupScope,

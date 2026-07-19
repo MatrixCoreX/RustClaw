@@ -34,7 +34,7 @@ input_schema = { type = "object", required = ["command"], properties = { action 
 planner_capabilities = [
   { name = "system.preview_command_permission", action = "preview_command_permission", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
   { name = "system.inspect_cli_help", action = "inspect_cli_help", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
-  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", output_semantic_kind = "raw_command_output" },
 ]
 
 [[skills]]
@@ -324,6 +324,59 @@ pub(super) fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
         plan_kind: PlanKind::Single,
         raw_plan_text: String::new(),
     }
+}
+
+#[test]
+fn checkpoint_action_plan_resolves_capability_before_replay() {
+    let state = test_state();
+    let task = test_task();
+    let mut stored_contract = crate::IntentOutputContract::default();
+    stored_contract.selection.structured_field_selector =
+        Some("command,created_path,stdout,status".to_string());
+    let plan = crate::agent_engine::checkpoint_action_plan(
+        "system.run_command",
+        "system.run_command",
+        json!({"command": "printf checkpoint_ok"}),
+        1,
+        Some(stored_contract),
+    );
+
+    let output_contract =
+        crate::capability_resolver::bind_unclassified_output_contract_from_capabilities(
+            &state, &plan,
+        )
+        .expect("checkpoint output contract");
+    assert_eq!(
+        output_contract.semantic_kind,
+        crate::OutputSemanticKind::RawCommandOutput
+    );
+    assert_eq!(
+        output_contract
+            .selection
+            .structured_field_selector
+            .as_deref(),
+        Some("command,created_path,stdout,status")
+    );
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: Some(&output_contract),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    let action = result.approved_steps[0]
+        .to_agent_action()
+        .expect("resolved replay action");
+    assert!(matches!(
+        action,
+        crate::AgentAction::CallSkill { ref skill, .. } if skill == "run_cmd"
+    ));
 }
 
 fn redacted_workspace_child_boundary_context() -> String {
