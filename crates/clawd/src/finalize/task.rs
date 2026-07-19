@@ -147,7 +147,12 @@ async fn finalize_ask_success(
         crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
     crate::worker::record_schedule_notify_outcome(journal, notify_outcome);
     let result = ask_result_payload(answer_text, answer_messages, Some(journal));
-    repo::update_task_success(state, &task.task_id, &result.to_string())?;
+    repo::update_task_success(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &result.to_string(),
+    )?;
     insert_ask_memory_pair(
         state,
         task,
@@ -194,7 +199,12 @@ async fn finalize_ask_checkpointed(
     if let (Some(obj), Some(resume_context)) = (result.as_object_mut(), resume_context) {
         obj.insert("resume_context".to_string(), resume_context.clone());
     }
-    repo::update_task_checkpointed_result(state, &task.task_id, &result.to_string())?;
+    repo::update_task_checkpointed_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &result.to_string(),
+    )?;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_checkpointed task_id={} kind=ask lifecycle_state={} checkpoint_id={}",
@@ -238,7 +248,13 @@ async fn finalize_ask_resume_failure(
         );
     }
     let result = journal.attach_to_result(result);
-    repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), user_error)?;
+    repo::update_task_failure_with_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &result.to_string(),
+        user_error,
+    )?;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_end task_id={} kind=ask status=failed path=normal error={} resume_context=true",
@@ -274,7 +290,13 @@ async fn finalize_ask_failure(
         );
     }
     let result = journal.attach_to_result(result);
-    repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), err_text)?;
+    repo::update_task_failure_with_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &result.to_string(),
+        err_text,
+    )?;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_end task_id={} kind=ask status=failed path=normal error={}",
@@ -348,7 +370,12 @@ pub(crate) async fn finalize_ask_direct_success(
         crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
     crate::worker::record_schedule_notify_outcome(&mut journal, notify_outcome);
     let result = journal.attach_to_result(json!({ "text": answer_text }));
-    repo::update_task_success(state, &task.task_id, &result.to_string())?;
+    repo::update_task_success(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &result.to_string(),
+    )?;
     insert_ask_memory_pair(
         state,
         task,

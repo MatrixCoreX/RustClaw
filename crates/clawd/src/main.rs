@@ -1537,6 +1537,7 @@ async fn classify_direct(
     }
     let channel_kind = req.channel.unwrap_or(ChannelKind::Ui);
     let task = ClaimedTask {
+        claim_attempt: 0,
         task_id: format!("direct-classify-{}", Uuid::new_v4()),
         user_id: identity.user_id,
         chat_id: req.chat_id.unwrap_or(identity.chat_id),

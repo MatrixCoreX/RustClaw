@@ -25,6 +25,7 @@ fn async_poll_claimed_dispatch(
     adapter_result: Option<serde_json::Value>,
 ) -> crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-async-poll-adapter".to_string(),
         user_id: 1,
         chat_id: 2,

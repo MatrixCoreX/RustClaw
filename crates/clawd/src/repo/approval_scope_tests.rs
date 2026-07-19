@@ -19,6 +19,7 @@ fn scope() -> ApprovalScopeBinding {
 
 fn task(user_key: &str, chat_id: i64) -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-match".to_string(),
         user_id: 42,
         chat_id,

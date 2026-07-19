@@ -143,6 +143,7 @@ fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
 
 fn support_test_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-support".to_string(),
         user_id: 1,
         chat_id: 2,

@@ -4,6 +4,7 @@ use super::*;
 fn deterministic_status_answer_defers_for_agent_loop_rich_content() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-rich-content".to_string(),
         user_id: 1,
         chat_id: 1,

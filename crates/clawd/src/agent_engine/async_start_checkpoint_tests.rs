@@ -10,6 +10,7 @@ use crate::task_lifecycle::{CheckpointBudgetCounters, ResumeEntrypoint};
 
 fn test_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-async-start".to_string(),
         user_id: 1,
         chat_id: 2,

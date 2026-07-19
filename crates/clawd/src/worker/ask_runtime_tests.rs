@@ -3,6 +3,7 @@ use super::build_agent_run_context_from_prepared_flow;
 #[test]
 fn planner_context_keeps_raw_request_without_pre_planner_route() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-runtime-context".to_string(),
         user_id: 1,
         chat_id: 2,

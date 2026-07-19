@@ -13,6 +13,7 @@ fn raw_tail_recovery_fixture(
 ) {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-raw-tail-text-boundary".to_string(),
         user_id: 1,
         chat_id: 1,

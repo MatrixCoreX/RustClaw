@@ -18,6 +18,7 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
 
 fn task() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-local-code-projection".to_string(),
         user_id: 1,
         chat_id: 1,

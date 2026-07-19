@@ -2,6 +2,7 @@ use serde_json::json;
 
 fn seeded_claimed_dispatch() -> crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-seeded-terminal".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -71,6 +72,7 @@ fn async_poll_claimed_dispatch(
     expires_at: Option<i64>,
 ) -> crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-async-poll".to_string(),
         user_id: 1,
         chat_id: 2,

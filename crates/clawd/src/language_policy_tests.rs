@@ -160,6 +160,7 @@ fn preferred_response_language_hint_falls_back_to_session_locale_when_turn_is_am
 #[test]
 fn task_language_source_prefers_original_payload_text_over_runtime_scaffold() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-language-source".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -181,6 +182,7 @@ fn task_language_source_prefers_original_payload_text_over_runtime_scaffold() {
 #[test]
 fn task_language_source_keeps_user_text_that_mentions_runtime_scaffold_marker() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-language-scaffold-mention".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -198,6 +200,7 @@ fn task_language_source_keeps_user_text_that_mentions_runtime_scaffold_marker() 
 #[test]
 fn task_language_source_treats_task_merge_frame_as_runtime_scaffold() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-language-task-merge-frame".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -218,6 +221,7 @@ fn task_language_source_treats_task_merge_frame_as_runtime_scaffold() {
 #[test]
 fn task_language_source_prefers_explicit_current_text_over_placeholder_payload() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-language-current-text".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -237,6 +241,7 @@ fn task_language_source_prefers_explicit_current_text_over_placeholder_payload()
 #[test]
 fn task_language_source_prefers_original_payload_over_resolved_semantic_rewrite() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-language-original".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -260,6 +265,7 @@ fn task_language_source_prefers_original_payload_over_resolved_semantic_rewrite(
 #[test]
 fn task_language_source_uses_active_clarify_source_for_locator_only_reply() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-language-active-clarify".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -282,6 +288,7 @@ fn task_language_source_uses_active_clarify_source_for_locator_only_reply() {
 #[test]
 fn task_language_source_keeps_current_sentence_language_over_active_clarify_source() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-language-active-clarify-current-sentence".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -306,6 +313,7 @@ fn task_language_source_keeps_current_sentence_language_over_active_clarify_sour
 #[test]
 fn task_user_request_for_prompt_keeps_original_language_and_resolved_semantics() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-request-for-prompt".to_string(),
         user_id: 1,
         chat_id: 2,

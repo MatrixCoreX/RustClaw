@@ -93,6 +93,7 @@ async fn compact_retry_uses_fixture_response_as_executable_steps() {
     let state =
         crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "compact-retry-task".to_string(),
         user_id: 1,
         chat_id: 2,

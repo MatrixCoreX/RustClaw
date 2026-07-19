@@ -73,6 +73,7 @@ fn non_machine_respond_matching_last_output_stays_trace_only() {
 fn terminal_last_output_placeholder_respond_publishes_structured_output() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-terminal-last-output-placeholder-respond".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -124,6 +125,7 @@ fn terminal_last_output_placeholder_respond_publishes_structured_output() {
 fn bare_last_output_respond_prefers_publishable_synthesis_output() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-terminal-synthesis-over-last-output".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -192,6 +194,7 @@ fn bare_last_output_respond_prefers_publishable_synthesis_output() {
 fn bare_last_output_respond_projects_subagent_child_model_result() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-terminal-subagent-child-result".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -258,6 +261,7 @@ fn bare_last_output_respond_projects_subagent_child_model_result() {
 fn terminal_last_output_placeholder_respond_publishes_empty_string_scalar() {
     let state = test_state_with_registry();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-terminal-last-output-placeholder-empty-string".to_string(),
         user_id: 1,
         chat_id: 1,

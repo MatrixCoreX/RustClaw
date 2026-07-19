@@ -713,6 +713,7 @@ pub(crate) async fn run_replay_case(case_name: &str) -> Result<Vec<String>, Stri
 
     let user_key = format!("anon:{}:{}", expected.user_id, expected.chat_id);
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.clone(),
         user_id: expected.user_id,
         chat_id: expected.chat_id,

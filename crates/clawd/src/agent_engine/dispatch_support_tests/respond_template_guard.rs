@@ -15,6 +15,7 @@ fn redacted_runtime_template_respond_triggers_replan_not_visible_output() {
 
 fn test_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-unresolved-runtime-template-respond".to_string(),
         user_id: 1,
         chat_id: 1,

@@ -128,6 +128,7 @@ fn sample_rss_news_output() -> &'static str {
 
 fn test_task() -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-loop-control".to_string(),
         user_id: 1,
         chat_id: 2,

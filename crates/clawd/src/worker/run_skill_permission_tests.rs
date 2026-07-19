@@ -26,6 +26,7 @@ fn state() -> AppState {
 
 fn task() -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: uuid::Uuid::new_v4().to_string(),
         user_id: 1,
         chat_id: 2,

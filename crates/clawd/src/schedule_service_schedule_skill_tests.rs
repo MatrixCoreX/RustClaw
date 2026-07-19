@@ -54,6 +54,7 @@ output_kind = "text"
 
 fn claimed_task_with_payload(channel: &str, payload: serde_json::Value) -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-1".to_string(),
         user_id: 1,
         chat_id: 2,

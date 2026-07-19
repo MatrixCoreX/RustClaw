@@ -1011,6 +1011,7 @@ fn paused_checkpoint_resume_work_item_is_machine_payload() {
 #[test]
 fn claimed_paused_checkpoint_resume_executor_plans_machine_action() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-exec".to_string(),
         user_id: 42,
         chat_id: 7,
@@ -1208,6 +1209,7 @@ fn planned_paused_checkpoint_resume_executor_handoff_is_machine_only() {
 #[test]
 fn claimed_paused_checkpoint_resume_handoff_dispatch_is_machine_only() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-handoff-dispatch".to_string(),
         user_id: 42,
         chat_id: 7,
@@ -1413,6 +1415,7 @@ fn claimed_paused_checkpoint_resume_handoff_dispatch_is_machine_only() {
 #[test]
 fn claimed_dispatch_result_payload_defers_only_supported_machine_states() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-dispatch-result".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -1619,6 +1622,7 @@ fn claimed_dispatch_result_reschedule_projection_payload_is_machine_only() {
     };
     let claimed = crate::repo::ClaimedPausedCheckpointResumeDispatchResult {
         task: crate::ClaimedTask {
+            claim_attempt: 0,
             task_id: "task-projection".to_string(),
             user_id: 1,
             chat_id: 2,

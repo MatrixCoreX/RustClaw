@@ -3,6 +3,7 @@ use serde_json::json;
 
 fn running_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "worker-runtime-error-task".to_string(),
         user_id: 7,
         chat_id: 9,

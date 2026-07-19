@@ -269,6 +269,7 @@ fn bound_target_accepts_extra_machine_payload() {
 fn workspace_project_summary_evidence_path_does_not_persist_followup_target() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-workspace-summary-evidence".to_string(),
         user_id: 431,
         chat_id: 432,
@@ -323,6 +324,7 @@ fn workspace_project_summary_evidence_path_does_not_persist_followup_target() {
 fn code_workspace_journal_persists_project_dir_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-code-workspace".to_string(),
         user_id: 31,
         chat_id: 32,
@@ -405,6 +407,7 @@ fn code_workspace_journal_persists_project_dir_for_followup() {
 fn readback_validated_code_workspace_persists_project_dir_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-code-workspace-readback-only".to_string(),
         user_id: 231,
         chat_id: 232,
@@ -480,6 +483,7 @@ fn readback_validated_code_workspace_persists_project_dir_for_followup() {
 fn code_workspace_followup_wins_over_delivery_route_noise() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-code-workspace-delivery-noise".to_string(),
         user_id: 131,
         chat_id: 132,
@@ -594,6 +598,7 @@ fn extracts_ordered_entries_from_markdown_bullet_listing_with_surrounding_prose(
 fn persisted_followup_frame_round_trips_with_slice_and_entries() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-frame".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -664,6 +669,7 @@ fn persisted_followup_frame_round_trips_with_slice_and_entries() {
 fn config_read_field_extra_path_persists_followup_bound_target() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-config-field".to_string(),
         user_id: 3,
         chat_id: 4,
@@ -731,6 +737,7 @@ fn config_read_field_extra_path_persists_followup_bound_target() {
 fn compact_listing_answer_persists_ordered_entries_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-compact-list".to_string(),
         user_id: 11,
         chat_id: 12,
@@ -783,6 +790,7 @@ fn compact_listing_answer_persists_ordered_entries_for_followup() {
 fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-visible-search-bullets".to_string(),
         user_id: 15,
         chat_id: 16,
@@ -838,6 +846,7 @@ fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_foll
 fn visible_listing_answer_overrides_full_journal_listing_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-visible-list".to_string(),
         user_id: 13,
         chat_id: 14,
@@ -898,6 +907,7 @@ fn visible_listing_answer_overrides_full_journal_listing_for_followup() {
 fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-fs-basic-list".to_string(),
         user_id: 31,
         chat_id: 32,
@@ -988,6 +998,7 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
 fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-fs-basic-wrapped-list".to_string(),
         user_id: 33,
         chat_id: 34,
@@ -1113,6 +1124,7 @@ fn ordered_entry_target_does_not_duplicate_prefixed_relative_path() {
 fn empty_generic_outcome_preserves_prior_structured_frame() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-empty-generic".to_string(),
         user_id: 41,
         chat_id: 42,
@@ -1162,6 +1174,7 @@ fn empty_generic_outcome_preserves_prior_structured_frame() {
 fn selected_target_turn_inherits_prior_ordered_entries_and_index() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-selected-entry".to_string(),
         user_id: 21,
         chat_id: 22,
@@ -1239,6 +1252,7 @@ fn selected_target_turn_inherits_prior_ordered_entries_and_index() {
 fn scalar_answer_matching_prior_ordered_entry_persists_selected_index() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-scalar-selected-entry".to_string(),
         user_id: 22,
         chat_id: 23,
@@ -1301,6 +1315,7 @@ fn scalar_answer_matching_prior_ordered_entry_persists_selected_index() {
 fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_position() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-read-candidate-selected-entry".to_string(),
         user_id: 24,
         chat_id: 25,
@@ -1368,6 +1383,7 @@ fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_pos
 fn delivery_answer_sets_bound_target_from_file_token_and_inherits_selection() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-delivery-entry".to_string(),
         user_id: 31,
         chat_id: 32,
@@ -1426,6 +1442,7 @@ fn delivery_answer_sets_bound_target_from_file_token_and_inherits_selection() {
 fn delivery_answer_with_absolute_file_token_still_inherits_relative_listing_selection() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-delivery-absolute-entry".to_string(),
         user_id: 41,
         chat_id: 42,
@@ -1487,6 +1504,7 @@ fn delivery_answer_with_absolute_file_token_still_inherits_relative_listing_sele
 fn clarify_outcome_clears_active_followup_frame() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-clarify".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -1529,6 +1547,7 @@ fn clarify_outcome_clears_active_followup_frame() {
 fn clarify_outcome_with_stale_locator_hint_still_clears_followup_frame() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-followup-stale-locator".to_string(),
         user_id: 3,
         chat_id: 4,

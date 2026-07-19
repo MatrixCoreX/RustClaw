@@ -298,6 +298,7 @@ async fn dynamic_mcp_capability_reaches_resolver_prompt_and_verifier_policy() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.mcp_runtime = Arc::clone(&runtime);
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "mcp-policy-task".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -391,6 +392,7 @@ async fn mutating_mcp_tool_requires_shared_permission_confirmation() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.mcp_runtime = Arc::clone(&runtime);
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "mcp-confirm-task".to_string(),
         user_id: 1,
         chat_id: 1,
@@ -471,6 +473,7 @@ async fn large_catalog_uses_bounded_search_then_discloses_matching_schema() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.mcp_runtime = Arc::clone(&runtime);
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "mcp-search-task".to_string(),
         user_id: 1,
         chat_id: 1,

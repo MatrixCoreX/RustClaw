@@ -560,7 +560,12 @@ async fn finalize_run_skill_success(
         }
     };
     if let Some(result) = pending_checkpoint_result {
-        repo::update_task_checkpointed_result(state, &task.task_id, &result.to_string())?;
+        repo::update_task_checkpointed_result(
+            state,
+            &task.task_id,
+            task.claim_attempt,
+            &result.to_string(),
+        )?;
         let _ = repo::insert_audit_log(
             state,
             Some(task.user_id),
@@ -607,7 +612,12 @@ async fn finalize_run_skill_success(
             "skill_name": skill_name
         }
     }));
-    repo::update_task_success(state, &task.task_id, &result.to_string())?;
+    repo::update_task_success(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &result.to_string(),
+    )?;
     let _ = crate::memory::service::insert_memory_with_kind(
         state,
         task.user_id,
@@ -709,7 +719,13 @@ async fn finalize_run_skill_failure(
     let result = journal.attach_to_result(json!({
         "text": err_text,
     }));
-    repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), err_text)?;
+    repo::update_task_failure_with_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &result.to_string(),
+        err_text,
+    )?;
     let _ = repo::insert_audit_log(
         state,
         Some(task.user_id),
@@ -882,7 +898,12 @@ pub(super) async fn finalize_run_skill_confirmation_required(
             "resume_context": resume_context,
             "task_lifecycle": lifecycle,
         }));
-        repo::update_task_checkpointed_result(state, &task.task_id, &result.to_string())?;
+        repo::update_task_checkpointed_result(
+            state,
+            &task.task_id,
+            task.claim_attempt,
+            &result.to_string(),
+        )?;
         let _ = repo::insert_audit_log(
             state,
             Some(task.user_id),
@@ -918,6 +939,7 @@ pub(super) async fn finalize_run_skill_confirmation_required(
     repo::update_task_failure_with_result(
         state,
         &task.task_id,
+        task.claim_attempt,
         &result.to_string(),
         failure_reason,
     )?;

@@ -674,6 +674,7 @@ fn test_build_safe_skill_args_summary_empty_object() {
 #[test]
 fn turn_analysis_prompt_block_includes_boundary_without_route_policy() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-turn-envelope".to_string(),
         user_id: 1,
         chat_id: 2,

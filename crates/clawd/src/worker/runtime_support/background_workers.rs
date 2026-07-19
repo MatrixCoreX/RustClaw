@@ -9,7 +9,11 @@ use uuid::Uuid;
 
 use crate::{now_ts, now_ts_u64, repo, schedule_service, AppState, ScheduledJobDue};
 
-pub(crate) fn start_task_heartbeat(state: AppState, task_id: String) -> oneshot::Sender<()> {
+pub(crate) fn start_task_heartbeat(
+    state: AppState,
+    task_id: String,
+    claim_attempt: i64,
+) -> oneshot::Sender<()> {
     let interval_secs = state.worker.worker_task_heartbeat_seconds.max(5);
     let worker_id = state.worker.worker_id.clone();
     let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
@@ -17,7 +21,9 @@ pub(crate) fn start_task_heartbeat(state: AppState, task_id: String) -> oneshot:
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
-                    if let Err(err) = repo::touch_running_task(&state, &task_id) {
+                    if let Err(err) =
+                        repo::touch_running_task(&state, &task_id, claim_attempt)
+                    {
                         warn!(
                             "task heartbeat update failed: worker_id={} task_id={} interval_secs={} err={}",
                             worker_id, task_id, interval_secs, err

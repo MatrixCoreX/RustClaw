@@ -29,6 +29,7 @@ fn state_with_workspace_registry() -> crate::AppState {
 
 fn task() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "planning-parse-test".to_string(),
         user_id: 1,
         chat_id: 1,

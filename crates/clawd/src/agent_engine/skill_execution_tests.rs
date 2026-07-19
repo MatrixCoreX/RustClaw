@@ -83,6 +83,7 @@ fn default_action_policy_error(
 
 pub(super) fn test_task() -> ClaimedTask {
     ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-skill-exec".to_string(),
         user_id: 1,
         chat_id: 2,

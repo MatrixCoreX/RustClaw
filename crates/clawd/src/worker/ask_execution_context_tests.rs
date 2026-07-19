@@ -63,6 +63,7 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
         .expect("insert resumable current task record");
     }
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-live-context-compaction".to_string(),
         user_id: 7,
         chat_id: 9,

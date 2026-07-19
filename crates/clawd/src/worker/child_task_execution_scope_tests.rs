@@ -46,6 +46,7 @@ fn child_task(permission_profile: &str) -> (crate::ClaimedTask, serde_json::Valu
     });
     (
         crate::ClaimedTask {
+            claim_attempt: 0,
             task_id: "child-task".to_string(),
             user_id: 1,
             chat_id: 2,

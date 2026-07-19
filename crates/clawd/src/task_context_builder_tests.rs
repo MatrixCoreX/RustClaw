@@ -107,6 +107,7 @@ fn read_followup_exports_structured_execution_anchor() {
 #[test]
 fn task_goal_context_uses_structured_payload_only() {
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "task-goal".to_string(),
         user_id: 1,
         chat_id: 2,

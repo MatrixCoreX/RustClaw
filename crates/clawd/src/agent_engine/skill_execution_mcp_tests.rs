@@ -6,6 +6,7 @@ use super::{record_mcp_tool_execution_observation, run_mcp_tool_observation, Loo
 
 fn task() -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: "mcp-dispatch-task".to_string(),
         user_id: 1,
         chat_id: 1,

@@ -65,6 +65,7 @@ fn demo_capability_contract() -> Value {
 
 fn claimed_run_skill_task(task_id: &str) -> crate::ClaimedTask {
     crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.to_string(),
         user_id: 42,
         chat_id: 7,
@@ -317,6 +318,7 @@ async fn direct_run_skill_confirmation_persists_and_consumes_exact_grant() {
     let state = state_with_runtime_registry();
     let task_id = "task-direct-skill-confirmation";
     let task = crate::ClaimedTask {
+        claim_attempt: 0,
         task_id: task_id.to_string(),
         user_id: 42,
         chat_id: 7,
