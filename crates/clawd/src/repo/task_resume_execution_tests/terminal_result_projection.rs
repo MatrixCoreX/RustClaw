@@ -619,6 +619,77 @@ fn terminal_async_poll_projection_preserves_visible_ask_reply() {
 }
 
 #[test]
+fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
+    let state = state_with_tasks_table();
+    let now = 9_600;
+    let task_id = "ask-seeded-terminal";
+    let checkpoint_id = "agent-loop:ask-seeded-terminal:round-1:step-1:confirmation";
+    let mut seed = terminal_projection_seed(
+        task_id,
+        checkpoint_id,
+        "executing_planner_resume",
+        "run_seeded_agent_loop",
+        "seeded_loop_requires_provider_window",
+        "ready_to_run_seeded_agent_loop",
+        "seeded_loop_completed",
+        now,
+    );
+    seed["text"] = json!("old confirmation reply");
+    seed["messages"] = json!(["old confirmation reply"]);
+    insert_task(&state, task_id, "running", Some(&seed), now);
+
+    claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_planner_resume",
+        "run_seeded_agent_loop",
+        "seeded_loop_requires_provider_window",
+        "ready_to_run_seeded_agent_loop",
+        "seeded_loop_completed",
+        now + 1,
+        10,
+    )
+    .expect("claim seeded projection")
+    .expect("seeded projection claimed");
+    assert!(
+        record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+            &state,
+            task_id,
+            checkpoint_id,
+            "executing_planner_resume",
+            "run_seeded_agent_loop",
+            "seeded_loop_requires_provider_window",
+            "ready_to_run_seeded_agent_loop",
+            "seeded_loop_completed",
+            &json!({
+                "schema_version": 1,
+                "task_id": task_id,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_planner_resume",
+                "executor_action": "run_seeded_agent_loop",
+                "executor_status": "seeded_loop_requires_provider_window",
+                "dispatch_state": "ready_to_run_seeded_agent_loop",
+                "executor_result_status": "seeded_loop_completed",
+                "result_projection_state": "project_seeded_loop_completed",
+                "final_result_json": {
+                    "text": "new resumed result",
+                    "messages": ["new resumed result"]
+                }
+            }),
+            now + 2,
+        )
+        .expect("record seeded terminal projection")
+    );
+
+    let (status, error_text, result) = stored_task_status_error_result(&state, task_id);
+    assert_eq!(status, "succeeded");
+    assert_eq!(error_text, None);
+    assert_eq!(result["text"], "new resumed result");
+    assert_eq!(result["messages"][0], "new resumed result");
+}
+
+#[test]
 fn terminal_agent_loop_async_poll_projection_replaces_waiting_visible_ask_reply() {
     let state = state_with_tasks_table();
     let now = 9_700;

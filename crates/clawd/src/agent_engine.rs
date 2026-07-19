@@ -1122,6 +1122,7 @@ pub(crate) fn checkpoint_action_plan(
     tool_or_skill: &str,
     action_ref: &str,
     args: Value,
+    completed_step_count: usize,
     output_contract: Option<crate::IntentOutputContract>,
 ) -> PlanResult {
     let actions = vec![
@@ -1147,6 +1148,27 @@ pub(crate) fn checkpoint_action_plan(
         &actions,
         "checkpoint_action",
     );
+    let step_id_map = plan
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(index, step)| {
+            (
+                step.step_id.clone(),
+                format!("step_{}", completed_step_count + index + 1),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    for step in &mut plan.steps {
+        if let Some(step_id) = step_id_map.get(&step.step_id) {
+            step.step_id = step_id.clone();
+        }
+        for dependency in &mut step.depends_on {
+            if let Some(step_id) = step_id_map.get(dependency) {
+                *dependency = step_id.clone();
+            }
+        }
+    }
     plan.output_contract = output_contract;
     plan
 }
