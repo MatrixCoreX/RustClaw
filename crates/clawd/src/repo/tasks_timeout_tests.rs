@@ -45,15 +45,20 @@ fn insert_task(
     db.execute(
         "INSERT INTO tasks (
             task_id, user_id, chat_id, user_key, channel, kind, payload_json,
-            status, result_json, error_text, created_at, updated_at
+            status, result_json, error_text, created_at, updated_at,
+            lease_owner, lease_expires_at, claim_attempt, claimed_at
         )
-        VALUES (?1, 42, 7, 'test-key', 'ui', 'ask', ?2, ?3, ?4, NULL, ?5, ?5)",
+        VALUES (
+            ?1, 42, 7, 'test-key', 'ui', 'ask', ?2, ?3, ?4, NULL, ?5, ?5,
+            ?6, 9223372036854775807, 1, ?5
+        )",
         rusqlite::params![
             task_id,
             json!({"text": "long task"}).to_string(),
             status,
             result_json.map(|value| value.to_string()),
             updated_at.to_string(),
+            state.worker.worker_id.as_str(),
         ],
     )
     .expect("insert task");

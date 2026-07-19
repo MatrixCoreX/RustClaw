@@ -27,14 +27,15 @@ fn worker_runtime_error_immediately_transitions_running_task_to_failed() {
                 status TEXT NOT NULL,
                 result_json TEXT,
                 error_text TEXT,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                lease_owner TEXT
             );",
         )
         .expect("create tasks table");
         db.execute(
-            "INSERT INTO tasks (task_id, status, updated_at)
-             VALUES (?1, 'running', '0')",
-            params![task.task_id],
+            "INSERT INTO tasks (task_id, status, updated_at, lease_owner)
+             VALUES (?1, 'running', '0', ?2)",
+            params![task.task_id, state.worker.worker_id.as_str()],
         )
         .expect("insert running task");
     }

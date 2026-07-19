@@ -83,5 +83,5 @@ pub(crate) use tasks::{
     update_task_checkpointed_result, update_task_failure, update_task_failure_with_result,
     update_task_progress_result, update_task_success, update_task_timeout,
     worker_task_lease_expires_at, ClaimedPausedCheckpointResumeExecutor, DuePausedCheckpointTask,
-    TaskViewerAccessError,
+    TaskViewerAccessError, WorkerTaskWriteRejected, WORKER_LEASE_LOST_STATUS_CODE,
 };

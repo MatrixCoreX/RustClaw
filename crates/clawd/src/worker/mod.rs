@@ -167,7 +167,19 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         match task_result {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                finalize_worker_runtime_error(state, &task, Some(&payload), &error)?;
+                if let Some(rejection) = error.downcast_ref::<repo::WorkerTaskWriteRejected>() {
+                    warn!(
+                        "worker_write_rejected status_code={} lease_lost={} operation={} task_id={} task_status={} lease_owner={}",
+                        rejection.status_code,
+                        rejection.status_code == repo::WORKER_LEASE_LOST_STATUS_CODE,
+                        rejection.operation,
+                        rejection.task_id,
+                        rejection.task_status.as_deref().unwrap_or("missing"),
+                        rejection.lease_owner.as_deref().unwrap_or("none")
+                    );
+                } else {
+                    finalize_worker_runtime_error(state, &task, Some(&payload), &error)?;
+                }
             }
             Err(_) => {
                 finalize_worker_timeout(

@@ -18,6 +18,75 @@ use lifecycle_projection::{
     worker_timeout_preserves_recoverable_checkpoint, worker_timeout_result_json,
 };
 
+pub(crate) const WORKER_LEASE_LOST_STATUS_CODE: &str = "worker_lease_lost";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkerTaskWriteRejected {
+    pub(crate) status_code: &'static str,
+    pub(crate) operation: &'static str,
+    pub(crate) task_id: String,
+    pub(crate) task_status: Option<String>,
+    pub(crate) lease_owner: Option<String>,
+}
+
+impl std::fmt::Display for WorkerTaskWriteRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "status_code={} operation={} task_id={} task_status={} lease_owner={}",
+            self.status_code,
+            self.operation,
+            self.task_id,
+            self.task_status.as_deref().unwrap_or("missing"),
+            self.lease_owner.as_deref().unwrap_or("none")
+        )
+    }
+}
+
+impl std::error::Error for WorkerTaskWriteRejected {}
+
+fn worker_task_write_rejection(
+    db: &rusqlite::Connection,
+    state: &AppState,
+    task_id: &str,
+    operation: &'static str,
+    expected_statuses: &[&str],
+) -> anyhow::Error {
+    let row = match db
+        .query_row(
+            "SELECT status, lease_owner FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![task_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()
+    {
+        Ok(row) => row,
+        Err(error) => return anyhow::Error::new(error),
+    };
+    let (task_status, lease_owner) = match row {
+        Some((status, owner)) => (Some(status), owner),
+        None => (None, None),
+    };
+    let status_code = if task_status
+        .as_deref()
+        .is_some_and(|status| expected_statuses.contains(&status))
+        && lease_owner.as_deref() != Some(state.worker.worker_id.as_str())
+    {
+        WORKER_LEASE_LOST_STATUS_CODE
+    } else if task_status.is_none() {
+        "worker_task_not_found"
+    } else {
+        "worker_task_state_conflict"
+    };
+    anyhow::Error::new(WorkerTaskWriteRejected {
+        status_code,
+        operation,
+        task_id: task_id.to_string(),
+        task_status,
+        lease_owner,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DuePausedCheckpointTask {
     pub(crate) task_id: String,
@@ -156,36 +225,65 @@ pub(crate) fn update_task_success(
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'succeeded', result_json = ?2, error_text = NULL, updated_at = ?3
-         WHERE task_id = ?1 AND status = 'running'",
-        params![task_id, result_json, now_ts()],
+         WHERE task_id = ?1
+           AND status = 'running'
+           AND lease_owner = ?4",
+        params![
+            task_id,
+            result_json,
+            now_ts(),
+            state.worker.worker_id.as_str()
+        ],
     )?;
     if changed == 0 {
         let existing = db
             .query_row(
-                "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+                "SELECT status, result_json, lease_owner
+                 FROM tasks
+                 WHERE task_id = ?1
+                 LIMIT 1",
                 params![task_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
             )
             .optional()?;
-        if let Some((status, Some(existing_result_json))) = existing {
+        if let Some((status, Some(existing_result_json), lease_owner)) = existing {
             if status == "succeeded"
+                && lease_owner.as_deref() == Some(state.worker.worker_id.as_str())
                 && async_poll_terminal_projection_without_visible_reply(&existing_result_json)
             {
                 let changed = db.execute(
                     "UPDATE tasks
                      SET result_json = ?2, error_text = NULL, updated_at = ?3
-                     WHERE task_id = ?1 AND status = 'succeeded' AND result_json = ?4",
-                    params![task_id, result_json, now_ts(), existing_result_json],
+                     WHERE task_id = ?1
+                       AND status = 'succeeded'
+                       AND result_json = ?4
+                       AND lease_owner = ?5",
+                    params![
+                        task_id,
+                        result_json,
+                        now_ts(),
+                        existing_result_json,
+                        state.worker.worker_id.as_str()
+                    ],
                 )?;
                 if changed > 0 {
                     return Ok(());
                 }
             }
         }
-        warn!(
-            "update_task_success skipped: task_id={} is no longer running",
-            task_id
-        );
+        return Err(worker_task_write_rejection(
+            &db,
+            state,
+            task_id,
+            "update_task_success",
+            &["running", "succeeded"],
+        ));
     }
     Ok(())
 }
@@ -203,8 +301,9 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str()],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?;
@@ -223,16 +322,16 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
     let changed = db.execute(
         "UPDATE tasks
          SET updated_at = ?2,
-             lease_owner = ?3,
-             lease_expires_at = ?4
+             lease_expires_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
+           AND lease_owner = ?4
            AND result_json IS ?5",
         params![
             task_id,
             heartbeat_at.to_string(),
-            state.worker.worker_id,
             worker_task_lease_expires_at(state, heartbeat_at),
+            state.worker.worker_id.as_str(),
             current_result_json
         ],
     )?;
@@ -374,16 +473,31 @@ pub(crate) fn update_task_checkpointed_result(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    db.execute(
+    let changed = db.execute(
         "UPDATE tasks
          SET result_json = ?2,
              updated_at = ?3,
              lease_owner = NULL,
              lease_expires_at = 0
          WHERE task_id = ?1
-           AND status IN ('queued','running')",
-        params![task_id, result_json, now_ts()],
+           AND status = 'running'
+           AND lease_owner = ?4",
+        params![
+            task_id,
+            result_json,
+            now_ts(),
+            state.worker.worker_id.as_str()
+        ],
     )?;
+    if changed == 0 {
+        return Err(worker_task_write_rejection(
+            &db,
+            state,
+            task_id,
+            "update_task_checkpointed_result",
+            &["running"],
+        ));
+    }
     Ok(())
 }
 
@@ -401,14 +515,25 @@ pub(crate) fn update_task_failure(
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'failed', result_json = ?2, error_text = ?3, updated_at = ?4
-         WHERE task_id = ?1 AND status = 'running'",
-        params![task_id, result_json, error_text, now_ts()],
+         WHERE task_id = ?1
+           AND status = 'running'
+           AND lease_owner = ?5",
+        params![
+            task_id,
+            result_json,
+            error_text,
+            now_ts(),
+            state.worker.worker_id.as_str()
+        ],
     )?;
     if changed == 0 {
-        warn!(
-            "update_task_failure skipped: task_id={} is no longer running",
-            task_id
-        );
+        return Err(worker_task_write_rejection(
+            &db,
+            state,
+            task_id,
+            "update_task_failure",
+            &["running"],
+        ));
     }
     Ok(())
 }
@@ -427,14 +552,25 @@ pub(crate) fn update_task_failure_with_result(
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'failed', result_json = ?2, error_text = ?3, updated_at = ?4
-         WHERE task_id = ?1 AND status = 'running'",
-        params![task_id, result_json, error_text, now_ts()],
+         WHERE task_id = ?1
+           AND status = 'running'
+           AND lease_owner = ?5",
+        params![
+            task_id,
+            result_json,
+            error_text,
+            now_ts(),
+            state.worker.worker_id.as_str()
+        ],
     )?;
     if changed == 0 {
-        warn!(
-            "update_task_failure_with_result skipped: task_id={} is no longer running",
-            task_id
-        );
+        return Err(worker_task_write_rejection(
+            &db,
+            state,
+            task_id,
+            "update_task_failure_with_result",
+            &["running"],
+        ));
     }
     Ok(())
 }
@@ -451,16 +587,33 @@ pub(crate) fn update_task_timeout(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let existing_result_json = db
         .query_row(
-            "SELECT result_json FROM tasks WHERE task_id = ?1 AND status = 'running' LIMIT 1",
-            params![task_id],
+            "SELECT result_json
+             FROM tasks
+             WHERE task_id = ?1
+               AND status = 'running'
+               AND lease_owner = ?2
+             LIMIT 1",
+            params![task_id, state.worker.worker_id.as_str()],
             |row| row.get::<_, Option<String>>(0),
         )
-        .optional()?
-        .flatten();
+        .optional()?;
+    let Some(existing_result_json) = existing_result_json else {
+        return Err(worker_task_write_rejection(
+            &db,
+            state,
+            task_id,
+            "update_task_timeout",
+            &["running"],
+        ));
+    };
     if worker_timeout_preserves_recoverable_checkpoint(existing_result_json.as_deref()) {
         let changed = db.execute(
-            "UPDATE tasks SET updated_at = ?2 WHERE task_id = ?1 AND status = 'running'",
-            params![task_id, now_ts()],
+            "UPDATE tasks
+             SET updated_at = ?2
+             WHERE task_id = ?1
+               AND status = 'running'
+               AND lease_owner = ?3",
+            params![task_id, now_ts(), state.worker.worker_id.as_str()],
         )?;
         if changed > 0 {
             warn!(
@@ -474,15 +627,25 @@ pub(crate) fn update_task_timeout(
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'timeout', result_json = ?2, error_text = ?3, updated_at = ?4
-         WHERE task_id = ?1 AND status = 'running'",
-        params![task_id, result_json, error_text, now_ts()],
+         WHERE task_id = ?1
+           AND status = 'running'
+           AND lease_owner = ?5",
+        params![
+            task_id,
+            result_json,
+            error_text,
+            now_ts(),
+            state.worker.worker_id.as_str()
+        ],
     )?;
     if changed == 0 {
-        warn!(
-            "update_task_timeout skipped: task_id={} is no longer running",
-            task_id
-        );
-        return Ok(false);
+        return Err(worker_task_write_rejection(
+            &db,
+            state,
+            task_id,
+            "update_task_timeout",
+            &["running"],
+        ));
     }
     Ok(true)
 }

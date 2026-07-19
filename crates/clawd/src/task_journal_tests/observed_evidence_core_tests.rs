@@ -875,8 +875,7 @@ fn text_observed_evidence_extracts_count_path_and_candidates() {
     }));
 
     let mut journal = TaskJournal::for_task("task-text-candidates", "ask", "列出文件名");
-    let mut route = crate::IntentOutputContract::default();
-    route = crate::IntentOutputContract {
+    let route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::FileNames,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
@@ -1517,8 +1516,7 @@ fn system_basic_info_without_action_uses_info_extractor() {
 fn docker_unavailable_text_counts_as_field_value_evidence() {
     let mut journal =
         TaskJournal::for_task("task-docker-unavailable", "ask", "检查 Docker 是否可用");
-    let mut route = crate::IntentOutputContract::default();
-    route = crate::IntentOutputContract {
+    let route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ServiceStatus,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
