@@ -8,7 +8,9 @@ use super::{
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
-    update_task_checkpointed_result, update_task_failure,
+    update_task_checkpointed_result, update_task_failure, update_task_failure_with_result,
+    update_task_success, update_task_timeout, WorkerTaskWriteRejected,
+    WORKER_LEASE_LOST_STATUS_CODE,
 };
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
@@ -151,6 +153,14 @@ fn update_task_failure_records_structured_worker_reason() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4();
     insert_task(&state, &task_id.to_string(), "running", None, 1234);
+    set_task_lease(
+        &state,
+        &task_id.to_string(),
+        state.worker.worker_id.as_str(),
+        i64::MAX,
+        1,
+        1234,
+    );
 
     update_task_failure(&state, &task_id.to_string(), "opaque-worker-error")
         .expect("update failure");
@@ -202,6 +212,14 @@ fn update_task_failure_preserves_structured_terminal_reason() {
         let state = state_with_tasks_table();
         let task_id = Uuid::new_v4();
         insert_task(&state, &task_id.to_string(), "running", None, 1234);
+        set_task_lease(
+            &state,
+            &task_id.to_string(),
+            state.worker.worker_id.as_str(),
+            i64::MAX,
+            1,
+            1234,
+        );
         let err = crate::skills::structured_skill_error_from_parts(
             "agent_loop",
             error_kind,
@@ -283,6 +301,14 @@ fn update_task_success_can_replace_async_poll_projection_without_visible_reply()
         "async-visible-replace",
         "succeeded",
         Some(&initial),
+        1,
+    );
+    set_task_lease(
+        &state,
+        "async-visible-replace",
+        state.worker.worker_id.as_str(),
+        i64::MAX,
+        1,
         1,
     );
 
@@ -782,6 +808,14 @@ fn touch_running_task_renews_worker_lease_fields() {
         None,
         crate::now_ts_u64() as i64,
     );
+    set_task_lease(
+        &state,
+        &task_id,
+        state.worker.worker_id.as_str(),
+        i64::MAX,
+        1,
+        crate::now_ts_u64() as i64,
+    );
 
     assert!(touch_running_task(&state, &task_id).expect("touch running task"));
 
@@ -796,6 +830,121 @@ fn touch_running_task_renews_worker_lease_fields() {
 
     assert_eq!(lease_owner, state.worker.worker_id);
     assert!(lease_expires_at > crate::now_ts_u64() as i64);
+}
+
+fn assert_worker_lease_lost(error: anyhow::Error, operation: &str) {
+    let rejection = error
+        .downcast_ref::<WorkerTaskWriteRejected>()
+        .expect("typed worker write rejection");
+    assert_eq!(rejection.status_code, WORKER_LEASE_LOST_STATUS_CODE);
+    assert_eq!(rejection.operation, operation);
+}
+
+#[test]
+fn stale_worker_cannot_renew_or_finalize_after_owner_takeover() {
+    let stale_worker = state_with_tasks_table();
+    let mut current_worker = stale_worker.clone();
+    current_worker.worker.worker_id = "worker:takeover".to_string();
+    let now = crate::now_ts_u64() as i64;
+    for task_id in [
+        "lease-heartbeat",
+        "lease-success",
+        "lease-failure",
+        "lease-failure-result",
+        "lease-checkpoint",
+        "lease-timeout",
+    ] {
+        insert_task(&stale_worker, task_id, "running", None, now);
+        set_task_lease(
+            &stale_worker,
+            task_id,
+            current_worker.worker.worker_id.as_str(),
+            now + 600,
+            2,
+            now,
+        );
+    }
+
+    assert!(!touch_running_task(&stale_worker, "lease-heartbeat").expect("stale heartbeat"));
+    assert_worker_lease_lost(
+        update_task_success(&stale_worker, "lease-success", r#"{"status":"ok"}"#)
+            .expect_err("stale success must be fenced"),
+        "update_task_success",
+    );
+    assert_worker_lease_lost(
+        update_task_failure(&stale_worker, "lease-failure", "worker_runtime_error")
+            .expect_err("stale failure must be fenced"),
+        "update_task_failure",
+    );
+    assert_worker_lease_lost(
+        update_task_failure_with_result(
+            &stale_worker,
+            "lease-failure-result",
+            r#"{"status":"error"}"#,
+            "worker_runtime_error",
+        )
+        .expect_err("stale failure result must be fenced"),
+        "update_task_failure_with_result",
+    );
+    assert_worker_lease_lost(
+        update_task_checkpointed_result(
+            &stale_worker,
+            "lease-checkpoint",
+            r#"{"task_lifecycle":{"state":"waiting"}}"#,
+        )
+        .expect_err("stale checkpoint must be fenced"),
+        "update_task_checkpointed_result",
+    );
+    assert_worker_lease_lost(
+        update_task_timeout(&stale_worker, "lease-timeout", "worker_task_timeout")
+            .expect_err("stale timeout must be fenced"),
+        "update_task_timeout",
+    );
+
+    let db = stale_worker.core.db.get().expect("get db");
+    for task_id in [
+        "lease-heartbeat",
+        "lease-success",
+        "lease-failure",
+        "lease-failure-result",
+        "lease-checkpoint",
+        "lease-timeout",
+    ] {
+        let (status, owner): (String, String) = db
+            .query_row(
+                "SELECT status, lease_owner FROM tasks WHERE task_id = ?1",
+                rusqlite::params![task_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("load fenced task");
+        assert_eq!(status, "running");
+        assert_eq!(owner, current_worker.worker.worker_id);
+    }
+}
+
+#[test]
+fn current_owner_can_complete_only_once() {
+    let state = state_with_tasks_table();
+    let task_id = "lease-complete-once";
+    let now = crate::now_ts_u64() as i64;
+    insert_task(&state, task_id, "running", None, now);
+    set_task_lease(
+        &state,
+        task_id,
+        state.worker.worker_id.as_str(),
+        now + 600,
+        1,
+        now,
+    );
+
+    update_task_success(&state, task_id, r#"{"sequence":1}"#).expect("first completion");
+    let second = update_task_success(&state, task_id, r#"{"sequence":2}"#)
+        .expect_err("second completion must be rejected");
+    let rejection = second
+        .downcast_ref::<WorkerTaskWriteRejected>()
+        .expect("typed state conflict");
+    assert_eq!(rejection.status_code, "worker_task_state_conflict");
+    assert_eq!(stored_result_json(&state, task_id)["sequence"], 1);
 }
 
 fn stored_task_status_and_error(
@@ -1592,7 +1741,7 @@ fn due_checkpoint_waits_for_frontend_worker_lease_and_claim_rechecks_it() {
     set_task_lease(
         &state,
         "worker-owned-checkpoint",
-        "worker:foreground",
+        state.worker.worker_id.as_str(),
         now + 120,
         1,
         now - 10,

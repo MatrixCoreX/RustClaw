@@ -304,8 +304,7 @@ pub(super) fn route_result() -> IntentOutputContract {
 pub(super) fn route_result_with_semantic(
     semantic_kind: crate::OutputSemanticKind,
 ) -> IntentOutputContract {
-    let mut route = route_result();
-    route = crate::IntentOutputContract {
+    let route = crate::IntentOutputContract {
         semantic_kind,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()

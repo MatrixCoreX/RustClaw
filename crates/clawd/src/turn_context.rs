@@ -62,3 +62,7 @@ pub(crate) struct TurnAnalysis {
     pub(crate) state_patch: Option<Value>,
     pub(crate) attachment_processing_required: bool,
 }
+
+#[cfg(test)]
+#[path = "turn_context_tests.rs"]
+mod tests;

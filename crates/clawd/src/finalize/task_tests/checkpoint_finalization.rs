@@ -51,9 +51,13 @@ fn insert_running_task(state: &crate::AppState, task: &crate::ClaimedTask) {
     db.execute(
         "INSERT INTO tasks (
             task_id, user_id, chat_id, user_key, channel, kind, payload_json,
-            status, result_json, error_text, created_at, updated_at
+            status, result_json, error_text, created_at, updated_at,
+            lease_owner, lease_expires_at, claim_attempt, claimed_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running', NULL, NULL, ?8, ?8)",
+        VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running', NULL, NULL, ?8, ?8,
+            ?9, 9223372036854775807, 1, ?8
+        )",
         rusqlite::params![
             task.task_id,
             task.user_id,
@@ -63,6 +67,7 @@ fn insert_running_task(state: &crate::AppState, task: &crate::ClaimedTask) {
             task.kind,
             task.payload_json,
             now,
+            state.worker.worker_id.as_str(),
         ],
     )
     .expect("insert running task");
@@ -92,10 +97,10 @@ async fn checkpointed_ask_finalization_overrides_failure_metric() {
         let db = state.core.db.get().expect("get db");
         db.execute(
             "UPDATE tasks
-             SET lease_owner = 'worker:foreground',
+             SET lease_owner = ?2,
                  lease_expires_at = 1781800300
              WHERE task_id = ?1",
-            rusqlite::params![task.task_id],
+            rusqlite::params![task.task_id, state.worker.worker_id.as_str()],
         )
         .expect("set foreground lease");
     }

@@ -45,8 +45,7 @@ fn generated_file_delivery_wrapped_missing_find_name_supplies_checked_path_evide
 #[test]
 fn docker_success_exit_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-docker-version", "ask", "检查 Docker 是否可用");
-    let mut route = crate::IntentOutputContract::default();
-    route = crate::IntentOutputContract {
+    let route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
@@ -85,8 +84,7 @@ fn docker_success_exit_text_counts_as_field_value_evidence() {
 #[test]
 fn package_manager_key_value_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-package-manager", "ask", "检测包管理器");
-    let mut route = crate::IntentOutputContract::default();
-    route = crate::IntentOutputContract {
+    let route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::PackageManagerDetection,
         locator_kind: crate::OutputLocatorKind::None,
         ..Default::default()
@@ -122,8 +120,7 @@ fn package_manager_key_value_text_counts_as_field_value_evidence() {
 fn docker_unavailable_text_counts_as_list_candidate_evidence() {
     let mut journal =
         TaskJournal::for_task("task-docker-images-unavailable", "ask", "列出 Docker 镜像");
-    let mut route = crate::IntentOutputContract::default();
-    route = crate::IntentOutputContract {
+    let route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::DockerImages,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
@@ -1162,8 +1159,7 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
 #[test]
 fn service_status_health_check_fields_count_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-service-status", "ask", "检查 clawd 服务状态");
-    let mut route = crate::IntentOutputContract::default();
-    route = crate::IntentOutputContract {
+    let route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ServiceStatus,
         locator_kind: crate::OutputLocatorKind::None,
         ..Default::default()
