@@ -128,6 +128,7 @@ pub(super) fn sync_recorded_local_code_projection_if_needed(
     if !crate::agent_engine::local_code_strict_json_answer_satisfies_request(
         user_text,
         &answer,
+        loop_state,
         agent_run_context,
     ) {
         return false;
@@ -185,6 +186,7 @@ fn latest_synthesis_local_code_projection(
                 && crate::agent_engine::local_code_strict_json_answer_satisfies_request(
                     user_text,
                     answer,
+                    loop_state,
                     agent_run_context,
                 )
         })
@@ -204,6 +206,7 @@ fn sync_local_code_projection_answer(
     if crate::agent_engine::local_code_strict_json_answer_satisfies_request(
         user_text,
         &current,
+        loop_state,
         agent_run_context,
     ) && !local_code_projection_is_richer(&answer, &current)
     {
@@ -273,6 +276,7 @@ fn current_delivery_should_prevent_local_code_projection(
         crate::agent_engine::local_code_strict_json_answer_satisfies_request(
             user_text,
             candidate,
+            loop_state,
             agent_run_context,
         ) && !local_code_projection_is_richer(projected_answer, candidate)
     })

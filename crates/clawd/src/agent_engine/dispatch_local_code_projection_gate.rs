@@ -21,7 +21,7 @@ pub(super) fn local_code_strict_json_projection_should_defer_observed_synthesis(
     {
         return false;
     }
-    if !local_code_strict_json_requested(agent_run_context, user_text) {
+    if !local_code_strict_json_requested(loop_state, agent_run_context) {
         return false;
     }
     if !agent_run_context
@@ -48,7 +48,7 @@ pub(super) fn local_code_strict_json_projection_should_defer_until_validation(
     {
         return false;
     }
-    if !local_code_validation_field_requested(agent_run_context, user_text) {
+    if !local_code_validation_field_requested(loop_state, agent_run_context) {
         return false;
     }
     if !agent_run_context
@@ -63,59 +63,21 @@ pub(super) fn local_code_strict_json_projection_should_defer_until_validation(
 }
 
 fn local_code_strict_json_requested(
+    loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
-    user_text: &str,
 ) -> bool {
-    local_code_requested_fields(agent_run_context, user_text)
+    super::requested_local_code_json_fields(loop_state, agent_run_context)
         .iter()
         .any(|field| local_code_json_projection_field_supported(field))
 }
 
 fn local_code_validation_field_requested(
+    loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
-    user_text: &str,
 ) -> bool {
-    local_code_requested_fields(agent_run_context, user_text)
+    super::requested_local_code_json_fields(loop_state, agent_run_context)
         .iter()
         .any(|field| matches!(field.as_str(), "test_command" | "test_status"))
-}
-
-fn local_code_requested_fields(
-    agent_run_context: Option<&AgentRunContext>,
-    user_text: &str,
-) -> Vec<String> {
-    let mut surfaces = Vec::new();
-    if let Some(context) = agent_run_context {
-        if let Some(state_patch) = context
-            .turn_analysis
-            .as_ref()
-            .and_then(|analysis| analysis.state_patch.as_ref())
-        {
-            crate::machine_kv_projection::collect_requested_machine_kv_surfaces_from_state_patch(
-                state_patch,
-                &mut surfaces,
-            );
-        }
-        for value in [
-            context.original_user_request.as_deref(),
-            context.user_request.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, value);
-        }
-    }
-    crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, user_text);
-    let mut fields = Vec::new();
-    for field in surfaces.iter().flat_map(|surface| {
-        crate::machine_kv_projection::requested_machine_markers_for_projection(surface)
-    }) {
-        if !fields.iter().any(|existing| existing == &field) {
-            fields.push(field);
-        }
-    }
-    fields
 }
 
 fn local_code_json_projection_field_supported(field: &str) -> bool {

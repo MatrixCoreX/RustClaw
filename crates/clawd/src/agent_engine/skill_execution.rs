@@ -323,6 +323,14 @@ async fn handle_skill_step_success(
             "completed_with_inconclusive_non_validation_observation",
         ),
     };
+    if ledger_status == crate::executor::StepExecutionStatus::Ok {
+        super::record_successful_run_cmd_command_output_var(
+            loop_state,
+            normalized_skill,
+            &step_execution.step_id,
+            action_args,
+        );
+    }
     super::attempt_ledger::record_attempt(
         loop_state,
         normalized_skill,
