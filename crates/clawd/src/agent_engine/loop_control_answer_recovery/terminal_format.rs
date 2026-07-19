@@ -69,6 +69,16 @@ pub(in crate::agent_engine::loop_control) fn prefer_terminal_model_answer_for_ve
     if answer_is_machine_or_internal(answer.as_str()) || answer.trim() == reply.text.trim() {
         return false;
     }
+    let output_contract = route.effective_output_contract();
+    if crate::finalize::raw_command_machine_field_delivery_satisfies_request(
+        &output_contract,
+        reply.text.as_str(),
+    ) && !crate::finalize::raw_command_machine_field_delivery_satisfies_request(
+        &output_contract,
+        answer.as_str(),
+    ) {
+        return false;
+    }
     if terminal_model_answer_is_lossy_observed_scalar(journal, answer.as_str(), reply.text.as_str())
     {
         return false;
