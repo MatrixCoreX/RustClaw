@@ -1,4 +1,15 @@
-use super::llm_trace_text_lines;
+use super::{llm_trace_text_lines, task_llm_trace_url};
+
+#[test]
+fn llm_trace_request_explicitly_opts_into_teaching_trace() {
+    let url = task_llm_trace_url("http://127.0.0.1:8787", "task-llm-trace")
+        .expect("build teaching trace URL");
+
+    assert_eq!(
+        url.as_str(),
+        "http://127.0.0.1:8787/v1/debug/tasks/task-llm-trace?teaching=true"
+    );
+}
 
 #[test]
 fn llm_trace_text_lines_number_calls_and_flow_tokens() {
