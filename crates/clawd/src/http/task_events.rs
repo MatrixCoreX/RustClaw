@@ -21,6 +21,7 @@ const SSE_KEEPALIVE_SECONDS: u64 = 15;
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct TaskEventQuery {
     cursor: Option<u64>,
+    follow: Option<bool>,
 }
 
 struct EventStreamState {
@@ -29,6 +30,7 @@ struct EventStreamState {
     receiver: broadcast::Receiver<u64>,
     pending: VecDeque<Value>,
     cursor: u64,
+    follow_live: bool,
     terminal_seen: bool,
     done: bool,
 }
@@ -109,6 +111,7 @@ pub(crate) async fn stream_task_events(
         receiver,
         pending,
         cursor,
+        follow_live: query.follow.unwrap_or(true),
         terminal_seen: false,
         done: false,
     });
@@ -215,10 +218,14 @@ fn event_stream(
                 if event_is_terminal(&value) {
                     state.terminal_seen = true;
                 }
-                if state.terminal_seen && state.pending.is_empty() {
+                if (state.terminal_seen || !state.follow_live) && state.pending.is_empty() {
                     state.done = true;
                 }
                 return Some((Ok(event), state));
+            }
+            if !state.follow_live {
+                state.done = true;
+                continue;
             }
 
             match state.receiver.recv().await {

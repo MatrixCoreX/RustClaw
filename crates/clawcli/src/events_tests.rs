@@ -208,6 +208,72 @@ fn event_stream_read_timeout_is_classified_from_real_transport() {
 
     assert!(task_event_stream_timed_out(&error), "{error:#}");
 }
+
+#[test]
+fn task_event_snapshot_reads_persisted_replay_and_closes_without_terminal_event() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind snapshot server");
+    let address = listener.local_addr().expect("snapshot server address");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept snapshot request");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+        let mut request_line = String::new();
+        reader
+            .read_line(&mut request_line)
+            .expect("read snapshot request line");
+        assert!(
+            request_line.contains("/v1/tasks/task-snapshot/events?cursor=4&follow=false"),
+            "{request_line}"
+        );
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read request header");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+        stream
+            .write_all(
+                concat!(
+                "HTTP/1.1 200 OK\r\n",
+                "Content-Type: text/event-stream\r\n",
+                "Connection: close\r\n\r\n",
+                "id: 5\nevent: coding_evidence\n",
+                "data: {\"seq\":5,\"event_type\":\"coding_evidence\",\"payload\":{\"projection_revision\":8,\"verification_status\":\"verified\"}}\n\n",
+            )
+                .as_bytes(),
+            )
+            .expect("write snapshot response");
+        stream.flush().expect("flush snapshot response");
+    });
+
+    let raw =
+        read_task_event_snapshot(&format!("http://{address}"), "test-key", "task-snapshot", 4)
+            .expect("read event snapshot");
+    server.join().expect("snapshot server");
+
+    assert_eq!(raw.len(), 1);
+    assert_eq!(raw[0]["seq"], 5);
+    let events = task_event_lines_from_raw(&raw);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0]
+            .fields
+            .get("projection_revision")
+            .map(String::as_str),
+        Some("8")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("verification_status")
+            .map(String::as_str),
+        Some("verified")
+    );
+}
 use serde_json::json;
 use std::collections::BTreeMap;
 

@@ -1117,7 +1117,7 @@ fn collect_failure_fields(
     let Some(status) = map.get("status").and_then(Value::as_str) else {
         return;
     };
-    if !is_failure_status_token(status) || signals.failures.len() >= 32 {
+    if !is_failure_status_token(status) {
         return;
     }
     let has_step_identity = map.get("step_id").is_some()
@@ -1126,7 +1126,7 @@ fn collect_failure_fields(
     if !has_step_identity {
         return;
     }
-    signals.failures.push(json!({
+    let failure = json!({
         "step_id": map.get("step_id").cloned().unwrap_or(Value::Null),
         "status": status,
         "skill": map.get("skill").cloned().unwrap_or(Value::Null),
@@ -1140,7 +1140,23 @@ fn collect_failure_fields(
             .or_else(|| map.get("error_kind"))
             .cloned()
             .unwrap_or(Value::Null),
-    }));
+    });
+    let identity_fields = ["step_id", "status", "skill", "action_ref"];
+    if let Some(existing) = signals.failures.iter_mut().find(|existing| {
+        identity_fields
+            .iter()
+            .all(|field| existing.get(field) == failure.get(field))
+    }) {
+        if existing.get("error_code").is_none_or(Value::is_null)
+            && failure
+                .get("error_code")
+                .is_some_and(|value| !value.is_null())
+        {
+            existing["error_code"] = failure["error_code"].clone();
+        }
+    } else if signals.failures.len() < 32 {
+        signals.failures.push(failure);
+    }
     if let Some(command) = map.get("command").and_then(Value::as_str) {
         record_verification_failure_kind(command, signals);
     }

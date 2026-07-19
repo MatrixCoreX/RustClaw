@@ -40,3 +40,16 @@ fn cursor_expiry_control_has_no_sequence_id() {
     assert_eq!(value["payload"]["replay_mode"], "retained_suffix");
     assert_eq!(value["payload"]["oldest_available_seq"], 9);
 }
+
+#[test]
+fn event_query_defaults_to_follow_and_accepts_snapshot_mode() {
+    let default_query = TaskEventQuery::default();
+    assert_eq!(default_query.follow.unwrap_or(true), true);
+
+    let snapshot_query = TaskEventQuery {
+        cursor: Some(7),
+        follow: Some(false),
+    };
+    assert_eq!(snapshot_query.cursor, Some(7));
+    assert_eq!(snapshot_query.follow, Some(false));
+}

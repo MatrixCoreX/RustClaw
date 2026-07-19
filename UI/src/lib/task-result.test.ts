@@ -234,6 +234,46 @@ test("uses the highest coding projection revision after checkpoint continuation"
   assert.ok(!view.verification.includes("verification_status=failed"));
 });
 
+test("uses authoritative coding summary when compact trace omits late projections", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-coding-summary-fallback",
+    status: "succeeded",
+    result_json: {
+      task_journal: {
+        summary: {
+          final_status: "success",
+          coding_workflow: {
+            schema_version: 2,
+            projection_revision: 8,
+            latest_verification_step_ref: "step_7",
+            verification_status: "verified",
+            verification_failure_kind_count: 0,
+            historical_verification_failure_kind_count: 1,
+          },
+        },
+        trace: {
+          event_stream: [
+            {
+              seq: 3,
+              event_type: "coding_evidence",
+              payload: {
+                projection_revision: 2,
+                verification_status: "failed",
+                verification_failure_kind_count: 1,
+              },
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const view = buildTaskOutcome(result, "en");
+  assert.ok(view.verification.includes("verification_status=verified"));
+  assert.ok(view.verification.includes("verification_failure_kind_count=0"));
+  assert.ok(!view.verification.includes("verification_status=failed"));
+});
+
 test("builds task goal view from query goal projection", () => {
   const result: TaskQueryResponse = {
     task_id: "task-goal-view",

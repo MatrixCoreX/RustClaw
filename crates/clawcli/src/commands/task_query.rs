@@ -284,7 +284,23 @@ pub(crate) fn run_events(
         });
     }
     let task = task::get_task_status(base_url, key, task_id)?;
-    let events = output::filtered_events(&task, &event_filters);
+    let persisted = match crate::events::read_task_event_snapshot(base_url, key, task_id, cursor) {
+        Ok(events) => Some(events),
+        Err(error) if crate::events::task_event_stream_is_unavailable(&error) => None,
+        Err(error) => return Err(error).context("task_event_snapshot_failed"),
+    };
+    let persisted_lines = persisted
+        .as_deref()
+        .map(crate::events::task_event_lines_from_raw);
+    let events = persisted_lines
+        .as_ref()
+        .map(|events| {
+            events
+                .iter()
+                .filter(|event| event_filters.is_empty() || event_filters.matches(event))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| output::filtered_events(&task, &event_filters));
     for line in task_event_output_lines(&task, events, jsonl_output)? {
         println!("{line}");
     }

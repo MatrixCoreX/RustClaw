@@ -992,8 +992,10 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
 
 function latestCodingSummary(result: TaskQueryResponse): Record<string, unknown> | null {
   const events = taskTraceEvents(result);
-  let latest: Record<string, unknown> | null = null;
-  let latestRevision = -1;
+  const summary = asRecord(getPathValue(taskSummaryRoot(result), ["coding_workflow"]));
+  let latest: Record<string, unknown> | null = summary;
+  const summaryRevision = Number(summary?.projection_revision);
+  let latestRevision = Number.isFinite(summaryRevision) ? summaryRevision : summary ? 0 : -1;
   let latestSequence = -1;
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index];

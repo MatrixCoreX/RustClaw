@@ -925,11 +925,15 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
             .and_then(Value::as_str),
         Some("step_2")
     );
+    assert_eq!(event["payload"]["failure_count"], 1);
+    assert_eq!(event["payload"]["historical_failure_count"], 1);
     assert_eq!(
         event
             .pointer("/payload/failures/0/error_code")
             .and_then(Value::as_str),
-        Some("exit_status")
+        Some("exit_status"),
+        "coding evidence payload: {}",
+        event["payload"]
     );
     assert_eq!(
         event
