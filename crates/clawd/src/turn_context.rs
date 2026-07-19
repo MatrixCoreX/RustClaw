@@ -2,6 +2,7 @@ use serde_json::Value;
 
 /// Planner-owned cross-turn classification. The runtime never derives this
 /// from natural-language matching before the planner loop.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TurnType {
     TaskRequest,
@@ -33,6 +34,7 @@ impl TurnType {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TargetTaskPolicy {
     ReuseActive,
