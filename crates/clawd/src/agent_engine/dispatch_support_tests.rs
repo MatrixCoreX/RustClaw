@@ -4,7 +4,6 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
-    filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
     strip_internal_execution_args, strip_unsupported_planner_metadata_args,
     synthesize_answer_allows_direct_fallback, synthesize_bounded_read_range_direct_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
@@ -24,8 +23,6 @@ use claw_core::skill_registry::SkillsRegistry;
 
 #[path = "dispatch_support_tests/active_recipe_terminal_discussion.rs"]
 mod active_recipe_terminal_discussion;
-#[path = "dispatch_support_tests/filesystem_mutation_lifecycle.rs"]
-mod filesystem_mutation_lifecycle;
 #[path = "dispatch_support_tests/machine_envelope.rs"]
 mod machine_envelope;
 #[path = "dispatch_support_tests/read_range_synthesis_fallback.rs"]

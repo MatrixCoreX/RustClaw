@@ -13,7 +13,6 @@ mod context_compaction;
 mod dispatch_support;
 mod execution_loop;
 mod explicit_machine_command;
-mod filesystem_lifecycle_contract;
 pub(crate) mod loop_control;
 mod loop_state_contract_evidence;
 mod loop_state_seed;
@@ -22,6 +21,7 @@ mod mutation_ledger;
 pub(crate) mod observed_output;
 mod planner_skill_context;
 mod planning;
+mod scratch_cleanup_args;
 pub(crate) use explicit_machine_command::explicit_machine_syntax_command_segment;
 mod planning_action_normalization;
 mod planning_actions;
@@ -116,10 +116,6 @@ pub(crate) fn successful_run_cmd_command_for_step(
 
 pub(crate) use self::context_compaction::run_model_assisted_context_compaction;
 use self::execution_loop::execute_actions_once;
-pub(crate) use self::filesystem_lifecycle_contract::{
-    enrich_scratch_filesystem_cleanup_runtime_args,
-    scratch_filesystem_lifecycle_observed_steps_match,
-};
 use self::loop_control::{
     run_agent_with_loop_direct_plan, run_agent_with_loop_seeded,
     run_agent_with_loop_seeded_direct_plan, run_agent_with_loop_with_initial_observations,
@@ -135,6 +131,7 @@ use self::planner_skill_context::build_planner_skill_context;
 use self::prepare_round::{
     prepare_round_actions, push_round_trace, verifier_confirmation_gate_requires_checkpoint,
 };
+pub(crate) use self::scratch_cleanup_args::enrich_scratch_filesystem_cleanup_runtime_args;
 use self::skill_execution::execute_prepared_skill_action;
 use self::support::{
     action_fingerprint_for_policy, append_progress_hint, build_safe_skill_args_summary,

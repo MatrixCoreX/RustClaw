@@ -24,7 +24,6 @@ ASSIGNMENT = re.compile(
 )
 
 APPROVED_COMPATIBILITY_WRITERS = {
-    SRC / "agent_engine" / "filesystem_lifecycle_contract.rs",
     SRC / "agent_engine" / "service_probe_contract.rs",
     SRC / "finalize" / "task_machine_kv_summary.rs",
     SRC / "intent_router_active_task_repair.rs",

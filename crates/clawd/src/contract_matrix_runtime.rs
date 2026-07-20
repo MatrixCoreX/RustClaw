@@ -51,11 +51,6 @@ impl ContractActionPolicy {
     pub(crate) fn is_allowed(&self) -> bool {
         self.decision == ActionPolicyDecision::Allowed
     }
-
-    #[cfg(test)]
-    pub(crate) fn action_matches_preferred(&self) -> bool {
-        action_matches_policy_tokens(&self.action_key, &self.preferred_actions)
-    }
 }
 
 pub(crate) fn parse_contract_matrix_source(source: &str) -> Result<ContractMatrix, String> {
@@ -440,12 +435,4 @@ pub(crate) fn action_policy_for_output_contract(
         channel_visibility: matched.channel_visibility(),
         evidence_profile: matched.evidence_profile(),
     })
-}
-
-#[cfg(test)]
-pub(crate) fn action_matches_policy_tokens(action_key: &str, policies: &[String]) -> bool {
-    let Some(action) = ActionRef::parse(action_key) else {
-        return false;
-    };
-    action_matches_any(&action, policies)
 }

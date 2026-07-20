@@ -227,12 +227,8 @@ use contract_enforce::{
 use contract_enforce::{
     discard_meta_respond_placeholder_for_content_evidence,
     discard_raw_passthrough_delivery_when_structured_answer_available,
-    enforce_delivery_output_contract, route_accepts_filesystem_mutation_synthesis,
+    enforce_delivery_output_contract,
 };
-
-#[path = "loop_reply_filesystem_mutation.rs"]
-mod filesystem_mutation;
-use filesystem_mutation::filesystem_mutation_synthesis_reply;
 
 #[path = "loop_reply_observed_contract.rs"]
 mod observed_contract;
@@ -475,11 +471,6 @@ pub(crate) async fn finalize_loop_reply(
         &mut finalizer_summary,
         agent_run_context,
     );
-    if let Some(reply) =
-        filesystem_mutation_synthesis_reply(task, user_text, &loop_state, agent_run_context)
-    {
-        return Ok(reply);
-    }
     if should_return_missing_file_delivery_reply(&loop_state, agent_run_context) {
         if let Some(reply) = missing_file_delivery_reply_from_loop(
             state,

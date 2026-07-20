@@ -198,17 +198,21 @@ fn structured_selector_evidence_coverage_accepts_guard_findings() {
 }
 
 #[test]
-fn filesystem_mutation_result_accepts_kb_ingest_path_evidence() {
+fn exact_path_selector_accepts_kb_ingest_path_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-kb-ingest-evidence",
         "ask",
         "ingest README into demo_docs_nl",
     );
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FilesystemMutationResult,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         locator_hint: "README.md".to_string(),
         requires_content_evidence: true,
+        response_shape: crate::OutputResponseShape::Scalar,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("path".to_string()),
+            ..Default::default()
+        },
         ..Default::default()
     };
     journal.record_output_contract(&route.clone());

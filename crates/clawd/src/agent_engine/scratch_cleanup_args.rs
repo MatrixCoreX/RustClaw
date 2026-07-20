@@ -5,53 +5,6 @@ use crate::AppState;
 
 use super::LoopState;
 
-pub(crate) fn scratch_filesystem_lifecycle_observed_steps_match(
-    state: &AppState,
-    loop_state: &LoopState,
-) -> bool {
-    let mut scratch_root: Option<String> = None;
-    let mut saw_fs_action = false;
-    let mut saw_create_or_write = false;
-    let mut saw_read_or_validate = false;
-    let mut saw_cleanup = false;
-
-    for step in loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok())
-    {
-        if step.skill != "fs_basic" {
-            continue;
-        }
-        let Some(extra) = step.output.as_deref().and_then(step_output_extra) else {
-            continue;
-        };
-        let Some(action_name) = fs_action_name(&extra) else {
-            continue;
-        };
-        let Some(root) = scratch_root_for_fs_args(&state.skill_rt.workspace_root, &extra) else {
-            continue;
-        };
-        if let Some(existing) = scratch_root.as_deref() {
-            if existing != root {
-                return false;
-            }
-        } else {
-            scratch_root = Some(root);
-        }
-        saw_fs_action = true;
-        match action_name {
-            "make_dir" | "write_text" | "append_text" => saw_create_or_write = true,
-            "read_text_range" | "read_range" | "stat_paths" => saw_read_or_validate = true,
-            "remove_path" => saw_cleanup = true,
-            "list_dir" | "find_entries" | "grep_text" | "count_entries" | "compare_paths" => {}
-            _ => return false,
-        }
-    }
-
-    saw_fs_action && saw_create_or_write && saw_read_or_validate && saw_cleanup
-}
-
 pub(crate) fn enrich_scratch_filesystem_cleanup_runtime_args(
     state: &AppState,
     loop_state: &LoopState,
@@ -73,17 +26,16 @@ pub(crate) fn enrich_scratch_filesystem_cleanup_runtime_args(
     if !fs_args_target_scratch_root(&state.skill_rt.workspace_root, requested_args, &root) {
         return false;
     }
-    let contract_allows = loop_state.output_contract.as_ref().is_some_and(|contract| {
-        contract.semantic_kind_is(crate::OutputSemanticKind::FilesystemMutationResult)
-    });
-    let recovery_allows =
-        scratch_lifecycle_progress_has_write_in_root(state, loop_state, root.as_str())
-            || scratch_lifecycle_progress_has_archive_pack_in_root(
-                state,
-                loop_state,
-                root.as_str(),
-            );
-    if !contract_allows && !recovery_allows {
+    let recovery_allows = scratch_lifecycle_progress_has_write_in_root(
+        &state.skill_rt.workspace_root,
+        loop_state,
+        root.as_str(),
+    ) || scratch_lifecycle_progress_has_archive_pack_in_root(
+        &state.skill_rt.workspace_root,
+        loop_state,
+        root.as_str(),
+    );
+    if !recovery_allows {
         return false;
     }
     let Some(obj) = runtime_args.as_object_mut() else {
@@ -152,7 +104,7 @@ fn scratch_root_for_path(workspace_root: &Path, raw_path: &str) -> Option<String
 }
 
 fn scratch_lifecycle_progress_has_write_in_root(
-    state: &AppState,
+    workspace_root: &Path,
     loop_state: &LoopState,
     root: &str,
 ) -> bool {
@@ -174,12 +126,12 @@ fn scratch_lifecycle_progress_has_write_in_root(
             let Some(path) = extra.get("path").and_then(Value::as_str) else {
                 return false;
             };
-            scratch_root_for_path(&state.skill_rt.workspace_root, path).as_deref() == Some(root)
+            scratch_root_for_path(workspace_root, path).as_deref() == Some(root)
         })
 }
 
 fn scratch_lifecycle_progress_has_archive_pack_in_root(
-    state: &AppState,
+    workspace_root: &Path,
     loop_state: &LoopState,
     root: &str,
 ) -> bool {
@@ -201,7 +153,7 @@ fn scratch_lifecycle_progress_has_archive_pack_in_root(
             let Some(path) = extra.get("archive").and_then(Value::as_str) else {
                 return false;
             };
-            scratch_root_for_path(&state.skill_rt.workspace_root, path).as_deref() == Some(root)
+            scratch_root_for_path(workspace_root, path).as_deref() == Some(root)
         })
 }
 
@@ -231,3 +183,7 @@ fn relative_workspace_path(workspace_root: &Path, raw_path: &str) -> Option<Stri
     }
     Some(raw_path.replace('\\', "/"))
 }
+
+#[cfg(test)]
+#[path = "scratch_cleanup_args_tests.rs"]
+mod tests;

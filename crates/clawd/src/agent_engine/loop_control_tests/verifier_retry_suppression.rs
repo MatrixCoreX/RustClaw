@@ -96,7 +96,7 @@ fn output_format_machine_payload_gap_detects_structured_or_field_projection_repl
     ));
     assert!(answer_verifier_output_format_machine_payload_gap(
         &verifier,
-        r#"{"contract_marker":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
+        r#"{"schema_version":1,"status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
     ));
     assert!(answer_verifier_output_format_machine_payload_gap(
         &verifier,
