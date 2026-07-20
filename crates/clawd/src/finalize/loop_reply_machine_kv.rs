@@ -1188,9 +1188,8 @@ fn current_delivery_is_richer_than_requested_machine_summary(
     if current_delivery_is_publishable_evidence_summary(route, current, requested_summary) {
         return true;
     }
-    let preserves_richer_delivery = route
-        .semantic_kind_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
-        || route_required_machine_evidence_is_present_in_current_delivery(route, current);
+    let preserves_richer_delivery =
+        route_required_machine_evidence_is_present_in_current_delivery(route, current);
     if !preserves_richer_delivery {
         return false;
     }

@@ -92,56 +92,14 @@ pub(super) fn quantity_comparison_answer_is_grounded_in_successful_observation(
     quantity_answer_mentions_human_size(candidate, &sizes)
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ObservedScalarValue {
     pub(super) source_key: String,
     pub(super) text: String,
 }
 
-pub(super) fn recent_scalar_equality_answer_is_grounded_in_successful_observation(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-    candidate_answer: &str,
-) -> bool {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
-        || route.output_contract.delivery_required
-    {
-        return false;
-    }
-    let candidate = candidate_answer.trim();
-    if candidate.is_empty() || candidate.lines().count() > 1 {
-        return false;
-    }
-    let observations = recent_structured_scalar_values_from_journal(journal, 2);
-    if observations.len() < 2 {
-        return false;
-    }
-    let left = observations[0].text.trim();
-    let right = observations[1].text.trim();
-    if left.is_empty() || right.is_empty() {
-        return false;
-    }
-    if !observations[0].source_key.is_empty()
-        && observations[0].source_key == observations[1].source_key
-    {
-        return false;
-    }
-    observed_scalar_text_occurs_in_candidate(candidate, left)
-        && observed_scalar_text_occurs_in_candidate(candidate, right)
-        && candidate.contains(if left == right { "==" } else { "!=" })
-}
-
-pub(super) fn observed_scalar_text_occurs_in_candidate(candidate: &str, observed: &str) -> bool {
-    let observed = observed.trim();
-    if observed.is_empty() {
-        return false;
-    }
-    if observed.chars().all(|ch| ch.is_ascii_alphanumeric()) {
-        return scalar_token_occurs_in_text(candidate, observed);
-    }
-    candidate.contains(observed)
-}
-
+#[cfg(test)]
 pub(super) fn recent_structured_scalar_values_from_journal(
     journal: &crate::task_journal::TaskJournal,
     limit: usize,
@@ -159,12 +117,14 @@ pub(super) fn recent_structured_scalar_values_from_journal(
     recent
 }
 
+#[cfg(test)]
 pub(super) fn observed_scalar_value_from_step_output(output: &str) -> Option<ObservedScalarValue> {
     let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
     observed_scalar_value_from_json(&value)
         .or_else(|| value.get("extra").and_then(observed_scalar_value_from_json))
 }
 
+#[cfg(test)]
 pub(super) fn observed_scalar_value_from_json(
     value: &serde_json::Value,
 ) -> Option<ObservedScalarValue> {
@@ -183,6 +143,7 @@ pub(super) fn observed_scalar_value_from_json(
     }
 }
 
+#[cfg(test)]
 pub(super) fn observed_scalar_value_from_extract_item(
     item: &serde_json::Value,
     parent: Option<&serde_json::Value>,
@@ -225,6 +186,7 @@ pub(super) fn observed_scalar_value_from_extract_item(
     Some(ObservedScalarValue { source_key, text })
 }
 
+#[cfg(test)]
 pub(super) fn observed_scalar_json_value_text(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::String(value) => {

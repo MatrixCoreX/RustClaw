@@ -81,10 +81,7 @@ use quantity::{
 
 #[path = "loop_reply_compare_paths_metadata.rs"]
 mod compare_paths_metadata;
-use compare_paths_metadata::{
-    replace_final_delivery_with_quantity_compare_paths_required_metadata,
-    replace_final_delivery_with_recent_scalar_compare_paths_required_metadata,
-};
+use compare_paths_metadata::replace_final_delivery_with_quantity_compare_paths_required_metadata;
 
 #[path = "loop_reply_config_edit.rs"]
 mod config_edit;
@@ -1516,14 +1513,6 @@ pub(crate) async fn finalize_loop_reply(
         state,
         task,
         user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut delivery_deduped,
-        &mut finalizer_summary,
-    );
-    replace_final_delivery_with_recent_scalar_compare_paths_required_metadata(
-        state,
-        task,
         &mut loop_state,
         agent_run_context,
         &mut delivery_deduped,

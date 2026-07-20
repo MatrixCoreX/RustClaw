@@ -45,24 +45,6 @@ fn existence_with_path_no_longer_autoprepends_or_hard_rejects() {
 }
 
 #[test]
-fn recent_scalar_equality_is_not_verified_by_local_text_tokens() {
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::RecentScalarEqualityCheck,
-        ..IntentOutputContract::default()
-    };
-    assert_eq!(
-        verify_output_contract(&contract, "react-example、clawd、不一样", ""),
-        OutputContractVerdict::Pass
-    );
-    assert_eq!(
-        verify_output_contract(&contract, "needs composer judgment", ""),
-        OutputContractVerdict::Pass
-    );
-}
-
-#[test]
 fn pass_scalar_path_only_for_pure_path() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,

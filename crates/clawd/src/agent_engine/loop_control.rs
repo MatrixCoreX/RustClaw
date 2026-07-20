@@ -240,24 +240,6 @@ fn route_needs_workspace_text_evidence_before_observed_finalize(
         && route.locator_hint.trim().is_empty()
 }
 
-fn structured_scalar_equality_observation_can_finalize(
-    route_result: &IntentOutputContract,
-    loop_state: &LoopState,
-    actions: &[AgentAction],
-) -> bool {
-    route_result.semantic_kind_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
-        && !route_result.delivery_required
-        && has_executable_observation_or_action(actions)
-        && !has_discussion_followup_action(actions)
-        && super::observed_output::structured_scalar_equality_direct_answer(
-            None,
-            route_result,
-            loop_state,
-            None,
-        )
-        .is_some()
-}
-
 fn latest_path_batch_facts_all_missing(loop_state: &LoopState) -> bool {
     for step in loop_state.executed_step_results.iter().rev() {
         if !step.is_ok() || step.skill != "system_basic" {
@@ -393,11 +375,6 @@ fn should_stop_for_observed_finalize(
         && !has_observed_stop_candidate
     {
         return false;
-    }
-    if structured_scalar_equality_observation_can_finalize(route_result, loop_state, actions) {
-        return required_success_marker.is_none_or(|marker| {
-            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
-        });
     }
     if route_result.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
         && has_direct_observed_answer

@@ -60,7 +60,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "generated_file_delivery": "写一个简单文本文件到 tmp/contract_matrix_generated_note.txt，内容是 RustClaw contract matrix test，然后把文件路径发给我。",
     "scalar_path_only": f"只输出 {FIXTURE_PACKAGE} 的路径，不要解释。",
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
-    "recent_scalar_equality_check": "检查当前 git 分支名是否等于 main，只回答判断结果和依据。",
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
     "config_validation": f"验证 {FIXTURE_CONFIG} 是否是可读配置，并简短说明结果。",
     "config_risk_assessment": "检查 configs/config.toml 的风险配置项，简短说明是否有明显高风险设置。",
@@ -86,7 +85,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "generated_file_delivery": "Write a simple text file to tmp/contract_matrix_generated_note.txt with the content RustClaw contract matrix test, then send me the file path.",
     "scalar_path_only": f"Output only the path {FIXTURE_PACKAGE}. Do not explain.",
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
-    "recent_scalar_equality_check": "Check whether the current git branch name equals main. Answer only with the judgment and evidence.",
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
     "config_validation": f"Validate whether {FIXTURE_CONFIG} is a readable config file, and briefly explain the result.",
     "config_risk_assessment": "Check the risk-related settings in configs/config.toml and briefly say whether there is any obvious high-risk setting.",
@@ -502,7 +500,6 @@ def live_nl_action_preference_applicable(case: dict[str, Any]) -> bool:
         return contract_id in allowed_contracts
     prompt_surface_action_contracts = {
         "file_paths": {"fs_basic.find_entries"},
-        "recent_scalar_equality_check": {"git_basic", "run_cmd"},
         "scalar_count": {"fs_basic.count_entries", "run_cmd"},
         "structured_keys": {"config_basic.list_keys", "config_basic.read_fields"},
     }
@@ -554,7 +551,6 @@ def planned_action_equivalents(case: dict[str, Any]) -> list[str]:
         ],
         ("execution_failed_step", "log_analyze"): ["log_analyze", "run_cmd"],
         ("generated_file_delivery", "transform"): ["transform", "fs_basic.write_text"],
-        ("recent_scalar_equality_check", "run_cmd"): ["run_cmd", "git_basic"],
     }
     return equivalents.get((contract_id, action), [action])
 

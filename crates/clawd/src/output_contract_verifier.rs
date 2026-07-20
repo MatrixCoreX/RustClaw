@@ -354,7 +354,6 @@ pub(crate) fn verify_output_contract(
             verify_directory_names(contract, trimmed_candidate, user_request)
         }
         OutputSemanticKind::ScalarCount => verify_scalar_count(contract, trimmed_candidate),
-        OutputSemanticKind::RecentScalarEqualityCheck => OutputContractVerdict::Pass,
         _ => OutputContractVerdict::Pass,
     }
 }

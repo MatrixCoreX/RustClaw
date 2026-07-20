@@ -124,47 +124,6 @@ fn requested_machine_kv_summary_preserves_policy_decision_selector() {
 }
 
 #[test]
-fn requested_machine_kv_summary_preserves_richer_recent_scalar_delivery() {
-    let task = claimed_task("task-machine-kv-summary-recent-scalar-richer");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false},"field_value":{"left_exists":true,"right_exists":true,"same_path":false},"left":{"exists":true},"right":{"exists":true}}}"#,
-    ));
-    let mut delivery_messages =
-        vec!["same_path=false\nleft_exists=true\nright_exists=true".to_string()];
-    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
-    let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
-    route.delivery_required = false;
-    route.requires_content_evidence = true;
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut finalizer_summary = None;
-
-    assert!(!replace_delivery_with_requested_machine_kv_summary(
-        &task,
-        "return same_path and existence fields",
-        &mut loop_state,
-        Some(&agent_run_context),
-        &mut finalizer_summary,
-        &mut delivery_messages,
-    ));
-
-    assert_eq!(
-        delivery_messages,
-        vec!["same_path=false\nleft_exists=true\nright_exists=true".to_string()]
-    );
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some("same_path=false\nleft_exists=true\nright_exists=true")
-    );
-}
-
-#[test]
 fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
     let task = claimed_task("task-machine-kv-summary-required-evidence-richer");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
