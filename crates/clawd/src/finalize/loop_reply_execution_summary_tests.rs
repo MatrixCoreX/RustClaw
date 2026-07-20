@@ -1305,7 +1305,7 @@ fn execution_summary_includes_direct_fs_search_structured_observation() {
 fn execution_summary_suppressed_for_scalar_contract_without_reading_user_text() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = ".".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

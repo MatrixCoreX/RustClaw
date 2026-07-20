@@ -88,7 +88,6 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
         OutputSemanticKind::ServiceStatus
-        | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
@@ -240,8 +239,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
         | OutputSemanticKind::DirectoryEntryGroups
-        | OutputSemanticKind::FilePaths
-        | OutputSemanticKind::HiddenEntriesCheck => {
+        | OutputSemanticKind::FilePaths => {
             fields.insert("candidates");
         }
         OutputSemanticKind::ServiceStatus | OutputSemanticKind::RecentScalarEqualityCheck => {

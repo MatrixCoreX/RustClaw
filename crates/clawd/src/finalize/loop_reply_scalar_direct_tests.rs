@@ -1037,36 +1037,6 @@ fn direct_structured_observed_answer_formats_scalar_equality_pair() {
 }
 
 #[test]
-fn direct_scalar_finalize_uses_hidden_entries_direct_answer() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.executed_step_results.push(StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "list_dir".to_string(),
-        status: StepExecutionStatus::Ok,
-        output: Some(".git\nREADME.md\n.env\nsrc\n".to_string()),
-        error: None,
-        started_at: 0,
-        finished_at: 0,
-    });
-    let mut route = scalar_route_result();
-    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.locator_hint = ".".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let (answer, summary) =
-        direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
-            .expect("hidden entries scalar fallback should succeed");
-    assert_eq!(answer, "2");
-    assert_eq!(
-        summary.disposition,
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
-}
-
-#[test]
 fn direct_scalar_finalize_defers_health_check_summary_to_synthesis() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(StepExecutionResult {

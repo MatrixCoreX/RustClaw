@@ -313,20 +313,6 @@ fn scalar_count_candidate_is_structural_unavailable_result(text: &str, locator_h
     !outside_hint.chars().any(|ch| ch.is_ascii_digit())
 }
 
-fn verify_hidden_entries_check(
-    _contract: &IntentOutputContract,
-    text: &str,
-) -> OutputContractVerdict {
-    if text.trim().is_empty() {
-        return OutputContractVerdict::reject(
-            "hidden_entries_check_empty_candidate",
-            "hidden_entries_check: empty candidate",
-        );
-    }
-    // 正/否和示例是否充分属于语义输出质量，交给 composer/prompt。
-    OutputContractVerdict::Pass
-}
-
 /// §7.1 verifier 主入口：保守路线，只拦最严重结构 anti-pattern。
 pub(crate) fn verify_output_contract(
     contract: &IntentOutputContract,
@@ -363,9 +349,6 @@ pub(crate) fn verify_output_contract(
                     "scalar_path_only: non-scalar candidate does not contain a path or locator token",
                 )
             }
-        }
-        OutputSemanticKind::HiddenEntriesCheck => {
-            verify_hidden_entries_check(contract, trimmed_candidate)
         }
         OutputSemanticKind::DirectoryNames => {
             verify_directory_names(contract, trimmed_candidate, user_request)

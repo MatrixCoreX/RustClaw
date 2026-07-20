@@ -234,11 +234,7 @@ pub(in crate::finalize::loop_reply) fn matrix_strict_list_observed_answer(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) else {
             continue;
         };
-        if route.semantic_kind_is(crate::OutputSemanticKind::HiddenEntriesCheck) {
-            collect_matrix_hidden_entries(&value, &mut items);
-        } else {
-            collect_matrix_strict_list_items(route, &value, &mut items);
-        }
+        collect_matrix_strict_list_items(route, &value, &mut items);
     }
     if items.is_empty() {
         return None;
@@ -559,7 +555,6 @@ fn route_supports_matrix_strict_list_observed_answer(route: &crate::IntentOutput
             route.semantic_kind,
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
-                | crate::OutputSemanticKind::HiddenEntriesCheck
                 | crate::OutputSemanticKind::FilePaths
         )
 }
@@ -704,69 +699,6 @@ fn matrix_ranked_size_list_observed_answer(
         }
     }
     None
-}
-
-fn collect_matrix_hidden_entries(value: &serde_json::Value, items: &mut BTreeMap<String, String>) {
-    if let Some(entries) = value.get("entries").and_then(serde_json::Value::as_array) {
-        for entry in entries {
-            let Some(map) = entry.as_object() else {
-                continue;
-            };
-            let hidden = map
-                .get("hidden")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
-            if !hidden {
-                continue;
-            }
-            for key in ["name", "path"] {
-                if let Some(text) = map.get(key).and_then(serde_json::Value::as_str) {
-                    push_matrix_hidden_entry_item(text, items);
-                    break;
-                }
-            }
-        }
-    }
-    if let Some(names) = value.get("names").and_then(serde_json::Value::as_array) {
-        for name in names {
-            if let Some(text) = name.as_str() {
-                push_matrix_hidden_entry_item(text, items);
-            }
-        }
-    }
-    if let Some(names_by_kind) = value
-        .get("names_by_kind")
-        .and_then(serde_json::Value::as_object)
-    {
-        for child in names_by_kind.values() {
-            if let Some(array) = child.as_array() {
-                for name in array {
-                    if let Some(text) = name.as_str() {
-                        push_matrix_hidden_entry_item(text, items);
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn push_matrix_hidden_entry_item(raw: &str, items: &mut BTreeMap<String, String>) {
-    let item = raw.trim().trim_matches('`').trim();
-    if item.is_empty() || item == "." || item == ".." {
-        return;
-    }
-    let display = std::path::Path::new(item)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(item);
-    if !display.starts_with('.') || matches!(display, "." | "..") {
-        return;
-    }
-    items
-        .entry(display.to_ascii_lowercase())
-        .or_insert_with(|| display.to_string());
 }
 
 pub(in crate::finalize::loop_reply) fn matrix_grouped_name_list_observed_answer(

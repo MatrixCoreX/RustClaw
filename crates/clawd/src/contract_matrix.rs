@@ -553,7 +553,6 @@ pub(crate) enum FinalAnswerShape {
     Free,
     GroupedNameList,
     LifecycleResult,
-    ListOrEmptyStatement,
     NameList,
     PathList,
     RawOutputOrShortSummary,
@@ -617,7 +616,6 @@ impl FinalAnswerShape {
         Self::Free,
         Self::GroupedNameList,
         Self::LifecycleResult,
-        Self::ListOrEmptyStatement,
         Self::NameList,
         Self::PathList,
         Self::RawOutputOrShortSummary,
@@ -641,7 +639,6 @@ impl FinalAnswerShape {
             "free" => Some(Self::Free),
             "grouped_name_list" => Some(Self::GroupedNameList),
             "lifecycle_result" => Some(Self::LifecycleResult),
-            "list_or_empty_statement" => Some(Self::ListOrEmptyStatement),
             "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
@@ -667,7 +664,6 @@ impl FinalAnswerShape {
             Self::Free => "free",
             Self::GroupedNameList => "grouped_name_list",
             Self::LifecycleResult => "lifecycle_result",
-            Self::ListOrEmptyStatement => "list_or_empty_statement",
             Self::NameList => "name_list",
             Self::PathList => "path_list",
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
@@ -687,10 +683,9 @@ impl FinalAnswerShape {
             Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
             Self::SinglePath => FinalAnswerShapeClass::SinglePath,
             Self::Scalar => FinalAnswerShapeClass::ScalarValue,
-            Self::GroupedNameList
-            | Self::ListOrEmptyStatement
-            | Self::NameList
-            | Self::PathList => FinalAnswerShapeClass::StrictList,
+            Self::GroupedNameList | Self::NameList | Self::PathList => {
+                FinalAnswerShapeClass::StrictList
+            }
             Self::ComparisonVerdict
             | Self::ExistenceVerdictWithPath
             | Self::LifecycleResult

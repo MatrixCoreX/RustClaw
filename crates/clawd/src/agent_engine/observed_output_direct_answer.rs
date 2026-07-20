@@ -42,13 +42,8 @@ pub(super) fn extract_answer_from_observed_output_impl(
             route,
             allow_localized_direct_template,
         );
-    let hidden_entries_should_use_llm_synthesis = route.is_some_and(|route| {
-        route_requests_hidden_entries_check(route)
-            && route.response_shape != crate::OutputResponseShape::Scalar
-    });
     let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route)
-        && !existence_with_path_should_use_llm_synthesis
-        && !hidden_entries_should_use_llm_synthesis;
+        && !existence_with_path_should_use_llm_synthesis;
     let health_check_prefers_raw_payload = has_route_contract
         && route.is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is(
@@ -100,19 +95,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
         if let Some(answer) =
             structured_scalar_equality_direct_answer(state, route, loop_state, agent_run_context)
         {
-            return evidence_policy_checked_direct_candidate(
-                Some(route),
-                loop_state,
-                auto_locator_path,
-                answer,
-            );
-        }
-        if let Some(answer) =
-            hidden_entries_direct_answer(state, route, loop_state, prefers_english_free_text)
-        {
-            if latest_observation_lacks_required_content_evidence(route, loop_state) {
-                return None;
-            }
             return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,

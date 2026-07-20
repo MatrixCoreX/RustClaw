@@ -124,25 +124,7 @@ pub(super) fn structured_scalar_candidate(
                     })
             }),
         "inventory_dir" => {
-            let hidden_count_route = route.is_some_and(|route| {
-                route.response_shape == crate::OutputResponseShape::Scalar
-                    && route_requests_hidden_entries_check(route)
-            });
-            if hidden_count_route {
-                value
-                    .get("counts")
-                    .and_then(|v| v.get("hidden"))
-                    .and_then(value_scalar_text)
-                    .or_else(|| {
-                        inventory_dir_names(&value).map(|names| {
-                            names
-                                .into_iter()
-                                .filter(|name| is_user_hidden_entry(name))
-                                .count()
-                                .to_string()
-                        })
-                    })
-            } else if route.is_some_and(route_requests_scalar_count) {
+            if route.is_some_and(route_requests_scalar_count) {
                 value
                     .get("counts")
                     .and_then(|v| v.get("total"))
