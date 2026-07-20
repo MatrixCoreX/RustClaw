@@ -138,10 +138,7 @@ fn requested_summary_refs_path_fact(
 fn route_requests_existence_with_path(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
         .and_then(|ctx| ctx.output_contract())
-        .is_some_and(|route| {
-            route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
-                || route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPathSummary)
-        })
+        .is_some_and(|route| route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath))
 }
 
 fn path_matches_requested_token(path: &str, token: &str) -> bool {

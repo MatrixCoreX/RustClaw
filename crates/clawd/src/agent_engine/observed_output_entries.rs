@@ -463,31 +463,6 @@ pub(super) fn is_observation_step_for_answer_synthesis(
     )
 }
 
-pub(super) fn route_observation_facts_entry(
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<String> {
-    let ctx = agent_run_context?;
-    let route = ctx.output_contract()?;
-    if !super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::ExistenceWithPathSummary,
-    ) {
-        return None;
-    }
-    let resolved_path = ctx
-        .auto_locator_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .or_else(|| {
-            let hint = route.locator_hint.trim();
-            (!hint.is_empty()).then_some(hint)
-        })?;
-    Some(format!(
-        "### route_contract_facts\nresolved_target_path: {resolved_path}\npath_rule: use resolved_target_path as the target file path; do not infer the target path from file content fields such as WorkingDirectory."
-    ))
-}
-
 pub(super) fn cross_turn_synthesis_allowed(agent_run_context: Option<&AgentRunContext>) -> bool {
     matches!(
         agent_run_context

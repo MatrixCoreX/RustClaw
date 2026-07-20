@@ -66,7 +66,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "generated_file_delivery": "写一个简单文本文件到 tmp/contract_matrix_generated_note.txt，内容是 RustClaw contract matrix test，然后把文件路径发给我。",
     "scalar_path_only": f"只输出 {FIXTURE_PACKAGE} 的路径，不要解释。",
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
-    "existence_with_path_summary": f"检查 {FIXTURE_PACKAGE} 是否存在，如果存在就一句话说明它大概是什么文件。",
     "recent_scalar_equality_check": "检查当前 git 分支名是否等于 main，只回答判断结果和依据。",
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
     "config_validation": f"验证 {FIXTURE_CONFIG} 是否是可读配置，并简短说明结果。",
@@ -99,7 +98,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "generated_file_delivery": "Write a simple text file to tmp/contract_matrix_generated_note.txt with the content RustClaw contract matrix test, then send me the file path.",
     "scalar_path_only": f"Output only the path {FIXTURE_PACKAGE}. Do not explain.",
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
-    "existence_with_path_summary": f"Check whether {FIXTURE_PACKAGE} exists. If it does, explain in one sentence what kind of file it is.",
     "recent_scalar_equality_check": "Check whether the current git branch name equals main. Answer only with the judgment and evidence.",
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
     "config_validation": f"Validate whether {FIXTURE_CONFIG} is a readable config file, and briefly explain the result.",
@@ -582,10 +580,6 @@ def planned_action_equivalents(case: dict[str, Any]) -> list[str]:
             "config_edit.validate_config",
         ],
         ("execution_failed_step", "log_analyze"): ["log_analyze", "run_cmd"],
-        (
-            "existence_with_path_summary",
-            "fs_basic.find_entries",
-        ): ["fs_basic.find_entries", "fs_basic.stat_paths", "fs_basic.read_text_range"],
         ("generated_file_delivery", "transform"): ["transform", "fs_basic.write_text"],
         ("recent_scalar_equality_check", "run_cmd"): ["run_cmd", "git_basic"],
     }

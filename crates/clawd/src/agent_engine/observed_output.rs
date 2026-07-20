@@ -80,7 +80,7 @@ pub(crate) use output_entries::has_observed_answer_candidates;
 use output_entries::recent_generated_output_from_user_request;
 use output_entries::{
     compound_listing_content_delivery_guard_entry, cross_turn_observed_output_entries,
-    execution_failed_step_guard_entry, observed_output_entries, route_observation_facts_entry,
+    execution_failed_step_guard_entry, observed_output_entries,
 };
 
 #[path = "observed_output_direct_scalar.rs"]
@@ -794,7 +794,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
     matches!(
         shape,
         FinalAnswerShape::ComparisonVerdict
-            | FinalAnswerShape::ExistenceSummaryWithPath
             | FinalAnswerShape::ExistenceVerdictWithPath
             | FinalAnswerShape::JudgmentWithExcerptBasis
             | FinalAnswerShape::PresenceVerdictWithMatch
@@ -867,9 +866,6 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             agent_run_context.and_then(|ctx| ctx.output_contract()),
         ) {
             observed_entries.insert(0, guard);
-        }
-        if let Some(route_facts) = route_observation_facts_entry(agent_run_context) {
-            observed_entries.insert(0, route_facts);
         }
         if let Some(guard) = compound_listing_content_delivery_guard_entry(
             loop_state,

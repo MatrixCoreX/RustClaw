@@ -179,7 +179,7 @@ fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
     ];
     loop_state.last_user_visible_respond = delivery_messages.last().cloned();
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     route.delivery_required = false;
     route.requires_content_evidence = true;

@@ -86,7 +86,6 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::ContentExcerptWithSummary
         | OutputSemanticKind::DirectoryPurposeSummary
         | OutputSemanticKind::WorkspaceProjectSummary
-        | OutputSemanticKind::ExistenceWithPathSummary
         | OutputSemanticKind::RecentArtifactsJudgment
         | OutputSemanticKind::ExcerptKindJudgment => TaskOperation::Summarize,
         OutputSemanticKind::GeneratedFileDelivery
@@ -234,7 +233,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ScalarPathOnly => {
             fields.insert("field_value");
         }
-        OutputSemanticKind::ExistenceWithPath | OutputSemanticKind::ExistenceWithPathSummary => {
+        OutputSemanticKind::ExistenceWithPath => {
             fields.insert("exists");
             fields.insert("kind");
             fields.insert("path");
@@ -304,9 +303,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
             }
         }
         _ => {}
-    }
-    if output_contract.semantic_kind_is(OutputSemanticKind::ExistenceWithPathSummary) {
-        fields.insert("content_excerpt");
     }
     fields.into_iter().map(str::to_string).collect()
 }
