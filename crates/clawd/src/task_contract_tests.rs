@@ -97,48 +97,27 @@ fn structured_selector_owns_required_evidence_without_domain_semantics() {
 
 #[test]
 fn planner_semantic_matrix_drives_evidence_contract() {
-    for (semantic_kind, target, operation, delivery_shape, evidence) in [
-        (
-            OutputSemanticKind::ConfigValidation,
-            TaskTargetObject::ConfigKey,
-            TaskOperation::Validate,
-            TaskDeliveryShape::Summary,
-            vec!["valid"],
-        ),
-        (
-            OutputSemanticKind::ConfigMutation,
-            TaskTargetObject::ConfigKey,
-            TaskOperation::Modify,
-            TaskDeliveryShape::Summary,
-            vec!["field_value", "path", "valid"],
-        ),
-    ] {
-        let output_contract = IntentOutputContract {
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            semantic_kind,
-            ..IntentOutputContract::default()
-        };
+    let output_contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::ConfigValidation,
+        ..IntentOutputContract::default()
+    };
 
-        assert_eq!(
-            target_object_for_output_contract(&output_contract),
-            target,
-            "{semantic_kind:?}"
-        );
-        assert_eq!(
-            operation_for_output_contract(&output_contract),
-            operation,
-            "{semantic_kind:?}"
-        );
-        assert_eq!(
-            delivery_shape_for_output_contract(&output_contract),
-            delivery_shape,
-            "{semantic_kind:?}"
-        );
-        assert_eq!(
-            required_evidence_fields_for_output_contract(&output_contract),
-            evidence,
-            "{semantic_kind:?}"
-        );
-    }
+    assert_eq!(
+        target_object_for_output_contract(&output_contract),
+        TaskTargetObject::ConfigKey
+    );
+    assert_eq!(
+        operation_for_output_contract(&output_contract),
+        TaskOperation::Validate
+    );
+    assert_eq!(
+        delivery_shape_for_output_contract(&output_contract),
+        TaskDeliveryShape::Summary
+    );
+    assert_eq!(
+        required_evidence_fields_for_output_contract(&output_contract),
+        vec!["valid"]
+    );
 }

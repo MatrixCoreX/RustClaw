@@ -588,35 +588,6 @@ fn action_policy_allows_runtime_equivalent_for_virtual_config_guard() {
 }
 
 #[test]
-fn config_mutation_contract_allows_plan_apply_validate_and_read_back() {
-    let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ConfigMutation,
-        requires_content_evidence: true,
-        ..IntentOutputContract::default()
-    };
-    for action in [
-        "plan_config_change",
-        "apply_config_change",
-        "validate_config",
-    ] {
-        let policy = action_policy_for_output_contract(
-            Some(&output_contract),
-            "config_edit",
-            &serde_json::json!({
-                "action": action,
-                "path": "configs/config.toml",
-                "field_path": "skills.skill_switches.example",
-                "value": true,
-            }),
-        )
-        .expect("policy decision");
-
-        assert_eq!(policy.decision, ActionPolicyDecision::Allowed, "{action}");
-        assert_eq!(policy.contract_match, "config_mutation");
-    }
-}
-
-#[test]
 fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
     let matrix = load_workspace_matrix();
     let cases = [
@@ -624,11 +595,6 @@ fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
             "config_validation",
             OutputSemanticKind::ConfigValidation,
             "config_basic.validate",
-        ),
-        (
-            "config_mutation",
-            OutputSemanticKind::ConfigMutation,
-            "config_edit.plan_config_change",
         ),
         (
             "filesystem_mutation_result",
@@ -948,7 +914,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 63);
+    let cases = generated_contract_cases(&matrix, 60);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

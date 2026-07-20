@@ -209,6 +209,56 @@ fn config_read_uses_generic_capability_result_selector() {
 }
 
 #[test]
+fn config_mutation_exact_field_uses_generic_capability_result_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "config_edit"
+        enabled = true
+        kind = "runner"
+        semantic_tags = []
+        "#,
+        &["config_edit"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("validated".to_string());
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "apply_config_change",
+        "path": "configs/config.toml",
+        "field_path": "skills.skill_switches.example",
+        "old_value": null,
+        "new_value": true,
+        "applied": true,
+        "validated": true,
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "config_edit",
+            "step_1",
+            &serde_json::json!({"action": "apply_config_change"}),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+
+    assert_eq!(
+        extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &state,
+            Some(&agent_run_context)
+        )
+        .as_deref(),
+        Some("true")
+    );
+}
+
+#[test]
 fn document_title_uses_generic_capability_result_selector() {
     let state = test_state_with_registry(
         r#"

@@ -622,9 +622,6 @@ pub(super) fn synthesize_evidence_policy_direct_observed_fallback_answer(
 ) -> Option<String> {
     let route = agent_run_context.and_then(|context| context.output_contract())?;
     crate::evidence_policy::final_answer_shape_for_output_contract(route)?;
-    if route.semantic_kind_is(crate::OutputSemanticKind::ConfigMutation) {
-        return None;
-    }
     if crate::agent_engine::observed_output::route_disallows_direct_observation_passthrough(route) {
         return None;
     }
@@ -752,22 +749,6 @@ fn multiline_read_range_content_line_count_from_value(value: &Value) -> Option<u
     value
         .get("extra")
         .and_then(multiline_read_range_content_line_count_from_value)
-}
-
-pub(super) fn synthesize_user_language_source<'a>(
-    user_text: &'a str,
-    agent_run_context: Option<&'a AgentRunContext>,
-) -> &'a str {
-    agent_run_context
-        .and_then(|context| {
-            context
-                .original_user_request
-                .as_deref()
-                .or(context.user_request.as_deref())
-        })
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .unwrap_or(user_text)
 }
 
 pub(super) fn route_resolved_intent(agent_run_context: Option<&AgentRunContext>) -> String {

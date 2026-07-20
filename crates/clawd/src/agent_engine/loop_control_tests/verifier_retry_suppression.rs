@@ -92,7 +92,7 @@ fn output_format_machine_payload_gap_detects_structured_or_field_projection_repl
 
     assert!(answer_verifier_output_format_machine_payload_gap(
         &verifier,
-        r#"{"message_key":"clawd.msg.config_edit.guard","candidates":["tools.allow_sudo=true"]}"#
+        r#"{"status":"ok","candidates":["tools.allow_sudo=true"]}"#
     ));
     assert!(answer_verifier_output_format_machine_payload_gap(
         &verifier,
@@ -121,7 +121,7 @@ fn output_format_machine_payload_gap_rejects_unresolved_field_value_gap() {
 
     assert!(!answer_verifier_output_format_machine_payload_gap(
         &verifier,
-        r#"{"message_key":"clawd.msg.config_edit.guard","field_value":null}"#
+        r#"{"status":"ok","field_value":null}"#
     ));
     assert!(!answer_verifier_gap_requests_observed_content_rewrite(
         &verifier

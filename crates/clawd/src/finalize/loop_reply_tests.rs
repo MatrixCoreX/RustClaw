@@ -8,7 +8,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::{
     agent_context_allows_observed_output_language_fallback,
     append_compound_file_delivery_token_from_route,
-    attach_config_edit_observed_answer_from_registry,
     attach_deterministic_observed_execution_status_answer,
     attach_execution_recipe_closeout_to_delivery, attach_execution_summary_to_delivery,
     auto_requested_success_marker, backfill_delivery_from_last_outputs,
@@ -18,13 +17,13 @@ use super::{
     delivery_contract_suppresses_execution_summary, delivery_is_content_answer_candidate,
     deterministic_execution_failed_step_answer, deterministic_matrix_observed_shape_answer,
     deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
-    deterministic_structured_file_validation_from_read_range, direct_config_edit_observed_answer,
-    direct_db_basic_observed_answer, direct_file_token_from_observed_auto_locator_filename,
+    deterministic_structured_file_validation_from_read_range, direct_db_basic_observed_answer,
+    direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_generated_file_path_report_from_dry_run_payload, direct_non_builtin_skill_raw_answer,
     direct_path_from_active_bound_inventory, direct_publishable_observed_answer,
-    direct_raw_command_output_projection, direct_rustclaw_config_risk_answer,
-    direct_scalar_observed_answer, direct_structured_observed_answer,
+    direct_raw_command_output_projection, direct_scalar_observed_answer,
+    direct_structured_observed_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
     discard_raw_passthrough_delivery_when_structured_answer_available,
     effective_agent_run_context_for_finalization, ensure_requested_success_marker_visible,
@@ -43,11 +42,9 @@ use super::{
     prefer_latest_synthesis_for_compound_observation_delivery,
     prefer_observed_answer_for_exact_contract, preferred_route_clarify_question,
     preserve_compound_content_summary_with_file_token, priority_last_respond_for_final_delivery,
-    promote_observed_language_delivery_summary, replace_config_edit_machine_marker_delivery,
-    replace_config_edit_machine_marker_final_answer,
+    promote_observed_language_delivery_summary,
     replace_delivery_with_deterministic_execution_failed_step_answer,
     replace_delivery_with_deterministic_observed_execution_status_answer,
-    replace_delivery_with_deterministic_rustclaw_config_risk_answer,
     replace_delivery_with_latest_tail_read_range_answer,
     replace_delivery_with_requested_machine_kv_summary,
     replace_raw_observation_delivery_with_synthesis, resolve_file_token_from_auto_locator_answer,
@@ -77,7 +74,7 @@ mod machine_kv_path_fact;
 #[test]
 fn visible_answer_machine_payload_detection_is_structural() {
     assert!(visible_answer_is_machine_payload(
-        r#"{"message_key":"clawd.msg.config_edit.guard","candidates":["tools.allow_sudo=true"]}"#
+        r#"{"status":"ok","candidates":["tools.allow_sudo=true"]}"#
     ));
     assert!(visible_answer_is_machine_payload(
         r#"{"contract_marker":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
@@ -183,19 +180,6 @@ fn priority_last_respond_keeps_explicit_respond_step_priority() {
 }
 
 #[test]
-fn config_guard_machine_payload_remains_structured_for_final_delivery() {
-    assert!(visible_machine_payload_should_remain_structured(
-        r#"{"message_key":"clawd.msg.config_edit.guard","path":"configs/config.toml","risk_count":2,"candidates":["tools.allow_sudo=true"]}"#
-    ));
-    assert!(visible_machine_payload_should_remain_structured(
-        r#"{"message_key":"clawd.msg.config_risk.summary","path":"configs/config.toml","count":1,"risks":["tools.allow_sudo=true"]}"#
-    ));
-    assert!(!visible_machine_payload_should_remain_structured(
-        r#"{"message_key":"clawd.msg.config_edit.guard","count":1}"#
-    ));
-}
-
-#[test]
 fn subagent_runtime_machine_payload_remains_structured_for_final_delivery() {
     assert!(visible_machine_payload_should_remain_structured(
         r#"{"output_format":"machine_json","owner_layer":"subagent_runtime","execution_mode":"bounded_parallel_readonly_child_runs","aggregation":{"finding_refs":[]}}"#
@@ -216,9 +200,6 @@ mod content_evidence_tests;
 
 #[path = "loop_reply_language_closeout_tests.rs"]
 mod language_closeout_tests;
-
-#[path = "loop_reply_config_edit_tests.rs"]
-mod config_edit_tests;
 
 #[path = "loop_reply_missing_delivery_tests.rs"]
 mod missing_delivery_tests;
@@ -282,9 +263,6 @@ mod task_lifecycle_renderers_tests;
 
 #[path = "loop_reply_deterministic_fallback_renderers_tests.rs"]
 mod deterministic_fallback_renderers_tests;
-
-#[path = "loop_reply_capability_result_renderers_tests.rs"]
-mod capability_result_renderers_tests;
 
 #[path = "loop_reply_artifact_renderers_tests.rs"]
 mod artifact_renderers_tests;

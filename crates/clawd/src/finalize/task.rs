@@ -6,8 +6,6 @@ use crate::{repo, AppState};
 
 #[path = "task_answer_verifier_failure.rs"]
 mod task_answer_verifier_failure;
-#[path = "task_config_guard_recovery.rs"]
-mod task_config_guard_recovery;
 #[path = "task_content_evidence_delivery.rs"]
 mod task_content_evidence_delivery;
 #[path = "task_cost_wait.rs"]
@@ -51,7 +49,6 @@ use task_answer_verifier_failure::{
     answer_verifier_failure_needs_user_message, compose_answer_verifier_failure_user_message,
     machine_payload_observed_facts,
 };
-use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
 use task_content_evidence_delivery::backfill_file_delivery_contract_from_journal;
 use task_cost_wait::record_cost_wait_checkpoint;
 use task_delivery_guards::{
@@ -821,22 +818,6 @@ pub(crate) async fn finalize_ask_result(
                 answer_messages.push(answer_text.clone());
                 journal.record_final_answer(&answer_text);
                 mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
-            }
-            if let Some(recovered_answer) =
-                deterministic_config_guard_candidates_recovery(route_result, &journal)
-            {
-                failure_reply = false;
-                semantic_clarify = false;
-                answer_text = recovered_answer;
-                answer_messages.clear();
-                answer_messages.push(answer_text.clone());
-                journal.record_final_answer(&answer_text);
-                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
-                info!(
-                    "finalize_config_guard_candidates_recovered task_id={} answer={}",
-                    task.task_id,
-                    crate::truncate_for_log(&answer_text)
-                );
             }
             if let Some(recovered_answer) = deterministic_content_tail_read_failure_recovery(
                 state,

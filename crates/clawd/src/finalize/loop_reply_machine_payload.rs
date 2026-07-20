@@ -92,20 +92,7 @@ pub(super) fn visible_machine_payload_should_remain_structured(text: &str) -> bo
     {
         return true;
     }
-    let Some(message_key) = object
-        .get("message_key")
-        .and_then(serde_json::Value::as_str)
-    else {
-        return false;
-    };
-    matches!(
-        message_key,
-        "clawd.msg.config_edit.guard" | "clawd.msg.config_risk.summary"
-    ) && object.contains_key("path")
-        && (object.contains_key("risk_count")
-            || object.contains_key("count")
-            || object.contains_key("candidates")
-            || object.contains_key("risks"))
+    false
 }
 
 fn route_allows_machine_payload_visible_render(

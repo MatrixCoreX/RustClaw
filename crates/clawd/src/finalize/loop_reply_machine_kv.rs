@@ -27,10 +27,7 @@ use machine_unit_delivery::{
     strict_machine_field_contract_requested, valid_machine_unit_key,
 };
 use request_surfaces::requested_machine_kv_request_surfaces;
-use structured_contract_delivery::{
-    current_delivery_contains_full_structured_contract, latest_config_guard_machine_payload,
-    should_restore_config_guard_payload,
-};
+use structured_contract_delivery::current_delivery_contains_full_structured_contract;
 
 use super::{
     final_answer_text_from_delivery, log_deterministic_delivery_record,
@@ -340,39 +337,6 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
             loop_state.executed_step_results.len(),
         );
         return true;
-    }
-    if should_restore_config_guard_payload(agent_run_context, &answer) {
-        if let Some(payload) = latest_config_guard_machine_payload(loop_state, delivery_messages) {
-            delivery_messages.clear();
-            delivery_messages.push(payload.clone());
-            loop_state.delivery_messages.clear();
-            append_delivery_message(
-                &task.task_id,
-                &mut loop_state.delivery_messages,
-                payload.clone(),
-            );
-            loop_state.last_user_visible_respond = Some(payload);
-            *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                parsed: true,
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: loop_state.executed_step_results.len(),
-                ..Default::default()
-            });
-            log_deterministic_delivery_record(
-                &task.task_id,
-                "requested_machine_kv_summary_config_guard_payload",
-                "restored",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-            return true;
-        }
     }
     if service_status_one_sentence_delivery_should_be_preserved(agent_run_context, &current) {
         loop_state.last_user_visible_respond = Some(current);

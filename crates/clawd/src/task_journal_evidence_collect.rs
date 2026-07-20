@@ -1132,9 +1132,6 @@ pub(super) fn text_looks_sensitive(text: &str) -> bool {
     }
     let trimmed =
         text.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-');
-    if known_non_secret_config_risk_label(trimmed) {
-        return false;
-    }
     if looks_like_safe_file_token(trimmed) {
         return false;
     }
@@ -1200,34 +1197,4 @@ pub(super) fn looks_like_safe_file_token(text: &str) -> bool {
             | "yml"
             | "zip"
     )
-}
-
-pub(super) fn known_non_secret_config_risk_label(text: &str) -> bool {
-    let Some((field, value)) = text.split_once('=') else {
-        return false;
-    };
-    let field = field.trim().to_ascii_lowercase();
-    let value = value
-        .trim()
-        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
-    if !matches!(
-        field.as_str(),
-        "tools.allow"
-            | "tools.allow_sudo"
-            | "tools.allow_path_outside_workspace"
-            | "telegram.sendfile.full_access"
-            | "server.listen"
-            | "worker.task_timeout_seconds"
-    ) {
-        return false;
-    }
-    if value.eq_ignore_ascii_case("true")
-        || value.eq_ignore_ascii_case("false")
-        || value.parse::<i64>().is_ok()
-        || value.parse::<f64>().is_ok()
-    {
-        return true;
-    }
-    field == "tools.allow" && value == "[\"*\"]"
-        || field == "server.listen" && (value == "0.0.0.0" || value.starts_with("0.0.0.0:"))
 }

@@ -1182,9 +1182,8 @@ fn requested_machine_kv_summary_prefers_observed_field_value_over_marker_only_pa
     let structured_answer = serde_json::json!({
         "current_value": "minimax",
         "field_path": "llm.selected_vendor",
-        "message_key": "clawd.msg.config_edit.read_guard",
         "path": "configs/config.toml",
-        "reason_code": "config_edit_read_guard",
+        "status": "ok",
         "risk_count": 0,
         "risks": []
     })
@@ -1372,40 +1371,4 @@ fn requested_machine_kv_summary_preserves_full_structured_contract_json() {
         &mut delivery_messages,
     ));
     assert_eq!(delivery_messages, vec![contract]);
-}
-
-#[test]
-fn requested_machine_kv_summary_preserves_config_guard_machine_payload() {
-    let task = claimed_task("task-machine-kv-config-guard");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
-    let guard = serde_json::json!({
-        "message_key": "clawd.msg.config_edit.guard",
-        "reason_code": "config_edit_guard_risk_found",
-        "path": "/home/guagua/rustclaw/configs/config.toml",
-        "count": 2,
-        "risk_count": 2,
-        "candidates": [
-            "tools.allow_sudo=true",
-            "tools.allow_path_outside_workspace=true"
-        ],
-        "enabled": false
-    })
-    .to_string();
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_1", "config_basic", &guard));
-    loop_state.delivery_messages.push(guard.clone());
-    loop_state.last_user_visible_respond = Some(guard.clone());
-    let mut delivery_messages = vec![guard.clone()];
-    let mut finalizer_summary = None;
-
-    assert!(!replace_delivery_with_requested_machine_kv_summary(
-        &task,
-        "检查 configs/config.toml 是否有明显空字段或禁用技能数量，不要输出任何 secret、token、key 的值。",
-        &mut loop_state,
-        None,
-        &mut finalizer_summary,
-        &mut delivery_messages,
-    ));
-    assert_eq!(delivery_messages, vec![guard]);
 }

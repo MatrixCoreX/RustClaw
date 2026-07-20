@@ -184,6 +184,34 @@ fn config_risk_resolves_without_domain_output_contract() {
 }
 
 #[test]
+fn config_mutation_resolves_without_domain_output_contract() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "config.apply_change",
+        json!({
+            "path": "configs/config.toml",
+            "field_path": "skills.skill_switches.example",
+            "value": true,
+        }),
+    );
+
+    assert_eq!(record.output_semantic_kind, None);
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected config mutation tool action");
+    };
+    assert_eq!(tool, "config_edit");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("apply_config_change")
+    );
+    assert_eq!(
+        args.get("field_path").and_then(Value::as_str),
+        Some("skills.skill_switches.example")
+    );
+}
+
+#[test]
 fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

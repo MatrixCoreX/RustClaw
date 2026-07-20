@@ -7,7 +7,6 @@ use super::{
     apply_requested_machine_kv_summary_to_final_answer, ask_runtime_failure_default_text,
     ask_runtime_failure_machine_payload, assistant_memory_source_text,
     compose_answer_verifier_failure_user_message, delivery_path_gap_should_finalize_as_clarify,
-    deterministic_config_guard_candidates_recovery,
     deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
     deterministic_raw_tail_read_failure_recovery, deterministic_tree_summary_rows_failure_recovery,
     drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
@@ -29,8 +28,6 @@ use serde_json::json;
 mod answer_verifier_recovery;
 #[path = "task_tests/checkpoint_finalization.rs"]
 mod checkpoint_finalization;
-#[path = "task_tests/config_guard_recovery.rs"]
-mod config_guard_recovery;
 #[path = "task_tests/config_validation_delivery.rs"]
 mod config_validation_delivery;
 #[path = "task_tests/content_evidence_delivery.rs"]
@@ -1089,164 +1086,6 @@ fn content_tail_read_failure_recovery_selects_observed_log_line() {
     assert_eq!(
         recovered,
         "2026-06-25T09:12:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=content_excerpt"
-    );
-}
-
-#[test]
-fn config_guard_candidates_recovery_uses_nested_observed_evidence() {
-    let mut route = route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-config-guard-candidates-recovery",
-        "ask",
-        "prompt",
-    );
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["candidates".to_string()],
-        answer_incomplete_reason: "candidate evidence missing".to_string(),
-        should_retry: true,
-        retry_instruction: "use guard candidates".to_string(),
-        confidence: 0.9,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "action": "guard_config",
-                    "path": "configs/config.toml",
-                    "risk_count": 2,
-                    "candidates": [
-                        "tools.allow_sudo=true",
-                        "tools.allow_path_outside_workspace=true"
-                    ],
-                    "valid": false
-                },
-                "text": "{}"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let recovered =
-        deterministic_config_guard_candidates_recovery(&route, &journal).expect("recovery");
-    let payload: serde_json::Value = serde_json::from_str(&recovered).expect("json payload");
-
-    assert_eq!(
-        payload
-            .get("reason_code")
-            .and_then(serde_json::Value::as_str),
-        Some("config_edit_guard_risk_found")
-    );
-    assert_eq!(
-        payload.get("count").and_then(serde_json::Value::as_u64),
-        Some(2)
-    );
-    assert_eq!(
-        payload
-            .pointer("/candidates/1")
-            .and_then(serde_json::Value::as_str),
-        Some("tools.allow_path_outside_workspace=true")
-    );
-    assert_eq!(
-        payload.get("valid").and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
-}
-
-#[test]
-fn config_guard_candidates_recovery_handles_truncated_output_excerpt() {
-    let mut route = route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-config-guard-truncated-recovery",
-        "ask",
-        "prompt",
-    );
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["candidates".to_string()],
-        answer_incomplete_reason: "candidate evidence missing".to_string(),
-        should_retry: true,
-        retry_instruction: "use guard candidates".to_string(),
-        confidence: 0.9,
-    });
-    journal.step_results.push(crate::task_journal::TaskJournalStepTrace::ok(
-        "step_1",
-        "config_basic",
-        r#"{"extra":{"action":"guard_config","candidates":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true"],"count":2,"format":"toml","path":"configs/config.toml","resolved_path":"/workspace/configs/config.toml","risk_coun...(truncated)"#,
-    ));
-
-    let recovered =
-        deterministic_config_guard_candidates_recovery(&route, &journal).expect("recovery");
-    let payload: serde_json::Value = serde_json::from_str(&recovered).expect("json payload");
-
-    assert_eq!(
-        payload
-            .get("risk_count")
-            .and_then(serde_json::Value::as_u64),
-        Some(2)
-    );
-    assert_eq!(
-        payload
-            .pointer("/candidates/0")
-            .and_then(serde_json::Value::as_str),
-        Some("tools.allow_sudo=true")
-    );
-    assert_eq!(
-        payload.get("path").and_then(serde_json::Value::as_str),
-        Some("configs/config.toml")
-    );
-}
-
-#[test]
-fn config_guard_candidates_recovery_allows_validation_route_after_guard_observation() {
-    let mut route = route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-config-validation-guard-recovery",
-        "ask",
-        "prompt",
-    );
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["candidates".to_string(), "field_value".to_string()],
-        answer_incomplete_reason: "candidate evidence missing".to_string(),
-        should_retry: true,
-        retry_instruction: "use guard candidates".to_string(),
-        confidence: 0.95,
-    });
-    journal.step_results.push(crate::task_journal::TaskJournalStepTrace::ok(
-        "step_1",
-        "config_basic",
-        r#"{"extra":{"action":"guard_config","candidates":["tools.allow_sudo=true"],"count":1,"path":"configs/config.toml"}}"#,
-    ));
-
-    let recovered =
-        deterministic_config_guard_candidates_recovery(&route, &journal).expect("recovery");
-    let payload: serde_json::Value = serde_json::from_str(&recovered).expect("json payload");
-
-    assert_eq!(
-        payload
-            .pointer("/candidates/0")
-            .and_then(serde_json::Value::as_str),
-        Some("tools.allow_sudo=true")
-    );
-    assert_eq!(
-        payload.get("count").and_then(serde_json::Value::as_u64),
-        Some(1)
     );
 }
 
