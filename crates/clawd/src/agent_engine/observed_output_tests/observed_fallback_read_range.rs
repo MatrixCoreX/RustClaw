@@ -192,7 +192,7 @@ fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_mach
         r#"{"action":"inventory_dir","counts":{"files":4,"total":4},"entries":[{"kind":"file","name":"x_abcd_log.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},{"kind":"file","name":"zz_abcd_backup.log","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"},{"kind":"file","name":"abcd_report.md","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},{"kind":"file","name":"my_abcd.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"}],"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
@@ -267,12 +267,14 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
 
 #[test]
 fn observed_fallback_prompt_uses_compact_template_for_short_listing_and_scalar_contracts() {
-    for semantic_kind in [
-        OutputSemanticKind::FilePaths,
-        OutputSemanticKind::ExistenceWithPath,
+    for (semantic_kind, structured_field_selector) in [
+        (OutputSemanticKind::None, Some("path")),
+        (OutputSemanticKind::ExistenceWithPath, None),
     ] {
         let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
         route_result.semantic_kind = semantic_kind;
+        route_result.selection.structured_field_selector =
+            structured_field_selector.map(str::to_string);
         route_result.requires_content_evidence = true;
         route_result.delivery_required = false;
         route_result.delivery_intent = OutputDeliveryIntent::None;
@@ -290,7 +292,7 @@ count=2"#,
 
         assert_eq!(
             path, "prompts/observed_answer_fallback_compact_prompt.md",
-            "{semantic_kind:?} should use compact finalizer"
+            "{semantic_kind:?}/{structured_field_selector:?} should use compact finalizer"
         );
     }
 

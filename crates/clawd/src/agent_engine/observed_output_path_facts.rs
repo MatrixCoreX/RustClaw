@@ -46,46 +46,6 @@ pub(super) fn run_cmd_directory_entry_list_candidate(
         .flatten()
 }
 
-pub(super) fn run_cmd_contract_listing_text_candidate(
-    route: &crate::IntentOutputContract,
-    body: &str,
-) -> Option<String> {
-    if !super::output_route_policy::route_contract_marker_is_any(
-        route,
-        &[crate::OutputSemanticKind::FilePaths],
-    ) {
-        return None;
-    }
-    if matches!(
-        route.response_shape,
-        crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar
-    ) {
-        return None;
-    }
-    let lines = body
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| *line != "exit=0")
-        .filter(|line| !is_ignorable_shell_warning(line))
-        .collect::<Vec<_>>();
-    if lines.is_empty()
-        || lines.len() > 200
-        || lines
-            .iter()
-            .any(|line| looks_like_shell_long_listing_line(line))
-    {
-        return None;
-    }
-    if lines
-        .iter()
-        .any(|line| serde_json::from_str::<serde_json::Value>(line).is_ok())
-    {
-        return None;
-    }
-    normalized_listing_text(&lines.join("\n"))
-}
-
 pub(super) fn run_cmd_listing_text_candidate(
     body: &str,
     auto_locator_path: Option<&str>,

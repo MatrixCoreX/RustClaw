@@ -58,15 +58,7 @@ fn strict_list_selector_limit(route: &AnswerContract) -> Option<usize> {
 }
 
 pub(super) fn strict_list_route_allows_observed_subset(route: &AnswerContract) -> bool {
-    route_contract_marker_is(route, crate::OutputSemanticKind::FilePaths)
-        || route.output_contract.requests_exact_name_list()
-}
-
-fn route_contract_marker_is(
-    route: &AnswerContract,
-    semantic_kind: crate::OutputSemanticKind,
-) -> bool {
-    route.output_contract_marker_is(semantic_kind)
+    route.output_contract.requests_exact_list()
 }
 
 pub(super) fn evidence_policy_single_path_answer_is_grounded_in_successful_observation(

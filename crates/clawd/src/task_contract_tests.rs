@@ -3,13 +3,13 @@ use crate::IntentOutputContract;
 
 #[test]
 fn file_path_search_maps_to_directory_list_evidence() {
-    let output_contract = IntentOutputContract {
+    let mut output_contract = IntentOutputContract {
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
-        semantic_kind: OutputSemanticKind::FilePaths,
         ..IntentOutputContract::default()
     };
+    output_contract.selection.structured_field_selector = Some("path".to_string());
 
     assert_eq!(
         target_object_for_output_contract(&output_contract),
@@ -25,7 +25,7 @@ fn file_path_search_maps_to_directory_list_evidence() {
     );
     assert_eq!(
         required_evidence_fields_for_output_contract(&output_contract),
-        vec!["candidates"]
+        vec!["path"]
     );
 }
 

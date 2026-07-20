@@ -2,7 +2,7 @@
 # Do not edit by hand; regenerate with scripts/nl_tests/build_release_gate_subset.py.
 # Selection uses suite/name/tags/source metadata only, not natural-language prompt matching.
 # source=scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt
-# selected_rows=285 coverage_categories=212 missing_categories=0
+# selected_rows=285 coverage_categories=211 missing_categories=0
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_release_gate_equivalent.txt --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet --exclude-case-tag x_api --exclude-case-tag post_tweet --exclude-case-tag publish_tweet
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -179,10 +179,9 @@ act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_workspace_hidden_ja_0
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_workspace_hidden_ko_030|act,exact_path_list,hidden_entries_check,listing,ko,client_like,aggregate|현재 워크스페이스 루트의 점으로 시작하는 숨김 항목 이름만 출력해 주세요.
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_docs_archive_paths_zh_031|act,exact_path_list,file_paths,listing,zh,client_like,aggregate|找出 scripts/nl_tests/fixtures/device_local/docs/archive 里的文件路径，只输出路径。
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_docs_archive_paths_en_032|act,exact_path_list,file_paths,listing,en,client_like,aggregate|List only file paths under scripts/nl_tests/fixtures/device_local/docs/archive.
-# source: scripts/nl_tests/cases/nl_cases_agent_loop_recent_artifacts_judgment_focus_20260612.txt
-act|nl_cases_agent_loop_recent_artifacts_judgment_focus_20260612_raj_logs_recent_zh_001|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like,aggregate|列出 logs 目录最近修改的 2 个文件名，再用一句中文判断它们更像运行日志还是测试残留。
-act|nl_cases_agent_loop_recent_artifacts_judgment_focus_20260612_raj_logs_recent_en_002|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like,aggregate|List the 2 most recently modified files under logs and say in one short sentence whether they look like runtime logs or test leftovers.
-act|nl_cases_agent_loop_recent_artifacts_judgment_focus_20260612_raj_logs_recent_ja_003|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like,aggregate|logs ディレクトリで最近更新された2件を挙げ、実行ログかテスト残骸かを短く判断してください。
+act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_docs_archive_names_zh_033|act,exact_path_list,file_names,listing,zh,client_like,aggregate|列出 scripts/nl_tests/fixtures/device_local/docs/archive 目录里的文件名，只输出名字。
+act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_docs_archive_names_en_034|act,exact_path_list,file_names,listing,en,client_like,aggregate|Output only file names inside scripts/nl_tests/fixtures/device_local/docs/archive.
+act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_tmp_dir_names_zh_035|act,exact_path_list,directory_names,listing,zh,client_like,aggregate|列出 scripts/nl_tests/fixtures/device_local/tmp 下的直接子目录名。
 # source: scripts/nl_tests/cases/nl_cases_agent_loop_structured_field_read_focus_20260611.txt
 act|nl_cases_agent_loop_structured_field_read_focus_20260611_sfr_json_pkg_name_zh_001|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like,aggregate|读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。|expect=rustclaw-nl-fixture
 act|nl_cases_agent_loop_structured_field_read_focus_20260611_sfr_json_pkg_name_zh_002|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like,aggregate|去 scripts/nl_tests/fixtures/device_local/package.json 里把 name 的值拿出来，只给值。|expect=rustclaw-nl-fixture

@@ -4,7 +4,7 @@ pub(super) use list_projection::generic_observed_machine_projection_answer;
 #[cfg(test)]
 pub(super) use list_projection::matrix_strict_list_observed_answer;
 use list_projection::{
-    matrix_observed_answer_candidate_for_shape, route_requests_exact_name_list,
+    matrix_observed_answer_candidate_for_shape, route_requests_exact_list,
     selected_name_list_prefers_observed_projection, stale_file_token_delivery_bounded_read_answer,
     stale_file_token_delivery_listing_answer,
 };
@@ -31,7 +31,7 @@ use super::{
 fn evidence_policy_final_answer_shape_class(
     route: &crate::IntentOutputContract,
 ) -> Option<crate::evidence_policy::FinalAnswerShapeClass> {
-    if route_requests_exact_name_list(route) {
+    if route_requests_exact_list(route) {
         return Some(crate::evidence_policy::FinalAnswerShapeClass::StrictList);
     }
     crate::evidence_policy::final_answer_shape_for_output_contract(route).map(|shape| shape.class())
@@ -85,7 +85,7 @@ pub(super) fn route_requires_observed_output_projection(
     ) {
         return true;
     }
-    route_requests_exact_name_list(route)
+    route_requests_exact_list(route)
 }
 
 pub(super) fn evidence_policy_candidate_satisfies_final_shape(

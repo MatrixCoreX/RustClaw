@@ -113,13 +113,8 @@ pub(super) fn extract_answer_from_observed_output_impl(
                         && !existence_with_path_should_use_llm_synthesis)
                         .then(|| {
                             route
-                                .and_then(|route| {
-                                    run_cmd_contract_listing_text_candidate(
-                                        route,
-                                        &observed_output.body,
-                                    )
-                                })
-                                .or_else(|| {
+                                .filter(|route| !route.requests_exact_path_list())
+                                .and_then(|_| {
                                     run_cmd_listing_text_candidate(
                                         &observed_output.body,
                                         auto_locator_path,
@@ -539,13 +534,7 @@ fn inventory_dir_can_use_direct_names(
 ) -> bool {
     let has_machine_names =
         value_requests_terminal_inventory_names(value) && inventory_dir_names(value).is_some();
-    if has_machine_names
-        && route.is_some_and(|route| {
-            super::output_route_policy::route_contract_marker_is_any(
-                route,
-                &[crate::OutputSemanticKind::FilePaths],
-            ) || route.requests_exact_name_list()
-        })
+    if has_machine_names && route.is_some_and(crate::IntentOutputContract::requests_exact_name_list)
     {
         return true;
     }

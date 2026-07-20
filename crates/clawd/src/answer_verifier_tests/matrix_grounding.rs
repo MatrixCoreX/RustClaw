@@ -403,7 +403,7 @@ fn matrix_file_path_list_shape_allows_grounded_filtered_subset() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-path-subset", "ask", "find path");
     journal
@@ -435,7 +435,7 @@ fn file_paths_contract_path_list_is_grounded() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-fs-path-capability-ref", "ask", "find");
     journal

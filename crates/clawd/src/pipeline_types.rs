@@ -76,7 +76,6 @@ pub(crate) enum OutputSemanticKind {
     #[default]
     None,
     RawCommandOutput,
-    FilePaths,
     ContentExcerptSummary,
     ContentExcerptWithSummary,
     ScalarCount,
@@ -91,7 +90,6 @@ impl OutputSemanticKind {
     pub(crate) const ALL: &'static [Self] = &[
         Self::None,
         Self::RawCommandOutput,
-        Self::FilePaths,
         Self::ContentExcerptSummary,
         Self::ContentExcerptWithSummary,
         Self::ScalarCount,
@@ -106,7 +104,6 @@ impl OutputSemanticKind {
         match self {
             Self::None => "none",
             Self::RawCommandOutput => "raw_command_output",
-            Self::FilePaths => "file_paths",
             Self::ContentExcerptSummary => "content_excerpt_summary",
             Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
             Self::ScalarCount => "scalar_count",
@@ -187,6 +184,14 @@ impl IntentOutputContract {
                 self.selection.list_selector.target_kind,
                 OutputScalarCountTargetKind::File | OutputScalarCountTargetKind::Dir
             )
+    }
+
+    pub(crate) fn requests_exact_path_list(&self) -> bool {
+        crate::machine_kv_projection::output_contract_requests_exact_list_path(self)
+    }
+
+    pub(crate) fn requests_exact_list(&self) -> bool {
+        self.requests_exact_name_list() || self.requests_exact_path_list()
     }
 }
 

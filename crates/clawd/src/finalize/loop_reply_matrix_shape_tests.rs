@@ -309,7 +309,7 @@ fn active_bound_inventory_path_overrides_bare_path_directory_listing_contract() 
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/locator_smart/case_only".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         cross_turn_recent_execution_context: Some("### ACTIVE_EXECUTION_ANCHOR\nfollowup_source_request: find report\nfollowup_op_kind: Read\nfollowup_bound_target: case_only/report.md\nobserved_bound_target: case_only/report.md".to_string()),
@@ -500,7 +500,7 @@ fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.limit = Some(3);
     route.selection.list_selector.include_metadata = Some(false);
@@ -530,7 +530,7 @@ fn matrix_path_list_inventory_uses_planner_semantic_kind() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.limit = Some(2);
     let ctx = crate::agent_engine::AgentRunContext {
@@ -574,7 +574,7 @@ fn matrix_filesystem_find_entries_contract_builds_path_list() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -610,7 +610,7 @@ fn matrix_path_list_collects_grep_text_name_results_from_wrapped_extra() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
@@ -818,7 +818,7 @@ fn name_list_contract_requires_observed_projection() {
 #[test]
 fn path_list_contract_requires_observed_projection() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.response_shape = crate::OutputResponseShape::Strict;
 
     assert!(super::super::route_requires_observed_output_projection(

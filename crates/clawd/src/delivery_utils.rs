@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::{AppState, IntentOutputContract, OutputResponseShape, OutputSemanticKind};
+use crate::{AppState, IntentOutputContract, OutputResponseShape};
 
 // Facade for delivery interception. Locator parsing, directory lookup, and
 // file-resolution flows live in sibling submodules.
@@ -114,8 +114,7 @@ pub(crate) fn intercept_response_payload_for_delivery(
         );
     let directory_lookup_candidate = normalized_text.trim();
     let may_replace_with_directory_lookup = directory_lookup_candidate.is_empty()
-        || (!output_contract.requests_exact_name_list()
-            && !matches!(output_contract.semantic_kind, OutputSemanticKind::FilePaths)
+        || (!output_contract.requests_exact_list()
             && looks_like_delivery_locator_literal(
                 directory_lookup_candidate,
                 &output_contract.locator_hint,

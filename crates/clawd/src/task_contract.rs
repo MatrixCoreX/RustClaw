@@ -66,7 +66,7 @@ fn target_object_for_locator_kind(locator_kind: OutputLocatorKind) -> TaskTarget
 pub(crate) fn operation_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> TaskOperation {
-    if output_contract.requests_exact_name_list() {
+    if output_contract.requests_exact_list() {
         return TaskOperation::List;
     }
     let semantic_kind = output_contract.semantic_kind;
@@ -77,7 +77,6 @@ pub(crate) fn operation_for_output_contract(
     }
     match semantic_kind {
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
-        OutputSemanticKind::FilePaths => TaskOperation::List,
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary => TaskOperation::Summarize,
@@ -108,6 +107,9 @@ fn operation_for_unclassified_output_contract(
 pub(crate) fn delivery_shape_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> TaskDeliveryShape {
+    if output_contract.requests_exact_list() {
+        return TaskDeliveryShape::List;
+    }
     matrix_contract_for_output_contract(output_contract)
         .and_then(|contract| task_delivery_shape_from_token(&contract.delivery_shape))
         .unwrap_or_else(|| delivery_shape_for_response_shape(output_contract.response_shape))
@@ -226,9 +228,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary => {
             fields.insert("content_excerpt");
-        }
-        OutputSemanticKind::FilePaths => {
-            fields.insert("candidates");
         }
         OutputSemanticKind::ExecutionFailedStep => {
             fields.insert("command_output");

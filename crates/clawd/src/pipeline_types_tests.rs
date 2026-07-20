@@ -106,16 +106,25 @@ fn plan_step_round_trips_call_capability() {
 }
 
 #[test]
-fn output_contract_semantic_methods_use_direct_contract() {
+fn output_contract_exact_path_list_uses_structured_selector() {
     let mut contract = output_contract();
-    contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    contract.response_shape = crate::OutputResponseShape::Strict;
+    contract.selection.structured_field_selector = Some("path".to_string());
 
-    assert!(contract.semantic_kind_is(crate::OutputSemanticKind::FilePaths));
-    assert!(!contract.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::None,
-        crate::OutputSemanticKind::None,
-    ]));
-    assert!(!contract.semantic_kind_is_unclassified());
+    assert!(contract.requests_exact_path_list());
+    assert!(contract.requests_exact_list());
+    assert!(contract.semantic_kind_is_unclassified());
+}
+
+#[test]
+fn output_contract_path_selector_must_be_a_single_strict_field() {
+    let mut contract = output_contract();
+    contract.selection.structured_field_selector = Some("path".to_string());
+    assert!(!contract.requests_exact_path_list());
+
+    contract.response_shape = crate::OutputResponseShape::Strict;
+    contract.selection.structured_field_selector = Some("path,resolved_path".to_string());
+    assert!(!contract.requests_exact_path_list());
 }
 
 #[test]

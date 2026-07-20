@@ -7,18 +7,13 @@ use crate::finalize::loop_reply::{
 };
 
 #[test]
-fn direct_structured_observed_answer_prefers_latest_path_result_for_exact_contract() {
-    let state = test_state();
+fn matrix_exact_path_list_prefers_latest_path_result() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "plan".to_string();
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -36,9 +31,8 @@ fn direct_structured_observed_answer_prefers_latest_path_result_for_exact_contra
         r#"{"action":"find_name","count":2,"patterns":["execution_intent"],"results":["plan/execution_intent_route_trace_cases.txt","plan/execution_intent_routing_repair_plan_20260509.md"],"root":"plan"}"#,
     ));
 
-    let (answer, summary) =
-        direct_structured_observed_answer(Some(&state), &loop_state, Some(&agent_run_context))
-            .expect("latest structured path result should answer exact path contract");
+    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("latest structured path result should answer exact path contract");
 
     assert!(answer.contains("plan/execution_intent_route_trace_cases.txt"));
     assert!(answer.contains("plan/execution_intent_routing_repair_plan_20260509.md"));
@@ -55,7 +49,7 @@ fn exact_path_observed_answer_replaces_step_status_after_fallback_success() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "plan".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -726,7 +720,8 @@ fn generated_file_path_report_prefers_latest_path_synthesis_over_run_cmd_status(
 fn loop_contract_path_observed_answer_replaces_status_and_drops_progress_summary() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result();
-    contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    contract.response_shape = OutputResponseShape::Strict;
+    contract.selection.structured_field_selector = Some("path".to_string());
     loop_state.output_contract = Some(contract);
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
