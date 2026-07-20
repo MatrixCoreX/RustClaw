@@ -274,3 +274,34 @@ fn parses_git_log_branch_and_remote_structures() {
         Some("fetch")
     );
 }
+
+#[test]
+fn log_success_extra_exposes_subject_for_generic_consumers() {
+    let extra = git_success_extra(
+        "log",
+        "log",
+        "log",
+        0,
+        "abc123 First commit\ndef456 Second subject\n",
+        "exit=0\nabc123 First commit\ndef456 Second subject\n",
+        None,
+    );
+
+    assert_eq!(
+        extra.get("subject").and_then(|value| value.as_str()),
+        Some("First commit")
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/subject")
+            .and_then(|value| value.as_str()),
+        Some("First commit")
+    );
+    assert_eq!(
+        extra
+            .get("subjects")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        Some(2)
+    );
+}

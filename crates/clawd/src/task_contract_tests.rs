@@ -131,13 +131,6 @@ fn planner_semantic_matrix_drives_evidence_contract() {
             TaskDeliveryShape::Summary,
             vec!["field_value", "path", "valid"],
         ),
-        (
-            OutputSemanticKind::GitCommitSubject,
-            TaskTargetObject::System,
-            TaskOperation::Inspect,
-            TaskDeliveryShape::Raw,
-            vec!["field_value"],
-        ),
     ] {
         let output_contract = IntentOutputContract {
             response_shape: OutputResponseShape::Strict,

@@ -182,6 +182,62 @@ fn archive_pack_result_exposes_generic_artifact_reference() {
 }
 
 #[test]
+fn git_result_preserves_structured_state_and_subject_fields() {
+    let status_extra = json!({
+        "action": "status",
+        "current_branch": "main",
+        "clean": false,
+        "changed_count": 2,
+        "paths": ["Cargo.toml", "src/main.rs"],
+        "field_value": {
+            "current_branch": "main",
+            "clean": false,
+            "changed_count": 2
+        }
+    });
+    let status = super::successful_execution_envelope(
+        "git_basic",
+        "step_1",
+        &json!({"action": "status"}),
+        "untrusted fallback",
+        Some(&status_extra),
+    );
+    assert_eq!(
+        status.data.pointer("/extra/field_value/current_branch"),
+        Some(&json!("main"))
+    );
+    assert_eq!(
+        status.data.pointer("/extra/field_value/clean"),
+        Some(&json!(false))
+    );
+
+    let log_extra = json!({
+        "action": "log",
+        "subject": "refactor: simplify delivery",
+        "subjects": ["refactor: simplify delivery"],
+        "field_value": {
+            "subject": "refactor: simplify delivery",
+            "commit_count": 1
+        }
+    });
+    let log = super::successful_execution_envelope(
+        "git_basic",
+        "step_2",
+        &json!({"action": "log", "limit": 1}),
+        "untrusted fallback",
+        Some(&log_extra),
+    );
+    assert_eq!(
+        log.data.pointer("/extra/field_value/subject"),
+        Some(&json!("refactor: simplify delivery"))
+    );
+    assert_eq!(
+        log.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+}
+
+#[test]
 fn pending_result_becomes_poll_continuation() {
     let envelope = super::successful_execution_envelope(
         "video_generate",

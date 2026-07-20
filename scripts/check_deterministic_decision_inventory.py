@@ -169,14 +169,6 @@ BRANCH_INVENTORY: tuple[BranchInventoryEntry, ...] = (
         tokens=("extract_direct_answer_from_generic_output", "extract_direct_scalar_from_generic_output"),
     ),
     BranchInventoryEntry(
-        name="observed_output_git_machine_summary",
-        path="crates/clawd/src/agent_engine/observed_output_git.rs",
-        category="evidence_projection",
-        input_fields=("git_basic.structured_json_v1", "status_output"),
-        output_fields=("git.branch", "git.worktree"),
-        tokens=("git_repository_state_answer", "answer_is_git_repository_state_machine_summary"),
-    ),
-    BranchInventoryEntry(
         name="answer_verifier_missing_evidence_gap",
         path="crates/clawd/src/answer_verifier_runtime.rs",
         category="recovery_boundary",

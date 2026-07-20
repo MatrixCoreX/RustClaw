@@ -551,6 +551,10 @@ fn append_git_log_extra(
         .collect::<Vec<_>>();
     root.insert("commits".to_string(), json!(commits));
     root.insert("commit_count".to_string(), json!(subjects.len()));
+    if let Some(subject) = subjects.first() {
+        root.insert("subject".to_string(), json!(subject));
+        field_value.insert("subject".to_string(), json!(subject));
+    }
     root.insert("subjects".to_string(), json!(subjects));
     field_value.insert("commit_count".to_string(), json!(subjects.len()));
 }

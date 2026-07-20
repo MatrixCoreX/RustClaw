@@ -74,18 +74,6 @@ use output_fs_search::{
 mod output_path_facts;
 use output_path_facts::*;
 
-#[path = "observed_output_git.rs"]
-mod output_git;
-pub(crate) use output_git::{
-    answer_is_git_repository_state_machine_summary,
-    git_repository_state_observation_from_status_output,
-};
-use output_git::{
-    git_basic_direct_answer_candidate, git_basic_json_action,
-    git_basic_observation_text_candidates, git_current_branch_from_json_value,
-    latest_git_current_branch, latest_git_repository_state_direct_answer,
-};
-
 #[path = "observed_output_entries.rs"]
 mod output_entries;
 pub(crate) use output_entries::has_observed_answer_candidates;
@@ -93,8 +81,7 @@ pub(crate) use output_entries::has_observed_answer_candidates;
 use output_entries::recent_generated_output_from_user_request;
 use output_entries::{
     compound_listing_content_delivery_guard_entry, cross_turn_observed_output_entries,
-    execution_failed_step_guard_entry, git_repository_state_facts_entry, observed_output_entries,
-    route_observation_facts_entry,
+    execution_failed_step_guard_entry, observed_output_entries, route_observation_facts_entry,
 };
 
 #[path = "observed_output_direct_scalar.rs"]
@@ -154,7 +141,6 @@ mod output_route_policy;
 use output_route_policy::{
     observed_language_supports_bilingual_template, observed_request_language_hint,
     observed_request_prefers_english_template, observed_response_style_hint,
-    route_git_repository_state_requires_language_synthesis,
     route_should_synthesize_non_bilingual_existence_with_path,
 };
 pub(crate) use output_route_policy::{
@@ -816,7 +802,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
         FinalAnswerShape::ComparisonVerdict
             | FinalAnswerShape::ExistenceSummaryWithPath
             | FinalAnswerShape::ExistenceVerdictWithPath
-            | FinalAnswerShape::GitStateSummary
             | FinalAnswerShape::JudgmentWithExcerptBasis
             | FinalAnswerShape::PresenceVerdictWithMatch
             | FinalAnswerShape::RawOutputOrShortSummary
@@ -891,12 +876,6 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         }
         if let Some(route_facts) = route_observation_facts_entry(agent_run_context) {
             observed_entries.insert(0, route_facts);
-        }
-        if let Some(git_facts) = git_repository_state_facts_entry(
-            loop_state,
-            agent_run_context.and_then(|ctx| ctx.output_contract()),
-        ) {
-            observed_entries.insert(0, git_facts);
         }
         if let Some(guard) = compound_listing_content_delivery_guard_entry(
             loop_state,
@@ -1023,8 +1002,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     let direct_passthrough_disallowed = agent_run_context
         .and_then(|ctx| ctx.output_contract())
         .is_some_and(route_disallows_direct_observation_passthrough)
-        && (answer_matches_observed_output_passthrough(&answer, loop_state)
-            || answer_is_git_repository_state_machine_summary(&answer));
+        && answer_matches_observed_output_passthrough(&answer, loop_state);
     if direct_passthrough_disallowed {
         tracing::info!(
             "observed_answer_fallback_reject_direct_passthrough task_id={} answer={}",

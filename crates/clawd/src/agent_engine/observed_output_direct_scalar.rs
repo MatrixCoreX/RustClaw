@@ -11,9 +11,6 @@ pub(super) fn structured_scalar_candidate(
     prefer_full_path: bool,
     prefer_english: bool,
 ) -> Option<String> {
-    if skill == "git_basic" {
-        return git_basic_scalar_candidate(route, body);
-    }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if let Some(answer) = selected_structured_scalar_candidate(route, &value) {
         return Some(answer);
@@ -398,65 +395,4 @@ fn selected_result_data_value<'a>(
             data.get("output")
                 .and_then(|output| structured_value_at_path(output, selector))
         })
-}
-
-pub(super) fn git_basic_commit_subject_candidate(body: &str) -> Option<String> {
-    static GIT_ONELINE_SUBJECT_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let regex = GIT_ONELINE_SUBJECT_RE.get_or_init(|| {
-        regex::Regex::new(r"^[0-9a-fA-F]{7,40}\s+(.+)$").expect("valid git oneline regex")
-    });
-    body.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| *line != "exit=0")
-        .find_map(|line| regex.captures(line))
-        .and_then(|captures| captures.get(1))
-        .map(|subject| subject.as_str().trim().to_string())
-        .filter(|subject| !subject.is_empty())
-}
-
-pub(super) fn git_basic_scalar_candidate(
-    route: Option<&crate::IntentOutputContract>,
-    body: &str,
-) -> Option<String> {
-    if route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::GitCommitSubject,
-        )
-    }) {
-        return git_basic_commit_subject_candidate(body);
-    }
-    if let Some(branch) = git_basic_current_branch_scalar_candidate(route, body) {
-        return Some(branch);
-    }
-    let scalar = normalized_scalar_candidate(body)?;
-    static GIT_ONELINE_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let regex = GIT_ONELINE_RE.get_or_init(|| {
-        regex::Regex::new(r"^[0-9a-fA-F]{7,40}\s+.+$").expect("valid git oneline regex")
-    });
-    if regex.is_match(&scalar) {
-        return None;
-    }
-    Some(scalar)
-}
-
-pub(super) fn git_basic_current_branch_scalar_candidate(
-    route: Option<&crate::IntentOutputContract>,
-    body: &str,
-) -> Option<String> {
-    if route.is_some_and(|route| {
-        !super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::GitRepositoryState,
-        )
-    }) {
-        return None;
-    }
-    let value = serde_json::from_str::<serde_json::Value>(body.trim()).ok()?;
-    let action = git_basic_json_action(&value)?;
-    if action != "current_branch" {
-        return None;
-    }
-    git_current_branch_from_json_value(&value)
 }

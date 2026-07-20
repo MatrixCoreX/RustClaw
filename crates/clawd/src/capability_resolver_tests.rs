@@ -224,6 +224,30 @@ fn archive_capabilities_resolve_without_domain_output_semantic_kinds() {
 }
 
 #[test]
+fn git_capabilities_resolve_without_domain_output_semantic_kinds() {
+    let state = state_with_workspace_registry();
+    for (capability, expected_action, args) in [
+        ("git.status", "status", json!({})),
+        ("git.current_branch", "current_branch", json!({})),
+        ("git.log", "log", json!({"limit": 3})),
+    ] {
+        let (action, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, args);
+
+        assert_eq!(record.output_semantic_kind, None, "{capability}");
+        let Some(AgentAction::CallTool { tool, args }) = action else {
+            panic!("expected git tool action for {capability}");
+        };
+        assert_eq!(tool, "git_basic", "{capability}");
+        assert_eq!(
+            args.get("action").and_then(Value::as_str),
+            Some(expected_action),
+            "{capability}"
+        );
+    }
+}
+
+#[test]
 fn weather_capability_resolves_without_domain_output_semantic_kind() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

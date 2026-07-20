@@ -238,10 +238,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ScalarCount => {
             fields.insert("count");
         }
-        OutputSemanticKind::ScalarPathOnly
-        | OutputSemanticKind::FileBasename
-        | OutputSemanticKind::GitCommitSubject
-        | OutputSemanticKind::GitRepositoryState => {
+        OutputSemanticKind::ScalarPathOnly | OutputSemanticKind::FileBasename => {
             fields.insert("field_value");
         }
         OutputSemanticKind::ExistenceWithPath | OutputSemanticKind::ExistenceWithPathSummary => {

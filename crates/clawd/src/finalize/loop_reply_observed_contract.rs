@@ -1247,7 +1247,6 @@ fn direct_structured_observed_answer_impl(
     }
     if route.clone().requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
-        && !route.semantic_kind_is(crate::OutputSemanticKind::GitRepositoryState)
         && !crate::finalize::route_matches_service_status_output_contract(route)
         && latest_successful_inventory_name_list_answer(loop_state).is_none()
     {

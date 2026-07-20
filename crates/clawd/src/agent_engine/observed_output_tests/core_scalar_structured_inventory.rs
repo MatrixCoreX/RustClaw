@@ -259,6 +259,83 @@ fn database_table_list_uses_generic_exact_field_selector() {
 }
 
 #[test]
+fn git_fields_use_generic_capability_result_selectors() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "git_basic"
+        enabled = true
+        kind = "runner"
+        semantic_tags = []
+        "#,
+        &["git_basic"],
+    );
+    for (selector, expected, action, extra) in [
+        (
+            "current_branch",
+            "main",
+            "status",
+            serde_json::json!({
+                "action": "status",
+                "current_branch": "main",
+                "clean": false,
+                "changed_count": 2
+            }),
+        ),
+        (
+            "clean",
+            "false",
+            "status",
+            serde_json::json!({
+                "action": "status",
+                "current_branch": "main",
+                "clean": false,
+                "changed_count": 2
+            }),
+        ),
+        (
+            "subject",
+            "refactor: simplify delivery",
+            "log",
+            serde_json::json!({
+                "action": "log",
+                "subject": "refactor: simplify delivery",
+                "commit_count": 1
+            }),
+        ),
+    ] {
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route.requires_content_evidence = true;
+        route.selection.structured_field_selector = Some(selector.to_string());
+        let agent_run_context = AgentRunContext {
+            output_contract: Some(route),
+            ..AgentRunContext::default()
+        };
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .capability_results
+            .push(crate::capability_result::successful_execution_envelope(
+                "git_basic",
+                "step_1",
+                &serde_json::json!({"action": action}),
+                "untrusted fallback",
+                Some(&extra),
+            ));
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output_i18n(
+                &loop_state,
+                &state,
+                Some(&agent_run_context)
+            )
+            .as_deref(),
+            Some(expected),
+            "selector={selector}"
+        );
+    }
+}
+
+#[test]
 fn archive_members_use_generic_exact_field_selector() {
     let state = test_state_with_registry(
         r#"
@@ -923,10 +1000,10 @@ fn direct_scalar_ignores_exit_zero_prefix() {
     let mut loop_state = LoopState::new(2);
     loop_state
         .executed_step_results
-        .push(ok_step("step_1", "git_basic", "exit=0\nmain\n"));
+        .push(ok_step("step_1", "machine_probe", "exit=0\nready\n"));
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
-        Some("main")
+        Some("ready")
     );
 }
 
@@ -950,35 +1027,6 @@ fn direct_scalar_extracts_system_basic_runtime_status_value() {
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
         Some("guagua")
-    );
-}
-
-#[test]
-fn direct_scalar_defers_git_oneline_log_record_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "git_basic",
-        "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
-    ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: ".".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
     );
 }
 

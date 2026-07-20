@@ -107,21 +107,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                 answer,
             );
         }
-        if let Some(answer) = latest_git_repository_state_direct_answer(
-            state,
-            route,
-            loop_state,
-            response_shape,
-            allow_localized_direct_template,
-            prefers_english_free_text,
-        ) {
-            return evidence_policy_checked_direct_candidate(
-                Some(route),
-                loop_state,
-                auto_locator_path,
-                answer,
-            );
-        }
         if let Some(answer) =
             hidden_entries_direct_answer(state, route, loop_state, prefers_english_free_text)
         {
@@ -276,18 +261,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             prefer_full_path,
                         )
                     }),
-                "git_basic" => {
-                    let branch = latest_git_current_branch(loop_state);
-                    git_basic_direct_answer_candidate(
-                        state,
-                        route,
-                        &observed_output.body,
-                        branch.as_deref(),
-                        response_shape,
-                        allow_localized_direct_template,
-                        prefers_english_free_text,
-                    )
-                }
                 "doc_parse" => route
                     .and_then(|route| {
                         doc_parse_content_presence_direct_answer_candidate(
@@ -711,7 +684,6 @@ pub(super) fn allows_normalized_scalar_direct_fallback(
     response_shape: Option<crate::OutputResponseShape>,
 ) -> bool {
     match skill {
-        "git_basic" => false,
         "package_manager" => false,
         "http_basic" => {
             !matches!(

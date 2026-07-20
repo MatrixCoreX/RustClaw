@@ -456,15 +456,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if output_contract.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::GitCommitSubject,
-        crate::OutputSemanticKind::GitRepositoryState,
-    ]) && (observed_canonical.contains("command_output")
-        || observed_canonical.contains("content_excerpt")
-        || observed_fields.contains("text_excerpt"))
-    {
-        observed_canonical.insert("field_value".to_string());
-    }
     if output_contract.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
         && (observed_canonical.contains("content_excerpt")
             || observed_canonical.contains("field_value")

@@ -35,8 +35,6 @@ STEP_TEXT_RE = re.compile(
 FIELD_RE = re.compile(r'"([^"]+)"')
 
 BASELINE_TEXT_LEGACY_STRICT_REFS = {
-    "archive_basic.text_legacy_v1",
-    "git_basic.text_legacy_v1",
     "http_basic.text_legacy_v1",
     "list_dir.text_legacy_v1",
     "run_cmd.text_legacy_v1",

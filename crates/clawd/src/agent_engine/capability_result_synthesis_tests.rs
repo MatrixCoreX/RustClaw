@@ -124,6 +124,48 @@ fn archive_results_use_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn git_results_use_generic_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    for (action, data) in [
+        (
+            "status",
+            json!({
+                "extra": {
+                    "action": "status",
+                    "current_branch": "main",
+                    "clean": false,
+                    "changed_count": 2,
+                    "paths": ["Cargo.toml", "src/main.rs"]
+                }
+            }),
+        ),
+        (
+            "log",
+            json!({
+                "extra": {
+                    "action": "log",
+                    "subject": "refactor: simplify delivery",
+                    "subjects": ["refactor: simplify delivery"]
+                }
+            }),
+        ),
+    ] {
+        loop_state
+            .capability_results
+            .push(CapabilityResultEnvelope::ok(
+                "git_basic",
+                Some(action.to_string()),
+                data,
+            ));
+    }
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
 fn exact_machine_and_artifact_delivery_bypass_language_synthesis() {
     let mut loop_state = LoopState::default();
     let mut result =

@@ -14,7 +14,7 @@ pub(super) fn evidence_policy_scalar_answer_is_grounded_in_successful_observatio
         return false;
     }
     if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
-        && (!scalar_answer_is_strict_for_shape(shape, candidate_answer)
+        && (!scalar_answer_is_strict(candidate_answer)
             || route.output_contract.response_shape != crate::OutputResponseShape::Scalar)
     {
         return count_summary_answer_is_grounded_in_successful_observation(
@@ -24,7 +24,7 @@ pub(super) fn evidence_policy_scalar_answer_is_grounded_in_successful_observatio
             route.output_contract.response_shape != crate::OutputResponseShape::Scalar,
         );
     }
-    scalar_answer_is_strict_for_shape(shape, candidate_answer)
+    scalar_answer_is_strict(candidate_answer)
         && scalar_answer_value_is_grounded_in_successful_observation(
             route,
             journal,
@@ -749,16 +749,10 @@ pub(super) fn scalar_token_occurs_in_text(text: &str, scalar: &str) -> bool {
             .any(|token| token == scalar)
 }
 
-pub(super) fn scalar_answer_is_strict_for_shape(
-    shape: crate::evidence_policy::FinalAnswerShape,
-    candidate_answer: &str,
-) -> bool {
+pub(super) fn scalar_answer_is_strict(candidate_answer: &str) -> bool {
     let candidate_answer = candidate_answer.trim();
     if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
         return false;
-    }
-    if shape == crate::evidence_policy::FinalAnswerShape::SingleCommitSubject {
-        return !candidate_answer.ends_with('.') && !candidate_answer.ends_with('。');
     }
     let lower = candidate_answer.to_ascii_lowercase();
     if lower.contains(" is ") || lower.contains("：") || lower.contains(':') {

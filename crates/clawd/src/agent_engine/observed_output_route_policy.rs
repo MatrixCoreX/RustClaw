@@ -155,9 +155,6 @@ pub(crate) fn route_requires_synthesized_delivery(route: &crate::IntentOutputCon
     if route_allows_strict_plain_observation_passthrough(route) {
         return false;
     }
-    if route_git_repository_state_requires_language_synthesis(route) {
-        return true;
-    }
     if route_quantity_comparison_requires_model_language_synthesis(route) {
         return true;
     }
@@ -207,16 +204,4 @@ pub(crate) fn route_disallows_direct_observation_passthrough(
         route.response_shape,
         crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
     ) || route.exact_sentence_count.is_some()
-}
-
-pub(super) fn route_git_repository_state_requires_language_synthesis(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route_contract_marker_is(route, crate::OutputSemanticKind::GitRepositoryState)
-        && route.requires_content_evidence
-        && !route.delivery_required
-        && (matches!(
-            route.response_shape,
-            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-        ) || route.exact_sentence_count.is_some())
 }

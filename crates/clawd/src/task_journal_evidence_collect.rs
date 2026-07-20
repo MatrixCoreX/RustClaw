@@ -714,13 +714,10 @@ pub(super) fn collect_text_observed_evidence(
 pub(super) fn collect_text_observed_evidence_for_extractor(
     collector: &mut ObservedEvidenceCollector,
     output: &str,
-    extractor: EvidenceExtractorSpec,
+    _extractor: EvidenceExtractorSpec,
 ) {
     collector.push(text_observed_evidence_item(output));
     collect_text_observed_evidence_fields(collector, output);
-    if extractor.extractor_ref == "git_basic.text_legacy_v1" {
-        collect_git_text_observed_evidence_fields(collector, output);
-    }
 }
 
 pub(super) fn collect_text_observed_evidence_fields(
@@ -803,92 +800,6 @@ pub(super) fn collect_status_prefixed_json_body_evidence(
         0,
     );
     collect_json_observed_evidence(collector, "text_output.body_json", "body", &value, 0);
-}
-
-pub(super) fn collect_git_text_observed_evidence_fields(
-    collector: &mut ObservedEvidenceCollector,
-    output: &str,
-) {
-    if let Some(subject) = text_git_oneline_subject_evidence(output) {
-        collector.push(text_extracted_evidence_item("subject", &subject));
-    }
-    let subjects = text_git_oneline_subjects_evidence(output);
-    if !subjects.is_empty() {
-        collector.push(text_extracted_evidence_item_with_source(
-            "git_subjects",
-            "text_output.extractor",
-            &subjects.join("\n"),
-        ));
-    }
-    if let Some(state) = text_git_state_evidence(output) {
-        collector.push(text_extracted_evidence_item("state", state));
-    }
-}
-
-pub(super) fn collect_git_json_observed_evidence_fields(
-    collector: &mut ObservedEvidenceCollector,
-    value: &Value,
-) {
-    let Some(extra) = value.get("extra").and_then(Value::as_object) else {
-        return;
-    };
-    let action = extra
-        .get("action")
-        .or_else(|| extra.get("raw_action"))
-        .and_then(Value::as_str)
-        .map(normalize_machine_token)
-        .unwrap_or_default();
-    if !matches!(
-        action.as_str(),
-        "log" | "status" | "branch" | "current_branch" | "changed_files" | "rev_parse"
-    ) {
-        return;
-    }
-    let Some(output) = extra
-        .get("output")
-        .or_else(|| value.get("text"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|output| !output.is_empty())
-    else {
-        return;
-    };
-    collector.push(text_extracted_evidence_item_with_source(
-        "command_output",
-        "json_output.extra",
-        output,
-    ));
-    collector.push(text_extracted_evidence_item_with_source(
-        "content_excerpt",
-        "json_output.extra",
-        output,
-    ));
-    if action == "log" {
-        if let Some(subject) = text_git_oneline_subject_evidence(output) {
-            collector.push(text_extracted_evidence_item_with_source(
-                "subject",
-                "json_output.extra",
-                &subject,
-            ));
-        }
-        let subjects = text_git_oneline_subjects_evidence(output);
-        if !subjects.is_empty() {
-            collector.push(text_extracted_evidence_item_with_source(
-                "git_subjects",
-                "json_output.extra",
-                &subjects.join("\n"),
-            ));
-        }
-    }
-    if action == "status" {
-        if let Some(state) = text_git_state_evidence(output) {
-            collector.push(text_extracted_evidence_item_with_source(
-                "state",
-                "json_output.extra",
-                state,
-            ));
-        }
-    }
 }
 
 pub(super) fn collect_text_machine_key_value_evidence(
@@ -1024,36 +935,6 @@ pub(super) fn text_count_evidence(output: &str) -> Option<i64> {
     (counts.len() == 1).then(|| *counts.iter().next().expect("single count"))
 }
 
-pub(super) fn text_git_state_evidence(output: &str) -> Option<&'static str> {
-    let mut saw_git_branch = false;
-    let mut saw_change = false;
-    for line in output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        if line.starts_with("## ") {
-            saw_git_branch = true;
-            continue;
-        }
-        if line == "exit=0" {
-            continue;
-        }
-        if line
-            .chars()
-            .take(2)
-            .any(|ch| matches!(ch, 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!'))
-        {
-            saw_change = true;
-        }
-    }
-    if saw_git_branch {
-        Some(if saw_change { "dirty" } else { "clean" })
-    } else {
-        None
-    }
-}
-
 pub(super) fn text_path_evidence(output: &str) -> Option<String> {
     let lines = output
         .lines()
@@ -1124,45 +1005,6 @@ pub(super) fn labeled_text_path_evidence(output: &str) -> Option<String> {
         }
     }
     (paths.len() == 1).then(|| paths.into_iter().next().expect("single labeled path"))
-}
-
-pub(super) fn text_git_oneline_subject_evidence(output: &str) -> Option<String> {
-    text_git_oneline_subjects_evidence(output)
-        .into_iter()
-        .next()
-}
-
-pub(super) fn text_git_oneline_subjects_evidence(output: &str) -> Vec<String> {
-    const MAX_GIT_SUBJECT_EVIDENCE: usize = 12;
-    let mut subjects = Vec::new();
-    for line in output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        if line == "exit=0" {
-            continue;
-        }
-        let mut parts = line.splitn(2, char::is_whitespace);
-        let Some(hash) = parts.next() else {
-            continue;
-        };
-        let Some(subject) = parts.next() else {
-            continue;
-        };
-        let subject = subject.trim();
-        if text_looks_like_git_hash(hash) && !subject.is_empty() {
-            subjects.push(subject.to_string());
-            if subjects.len() >= MAX_GIT_SUBJECT_EVIDENCE {
-                break;
-            }
-        }
-    }
-    subjects
-}
-
-pub(super) fn text_looks_like_git_hash(value: &str) -> bool {
-    (7..=40).contains(&value.len()) && value.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 pub(super) fn text_line_looks_like_path(line: &str) -> bool {

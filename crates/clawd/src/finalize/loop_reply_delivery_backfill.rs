@@ -961,7 +961,6 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(
         || route.semantic_kind_is_any(&[
             crate::OutputSemanticKind::RawCommandOutput,
             crate::OutputSemanticKind::CommandOutputSummary,
-            crate::OutputSemanticKind::GitRepositoryState,
             crate::OutputSemanticKind::DirectoryPurposeSummary,
             crate::OutputSemanticKind::ContentExcerptSummary,
             crate::OutputSemanticKind::ContentExcerptWithSummary,
