@@ -42,7 +42,7 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "scripts/skill_calls".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -439,35 +439,6 @@ fn exact_path_selector_uses_rooted_full_path_for_unique_find_name_match() {
 }
 
 #[test]
-fn system_basic_find_path_normalization_prefers_existing_relative_path() {
-    let rel_dir = Path::new("target").join(format!(
-        "clawd-observed-output-find-path-{}-{}",
-        std::process::id(),
-        crate::now_ts_u64()
-    ));
-    std::fs::create_dir_all(&rel_dir).unwrap();
-    let file_path = rel_dir.join("Report.MD");
-    std::fs::write(&file_path, "hello").unwrap();
-    let cwd = std::env::current_dir().unwrap();
-    let resolved_root = cwd.join(&rel_dir).to_string_lossy().to_string();
-    let expected = file_path
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-
-    assert_eq!(
-        normalize_system_basic_match_path(
-            Some(&resolved_root),
-            Some(file_path.to_string_lossy().as_ref())
-        )
-        .as_deref(),
-        Some(expected.as_str())
-    );
-    let _ = std::fs::remove_dir_all(rel_dir);
-}
-
-#[test]
 fn exact_path_selector_prefers_resolved_path_from_path_batch_facts() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -525,7 +496,7 @@ fn path_fact_without_exact_selector_defers_to_model_synthesis() {
 }
 
 #[test]
-fn direct_answer_keeps_plain_path_terminal_format_for_observed_path_fact() {
+fn path_fact_without_exact_path_selector_does_not_direct_render() {
     let mut loop_state = LoopState::new(2);
     loop_state.last_user_visible_respond = Some("/tmp/case_only/Report.MD".to_string());
     loop_state.executed_step_results.push(ok_step(
@@ -540,7 +511,7 @@ fn direct_answer_keeps_plain_path_terminal_format_for_observed_path_fact() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "report.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -548,9 +519,8 @@ fn direct_answer_keeps_plain_path_terminal_format_for_observed_path_fact() {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("/tmp/case_only/Report.MD")
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
     );
 }
 

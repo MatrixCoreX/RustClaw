@@ -645,9 +645,7 @@ fn exact_fallback_candidate_is_machine_grounded(
     if route_path_locator_allows_observed_listing(route) {
         return candidate.lines().any(|line| !line.trim().is_empty());
     }
-    (route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
-        || route.requests_exact_path_list())
-        && candidate.lines().any(|line| !line.trim().is_empty())
+    route.requests_exact_path_list() && candidate.lines().any(|line| !line.trim().is_empty())
 }
 
 fn exact_contract_answer_from_json(
@@ -658,7 +656,6 @@ fn exact_contract_answer_from_json(
         return scalar_answer_from_json(value);
     }
     if route.requests_exact_path_list()
-        || route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
         || matches!(route.locator_kind, crate::OutputLocatorKind::Path)
     {
         return path_answer_from_json(value);
@@ -772,8 +769,7 @@ pub(super) fn route_prefers_observed_answer(route: &crate::IntentOutputContract)
 fn route_path_locator_allows_observed_listing(route: &crate::IntentOutputContract) -> bool {
     !route.delivery_required
         && route.locator_kind == crate::OutputLocatorKind::Path
-        && (route.semantic_kind_is_unclassified()
-            || route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath))
+        && route.requests_exact_list()
 }
 
 fn route_allows_prior_step_error_observed_replacement(route: &crate::IntentOutputContract) -> bool {
@@ -784,7 +780,6 @@ fn route_allows_prior_step_error_observed_replacement(route: &crate::IntentOutpu
         return true;
     }
     route.requests_exact_path_list()
-        || route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
 }
 
 fn delivery_has_planned_content_beyond_observed_answer(delivery: &str, observed: &str) -> bool {
@@ -816,17 +811,15 @@ pub(super) fn should_keep_planned_delivery_over_observed_answer(
     if route.requests_exact_list() && exact_list_delivery_is_observed_subset(delivery, observed) {
         return true;
     }
-    let scalar_model_language_verdict = route.response_shape == crate::OutputResponseShape::Scalar
-        && route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath);
-    if route.delivery_required && !scalar_model_language_verdict {
+    if route.delivery_required {
         return false;
     }
     if route_allows_model_language_final_answer(route)
-        && (!output_contract_requests_exact_delivery(route) || scalar_model_language_verdict)
-        && (!matches!(
+        && !output_contract_requests_exact_delivery(route)
+        && !matches!(
             route.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-        ) || scalar_model_language_verdict)
+        )
         && planned_delivery_is_publishable_model_language_answer(delivery)
     {
         return true;

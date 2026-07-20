@@ -31,11 +31,11 @@
         "delivery_required": {"type": "boolean"},
         "locator_kind": {"type": "string", "enum": ["none", "path", "current_workspace", "url", "filename"]},
         "delivery_intent": {"type": "string", "enum": ["none", "file_single", "directory_lookup", "directory_batch_files"]},
-        "result_kind": {"type": "string", "enum": ["none", "raw_command_output", "existence_with_path"]},
+        "result_kind": {"type": "string", "enum": ["none", "raw_command_output"]},
         "structured_field_selector": {
           "type": ["string", "null"],
           "maxLength": 256,
-          "description": "Optional comma-separated machine field selector for exact structured delivery. Use null when no named machine fields were requested."
+          "description": "Optional comma-separated machine field selector. With scalar/strict/file_token it requests exact structured delivery; with free/one_sentence it declares the structured evidence fields that model synthesis must cover. Use null when no named machine fields were requested."
         }
       }
     },

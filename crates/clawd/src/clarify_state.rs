@@ -252,24 +252,6 @@ fn clarify_state_semantic_kind(route_result: &crate::IntentOutputContract) -> Op
     if !matches!(route_result.semantic_kind, crate::OutputSemanticKind::None) {
         return Some(route_result.semantic_kind.as_str().to_string());
     }
-    let non_content_locator_probe = !route_result.delivery_required
-        && !route_result.delivery_required
-        && !route_result.requires_content_evidence
-        && matches!(
-            route_result.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        )
-        && matches!(
-            route_result.delivery_intent,
-            crate::OutputDeliveryIntent::None
-        );
-    if non_content_locator_probe {
-        return Some(
-            crate::OutputSemanticKind::ExistenceWithPath
-                .as_str()
-                .to_string(),
-        );
-    }
     None
 }
 

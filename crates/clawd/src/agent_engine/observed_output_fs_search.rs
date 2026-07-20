@@ -713,13 +713,7 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
     allow_multi_result_list: bool,
 ) -> Option<String> {
     if !route.requests_exact_path_list() && !route_requests_exact_scalar_path(route) {
-        if !super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::ExistenceWithPath,
-        ) || !route_prefers_plain_fs_search_paths(route)
-        {
-            return None;
-        }
+        return None;
     }
     let (mut results, count, pattern) = fs_search_find_name_results(value)?;
     if count == 0 || results.is_empty() {

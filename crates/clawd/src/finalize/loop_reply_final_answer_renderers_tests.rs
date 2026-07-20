@@ -151,10 +151,11 @@ fn machine_kv_renderer_replaces_field_selector_with_structured_value() {
 }
 
 #[test]
-fn machine_kv_renderer_preserves_missing_path_error_code() {
+fn machine_kv_renderer_does_not_expand_missing_path_into_domain_template() {
     let task = claimed_task("task-missing-path-machine-kv");
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.selection.structured_field_selector = Some("path,exists,error_code".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
@@ -185,7 +186,7 @@ fn machine_kv_renderer_preserves_missing_path_error_code() {
     let mut delivery_messages =
         vec!["path: missing.md\nexists: false\nerror_code: path_not_found".to_string()];
 
-    assert!(replace_delivery_with_requested_machine_kv_summary(
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
         &task,
         "Return path, exists=false, and error_code for missing.md.",
         &mut loop_state,
@@ -194,10 +195,8 @@ fn machine_kv_renderer_preserves_missing_path_error_code() {
         &mut delivery_messages,
     ));
 
-    let answer = delivery_messages.join("\n");
-    assert!(answer.contains("exists=false"));
-    assert!(answer.contains("path=missing.md"));
-    assert!(answer.contains("kind=missing"));
-    assert!(answer.contains("error_code=path_not_found"));
-    assert!(answer.contains("source_action=path_batch_facts"));
+    assert_eq!(
+        delivery_messages,
+        vec!["path: missing.md\nexists: false\nerror_code: path_not_found".to_string()]
+    );
 }

@@ -16,21 +16,6 @@ pub(super) fn observed_language_supports_bilingual_template(language_hint: &str)
     hint == "config_default" || hint.starts_with("en") || hint.starts_with("zh")
 }
 
-pub(super) fn route_should_synthesize_non_bilingual_existence_with_path(
-    route: Option<&crate::IntentOutputContract>,
-    allow_localized_direct_template: bool,
-) -> bool {
-    if allow_localized_direct_template {
-        return false;
-    }
-    let Some(route) = route else {
-        return false;
-    };
-    route_contract_marker_is(route, crate::OutputSemanticKind::ExistenceWithPath)
-        && crate::evidence_policy::final_answer_shape_for_output_contract(route)
-            .is_some_and(|shape| shape.allows_model_language())
-}
-
 pub(super) fn route_contract_marker_is(
     route: &crate::IntentOutputContract,
     semantic_kind: crate::OutputSemanticKind,
@@ -106,9 +91,6 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
         .and_then(|route| route.exact_sentence_count)
     {
         return format!("style_policy=exact_sentence_count sentence_count={count}");
-    }
-    if route_has_marker(crate::OutputSemanticKind::ExistenceWithPath) {
-        return "style_policy=existence_with_path include=verdict,path scalar_override=path_required".to_string();
     }
     match response_shape {
         Some(crate::OutputResponseShape::Scalar) => "style_policy=scalar bare_value=true",

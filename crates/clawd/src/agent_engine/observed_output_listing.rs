@@ -137,31 +137,14 @@ pub(super) fn route_requests_scalar_count(route: &crate::IntentOutputContract) -
     route.requests_exact_count()
 }
 
-pub(super) fn route_requests_scalar_existence(route: &crate::IntentOutputContract) -> bool {
-    route.response_shape == crate::OutputResponseShape::Scalar
-        && super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::ExistenceWithPath,
-        )
-        && !route.delivery_required
-}
-
-pub(crate) fn route_prefers_direct_observed_answer_for_scalar(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route_requests_scalar_existence(route)
-}
-
 pub(crate) fn scalar_route_prefers_structured_observed_answer(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
     route.response_shape == crate::OutputResponseShape::Scalar
-        && (route_prefers_direct_observed_answer_for_scalar(route)
-            || extract_latest_generic_successful_output(loop_state).is_some_and(|observed| {
-                observed.skill == "health_check"
-                    || observed_output_action_is(&observed, "read_range")
-            }))
+        && extract_latest_generic_successful_output(loop_state).is_some_and(|observed| {
+            observed.skill == "health_check" || observed_output_action_is(&observed, "read_range")
+        })
 }
 
 fn observed_output_action_is(observed: &GenericObservedOutput, expected_action: &str) -> bool {
@@ -240,44 +223,8 @@ pub(super) fn recent_file_path_candidate_for_scalar_path(
 
 pub(super) fn route_prefers_plain_fs_search_paths(route: &crate::IntentOutputContract) -> bool {
     route_requests_exact_scalar_path(route)
-        || (route.response_shape == crate::OutputResponseShape::Strict
-            && route.locator_kind == crate::OutputLocatorKind::Path
-            && super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::ExistenceWithPath,
-            )
-            && !route.delivery_required)
         || route.requests_exact_name_list()
         || route.requests_exact_path_list()
-}
-
-fn looks_like_plain_path_literal(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed.contains('\n') || trimmed.split_whitespace().count() > 1 {
-        return false;
-    }
-    let path = Path::new(trimmed);
-    path.is_absolute()
-        || trimmed.starts_with("~/")
-        || trimmed.contains('/')
-        || trimmed.contains('\\')
-}
-
-pub(super) fn route_scalar_has_plain_path_terminal_respond(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-) -> bool {
-    route.response_shape == crate::OutputResponseShape::Scalar
-        && super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::ExistenceWithPath,
-        )
-        && route.locator_kind == crate::OutputLocatorKind::Path
-        && !route.delivery_required
-        && loop_state
-            .last_user_visible_respond
-            .as_deref()
-            .is_some_and(looks_like_plain_path_literal)
 }
 
 pub(super) fn route_allows_raw_listing_direct_answer(
@@ -289,11 +236,7 @@ pub(super) fn route_allows_raw_listing_direct_answer(
         }
         if !route.delivery_required
             && route.locator_kind == crate::OutputLocatorKind::Path
-            && (super::output_route_policy::route_is_unclassified_contract(route)
-                || super::output_route_policy::route_contract_marker_is(
-                    route,
-                    crate::OutputSemanticKind::ExistenceWithPath,
-                ))
+            && super::output_route_policy::route_is_unclassified_contract(route)
         {
             return true;
         }

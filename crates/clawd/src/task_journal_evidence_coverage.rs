@@ -537,9 +537,7 @@ pub(super) fn step_error_supplies_negative_contract_evidence(
     let Some(output_contract) = output_contract else {
         return false;
     };
-    if !output_contract.requires_content_evidence
-        && !output_contract.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
-    {
+    if !output_contract.requires_content_evidence && !output_contract.requests_path_inspection() {
         return false;
     }
     let Some(error) = step

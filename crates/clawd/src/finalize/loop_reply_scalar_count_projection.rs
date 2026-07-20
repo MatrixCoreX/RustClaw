@@ -58,8 +58,7 @@ fn route_prefers_observed_count(
     if contract.delivery_required {
         return false;
     }
-    route.requests_exact_count()
-        && !plan_requests_count_inventory_file_dir_breakdown(loop_state)
+    route.requests_exact_count() && !plan_requests_count_inventory_file_dir_breakdown(loop_state)
 }
 
 fn plan_requests_count_inventory_file_dir_breakdown(loop_state: &LoopState) -> bool {

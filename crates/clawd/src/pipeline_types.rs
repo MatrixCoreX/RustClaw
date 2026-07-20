@@ -76,21 +76,15 @@ pub(crate) enum OutputSemanticKind {
     #[default]
     None,
     RawCommandOutput,
-    ExistenceWithPath,
 }
 
 impl OutputSemanticKind {
-    pub(crate) const ALL: &'static [Self] = &[
-        Self::None,
-        Self::RawCommandOutput,
-        Self::ExistenceWithPath,
-    ];
+    pub(crate) const ALL: &'static [Self] = &[Self::None, Self::RawCommandOutput];
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::RawCommandOutput => "raw_command_output",
-            Self::ExistenceWithPath => "existence_with_path",
         }
     }
 }
@@ -157,6 +151,49 @@ impl IntentOutputContract {
                 .as_deref()
                 .and_then(crate::machine_kv_projection::exact_machine_field_selector)
                 .is_some_and(|fields| matches!(fields.as_slice(), [field] if field == "count"))
+    }
+
+    pub(crate) fn requests_exact_structured_fields(&self) -> bool {
+        matches!(
+            self.response_shape,
+            OutputResponseShape::Scalar
+                | OutputResponseShape::Strict
+                | OutputResponseShape::FileToken
+        ) && self
+            .selection
+            .structured_field_selector
+            .as_deref()
+            .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+            .is_some()
+    }
+
+    pub(crate) fn requests_path_inspection(&self) -> bool {
+        let Some(fields) = self
+            .selection
+            .structured_field_selector
+            .as_deref()
+            .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+        else {
+            return false;
+        };
+        let has_path_inspection_fields = fields.iter().any(|field| field == "exists")
+            && fields.iter().any(|field| field == "path")
+            && fields
+                .iter()
+                .all(|field| matches!(field.as_str(), "exists" | "kind" | "path"));
+        has_path_inspection_fields
+            && !self.requires_content_evidence
+            && !self.delivery_required
+            && matches!(
+                self.locator_kind,
+                OutputLocatorKind::Path
+                    | OutputLocatorKind::CurrentWorkspace
+                    | OutputLocatorKind::Filename
+            )
+            && matches!(
+                self.response_shape,
+                OutputResponseShape::Free | OutputResponseShape::OneSentence
+            )
     }
 
     pub(crate) fn requests_exact_name_list(&self) -> bool {

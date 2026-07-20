@@ -1140,13 +1140,11 @@ fn one_sentence_count_waits_for_model_synthesis() {
         ..Default::default()
     };
 
-    assert!(
-        direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context)).is_none()
-    );
+    assert!(direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context)).is_none());
 }
 
 #[test]
-fn direct_structured_finalize_answers_existence_with_path_from_single_observation() {
+fn direct_structured_finalize_defers_path_inspection_to_model_synthesis() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1163,22 +1161,16 @@ fn direct_structured_finalize_answers_existence_with_path_from_single_observatio
     let mut route = scalar_route_result();
     route.response_shape = OutputResponseShape::Free;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "rustclaw.service".to_string();
+    route.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let (answer, summary) =
+    assert!(
         super::direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
-            .expect("single path_batch_facts observation should answer existence-with-path");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains("path=/tmp/rustclaw-workspace/rustclaw.service"));
-    assert_eq!(
-        summary.disposition,
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+            .is_none()
     );
 }
 
@@ -1571,7 +1563,7 @@ fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_quer
     });
     let mut route = scalar_route_result();
     route.requires_content_evidence = false;
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1611,7 +1603,7 @@ fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };

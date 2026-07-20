@@ -518,13 +518,17 @@ fn generic_delivery_allows_file_writes_before_delivery() {
 }
 
 #[test]
-fn existence_with_path_prefers_path_facts_but_allows_verifier_requested_excerpt() {
+fn generic_path_inspection_prefers_path_facts_and_allows_bounded_read() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ExistenceWithPath,
-        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::None,
+        requires_content_evidence: false,
         locator_kind: OutputLocatorKind::Filename,
-        response_shape: OutputResponseShape::Strict,
+        response_shape: OutputResponseShape::Free,
         locator_hint: "restart_once.sh".to_string(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("exists,path".to_string()),
+            ..Default::default()
+        },
         ..IntentOutputContract::default()
     };
 
@@ -536,7 +540,7 @@ fn existence_with_path_prefers_path_facts_but_allows_verifier_requested_excerpt(
     .expect("stat policy");
     assert!(stat_policy.is_allowed(), "{stat_policy:?}");
     assert_eq!(stat_policy.action_key, "fs_basic.stat_paths");
-    assert_eq!(stat_policy.contract_match, "existence_with_path");
+    assert_eq!(stat_policy.contract_match, "generic_path_inspection");
 
     let read_policy = action_policy_for_output_contract(
         Some(&contract),
@@ -546,7 +550,7 @@ fn existence_with_path_prefers_path_facts_but_allows_verifier_requested_excerpt(
     .expect("read policy");
     assert!(read_policy.is_allowed(), "{read_policy:?}");
     assert_eq!(read_policy.action_key, "fs_basic.read_text_range");
-    assert_eq!(read_policy.contract_match, "existence_with_path");
+    assert_eq!(read_policy.contract_match, "generic_path_inspection");
 }
 
 #[test]

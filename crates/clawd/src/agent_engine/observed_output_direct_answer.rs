@@ -24,6 +24,9 @@ pub(super) fn extract_answer_from_observed_output_impl(
             answer,
         );
     }
+    if route.is_some_and(crate::IntentOutputContract::requests_path_inspection) {
+        return None;
+    }
     let request_language_hint = current_turn_request_text(route, agent_run_context)
         .map(observed_request_language_hint)
         .unwrap_or("config_default");
@@ -31,19 +34,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
         observed_language_supports_bilingual_template(request_language_hint);
     let prefers_english_free_text =
         observed_request_prefers_english_template(state, request_language_hint);
-    let prefers_english_presence_answer = route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::ExistenceWithPath,
-        ) && prefers_english_free_text
-    });
-    let existence_with_path_should_use_llm_synthesis =
-        route_should_synthesize_non_bilingual_existence_with_path(
-            route,
-            allow_localized_direct_template,
-        );
-    let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route)
-        && !existence_with_path_should_use_llm_synthesis;
+    let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route);
     let health_check_prefers_raw_payload = has_route_contract
         && route.is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is(
@@ -96,21 +87,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                 extract_latest_generic_successful_output_with_state(state, loop_state)?;
             if observed_output.skill == "run_cmd" {
                 {
-                    (!existence_with_path_should_use_llm_synthesis)
-                        .then(|| {
-                            run_cmd_presence_with_path_candidate(
-                                state,
-                                &observed_output.body,
-                                locator_hint,
-                                auto_locator_path,
-                                prefers_english_presence_answer,
-                            )
-                        })
-                        .flatten()
-                }
-                .or_else(|| {
-                    (allow_raw_listing_direct_answer
-                        && !existence_with_path_should_use_llm_synthesis)
+                    allow_raw_listing_direct_answer
                         .then(|| {
                             route
                                 .filter(|route| !route.requests_exact_path_list())
@@ -122,7 +99,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                                 })
                         })
                         .flatten()
-                })
+                }
             } else {
                 None
             }
@@ -269,76 +246,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             .and_then(|field| {
                                 system_basic_path_batch_scalar_path_candidate(&value, &field)
                             })
-                    } else if action == Some("path_batch_facts")
-                        && route.is_some_and(|route| {
-                            route_scalar_has_plain_path_terminal_respond(route, loop_state)
-                        })
-                    {
-                        loop_state
-                            .last_user_visible_respond
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|answer| !answer.is_empty())
-                            .map(ToOwned::to_owned)
-                    } else if action == Some("path_batch_facts")
-                        && route.is_some_and(route_requests_scalar_existence)
-                    {
-                        system_basic_scalar_existence_candidate(
-                            state,
-                            &value,
-                            prefers_english_presence_answer,
-                        )
-                    } else if action == Some("path_batch_facts")
-                        && !existence_with_path_should_use_llm_synthesis
-                        && route.is_some_and(route_prefers_path_kind_fact_answer)
-                    {
-                        path_batch_fact_path_kind_candidate(&value, prefers_english_free_text)
-                            .or_else(|| {
-                                (!existence_with_path_should_use_llm_synthesis
-                                    && route.is_some_and(|route| {
-                                        super::output_route_policy::route_contract_marker_is(
-                                            route,
-                                            crate::OutputSemanticKind::ExistenceWithPath,
-                                        )
-                                    }))
-                                .then(|| {
-                                    system_basic_existence_with_path_candidate(
-                                        state,
-                                        &value,
-                                        locator_hint,
-                                        auto_locator_path,
-                                        prefers_english_presence_answer,
-                                    )
-                                })
-                                .flatten()
-                            })
-                    } else if !existence_with_path_should_use_llm_synthesis
-                        && route.is_some_and(|route| {
-                            super::output_route_policy::route_contract_marker_is(
-                                route,
-                                crate::OutputSemanticKind::ExistenceWithPath,
-                            )
-                        })
-                    {
-                        system_basic_existence_with_path_candidate(
-                            state,
-                            &value,
-                            locator_hint,
-                            auto_locator_path,
-                            prefers_english_presence_answer,
-                        )
-                    } else if action == Some("path_batch_facts")
-                        && !existence_with_path_should_use_llm_synthesis
-                        && !matches!(response_shape, Some(crate::OutputResponseShape::FileToken))
-                        && route.is_none_or(|route| !route.delivery_required)
-                    {
-                        system_basic_existence_with_path_candidate(
-                            state,
-                            &value,
-                            locator_hint,
-                            auto_locator_path,
-                            prefers_english_presence_answer,
-                        )
                     } else {
                         None
                     }
@@ -358,12 +265,11 @@ pub(super) fn extract_answer_from_observed_output_impl(
                 )
             })
             .or_else(|| {
-                (!existence_with_path_should_use_llm_synthesis
-                    && allows_normalized_scalar_direct_fallback(
-                        &observed_output.skill,
-                        route,
-                        response_shape,
-                    ))
+                allows_normalized_scalar_direct_fallback(
+                    &observed_output.skill,
+                    route,
+                    response_shape,
+                )
                 .then(|| normalized_scalar_candidate(&observed_output.body))
                 .flatten()
             })

@@ -5,8 +5,6 @@ use crate::ClaimedTask;
 
 #[path = "loop_reply_machine_kv/machine_unit_delivery.rs"]
 mod machine_unit_delivery;
-#[path = "loop_reply_machine_kv/path_fact_delivery.rs"]
-mod path_fact_delivery;
 #[path = "loop_reply_machine_kv/request_surfaces.rs"]
 mod request_surfaces;
 #[path = "loop_reply_machine_kv/structured_contract_delivery.rs"]
@@ -15,14 +13,14 @@ mod structured_contract_delivery;
 mod structured_scalar_delivery;
 
 use machine_unit_delivery::{
-    bare_machine_markers, current_delivery_contains_all_requested_machine_units,
+    current_delivery_contains_all_requested_machine_units,
     current_delivery_has_conflicting_values_for_requested_keys,
     current_delivery_has_values_for_requested_marker_summary, current_delivery_is_machine_kv_only,
     current_delivery_is_publishable_evidence_summary,
     latest_publishable_delivery_with_requested_machine_units, machine_kv_units,
     machine_kv_units_strictly_extend, normalized_state_patch_key,
     patch_current_delivery_conflicting_requested_machine_fields,
-    patch_current_delivery_empty_requested_machine_fields, requested_machine_summary_pairs,
+    patch_current_delivery_empty_requested_machine_fields,
     route_required_machine_evidence_is_present_in_current_delivery,
     strict_machine_field_contract_requested, valid_machine_unit_key,
 };
@@ -42,6 +40,12 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
     delivery_messages: &mut Vec<String>,
 ) -> bool {
+    if agent_run_context
+        .and_then(|ctx| ctx.output_contract())
+        .is_some_and(crate::IntentOutputContract::requests_path_inspection)
+    {
+        return false;
+    }
     if current_delivery_contains_full_structured_contract(loop_state, delivery_messages) {
         return false;
     }
@@ -165,47 +169,6 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     if current_delivery_already_publishes_single_names_array(agent_run_context, &current, &answer) {
         loop_state.last_user_visible_respond = Some(current);
         return false;
-    }
-    if let Some(restored) =
-        path_fact_delivery::latest_path_batch_fact_delivery_for_requested_summary(
-            loop_state,
-            agent_run_context,
-            &answer,
-        )
-    {
-        if restored.trim() == current.trim() {
-            loop_state.last_user_visible_respond = Some(current);
-            return false;
-        }
-        delivery_messages.clear();
-        delivery_messages.push(restored.clone());
-        loop_state.delivery_messages.clear();
-        append_delivery_message(
-            &task.task_id,
-            &mut loop_state.delivery_messages,
-            restored.clone(),
-        );
-        loop_state.last_user_visible_respond = Some(restored);
-        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
-            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-            parsed: true,
-            contract_ok: true,
-            completion_ok: Some(true),
-            grounded_ok: Some(true),
-            format_ok: Some(true),
-            needs_clarify: Some(false),
-            used_evidence_ids_count: loop_state.executed_step_results.len(),
-            ..Default::default()
-        });
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "requested_machine_kv_summary_path_fact_delivery",
-            "restored",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-        return true;
     }
     if marker_only_requested_summary(&answer)
         && !strict_machine_field_contract_requested(agent_run_context)

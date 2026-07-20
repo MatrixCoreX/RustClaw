@@ -287,6 +287,14 @@ fn structured_field_selector_observation_can_finalize(
     route_result: &IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
+    if !matches!(
+        route_result.response_shape,
+        crate::OutputResponseShape::Scalar
+            | crate::OutputResponseShape::Strict
+            | crate::OutputResponseShape::FileToken
+    ) {
+        return false;
+    }
     let Some(selector) = route_result
         .selection
         .structured_field_selector
@@ -343,6 +351,9 @@ fn should_stop_for_observed_finalize(
     if structured_field_selector_observation_can_finalize(route_result, loop_state) {
         return true;
     }
+    if route_result.requests_path_inspection() {
+        return false;
+    }
     if route_needs_workspace_text_evidence_before_observed_finalize(route_result)
         && !has_discussion_followup_action(actions)
         && !last_executable_action(actions).is_some_and(action_reads_text_content)
@@ -362,13 +373,6 @@ fn should_stop_for_observed_finalize(
         && !has_observed_stop_candidate
     {
         return false;
-    }
-    if route_result.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
-        && has_direct_observed_answer
-    {
-        return required_success_marker.is_none_or(|marker| {
-            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
-        });
     }
     if super::observed_output::route_disallows_direct_observation_passthrough(route_result)
         && !has_discussion_followup_action(actions)

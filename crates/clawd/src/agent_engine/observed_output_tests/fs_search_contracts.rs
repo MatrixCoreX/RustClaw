@@ -773,17 +773,19 @@ fn observed_bilingual_templates_defer_non_bilingual_missing_field_answers() {
 }
 
 #[test]
-fn observed_direct_answer_defers_non_bilingual_existence_with_path_template() {
+fn path_inspection_defers_non_bilingual_answer_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
             r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/rustclaw-missing-ja.txt"}],"include_missing":true}"#,
         ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+    route_result.semantic_kind = OutputSemanticKind::None;
+    route_result.requires_content_evidence = false;
     route_result.locator_kind = OutputLocatorKind::Path;
     route_result.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+    route_result.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = AgentRunContext {
             original_user_request: Some(
                 "/tmp/rustclaw-missing-ja.txt が存在するか確認してください。存在しない場合は日本語で短く答えてください。"
@@ -863,18 +865,19 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
         .contains("style_policy=scalar"));
     assert!(observed_response_style_hint(Some(&agent_run_context)).contains("bare_value=true"));
 
-    route_result.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route_result.selection.structured_field_selector = None;
+    route_result.semantic_kind = OutputSemanticKind::None;
+    route_result.response_shape = OutputResponseShape::OneSentence;
+    route_result.requires_content_evidence = false;
+    route_result.selection.structured_field_selector = Some("exists,path".to_string());
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("style_policy=existence_with_path"));
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("scalar_override=path_required"));
+        .contains("style_policy=one_sentence"));
 
     route_result.semantic_kind = OutputSemanticKind::None;
 
     route_result.selection.structured_field_selector = Some("count".to_string());
     route_result.response_shape = OutputResponseShape::OneSentence;
+    route_result.requires_content_evidence = true;
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=evidence_synthesis"));

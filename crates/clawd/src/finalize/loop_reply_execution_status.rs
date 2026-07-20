@@ -235,17 +235,6 @@ pub(super) fn deterministic_missing_observed_target_answer(
     let exact_count = agent_run_context
         .and_then(|ctx| ctx.output_contract())
         .is_some_and(crate::IntentOutputContract::requests_exact_count);
-    let concise_existence = agent_run_context
-        .and_then(|ctx| ctx.output_contract())
-        .is_some_and(|route| {
-            let contract = route.clone();
-            route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
-                && !contract.delivery_required
-                && matches!(
-                    contract.response_shape,
-                    crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
-                )
-        });
     let mut lines = vec![
         "schema_version=1".to_string(),
         "reason_code=missing_observed_target".to_string(),
@@ -261,9 +250,6 @@ pub(super) fn deterministic_missing_observed_target_answer(
     }
     if exact_count {
         lines.push("count_available=false".to_string());
-    }
-    if concise_existence {
-        lines.push("response_shape=existence_with_path".to_string());
     }
     Some(lines.join("\n"))
 }

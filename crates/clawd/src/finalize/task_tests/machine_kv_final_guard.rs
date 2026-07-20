@@ -600,7 +600,7 @@ fn requested_machine_kv_summary_final_guard_restores_path_fact_over_filename_mar
     let prompt = "rustclaw.service";
     let mut route = route_result();
     route.response_shape = crate::OutputResponseShape::Free;
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "rustclaw.service".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-machine-kv-path-fact-final",

@@ -13,7 +13,7 @@ fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/tmp/test_bundle.zip".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
@@ -22,9 +22,6 @@ fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
     };
 
     assert!(direct_structured_observed_answer(Some(&state), &loop_state, Some(&ctx)).is_none());
-    assert!(super::latest_path_batch_facts_has_implicit_metadata_fields(
-        &loop_state
-    ));
 }
 
 #[test]

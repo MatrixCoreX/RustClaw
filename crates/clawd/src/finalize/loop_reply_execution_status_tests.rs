@@ -115,14 +115,15 @@ fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_pat
 }
 
 #[test]
-fn deterministic_missing_observed_target_answer_respects_scalar_existence_shape() {
+fn deterministic_missing_observed_target_uses_generic_machine_shape() {
     let state = test_state();
     let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt".to_string();
+    route.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -144,19 +145,20 @@ fn deterministic_missing_observed_target_answer_respects_scalar_existence_shape(
 
     assert_eq!(
         answer,
-        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt`\nkind=missing\nfinal_answer_shape=existence_verdict_with_path\nresponse_shape=existence_with_path"
+        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt`\nkind=missing\nfinal_answer_shape=summary_with_evidence"
     );
 }
 
 #[test]
-fn deterministic_missing_observed_target_answer_uses_machine_payload_for_non_bilingual_existence() {
+fn deterministic_missing_observed_target_machine_payload_is_language_neutral() {
     let state = test_state();
     let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+    route.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some(
@@ -181,7 +183,7 @@ fn deterministic_missing_observed_target_answer_uses_machine_payload_for_non_bil
 
     assert_eq!(
         answer,
-        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/tmp/rustclaw-missing-ja.txt`\nkind=missing\nfinal_answer_shape=existence_verdict_with_path\nresponse_shape=existence_with_path"
+        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/tmp/rustclaw-missing-ja.txt`\nkind=missing\nfinal_answer_shape=summary_with_evidence"
     );
 }
 

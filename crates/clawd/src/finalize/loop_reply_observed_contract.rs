@@ -6,11 +6,10 @@ use super::{
     delivery_is_raw_read_observation, delivery_is_single_line_text,
     delivery_message_is_json_container, deterministic_missing_observed_target_answer,
     direct_raw_command_output_projection, evidence_policy_candidate_satisfies_final_shape,
-    latest_contractual_synthesis_output, latest_path_batch_facts_has_implicit_metadata_fields,
-    latest_plan_requested_synthesis, latest_publishable_respond_step_output,
-    latest_publishable_synthesis_step_matches, log_deterministic_delivery_record,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    planned_delivery_is_publishable_model_language_answer,
+    latest_contractual_synthesis_output, latest_plan_requested_synthesis,
+    latest_publishable_respond_step_output, latest_publishable_synthesis_step_matches,
+    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
+    looks_like_structured_machine_output, planned_delivery_is_publishable_model_language_answer,
     publishable_summary_has_multi_source_observation,
     raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
     route_prefers_observed_answer, route_requires_evidence_policy_deterministic_final_answer,
@@ -1079,7 +1078,7 @@ fn direct_structured_observed_answer_impl(
     state: Option<&AppState>,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
-    allow_implicit_metadata_path_facts: bool,
+    _allow_implicit_metadata_path_facts: bool,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     if raw_command_output_needs_structural_projection(route, loop_state) {
@@ -1088,14 +1087,6 @@ fn direct_structured_observed_answer_impl(
     if route.clone().requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
         && latest_successful_inventory_name_list_answer(loop_state).is_none()
-    {
-        return None;
-    }
-    if route.clone().requires_content_evidence
-        && route.response_shape == crate::OutputResponseShape::Strict
-        && route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
-        && latest_path_batch_facts_has_implicit_metadata_fields(loop_state)
-        && !allow_implicit_metadata_path_facts
     {
         return None;
     }

@@ -29,8 +29,6 @@ use output_success::{
 
 #[path = "observed_output_listing.rs"]
 mod output_listing;
-#[cfg(test)]
-use output_listing::route_prefers_direct_observed_answer_for_scalar;
 pub(crate) use output_listing::scalar_route_prefers_structured_observed_answer;
 use output_listing::{
     canonical_existing_path, count_answer_from_latest_fs_search, count_answer_from_latest_listing,
@@ -40,8 +38,7 @@ use output_listing::{
     resolve_listing_entry_full_path, route_allows_path_batch_scalar_path_observed_answer,
     route_allows_raw_listing_direct_answer, route_allows_scalar_read_range_direct_answer,
     route_prefers_plain_fs_search_paths, route_requests_exact_scalar_path,
-    route_requests_scalar_count, route_requests_scalar_existence,
-    route_scalar_has_plain_path_terminal_respond,
+    route_requests_scalar_count,
 };
 
 #[path = "observed_output_system_inventory.rs"]
@@ -50,8 +47,8 @@ use output_system_inventory::{
     count_inventory_direct_answer_candidate, count_inventory_planned_file_dir_breakdown_answer,
     dir_compare_direct_answer_candidate, inventory_dir_direct_answer_candidate,
     inventory_dir_names, inventory_dir_observed_candidate, inventory_dir_scalar_path_candidate,
-    system_basic_existence_with_path_value, system_basic_info_scalar_path_candidate,
-    system_basic_info_value, system_basic_inventory_dir_value,
+    system_basic_info_scalar_path_candidate, system_basic_info_value,
+    system_basic_inventory_dir_value, system_basic_path_observation_value,
     system_basic_structured_doc_observed_body, system_basic_structured_doc_value,
     system_basic_value_looks_like_info, tree_summary_direct_answer_candidate,
 };
@@ -60,9 +57,8 @@ use output_system_inventory::{
 mod output_fs_search;
 use output_fs_search::{
     absolutize_fs_search_answer_paths, fs_search_direct_answer_candidate,
-    fs_search_find_name_observed_candidate, fs_search_find_name_results,
-    fs_search_grep_text_observed_candidate, fs_search_route_filtered_listing_candidate,
-    fs_search_scalar_candidate, normalized_find_name_pattern, preferred_fs_search_exact_match,
+    fs_search_find_name_observed_candidate, fs_search_grep_text_observed_candidate,
+    fs_search_route_filtered_listing_candidate, fs_search_scalar_candidate,
 };
 
 #[path = "observed_output_path_facts.rs"]
@@ -132,7 +128,6 @@ mod output_route_policy;
 use output_route_policy::{
     observed_language_supports_bilingual_template, observed_request_language_hint,
     observed_request_prefers_english_template, observed_response_style_hint,
-    route_should_synthesize_non_bilingual_existence_with_path,
 };
 pub(crate) use output_route_policy::{
     route_disallows_direct_observation_passthrough, route_requires_synthesized_delivery,
@@ -145,8 +140,7 @@ use output_process_service::process_basic_observed_candidate;
 #[path = "observed_output_scalar_text.rs"]
 mod output_scalar_text;
 use output_scalar_text::{
-    normalized_scalar_candidate, trim_for_observed_prompt, value_scalar_text,
-    value_structured_text,
+    normalized_scalar_candidate, trim_for_observed_prompt, value_scalar_text, value_structured_text,
 };
 
 #[path = "observed_output_status_json.rs"]
@@ -172,7 +166,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
     prefer_full_path: bool,
-    allow_localized_direct_template: bool,
+    _allow_localized_direct_template: bool,
     prefer_english: bool,
 ) -> Option<String> {
     if let Some(answer) =
@@ -211,12 +205,6 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         }
     }
     let observed_output = extract_latest_generic_successful_output_with_state(state, loop_state)?;
-    if route_should_synthesize_non_bilingual_existence_with_path(
-        route,
-        allow_localized_direct_template,
-    ) {
-        return None;
-    }
     if multiple_structured_scalar_observations_need_synthesis(route, loop_state) {
         return None;
     }
@@ -477,12 +465,6 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         .unwrap_or("config_default");
     let allow_localized_direct_template =
         observed_language_supports_bilingual_template(request_language_hint);
-    if route_should_synthesize_non_bilingual_existence_with_path(
-        route,
-        allow_localized_direct_template,
-    ) {
-        return None;
-    }
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
         if multiple_structured_scalar_observations_need_synthesis(Some(route), loop_state) {
             return None;
@@ -676,10 +658,7 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
     ) {
         return true;
     }
-    matches!(
-        shape,
-        FinalAnswerShape::ExistenceVerdictWithPath | FinalAnswerShape::RawOutputOrShortSummary
-    )
+    matches!(shape, FinalAnswerShape::RawOutputOrShortSummary)
 }
 
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {

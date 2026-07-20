@@ -1,10 +1,11 @@
 use super::*;
+use crate::OutputSemanticKind;
 
 fn contract_existence(hint: &str) -> IntentOutputContract {
     IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::ExistenceWithPath,
+        semantic_kind: OutputSemanticKind::None,
         locator_hint: hint.to_string(),
         ..IntentOutputContract::default()
     }
@@ -25,7 +26,7 @@ fn reject_for_empty_candidate() {
 }
 
 #[test]
-fn existence_with_path_no_longer_autoprepends_or_hard_rejects() {
+fn path_inspection_no_longer_autoprepends_or_hard_rejects() {
     assert_eq!(
         verify_output_contract(
             &contract_existence("rustclaw.service"),

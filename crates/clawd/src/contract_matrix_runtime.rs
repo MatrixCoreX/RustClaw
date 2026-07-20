@@ -401,14 +401,15 @@ pub(crate) fn action_policy_for_output_contract(
     args: &Value,
 ) -> Option<ContractActionPolicy> {
     let output_contract = output_contract?;
+    let matrix = bundled_contract_matrix()?;
+    let matched = matrix.match_output_contract(output_contract)?;
     if output_contract.semantic_kind_is_unclassified()
         && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
+        && matched.match_name() == crate::OutputSemanticKind::None.as_str()
     {
         return None;
     }
-    let matrix = bundled_contract_matrix()?;
-    let matched = matrix.match_output_contract(output_contract)?;
     let policy_action = policy_action_ref_for_match(&matched, normalized_skill, args)?;
     let final_answer_shape_kind = final_answer_shape_for_output_contract(output_contract)?;
     let decision = matched.action_policy(&policy_action.effective);

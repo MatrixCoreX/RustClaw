@@ -146,7 +146,7 @@ fn derive_locator_clarify_state_preserves_structured_field_selector_token() {
 }
 
 #[test]
-fn derive_locator_clarify_state_marks_non_content_probe_as_existence_contract() {
+fn derive_locator_clarify_state_does_not_invent_a_semantic_contract() {
     let route = crate::IntentOutputContract {
         exact_sentence_count: None,
         response_shape: crate::OutputResponseShape::Strict,
@@ -171,10 +171,7 @@ fn derive_locator_clarify_state_marks_non_content_probe_as_existence_contract() 
     )
     .expect("clarify state should be derived");
 
-    assert_eq!(
-        clarify_state.semantic_kind.as_deref(),
-        Some(crate::OutputSemanticKind::ExistenceWithPath.as_str())
-    );
+    assert_eq!(clarify_state.semantic_kind, None);
     assert_eq!(
         clarify_state.output_shape.as_deref(),
         Some(crate::OutputResponseShape::Strict.as_str())

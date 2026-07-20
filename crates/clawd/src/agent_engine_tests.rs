@@ -145,8 +145,8 @@ fn quick_index_includes_planner_capability_metadata() {
         subprocess: Some(false),
         package_install: Some(false),
         privilege_escalation: Some(false),
-        output_semantic_kind: Some("existence_with_path".to_string()),
-        final_answer_shape: Some("existence_verdict_with_path".to_string()),
+        output_semantic_kind: Some("path_inspection".to_string()),
+        final_answer_shape: Some("summary_with_evidence".to_string()),
     }]);
     manifest.risk_level = Some(SkillRiskLevel::Medium);
     manifest.output_schema = Some(json!({
@@ -177,8 +177,8 @@ fn quick_index_includes_planner_capability_metadata() {
     assert!(text.contains("filesystem_write=false"));
     assert!(text.contains("external_publish=false"));
     assert!(text.contains("credential_access=false"));
-    assert!(text.contains("output_semantic_kind=existence_with_path"));
-    assert!(text.contains("final_answer_shape=existence_verdict_with_path"));
+    assert!(text.contains("output_semantic_kind=path_inspection"));
+    assert!(text.contains("final_answer_shape=summary_with_evidence"));
     assert!(output_contract.contains("output_contract: kind=text"));
     assert!(output_contract.contains("required=text"));
     assert!(output_contract.contains("fields=extra|text"));

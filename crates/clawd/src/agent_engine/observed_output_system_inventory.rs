@@ -46,7 +46,7 @@ pub(super) fn system_basic_info_value(skill: &str, body: &str) -> Option<serde_j
     system_basic_info_payload_from_value(&value)
 }
 
-pub(super) fn system_basic_existence_with_path_value(
+pub(super) fn system_basic_path_observation_value(
     skill: &str,
     body: &str,
 ) -> Option<serde_json::Value> {

@@ -316,35 +316,21 @@ fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contrac
 }
 
 #[test]
-fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
+fn generic_path_inspection_action_preferences_live_in_task_contract_matrix() {
     let matrix = load_workspace_matrix();
-    let cases = [(
-        "existence_with_path",
-        OutputSemanticKind::ExistenceWithPath,
-        "fs_basic.stat_paths",
-    )];
-
-    for (contract_name, semantic_kind, preferred_action) in cases {
-        let contract = matrix
-            .semantic_contract(semantic_kind)
-            .unwrap_or_else(|| panic!("missing contract for {contract_name}"));
-        assert!(
-            contract
-                .preferred_actions
-                .iter()
-                .any(|action| action == preferred_action),
-            "contract `{contract_name}` should prefer `{preferred_action}`, got {:?}",
-            contract.preferred_actions
-        );
-        assert!(
-            contract
-                .allowed_actions
-                .iter()
-                .any(|action| action == preferred_action),
-            "contract `{contract_name}` should allow `{preferred_action}`, got {:?}",
-            contract.allowed_actions
-        );
-    }
+    let profile = matrix
+        .generic_profiles
+        .iter()
+        .find(|profile| profile.name == "generic_path_inspection")
+        .expect("generic path inspection profile");
+    assert!(profile
+        .preferred_actions
+        .iter()
+        .any(|action| action == "fs_basic.stat_paths"));
+    assert!(profile
+        .allowed_actions
+        .iter()
+        .any(|action| action == "fs_basic.stat_paths"));
 }
 
 #[test]
