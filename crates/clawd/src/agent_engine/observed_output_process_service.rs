@@ -1,118 +1,3 @@
-use super::*;
-
-pub(super) fn service_control_summary_candidate(value: &serde_json::Value) -> Option<String> {
-    service_control_status_payload_value(value)?
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToString::to_string)
-}
-
-fn service_control_status_payload_value(value: &serde_json::Value) -> Option<serde_json::Value> {
-    if value_has_service_control_status_shape(value) {
-        return Some(value.clone());
-    }
-    if let Some(extra) = value
-        .get("extra")
-        .filter(|extra| value_has_service_control_status_shape(extra))
-    {
-        return Some(extra.clone());
-    }
-    None
-}
-
-fn value_has_service_control_status_shape(value: &serde_json::Value) -> bool {
-    value
-        .get("service_name")
-        .or_else(|| value.get("target"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .is_some_and(|value| !value.is_empty())
-        && (value.get("post_state").is_some()
-            || value.get("pre_state").is_some()
-            || value.get("status").is_some()
-            || value.get("summary").is_some())
-}
-
-fn service_control_state_value(value: &serde_json::Value) -> Option<&str> {
-    value
-        .get("post_state")
-        .or_else(|| value.get("pre_state"))
-        .or_else(|| value.get("status"))
-        .or_else(|| value.get("summary"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-}
-
-fn service_control_json_scalar_to_string(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(value) => Some(value.trim().to_string()),
-        serde_json::Value::Number(value) => Some(value.to_string()),
-        serde_json::Value::Bool(value) => Some(value.to_string()),
-        _ => None,
-    }
-    .filter(|value| !value.is_empty())
-}
-
-fn push_service_control_field(
-    fields: &mut Vec<String>,
-    value: &serde_json::Value,
-    field_name: &'static str,
-    output_name: &'static str,
-) {
-    if fields.iter().any(|field| {
-        field
-            .split_once('=')
-            .is_some_and(|(key, _)| key == output_name)
-    }) {
-        return;
-    }
-    let Some(field_value) = value
-        .get(field_name)
-        .and_then(service_control_json_scalar_to_string)
-    else {
-        return;
-    };
-    fields.push(format!("{output_name}={field_value}"));
-}
-
-fn service_control_status_fields_answer(value: &serde_json::Value) -> Option<String> {
-    let mut fields = Vec::new();
-    push_service_control_field(&mut fields, value, "target", "target");
-    push_service_control_field(&mut fields, value, "service_name", "target");
-    push_service_control_field(&mut fields, value, "service_name", "service_name");
-    push_service_control_field(&mut fields, value, "post_state", "post_state");
-    push_service_control_field(&mut fields, value, "pre_state", "pre_state");
-    push_service_control_field(&mut fields, value, "status", "status");
-    push_service_control_field(&mut fields, value, "verified", "verified");
-    push_service_control_field(&mut fields, value, "manager_type", "manager_type");
-    if fields.is_empty() {
-        return None;
-    }
-    fields.push("source=service_control".to_string());
-    Some(fields.join(" "))
-}
-
-pub(super) fn service_control_status_direct_answer_candidate(
-    value: &serde_json::Value,
-    response_shape: Option<crate::OutputResponseShape>,
-) -> Option<String> {
-    let value = service_control_status_payload_value(value)?;
-    let service_state = service_control_state_value(&value)?;
-    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
-        return Some(service_state.to_string());
-    }
-    if matches!(
-        response_shape,
-        Some(crate::OutputResponseShape::Strict | crate::OutputResponseShape::Free)
-    ) {
-        return service_control_status_fields_answer(&value);
-    }
-    None
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProcessBasicPsStatusObservation {
     status: String,
@@ -122,46 +7,6 @@ struct ProcessBasicPsStatusObservation {
     filter: Option<String>,
     process_name: Option<String>,
     exit_code: Option<i64>,
-}
-
-pub(super) fn latest_process_basic_service_status_direct_answer_candidate(
-    _state: Option<&AppState>,
-    loop_state: &LoopState,
-    response_shape: Option<crate::OutputResponseShape>,
-    _prefer_english: bool,
-) -> Option<String> {
-    let idx = latest_successful_step_index(loop_state, |step| step.skill == "process_basic")?;
-    let body = loop_state.executed_step_results[idx]
-        .output
-        .as_deref()
-        .map(str::trim)
-        .filter(|body| !body.is_empty())?;
-    let body = normalized_success_body_for_observed_output(body);
-    process_basic_service_status_structured_scalar_candidate(&body, response_shape)
-        .or_else(|| {
-            process_basic_port_list_structured_direct_answer_candidate(&body, response_shape)
-        })
-        .or_else(|| {
-            matches!(
-                response_shape,
-                Some(crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict)
-            )
-            .then(|| {
-                process_basic_port_list_direct_answer_candidate(None, &body, response_shape, false)
-            })
-            .flatten()
-        })
-}
-
-fn process_basic_service_status_structured_scalar_candidate(
-    body: &str,
-    response_shape: Option<crate::OutputResponseShape>,
-) -> Option<String> {
-    let observation = process_basic_ps_status_observation(body)?;
-    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
-        return Some(observation.status);
-    }
-    None
 }
 
 fn process_basic_ps_status_observation(body: &str) -> Option<ProcessBasicPsStatusObservation> {
@@ -249,128 +94,6 @@ fn process_basic_ps_observation_value(value: &serde_json::Value) -> Option<&serd
         .and_then(process_basic_ps_observation_value)
 }
 
-fn process_basic_port_list_structured_direct_answer_candidate(
-    body: &str,
-    response_shape: Option<crate::OutputResponseShape>,
-) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(body.trim()).ok()?;
-    let value = process_basic_port_list_observation_value(&value)?;
-    let listener_count = value
-        .get("listener_count")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let public_listener_count = value
-        .get("public_listener_count")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    if listener_count == 0 && public_listener_count == 0 {
-        return None;
-    }
-    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
-        return Some(public_listener_count.max(listener_count).to_string());
-    }
-    if response_shape.is_some() {
-        return None;
-    }
-    let public_ports = value
-        .get("public_ports")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let ports = value
-        .get("ports")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let public_listeners = value
-        .get("public_listeners")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let listeners = value
-        .get("listeners")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let notable_listeners = if public_listeners.is_empty() {
-        listeners.iter().take(8).cloned().collect::<Vec<_>>()
-    } else {
-        public_listeners.iter().take(8).cloned().collect::<Vec<_>>()
-    };
-    let process_names = process_basic_listener_process_names(&notable_listeners);
-    let brief_explanation = process_basic_port_brief_explanation(&notable_listeners);
-    let field_value = if public_ports.is_empty() {
-        serde_json::Value::Array(ports.clone())
-    } else {
-        serde_json::Value::Array(public_ports.clone())
-    };
-    let mut payload = serde_json::Map::new();
-    payload.insert(
-        "message_key".to_string(),
-        serde_json::json!("clawd.msg.service_status.port_list"),
-    );
-    payload.insert(
-        "status_source".to_string(),
-        serde_json::json!("process_basic.port_list"),
-    );
-    payload.insert("field_value".to_string(), field_value);
-    payload.insert(
-        "listener_count".to_string(),
-        serde_json::json!(listener_count),
-    );
-    payload.insert(
-        "public_listener_count".to_string(),
-        serde_json::json!(public_listener_count),
-    );
-    if let Some(count) = value
-        .get("localhost_listener_count")
-        .and_then(|value| value.as_u64())
-    {
-        payload.insert(
-            "localhost_listener_count".to_string(),
-            serde_json::json!(count),
-        );
-    }
-    if !public_ports.is_empty() {
-        if let Some(first_port) = public_ports.first().and_then(|value| value.as_str()) {
-            payload.insert("port".to_string(), serde_json::json!(first_port));
-        }
-        payload.insert(
-            "public_ports".to_string(),
-            serde_json::Value::Array(public_ports),
-        );
-    }
-    if !ports.is_empty() {
-        payload.insert("ports".to_string(), serde_json::Value::Array(ports));
-    }
-    if !notable_listeners.is_empty() {
-        payload.insert(
-            "public_listeners".to_string(),
-            serde_json::Value::Array(notable_listeners),
-        );
-    }
-    if !brief_explanation.is_empty() {
-        payload.insert(
-            "brief_explanation".to_string(),
-            serde_json::Value::Array(brief_explanation.clone()),
-        );
-        payload.insert(
-            "notable_ports".to_string(),
-            serde_json::Value::Array(brief_explanation),
-        );
-    }
-    if !process_names.is_empty() {
-        if let Some(first_name) = process_names.first() {
-            payload.insert("process_name".to_string(), serde_json::json!(first_name));
-        }
-        payload.insert(
-            "process_names".to_string(),
-            serde_json::json!(process_names),
-        );
-    }
-    Some(serde_json::Value::Object(payload).to_string())
-}
-
 fn process_basic_port_list_observation_value(
     value: &serde_json::Value,
 ) -> Option<&serde_json::Value> {
@@ -384,101 +107,6 @@ fn process_basic_port_list_observation_value(
     value
         .get("extra")
         .and_then(process_basic_port_list_observation_value)
-}
-
-fn process_basic_listener_process_names(listeners: &[serde_json::Value]) -> Vec<String> {
-    let mut names = Vec::new();
-    for listener in listeners {
-        let Some(name) = listener
-            .get("process_name")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-        else {
-            continue;
-        };
-        if !names.iter().any(|existing| existing == name) {
-            names.push(name.to_string());
-        }
-    }
-    names
-}
-
-fn process_basic_port_brief_explanation(listeners: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    let mut items = Vec::new();
-    let mut seen_ports = Vec::new();
-    for listener in listeners {
-        let Some(port) = listener
-            .get("port")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|port| !port.is_empty())
-        else {
-            continue;
-        };
-        if seen_ports.iter().any(|seen| seen == port) {
-            continue;
-        }
-        seen_ports.push(port.to_string());
-        let mut item = serde_json::Map::new();
-        item.insert("port".to_string(), serde_json::json!(port));
-        if let Some(endpoint) = listener
-            .get("local_endpoint")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|endpoint| !endpoint.is_empty())
-        {
-            item.insert("local_endpoint".to_string(), serde_json::json!(endpoint));
-        }
-        if let Some(bind_scope) = listener
-            .get("bind_scope")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|scope| !scope.is_empty())
-        {
-            item.insert("bind_scope".to_string(), serde_json::json!(bind_scope));
-            item.insert(
-                "exposure".to_string(),
-                serde_json::json!(process_basic_bind_scope_exposure(bind_scope)),
-            );
-        }
-        if let Some(process_name) = listener
-            .get("process_name")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|process_name| !process_name.is_empty())
-        {
-            item.insert("process_name".to_string(), serde_json::json!(process_name));
-        }
-        if let Some(service_hint) = well_known_port_service_hint(port) {
-            item.insert("service_hint".to_string(), serde_json::json!(service_hint));
-        }
-        item.insert(
-            "source".to_string(),
-            serde_json::json!("process_basic.port_list"),
-        );
-        items.push(serde_json::Value::Object(item));
-    }
-    items
-}
-
-fn process_basic_bind_scope_exposure(bind_scope: &str) -> &'static str {
-    match bind_scope {
-        "all_interfaces" => "public_bind",
-        "localhost" => "loopback",
-        _ => "bound",
-    }
-}
-
-fn well_known_port_service_hint(port: &str) -> Option<&'static str> {
-    match port {
-        "22" => Some("ssh"),
-        "53" => Some("dns"),
-        "80" => Some("http"),
-        "443" => Some("https"),
-        "631" => Some("ipp"),
-        _ => None,
-    }
 }
 
 pub(super) fn process_basic_observed_candidate(body: &str) -> Option<String> {
@@ -701,86 +329,12 @@ fn process_basic_port_text_observed_candidate(body: &str) -> Option<String> {
     Some(lines.join("\n"))
 }
 
-pub(super) fn process_basic_service_status_direct_answer_candidate(
-    state: Option<&AppState>,
-    body: &str,
-    response_shape: Option<crate::OutputResponseShape>,
-    prefer_english: bool,
-) -> Option<String> {
-    if let Some(answer) =
-        process_basic_port_list_direct_answer_candidate(state, body, response_shape, prefer_english)
-    {
-        return Some(answer);
-    }
-    let observation = process_basic_ps_status_observation(body);
-    let rows = process_basic_table_rows(body);
-    let status = if rows.is_empty() {
-        "not_running"
-    } else {
-        "running"
-    };
-    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
-        return Some(
-            observation
-                .map(|observation| observation.status)
-                .unwrap_or_else(|| status.to_string()),
-        );
-    }
-    if let Some(answer) =
-        process_basic_ps_inventory_direct_answer_candidate(state, &rows, prefer_english)
-    {
-        return Some(answer);
-    }
-    observation?;
-    None
-}
-
 #[derive(Debug, Clone, PartialEq)]
 struct ProcessBasicPsRow {
     pid: String,
     cpu: String,
     mem: String,
     comm: String,
-}
-
-fn process_basic_ps_inventory_direct_answer_candidate(
-    _state: Option<&AppState>,
-    rows: &[&str],
-    _prefer_english: bool,
-) -> Option<String> {
-    let rows = rows
-        .iter()
-        .filter_map(|row| process_basic_ps_row(row))
-        .collect::<Vec<_>>();
-    if rows.len() < 2 {
-        return None;
-    }
-    let top = rows.first()?;
-    let mut lines = vec![
-        "message_key=clawd.msg.process_basic.ps_inventory.observed".to_string(),
-        "reason_code=process_basic_ps_inventory_observed".to_string(),
-        "selection_reason=ranked_by_cpu".to_string(),
-        format!("process_count={}", rows.len()),
-    ];
-    push_process_basic_machine_line(&mut lines, "top_process.pid", &top.pid);
-    push_process_basic_machine_line(&mut lines, "top_process.name", &top.comm);
-    push_process_basic_machine_line(&mut lines, "top_process.cpu_percent", &top.cpu);
-    push_process_basic_machine_line(&mut lines, "top_process.mem_percent", &top.mem);
-    for (idx, row) in rows.iter().enumerate() {
-        let prefix = format!("process.{}", idx + 1);
-        push_process_basic_machine_line(&mut lines, &format!("{prefix}.pid"), &row.pid);
-        push_process_basic_machine_line(&mut lines, &format!("{prefix}.name"), &row.comm);
-        push_process_basic_machine_line(&mut lines, &format!("{prefix}.cpu_percent"), &row.cpu);
-        push_process_basic_machine_line(&mut lines, &format!("{prefix}.mem_percent"), &row.mem);
-    }
-    Some(lines.join("\n"))
-}
-
-fn push_process_basic_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
-    let value = crate::truncate_for_agent_trace(
-        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
-    );
-    lines.push(format!("{key}={value}"));
 }
 
 fn process_basic_ps_row(row: &str) -> Option<ProcessBasicPsRow> {
@@ -801,46 +355,6 @@ struct ProcessBasicPortRow {
     local: String,
     port: String,
     process: Option<String>,
-}
-
-fn process_basic_port_list_direct_answer_candidate(
-    _state: Option<&AppState>,
-    body: &str,
-    response_shape: Option<crate::OutputResponseShape>,
-    _prefer_english: bool,
-) -> Option<String> {
-    let rows = process_basic_port_rows(body);
-    if rows.is_empty() {
-        return None;
-    }
-    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
-        return Some(rows.len().to_string());
-    }
-    let mut lines = vec![format!("port.count={}", rows.len())];
-    lines.extend(
-        rows.iter()
-            .enumerate()
-            .map(|(idx, row)| process_basic_port_row_label(idx, row)),
-    );
-    Some(lines.join("\n"))
-}
-
-fn process_basic_port_row_label(idx: usize, row: &ProcessBasicPortRow) -> String {
-    let exposure = if process_basic_local_addr_is_loopback(&row.local) {
-        "loopback"
-    } else {
-        "public_bind"
-    };
-    match row.process.as_deref().filter(|value| !value.is_empty()) {
-        Some(process) => format!(
-            "port[{idx}].number={}\nport[{idx}].local={}\nport[{idx}].exposure={}\nport[{idx}].process={}",
-            row.port, row.local, exposure, process
-        ),
-        None => format!(
-            "port[{idx}].number={}\nport[{idx}].local={}\nport[{idx}].exposure={}",
-            row.port, row.local, exposure
-        ),
-    }
 }
 
 fn process_basic_port_rows(body: &str) -> Vec<ProcessBasicPortRow> {
@@ -908,10 +422,6 @@ fn process_basic_process_name_from_port_line(line: &str) -> Option<String> {
     Some(rest[..end].to_string()).filter(|value| !value.trim().is_empty())
 }
 
-fn process_basic_local_addr_is_loopback(local: &str) -> bool {
-    local.starts_with("127.") || local.starts_with("[::1]") || local.starts_with("::1")
-}
-
 fn process_basic_table_rows(body: &str) -> Vec<&str> {
     let mut saw_header = false;
     let mut rows = Vec::new();
@@ -945,25 +455,4 @@ fn process_basic_no_match_filter(body: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
-}
-
-pub(super) fn process_basic_port_list_should_use_llm_synthesis(
-    route: &crate::IntentOutputContract,
-    body: &str,
-) -> bool {
-    super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::ServiceStatus,
-    ) && route_allows_model_language_direct_candidate(route)
-        && route.response_shape != crate::OutputResponseShape::Scalar
-        && body_has_process_basic_port_list_observation(body)
-}
-
-fn body_has_process_basic_port_list_observation(body: &str) -> bool {
-    !process_basic_port_rows(body).is_empty()
-        || serde_json::from_str::<serde_json::Value>(body.trim())
-            .ok()
-            .as_ref()
-            .and_then(process_basic_port_list_observation_value)
-            .is_some()
 }

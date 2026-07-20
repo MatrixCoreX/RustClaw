@@ -16,10 +16,6 @@ use task_lifecycle_renderers::run_task_lifecycle_renderer_registry;
 mod deterministic_fallback_renderers;
 use deterministic_fallback_renderers::run_deterministic_fallback_renderer_registry;
 
-#[path = "loop_reply_capability_result_renderers.rs"]
-mod capability_result_renderers;
-use capability_result_renderers::run_service_status_observed_fields_renderer;
-
 #[path = "loop_reply_capability_synthesis.rs"]
 mod capability_synthesis;
 use capability_synthesis::finalize_capability_synthesis;
@@ -59,10 +55,6 @@ mod delivery_text_tests;
 #[cfg(test)]
 use delivery_text::single_publishable_delivery_message;
 use delivery_text::{delivery_is_single_line_text, final_answer_text_from_delivery};
-
-#[path = "loop_reply_service_status.rs"]
-mod service_status;
-pub(crate) use service_status::service_status_system_basic_info_answer;
 
 #[path = "loop_reply_machine_projections.rs"]
 mod machine_projections;
@@ -328,7 +320,6 @@ use synthesis_preference::structured_compound_synthesis_can_replace_current_deli
 use synthesis_preference::{
     prefer_content_evidence_synthesis_for_final_delivery,
     prefer_latest_synthesis_for_compound_observation_delivery,
-    replace_delivery_with_service_status_observed_answer,
     replace_raw_passthrough_delivery_with_publishable_synthesis,
 };
 
@@ -901,19 +892,14 @@ pub(crate) async fn finalize_loop_reply(
     replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
     replace_raw_read_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
     replace_raw_observation_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
-    let replaced_service_status = run_service_status_observed_fields_renderer(
-        task,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    ) || run_deterministic_fallback_renderer_registry(
+    let replaced_deterministic_fallback = run_deterministic_fallback_renderer_registry(
         state,
         task,
         &mut loop_state,
         agent_run_context,
         &mut finalizer_summary,
     );
-    let replaced_grounded_answer = if !replaced_service_status {
+    let replaced_grounded_answer = if !replaced_deterministic_fallback {
         replace_structured_delivery_with_grounded_synthesis(
             task,
             &mut loop_state,
@@ -928,7 +914,7 @@ pub(crate) async fn finalize_loop_reply(
     } else {
         false
     };
-    let replaced_direct_scalar = if !replaced_grounded_answer && !replaced_service_status {
+    let replaced_direct_scalar = if !replaced_grounded_answer && !replaced_deterministic_fallback {
         replace_delivery_with_direct_scalar_observed_answer(
             state,
             task,
@@ -940,7 +926,8 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_direct_structured =
-        if !replaced_grounded_answer && !replaced_service_status && !replaced_direct_scalar {
+        if !replaced_grounded_answer && !replaced_deterministic_fallback && !replaced_direct_scalar
+        {
             replace_delivery_with_direct_structured_observed_answer(
                 state,
                 task,
@@ -952,7 +939,7 @@ pub(crate) async fn finalize_loop_reply(
             false
         };
     let replaced_contract_answer = if !replaced_grounded_answer
-        && !replaced_service_status
+        && !replaced_deterministic_fallback
         && !replaced_direct_scalar
         && !replaced_direct_structured
     {
@@ -966,7 +953,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_failed_step = if !replaced_grounded_answer
-        && !replaced_service_status
+        && !replaced_deterministic_fallback
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
@@ -983,7 +970,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_matrix_observed_shape = if !replaced_grounded_answer
-        && !replaced_service_status
+        && !replaced_deterministic_fallback
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
@@ -1006,7 +993,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     if !replaced_grounded_answer
-        && !replaced_service_status
+        && !replaced_deterministic_fallback
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
@@ -1407,14 +1394,6 @@ pub(crate) async fn finalize_loop_reply(
         &mut finalizer_summary,
         &mut delivery_deduped,
     );
-    if replace_delivery_with_service_status_observed_answer(
-        task,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    ) {
-        delivery_deduped = loop_state.delivery_messages.clone();
-    }
     if sync_final_delivery_with_local_code_projection(
         task,
         user_text,

@@ -184,20 +184,6 @@ pub(crate) fn structurally_satisfies_answer_contract(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if service_status_port_answer_is_grounded_in_successful_observation(
-        route_result,
-        journal,
-        candidate_answer,
-    ) {
-        return true;
-    }
-    if health_check_diagnostic_answer_is_grounded_in_successful_observation(
-        route_result,
-        journal,
-        candidate_answer,
-    ) {
-        return true;
-    }
     if execution_failed_step_answer_is_grounded_in_failed_observation(
         route_result,
         journal,

@@ -15,20 +15,7 @@ pub(super) fn structured_scalar_candidate(
         return Some(answer);
     }
     if skill == "service_control" {
-        let response_shape = route.map(|route| route.response_shape);
-        let service_status_route = route.is_some_and(|route| {
-            super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::ServiceStatus,
-            )
-        });
-        if route.is_some_and(|route| route.response_shape == crate::OutputResponseShape::Scalar) {
-            return service_control_status_direct_answer_candidate(&value, response_shape);
-        }
-        if service_status_route {
-            return None;
-        }
-        return service_control_summary_candidate(&value);
+        return None;
     }
     if skill == "fs_search" {
         let rooted_scalar = prefer_full_path

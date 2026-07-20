@@ -58,8 +58,7 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     if route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ExecutionFailedStep,
         crate::OutputSemanticKind::RawCommandOutput,
-    ]) || crate::finalize::route_matches_service_status_output_contract(route)
-    {
+    ]) {
         return false;
     }
     successful_content_observation_count(loop_state) > 0
@@ -382,17 +381,6 @@ fn has_publishable_synthesis_other_than_status(
         })
 }
 
-fn latest_delivery_is_underinformative_success_status(
-    loop_state: &crate::agent_engine::LoopState,
-) -> bool {
-    loop_state
-        .delivery_messages
-        .last()
-        .or(loop_state.last_user_visible_respond.as_ref())
-        .map(String::as_str)
-        .is_some_and(delivery_text_is_underinformative_success_status)
-}
-
 fn delivery_text_is_underinformative_success_status(text: &str) -> bool {
     let text = text.trim();
     if text.eq_ignore_ascii_case("status=ok") || text.eq_ignore_ascii_case("status: ok") {
@@ -408,110 +396,6 @@ fn delivery_text_is_underinformative_success_status(text: &str) -> bool {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|status| status.eq_ignore_ascii_case("ok"))
     })
-}
-
-fn deterministic_service_control_status_observed_answer(
-    loop_state: &crate::agent_engine::LoopState,
-) -> Option<String> {
-    loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .find_map(service_control_status_observed_answer_from_step)
-}
-
-fn service_control_status_observed_answer_from_step(
-    step: &crate::executor::StepExecutionResult,
-) -> Option<String> {
-    if step.skill != "service_control" || !step.is_ok() {
-        return None;
-    }
-    let output = output_text_from_execution_result(step)?;
-    let output = serde_json::from_str::<serde_json::Value>(&output).ok()?;
-    let payload = output
-        .get("extra")
-        .filter(|value| value.is_object())
-        .unwrap_or(&output);
-    let action = first_trimmed_string(payload, &["requested_action", "action"])?;
-    if !action.eq_ignore_ascii_case("status") {
-        return None;
-    }
-
-    let mut lines = Vec::new();
-    push_first_payload_field(&mut lines, payload, "target", &["target", "service_name"]);
-    push_first_payload_field(&mut lines, payload, "service_name", &["service_name"]);
-    push_first_payload_field(&mut lines, payload, "post_state", &["post_state"]);
-    push_first_payload_field(&mut lines, payload, "pre_state", &["pre_state"]);
-    push_first_payload_field(&mut lines, payload, "status", &["status"]);
-    push_first_payload_field(&mut lines, payload, "verified", &["verified"]);
-    push_first_payload_field(&mut lines, payload, "manager_type", &["manager_type"]);
-    push_service_control_evidence_fields(&mut lines, payload);
-    if lines.len() <= 1 {
-        return None;
-    }
-    lines.push("source=service_control".to_string());
-    Some(lines.join("\n"))
-}
-
-fn push_first_payload_field(
-    lines: &mut Vec<String>,
-    payload: &serde_json::Value,
-    output_key: &str,
-    input_keys: &[&str],
-) {
-    let Some(value) = input_keys
-        .iter()
-        .find_map(|key| payload.get(*key).and_then(payload_scalar_to_string))
-    else {
-        return;
-    };
-    lines.push(format!("{output_key}={value}"));
-}
-
-fn first_trimmed_string(payload: &serde_json::Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        payload
-            .get(*key)
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-    })
-}
-
-fn payload_scalar_to_string(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(value) => {
-            let value = value.trim();
-            (!value.is_empty()).then(|| value.replace('\n', " "))
-        }
-        serde_json::Value::Bool(value) => Some(value.to_string()),
-        serde_json::Value::Number(value) => Some(value.to_string()),
-        _ => None,
-    }
-}
-
-fn push_service_control_evidence_fields(lines: &mut Vec<String>, payload: &serde_json::Value) {
-    let Some(evidence) = payload.get("key_evidence") else {
-        return;
-    };
-    match evidence {
-        serde_json::Value::Array(values) => {
-            for (idx, value) in values
-                .iter()
-                .filter_map(payload_scalar_to_string)
-                .take(3)
-                .enumerate()
-            {
-                lines.push(format!("evidence.{}={value}", idx + 1));
-            }
-        }
-        value => {
-            if let Some(value) = payload_scalar_to_string(value) {
-                lines.push(format!("evidence.1={value}"));
-            }
-        }
-    }
 }
 
 pub(super) fn attach_deterministic_observed_execution_status_answer(
@@ -577,16 +461,8 @@ pub(super) fn replace_delivery_with_deterministic_observed_execution_status_answ
     loop_state: &mut crate::agent_engine::LoopState,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let answer = if let Some(answer) =
-        deterministic_observed_execution_status_answer(state, user_text, loop_state)
-    {
-        answer
-    } else if latest_delivery_is_underinformative_success_status(loop_state) {
-        let Some(answer) = deterministic_service_control_status_observed_answer(loop_state) else {
-            return false;
-        };
-        answer
-    } else {
+    let Some(answer) = deterministic_observed_execution_status_answer(state, user_text, loop_state)
+    else {
         return false;
     };
     if has_publishable_synthesis_other_than_status(loop_state, &answer) {

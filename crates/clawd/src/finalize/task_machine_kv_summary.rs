@@ -1,10 +1,6 @@
 #[path = "task_machine_kv_summary_path_request.rs"]
 mod path_request;
-#[path = "task_machine_kv_summary_service_control.rs"]
-mod service_control;
 
-#[cfg(test)]
-use path_request::requested_machine_kv_summary_from_task_final_answer;
 use path_request::{
     final_answer_preserves_compare_paths_existence_fields,
     latest_path_batch_fact_answer_for_requested_summary,
@@ -13,7 +9,6 @@ use path_request::{
     route_preserves_generated_file_machine_report, task_machine_kv_request_surfaces,
     text_has_compare_paths_existence_fields,
 };
-use service_control::final_answer_preserves_service_control_status_summary;
 
 pub(super) fn recover_requested_machine_kv_summary_final_answer(
     prompt: &str,
@@ -328,17 +323,6 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
     }
     if final_answer_preserves_compare_paths_existence_fields(answer_text, answer_messages)
         && !text_has_compare_paths_existence_fields(&summary)
-    {
-        journal.record_final_answer(answer_text.as_str());
-        return false;
-    }
-    if !force_structured
-        && final_answer_preserves_service_control_status_summary(
-            route_result,
-            journal,
-            answer_text,
-            answer_messages,
-        )
     {
         journal.record_final_answer(answer_text.as_str());
         return false;
@@ -977,85 +961,3 @@ fn valid_machine_marker_key(key: &str) -> bool {
 #[cfg(test)]
 #[path = "task_machine_kv_summary_tests.rs"]
 mod task_machine_kv_summary_tests;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-        OutputSemanticKind,
-    };
-    use serde_json::json;
-
-    fn service_status_route() -> IntentOutputContract {
-        IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::None,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
-            locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
-        }
-    }
-
-    #[test]
-    fn service_status_machine_kv_prefers_single_service_control_source() {
-        let route = service_status_route();
-        let mut journal = crate::task_journal::TaskJournal::for_task(
-            "task-service-kv-source",
-            "ask",
-            "Check clawd service/process status only; return target, status, manager_type.",
-        );
-        journal.record_output_contract(&route.clone());
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace::ok(
-                "step_1",
-                "process_basic",
-                json!({
-                    "extra": {
-                        "action": "ps",
-                        "filter": "clawd",
-                        "match_count": 0,
-                        "running": false,
-                        "status": "not_running"
-                    },
-                    "text": "status=not_running target=clawd"
-                })
-                .to_string(),
-            ));
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace::ok(
-                "step_2",
-                "service_control",
-                json!({
-                    "extra": {
-                        "status": "ok",
-                        "target": "clawd",
-                        "service_name": "clawd",
-                        "manager_type": "rustclaw",
-                        "requested_action": "status",
-                        "executed_actions": ["status"],
-                        "post_state": "clawd=running",
-                        "verified": true
-                    }
-                })
-                .to_string(),
-            ));
-
-        let summary = requested_machine_kv_summary_from_task_final_answer(
-            "Return target, status, manager_type.",
-            &route,
-            &journal,
-            "",
-            &[],
-        )
-        .expect("machine summary");
-
-        assert_eq!(summary, "target=clawd status=ok manager_type=rustclaw");
-    }
-}

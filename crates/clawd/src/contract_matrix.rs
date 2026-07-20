@@ -549,7 +549,6 @@ pub(crate) enum FinalAnswerShape {
     RawOutputOrShortSummary,
     Scalar,
     SinglePath,
-    StatusWithSource,
     SummaryGroundedInExcerpt,
     SummaryWithEvidence,
 }
@@ -608,7 +607,6 @@ impl FinalAnswerShape {
         Self::RawOutputOrShortSummary,
         Self::Scalar,
         Self::SinglePath,
-        Self::StatusWithSource,
         Self::SummaryGroundedInExcerpt,
         Self::SummaryWithEvidence,
     ];
@@ -627,7 +625,6 @@ impl FinalAnswerShape {
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
             "scalar" => Some(Self::Scalar),
             "single_path" => Some(Self::SinglePath),
-            "status_with_source" => Some(Self::StatusWithSource),
             "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
             "summary_with_evidence" => Some(Self::SummaryWithEvidence),
             _ => None,
@@ -648,7 +645,6 @@ impl FinalAnswerShape {
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
             Self::Scalar => "scalar",
             Self::SinglePath => "single_path",
-            Self::StatusWithSource => "status_with_source",
             Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
             Self::SummaryWithEvidence => "summary_with_evidence",
         }
@@ -662,7 +658,7 @@ impl FinalAnswerShape {
             Self::GroupedNameList | Self::NameList | Self::PathList => {
                 FinalAnswerShapeClass::StrictList
             }
-            Self::ExistenceVerdictWithPath | Self::LifecycleResult | Self::StatusWithSource => {
+            Self::ExistenceVerdictWithPath | Self::LifecycleResult => {
                 FinalAnswerShapeClass::Verdict
             }
             Self::ExcerptPlusSummary

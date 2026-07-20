@@ -56,7 +56,7 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
 }
 
 #[test]
-fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
+fn direct_answer_preserves_http_status_machine_value_without_domain_rendering() {
     let mut loop_state = LoopState::new(2);
     let body = "status=200\n{\"ok\":true,\"data\":{\"version\":\"0.1.7\",\"worker_state\":\"running\",\"queue_length\":0,\"bound_channel_count\":3}}\n";
     loop_state
@@ -69,7 +69,7 @@ fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -79,12 +79,12 @@ fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
     };
 
     assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some("status=200")
     );
     assert_eq!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
+        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some("status=200")
     );
 }
 
@@ -103,7 +103,7 @@ fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "telegramd".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -132,7 +132,7 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "telegramd".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -147,7 +147,7 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
 }
 
 #[test]
-fn direct_answer_keeps_service_control_scalar_status_as_machine_value() {
+fn direct_answer_uses_generic_selector_for_service_control_machine_value() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -161,9 +161,12 @@ fn direct_answer_keeps_service_control_scalar_status_as_machine_value() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "telegramd".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("post_state".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

@@ -6,7 +6,6 @@ use crate::agent_engine::LoopState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum FinalizerRendererShapeClass {
-    CapabilityResult,
     FinalAnswerShape,
     ArtifactDelivery,
     TaskLifecycle,
@@ -16,7 +15,6 @@ pub(super) enum FinalizerRendererShapeClass {
 impl FinalizerRendererShapeClass {
     pub(super) fn as_str(self) -> &'static str {
         match self {
-            Self::CapabilityResult => "capability_result",
             Self::FinalAnswerShape => "final_answer_shape",
             Self::ArtifactDelivery => "artifact_delivery",
             Self::TaskLifecycle => "task_lifecycle",
@@ -35,13 +33,6 @@ pub(super) struct FinalizerRendererDescriptor {
 }
 
 pub(super) const FINALIZER_RENDERER_REGISTRY: &[FinalizerRendererDescriptor] = &[
-    FinalizerRendererDescriptor {
-        key: "service_status_observed_fields",
-        shape_class: FinalizerRendererShapeClass::CapabilityResult,
-        owner_module: "finalize::loop_reply_service_status",
-        entrypoint: "replace_delivery_with_service_status_observed_answer",
-        summary_contract: "finalizer_summary",
-    },
     FinalizerRendererDescriptor {
         key: "matrix_observed_shape",
         shape_class: FinalizerRendererShapeClass::FinalAnswerShape,

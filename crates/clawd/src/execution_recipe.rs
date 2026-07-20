@@ -1229,7 +1229,7 @@ fn assess_systemctl_is_active_validation(output: &str) -> ValidationObservation 
     }
 }
 
-fn assess_service_status_validation(output: &str) -> ValidationObservation {
+fn assess_service_lifecycle_validation(output: &str) -> ValidationObservation {
     let lower = output.trim().to_ascii_lowercase();
     if lower.contains("active: active (running)")
         || lower.contains(" is running")
@@ -1339,7 +1339,7 @@ fn assess_run_cmd_validation(command: &str, output: &str) -> ValidationObservati
         || command_lower.contains(" service status")
         || command_lower.contains("service --status-all")
     {
-        return assess_service_status_validation(output);
+        return assess_service_lifecycle_validation(output);
     }
     if command_lower.contains("nginx -t") {
         return assess_nginx_test_validation(output);

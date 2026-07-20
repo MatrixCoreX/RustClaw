@@ -165,7 +165,7 @@ fn direct_answer_defers_system_basic_info_for_free_shape_request() {
 }
 
 #[test]
-fn direct_answer_defers_system_basic_info_service_status_to_synthesis() {
+fn direct_answer_defers_system_basic_info_to_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -179,7 +179,7 @@ fn direct_answer_defers_system_basic_info_service_status_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };

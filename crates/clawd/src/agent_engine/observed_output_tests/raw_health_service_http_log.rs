@@ -203,7 +203,7 @@ fn direct_answer_defers_health_check_json_for_act_free_shape() {
 }
 
 #[test]
-fn direct_answer_defers_health_check_service_status_contract_to_synthesis() {
+fn direct_answer_defers_health_check_contract_to_synthesis() {
     let mut loop_state = LoopState::new(2);
     let body = r#"{"clawd_process_count":1,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0}}"#;
     loop_state
@@ -216,7 +216,7 @@ fn direct_answer_defers_health_check_service_status_contract_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -232,7 +232,7 @@ fn direct_answer_defers_health_check_service_status_contract_to_synthesis() {
 }
 
 #[test]
-fn direct_answer_defers_wrapped_health_check_service_status_free_shape() {
+fn direct_answer_defers_wrapped_health_check_free_shape() {
     let mut loop_state = LoopState::new(2);
     let body = serde_json::json!({
         "extra": {
@@ -265,7 +265,7 @@ fn direct_answer_defers_wrapped_health_check_service_status_free_shape() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -295,7 +295,7 @@ fn direct_answer_defers_health_check_diagnostic_summary_for_system_health_fields
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -616,65 +616,6 @@ fn direct_answer_defers_process_basic_port_summary_to_llm() {
 }
 
 #[test]
-fn direct_answer_formats_process_basic_port_status_contract_without_llm() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "process_basic",
-            "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0      4096   127.0.0.53%lo:53         0.0.0.0:*\nLISTEN 0      4096         0.0.0.0:8787       0.0.0.0:*    users:((\"clawd\",pid=706551,fd=31))\nLISTEN 0      4096         0.0.0.0:22         0.0.0.0:*\nLISTEN 0      511          0.0.0.0:80         0.0.0.0:*\n",
-        ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::None,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
-            locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("service_status should use process_basic port evidence directly");
-
-    assert!(answer.contains("port.count=4"));
-    assert!(answer.contains("port[1].number=8787"));
-    assert!(answer.contains("port[1].process=clawd"));
-    assert!(!answer.contains("State  Recv-Q"));
-}
-
-#[test]
-fn direct_answer_formats_process_basic_port_status_from_output_contract() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "process_basic",
-            "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787       0.0.0.0:*    users:((\"clawd\",pid=706551,fd=31))\nLISTEN 0      4096         0.0.0.0:22         0.0.0.0:*\n",
-        ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ServiceStatus;
-    route_result.locator_kind = OutputLocatorKind::None;
-    route_result.locator_hint.clear();
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("service status contract should use process_basic port evidence directly");
-
-    assert!(answer.contains("port.count=2"));
-    assert!(answer.contains("port[0].number=8787"));
-    assert!(answer.contains("port[0].process=clawd"));
-    assert!(!answer.contains("State  Recv-Q"));
-}
-
-#[test]
 fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
     let mut loop_state = LoopState::new(3);
     loop_state.executed_step_results.push(ok_step(
@@ -731,7 +672,7 @@ fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -832,7 +773,7 @@ fn observed_entries_compact_wrapped_process_basic_ps() {
 }
 
 #[test]
-fn direct_answer_keeps_wrapped_process_basic_port_status_scalar_count() {
+fn direct_answer_uses_generic_selector_for_process_listener_count() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -858,9 +799,12 @@ fn direct_answer_keeps_wrapped_process_basic_port_status_scalar_count() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("listener_count".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -873,7 +817,7 @@ fn direct_answer_keeps_wrapped_process_basic_port_status_scalar_count() {
 }
 
 #[test]
-fn direct_answer_defers_process_basic_service_status_to_synthesis() {
+fn direct_answer_defers_process_basic_observation_to_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -887,7 +831,7 @@ fn direct_answer_defers_process_basic_service_status_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -898,60 +842,8 @@ fn direct_answer_defers_process_basic_service_status_to_synthesis() {
 
     assert!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none(),
-        "non-scalar service_status should be rendered by synthesis/finalizer, not a runtime reply template"
+        "non-scalar process observations should be rendered by synthesis, not a runtime reply template"
     );
-}
-
-#[test]
-fn direct_answer_formats_process_basic_multi_row_cpu_inventory() {
-    let answer = super::process_basic_service_status_direct_answer_candidate(
-        None,
-        "exit=0\nPID PPID %CPU %MEM COMM\n1713539 8057 6.4 2.7 WebKitWebProces\n8923 7620 6.1 0.3 ptyxis\n7886 7620 3.5 1.8 gnome-shell\n9127 9116 3.5 4.2 codex\n1100416 83086 1.2 1.7 chrome",
-        Some(OutputResponseShape::OneSentence),
-        false,
-    )
-    .expect("multi-row process inventory should produce a data-grounded summary");
-
-    assert!(answer.contains("message_key=clawd.msg.process_basic.ps_inventory.observed"));
-    assert!(answer.contains("reason_code=process_basic_ps_inventory_observed"));
-    assert!(answer.contains("selection_reason=ranked_by_cpu"));
-    assert!(answer.contains("process_count=5"));
-    assert!(answer.contains("top_process.name=WebKitWebProces"));
-    assert!(answer.contains("top_process.cpu_percent=6.4"));
-    assert!(answer.contains("process.1.name=WebKitWebProces"));
-    assert!(answer.contains("process.2.name=ptyxis"));
-    assert!(answer.contains("process.3.name=gnome-shell"));
-    assert!(answer.contains("process.4.name=codex"));
-    assert!(answer.contains("process.5.name=chrome"));
-    assert!(!answer.contains("PID PPID"));
-    assert!(!answer.contains("最值得注意"));
-}
-
-#[test]
-fn direct_answer_defers_process_basic_no_match_to_synthesis() {
-    assert!(
-        super::process_basic_service_status_direct_answer_candidate(
-            None,
-            "exit=0\nPID PPID %CPU %MEM COMM\nno matching processes for filter: telegramd",
-            Some(OutputResponseShape::OneSentence),
-            true,
-        )
-        .is_none(),
-        "process service no-match should not be turned into a fixed user-visible runtime template"
-    );
-}
-
-#[test]
-fn direct_answer_keeps_process_basic_no_match_scalar_status() {
-    let answer = super::process_basic_service_status_direct_answer_candidate(
-        None,
-        "exit=0\nPID PPID %CPU %MEM COMM\nno matching processes for filter: telegramd",
-        Some(OutputResponseShape::Scalar),
-        true,
-    )
-    .expect("scalar service status can return the observed machine status token");
-
-    assert_eq!(answer, "not_running");
 }
 
 #[test]
@@ -989,7 +881,7 @@ fn direct_answer_prefers_process_basic_status_over_later_system_info() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "telegramd".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };

@@ -928,7 +928,7 @@ optional_bins = ["pgrep", "ps", "uname", "df", "brew", "sysctl", "vm_stat"]
 platform_notes = ["Linux reads /proc for uptime/load/memory; macOS uses sysctl/vm_stat where available."]
 planner_capabilities = [
   { name = "health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "system.health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "status_with_source" },
+  { name = "system.health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
@@ -972,9 +972,9 @@ supported_os = ["linux", "macos"]
 optional_bins = ["systemctl", "service", "journalctl", "brew", "launchctl", "log", "sudo", "ps"]
 platform_notes = ["Linux supports systemd/service managers; macOS prefers Homebrew services and limited launchd inspection/lifecycle guidance."]
 planner_capabilities = [
-  { name = "service_control", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "status_with_source" },
-  { name = "service_control.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "status_with_source" },
-  { name = "service.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "status_with_source" },
+  { name = "service_control", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "service_control.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "service.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "service.verify", action = "verify", effect = "validate", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "service.logs", action = "logs", effect = "observe", required = ["target"], optional = ["service", "manager_type", "lines"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "service.start", action = "start", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "lifecycle_result" },

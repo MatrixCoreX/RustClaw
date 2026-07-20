@@ -6,9 +6,9 @@ use super::{
     answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
     commit_answer_verifier_retry_answer, commit_local_code_strict_json_projection_after_readback,
     evaluate_round_outcome, forced_boundary_observation_clarify_intent,
-    initial_execution_recipe_spec, machine_status_visible_output_format_gap,
-    mark_reply_failed_after_answer_verifier_exhausted, observe_only_round_should_continue,
-    parse_log_analyze_finding, post_write_content_evidence_readback_recovery_policy,
+    initial_execution_recipe_spec, mark_reply_failed_after_answer_verifier_exhausted,
+    observe_only_round_should_continue, parse_log_analyze_finding,
+    post_write_content_evidence_readback_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
@@ -23,8 +23,8 @@ use super::{
     try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_filesystem_mutation_success_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
-    try_recover_http_health_answer_verifier_gap, try_recover_inconsistent_boundary_clarify,
-    try_recover_latest_synthesis_answer_verifier_gap, try_recover_local_health_answer_verifier_gap,
+    try_recover_inconsistent_boundary_clarify, try_recover_latest_synthesis_answer_verifier_gap,
+    try_recover_local_health_answer_verifier_gap,
     try_recover_local_health_answer_verifier_gap_from_loop_state,
     try_recover_log_analyze_answer_verifier_gap,
     try_recover_machine_kv_summary_output_format_answer_verifier_gap,
@@ -82,8 +82,8 @@ fn answer_contract(route: &IntentOutputContract) -> crate::answer_verifier::Answ
 #[test]
 fn answer_contract_for_reply_uses_journal_output_contract() {
     let mut output_contract = IntentOutputContract::default();
-    output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    output_contract.locator_kind = OutputLocatorKind::Path;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-effective-route",
         "ask",
@@ -97,13 +97,13 @@ fn answer_contract_for_reply_uses_journal_output_contract() {
 
     assert_eq!(
         selected.output_contract.semantic_kind,
-        OutputSemanticKind::ServiceStatus
+        OutputSemanticKind::FilePaths
     );
     assert_eq!(
         crate::evidence_policy::required_evidence_fields_for_output_contract(
             &selected.output_contract,
         ),
-        vec!["field_value".to_string()]
+        vec!["candidates".to_string()]
     );
 }
 
@@ -862,265 +862,6 @@ fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
     );
 }
 
-#[test]
-fn http_health_service_status_contract_recovers_with_structured_status_line() {
-    let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::ServiceStatus;
-    route.locator_kind = OutputLocatorKind::Url;
-    route.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
-
-    let body = json!({
-        "ok": true,
-        "data": {
-            "version": "0.1.7",
-            "uptime_seconds": 1227,
-            "memory_rss_bytes": 764149760,
-            "running_length": 1,
-            "channel_gateway_healthy": false,
-            "telegram_bot_healthy": true,
-            "gateway_instance_statuses": [
-                {"kind": "telegram", "name": "primary", "healthy": false, "status": "stale"},
-                {"kind": "feishu", "name": "primary", "healthy": true, "status": "running"}
-            ]
-        },
-        "error": null
-    });
-    let output = json!({
-        "extra": {
-            "action": "get",
-            "url": "http://127.0.0.1:8787/v1/health",
-            "status_code": 200,
-            "success_status": true,
-            "body_preview": body.to_string()
-        },
-        "text": format!("status=200\n{}", body)
-    })
-    .to_string();
-
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "http_basic".to_string(),
-            status: StepExecutionStatus::Ok,
-            output_excerpt: Some(output),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["content_excerpt".to_string()],
-        answer_incomplete_reason: "unsupported generated health summary".to_string(),
-        should_retry: true,
-        retry_instruction: "use only observed health fields".to_string(),
-        confidence: 0.95,
-    });
-    let mut reply =
-        AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
-
-    assert!(try_recover_http_health_answer_verifier_gap(
-        Some(&answer_contract(&route)),
-        &mut reply,
-    ));
-
-    assert!(!reply.should_fail_task);
-    assert!(reply.text.contains("http_reachability=reachable"));
-    assert!(reply.text.contains("status_code=200"));
-    assert!(reply.text.contains("ok=true"));
-    assert!(reply.text.contains("version=0.1.7"));
-    assert!(reply.text.contains("channel_gateway_healthy=false"));
-    assert!(reply.text.contains("telegram:primary:stale:false"));
-    assert!(!reply.text.contains("memory"));
-    assert_eq!(
-        reply
-            .task_journal
-            .as_ref()
-            .and_then(|journal| journal.final_status),
-        Some(crate::task_journal::TaskJournalFinalStatus::Success)
-    );
-}
-
-#[test]
-fn http_health_command_summary_gap_recovers_with_structured_status_line() {
-    let mut route = route_result(OutputResponseShape::OneSentence);
-    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
-    route.locator_kind = OutputLocatorKind::Url;
-    route.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
-
-    let body = json!({
-        "ok": true,
-        "data": {
-            "version": "0.1.8",
-            "uptime_seconds": 1050,
-            "running_length": 1,
-            "channel_gateway_healthy": false,
-            "telegram_bot_healthy": false,
-            "gateway_instance_statuses": [
-                {"kind": "telegram", "name": "primary", "healthy": false, "status": "stale"},
-                {"kind": "feishu", "name": "primary", "healthy": false, "status": "stopped"}
-            ]
-        },
-        "error": null
-    });
-    let output = json!({
-        "extra": {
-            "action": "get",
-            "url": "http://127.0.0.1:8787/v1/health",
-            "status_code": 200,
-            "success_status": true,
-            "body_json": body
-        },
-        "text": "status=200"
-    })
-    .to_string();
-
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-http-health", "ask", "prompt");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "http_basic".to_string(),
-            status: StepExecutionStatus::Ok,
-            output_excerpt: Some(output),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec![
-            "output_format".to_string(),
-            "unsupported_claims".to_string(),
-        ],
-        answer_incomplete_reason: "generated summary added unsupported fields".to_string(),
-        should_retry: true,
-        retry_instruction: "use only observed health fields".to_string(),
-        confidence: 0.95,
-    });
-    let mut reply =
-        AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
-
-    assert!(try_recover_http_health_answer_verifier_gap(
-        Some(&answer_contract(&route)),
-        &mut reply,
-    ));
-
-    assert!(!reply.should_fail_task);
-    assert!(reply.text.contains("http_reachability=reachable"));
-    assert!(reply.text.contains("status_code=200"));
-    assert!(reply.text.contains("ok=true"));
-    assert!(reply.text.contains("version=0.1.8"));
-    assert!(reply.text.contains("uptime_seconds=1050"));
-    assert!(reply.text.contains("running_length=1"));
-    assert!(reply.text.contains("channel_gateway_healthy=false"));
-    assert!(reply.text.contains("telegram_bot_healthy=false"));
-    assert!(reply.text.contains("telegram:primary:stale:false"));
-    assert!(reply.text.contains("feishu:primary:stopped:false"));
-    assert!(!reply.text.contains("memory"));
-    assert_eq!(reply.messages, vec![reply.text.clone()]);
-    assert_eq!(
-        reply
-            .task_journal
-            .as_ref()
-            .and_then(|journal| journal.final_status),
-        Some(crate::task_journal::TaskJournalFinalStatus::Success)
-    );
-    assert!(reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-        .is_none());
-}
-
-#[test]
-fn http_health_command_summary_gap_prefers_latest_language_synthesis() {
-    let mut route = route_result(OutputResponseShape::OneSentence);
-    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
-    route.locator_kind = OutputLocatorKind::Url;
-    route.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
-
-    let body = json!({
-        "ok": true,
-        "data": {
-            "version": "0.1.8",
-            "uptime_seconds": 1050,
-            "running_length": 1,
-            "channel_gateway_healthy": false,
-            "telegram_bot_healthy": false
-        },
-        "error": null
-    });
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-http-health-language", "ask", "prompt");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "http_basic".to_string(),
-            status: StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "extra": {
-                        "action": "get",
-                        "url": "http://127.0.0.1:8787/v1/health",
-                        "status_code": 200,
-                        "success_status": true,
-                        "body_json": body
-                    },
-                    "text": "status=200"
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_2".to_string(),
-            skill: "synthesize_answer".to_string(),
-            status: StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                "health 接口可连通，版本 0.1.8 正在运行，但渠道网关和 Telegram 机器人当前不健康。"
-                    .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["unsupported_claims".to_string()],
-        answer_incomplete_reason: "verifier asked for retry".to_string(),
-        should_retry: true,
-        retry_instruction: "use only observed health fields".to_string(),
-        confidence: 0.95,
-    });
-    let mut reply =
-        AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
-
-    assert!(try_recover_http_health_answer_verifier_gap(
-        Some(&answer_contract(&route)),
-        &mut reply,
-    ));
-
-    assert_eq!(
-        reply.text,
-        "health 接口可连通，版本 0.1.8 正在运行，但渠道网关和 Telegram 机器人当前不健康。"
-    );
-    assert!(!reply.text.contains("http_reachability="));
-    assert!(!reply.should_fail_task);
-    assert!(reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-        .is_none());
-}
-
 fn test_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
         max_steps: 8,
@@ -1158,9 +899,6 @@ mod clarify_control;
 
 #[path = "loop_control_tests/local_health_recovery.rs"]
 mod local_health_recovery;
-#[path = "loop_control_tests/machine_status_visible.rs"]
-mod machine_status_visible;
-
 #[path = "loop_control_tests/observed_finalize.rs"]
 mod observed_finalize;
 #[path = "loop_control_tests/post_write_validation_reserve.rs"]

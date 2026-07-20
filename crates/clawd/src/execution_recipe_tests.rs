@@ -640,7 +640,7 @@ fn split_combined_run_cmd_into_mutate_and_validate_parts() {
 }
 
 #[test]
-fn classify_service_status_as_validation() {
+fn classify_service_lifecycle_status_as_validation() {
     let state = test_state();
     let effect = classify_skill_action_effect(
         &state,
@@ -1121,7 +1121,7 @@ fn failed_http_preflight_then_repair_mutate_then_validate_passes() {
 }
 
 #[test]
-fn failed_service_status_preflight_then_restart_then_verify_passes() {
+fn failed_service_lifecycle_preflight_then_restart_then_verify_passes() {
     let state = test_state();
     let status_args = json!({"command":"systemctl status sing-box"});
     let verify_args = json!({"command":"systemctl is-active sing-box"});

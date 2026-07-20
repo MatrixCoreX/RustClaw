@@ -142,12 +142,7 @@ pub(crate) use output_route_policy::{
 
 #[path = "observed_output_process_service.rs"]
 mod output_process_service;
-use output_process_service::{
-    latest_process_basic_service_status_direct_answer_candidate, process_basic_observed_candidate,
-    process_basic_port_list_should_use_llm_synthesis,
-    process_basic_service_status_direct_answer_candidate,
-    service_control_status_direct_answer_candidate, service_control_summary_candidate,
-};
+use output_process_service::process_basic_observed_candidate;
 
 #[path = "observed_output_scalar_text.rs"]
 mod output_scalar_text;
@@ -325,11 +320,6 @@ fn route_requires_evidence_policy_grounding_for_direct_candidate(
     route: &crate::IntentOutputContract,
 ) -> bool {
     route_requires_evidence_policy_grounded_direct_candidate(route)
-}
-
-fn route_allows_model_language_direct_candidate(route: &crate::IntentOutputContract) -> bool {
-    crate::evidence_policy::final_answer_shape_for_output_contract(route)
-        .is_some_and(|shape| shape.allows_model_language())
 }
 
 fn evidence_policy_direct_candidate_satisfies_contract(
@@ -691,9 +681,7 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
     }
     matches!(
         shape,
-        FinalAnswerShape::ExistenceVerdictWithPath
-            | FinalAnswerShape::RawOutputOrShortSummary
-            | FinalAnswerShape::StatusWithSource
+        FinalAnswerShape::ExistenceVerdictWithPath | FinalAnswerShape::RawOutputOrShortSummary
     )
 }
 

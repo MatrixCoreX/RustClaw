@@ -1451,7 +1451,7 @@ fn trace_json_preserves_planner_action_ref() {
     let output_contract = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
-        semantic_kind: crate::OutputSemanticKind::ServiceStatus,
+        semantic_kind: crate::OutputSemanticKind::None,
         ..Default::default()
     };
     journal.record_output_contract(&output_contract);

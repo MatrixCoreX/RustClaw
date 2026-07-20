@@ -142,27 +142,9 @@ fn sanitize_machine_line_value(value: &str) -> String {
     )
 }
 
-#[cfg(test)]
-pub(super) fn requested_machine_kv_summary_from_task_final_answer(
-    prompt: &str,
-    route_result: &crate::IntentOutputContract,
-    journal: &crate::task_journal::TaskJournal,
-    answer_text: &str,
-    answer_messages: &[String],
-) -> Option<String> {
-    let request_surfaces = task_machine_kv_request_surfaces(prompt, route_result, journal);
-    requested_machine_kv_summary_from_task_final_answer_with_surfaces(
-        &request_surfaces,
-        route_result,
-        journal,
-        answer_text,
-        answer_messages,
-    )
-}
-
 pub(super) fn requested_machine_kv_summary_from_task_final_answer_with_surfaces(
     request_surfaces: &[String],
-    route_result: &crate::IntentOutputContract,
+    _route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
     answer_messages: &[String],
@@ -181,20 +163,6 @@ pub(super) fn requested_machine_kv_summary_from_task_final_answer_with_surfaces(
     }
     observed_texts.sort();
     observed_texts.dedup();
-    if route_requests_service_status_machine_kv_summary(route_result) {
-        let service_control_texts =
-            observed_machine_text_fragments_from_journal_skill(journal, "service_control");
-        if !service_control_texts.is_empty() {
-            if let Some(summary) =
-                crate::machine_kv_projection::requested_machine_kv_summary_from_observation_inputs(
-                    request_surfaces.iter().map(String::as_str),
-                    &service_control_texts,
-                )
-            {
-                return Some(summary);
-            }
-        }
-    }
     crate::machine_kv_projection::requested_machine_kv_summary_from_observation_inputs(
         request_surfaces.iter().map(String::as_str),
         &observed_texts,
@@ -216,32 +184,6 @@ pub(super) fn request_surfaces_explicitly_request_kv_summary(
                         .any(|surface_unit| surface_unit == unit)
                 })
         })
-}
-
-fn route_requests_service_status_machine_kv_summary(route: &crate::IntentOutputContract) -> bool {
-    crate::finalize::route_matches_service_control_machine_summary(route)
-}
-
-fn observed_machine_text_fragments_from_journal_skill(
-    journal: &crate::task_journal::TaskJournal,
-    skill_name: &str,
-) -> Vec<String> {
-    let mut values = Vec::new();
-    for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok || step.skill != skill_name {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        crate::machine_kv_projection::collect_machine_text_fragments_from_output(
-            output,
-            &mut values,
-        );
-    }
-    values.sort();
-    values.dedup();
-    values
 }
 
 pub(super) fn task_machine_kv_request_surfaces(

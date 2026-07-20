@@ -48,7 +48,6 @@ PROBE_ACTIONS = [
 NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "不用执行任何操作，直接用一句话解释 RustClaw 是一个什么样的本地助手。",
     "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
-    "service_status": "检查 clawd 服务当前状态，并用一句话说明来源。",
     "file_names": f"列出 {FIXTURE_DOCS_DIR} 目录下的文件名，只输出文件名列表。",
     "directory_names": f"列出 {FIXTURE_ROOT} 下的文件夹名，只输出名称列表。",
     "directory_entry_groups": f"列出 {FIXTURE_ROOT} 下的直接子项，并按文件和文件夹分组。",
@@ -69,7 +68,6 @@ NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
 EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "Do not run any operation. In one sentence, explain what kind of local assistant RustClaw is.",
     "raw_command_output": "Run pwd and briefly tell me what the command printed.",
-    "service_status": "Check the current clawd service status and state the source in one sentence.",
     "file_names": f"List the file names under {FIXTURE_DOCS_DIR}. Output only the file-name list.",
     "directory_names": f"List the folder names under {FIXTURE_ROOT}. Output only the names.",
     "directory_entry_groups": f"List the direct children under {FIXTURE_ROOT}, grouped into files and folders.",

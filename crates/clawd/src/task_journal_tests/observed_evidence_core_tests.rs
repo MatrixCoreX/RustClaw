@@ -1347,11 +1347,11 @@ fn generic_path_content_directory_counts_can_complete_from_count_evidence() {
 }
 
 #[test]
-fn docker_unavailable_text_counts_as_field_value_evidence() {
+fn docker_unavailable_text_counts_as_generic_command_evidence() {
     let mut journal =
         TaskJournal::for_task("task-docker-unavailable", "ask", "检查 Docker 是否可用");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ServiceStatus,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
@@ -1368,8 +1368,6 @@ fn docker_unavailable_text_counts_as_field_value_evidence() {
 
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-
     assert!(coverage.observed_canonical.contains("command_output"));
 }
 

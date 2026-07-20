@@ -260,7 +260,7 @@ fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
 }
 
 #[test]
-fn service_control_status_protocol_output_can_stop_strict_loop_without_synthesis_round() {
+fn service_control_status_protocol_output_stops_for_observed_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     let service_payload = json!({
@@ -289,7 +289,7 @@ fn service_control_status_protocol_output_can_stop_strict_loop_without_synthesis
 
     let mut route = route_result(OutputResponseShape::Strict);
     route.locator_kind = OutputLocatorKind::None;
-    route.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
         skill: "service_control".to_string(),
         args: json!({"action":"status","target":"clawd","manager_type":"rustclaw"}),
@@ -299,15 +299,13 @@ fn service_control_status_protocol_output_can_stop_strict_loop_without_synthesis
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let direct_answer =
+    assert_eq!(
         crate::agent_engine::observed_output::extract_direct_answer_from_generic_output(
             &loop_state,
             Some(&context),
-        )
-        .expect("service status direct answer");
-    assert!(direct_answer.contains("target=clawd"));
-    assert!(direct_answer.contains("status=ok"));
-    assert!(direct_answer.contains("manager_type=rustclaw"));
+        ),
+        None
+    );
     assert!(should_stop_for_observed_finalize(
         Some(&context),
         &loop_state,
@@ -356,33 +354,6 @@ fn observation_only_freeform_round_can_stop_for_observed_fallback() {
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route_result(OutputResponseShape::Free)),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn service_status_port_observation_without_direct_candidate_does_not_stop() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "process_basic",
-        "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787       0.0.0.0:*    users:((\"clawd\",pid=706551,fd=31))\nLISTEN 0      4096         0.0.0.0:22         0.0.0.0:*\n",
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.locator_kind = OutputLocatorKind::None;
-    route.semantic_kind = OutputSemanticKind::ServiceStatus;
-    let actions = vec![AgentAction::CallSkill {
-        skill: "process_basic".to_string(),
-        args: json!({"action":"port_list"}),
-    }];
-
-    assert!(!should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,

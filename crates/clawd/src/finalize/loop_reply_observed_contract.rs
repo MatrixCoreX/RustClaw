@@ -14,7 +14,7 @@ use super::{
     publishable_summary_has_multi_source_observation,
     raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
     route_prefers_observed_answer, route_requires_evidence_policy_deterministic_final_answer,
-    service_status_system_basic_info_answer, valid_publishable_synthesis_output,
+    valid_publishable_synthesis_output,
 };
 
 pub(super) fn direct_scalar_observed_answer(
@@ -649,18 +649,11 @@ pub(super) fn replace_delivery_with_direct_structured_observed_answer(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
-        && !crate::finalize::route_matches_service_status_output_contract(route)
-    {
+    if !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput) {
         return false;
     }
-    let projected = if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput) {
-        direct_raw_command_output_projection(state, route, loop_state).or_else(|| {
-            direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
-        })
-    } else {
-        direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
-    };
+    let projected = direct_raw_command_output_projection(state, route, loop_state)
+        .or_else(|| direct_structured_observed_answer(Some(state), loop_state, agent_run_context));
     let Some((answer, summary)) = projected else {
         return false;
     };
@@ -1108,27 +1101,9 @@ fn direct_structured_observed_answer_impl(
     }
     if route.clone().requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
-        && !crate::finalize::route_matches_service_status_output_contract(route)
         && latest_successful_inventory_name_list_answer(loop_state).is_none()
     {
         return None;
-    }
-    if let Some(answer) = service_status_system_basic_info_answer(route, loop_state) {
-        return Some((
-            answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                parsed: true,
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: 1,
-                ..Default::default()
-            },
-        ));
     }
     if route.clone().requires_content_evidence
         && route.response_shape == crate::OutputResponseShape::Strict

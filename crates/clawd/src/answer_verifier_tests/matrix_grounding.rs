@@ -120,7 +120,7 @@ fn matrix_scalar_shape_accepts_admitted_external_extra_count() {
 fn matrix_scalar_shape_does_not_use_content_excerpt_as_field_value() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-scalar-content-excerpt",
         "ask",
@@ -272,7 +272,7 @@ fn raw_command_output_bounded_read_excerpt_respects_locator_path() {
 fn matrix_scalar_shape_ignores_read_text_structured_fields() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-scalar-read-fields",
@@ -298,96 +298,6 @@ fn matrix_scalar_shape_ignores_read_text_structured_fields() {
     );
     assert!(!structurally_satisfies_answer_contract(
         &route, &journal, "running"
-    ));
-}
-
-#[test]
-fn service_status_port_answer_uses_complete_successful_socket_observation() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-service-ports",
-        "ask",
-        "inspect listening ports",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_ports",
-            "process_basic",
-            "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*\nLISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:((\"clawd\",pid=1,fd=3))\nLISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\nLISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:7897 0.0.0.0:*\nLISTEN 0 4096 127.0.0.54:53 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:33331 0.0.0.0:* users:((\"clash-verge\",pid=2,fd=4))\nLISTEN 0 4096 127.0.0.1:631 0.0.0.0:*\nLISTEN 0 4096 [::]:22 [::]:*\nLISTEN 0 4096 [::]:80 [::]:*\nLISTEN 0 4096 [::1]:631 [::]:*",
-        ));
-    let candidate = "\
-| Port | Bind | Note |
-| --- | --- | --- |
-| 22 | 0.0.0.0:22 / [::]:22 | ssh |
-| 80 | 0.0.0.0:80 / [::]:80 | web |
-| 8787 | 0.0.0.0:8787 | clawd |
-| 53 | 127.0.0.53:53 / 127.0.0.54:53 | local dns |
-| 631 | 127.0.0.1:631 / [::1]:631 | local print |
-| 7897 | 127.0.0.1:7897 | local proxy |
-| 33331 | 127.0.0.1:33331 | local app |";
-
-    assert!(structurally_satisfies_answer_contract(
-        &route, &journal, candidate
-    ));
-}
-
-#[test]
-fn service_status_contract_port_answer_is_grounded() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-service-ports-capability-ref",
-        "ask",
-        "inspect listening ports",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_ports",
-            "process_basic",
-            "port.count=2\nport[0].number=22\nport[0].local=0.0.0.0:22\nport[1].number=80\nport[1].local=0.0.0.0:80",
-        ));
-    let candidate = "\
-| Port | Bind |
-| --- | --- |
-| 22 | 0.0.0.0:22 |
-| 80 | 0.0.0.0:80 |";
-
-    assert!(structurally_satisfies_answer_contract(
-        &route, &journal, candidate
-    ));
-}
-
-#[test]
-fn service_status_port_answer_rejects_unobserved_candidate_port() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-service-ports-unobserved",
-        "ask",
-        "inspect listening ports",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_ports",
-            "process_basic",
-            "port.count=2\nport[0].number=22\nport[0].local=0.0.0.0:22\nport[1].number=80\nport[1].local=0.0.0.0:80",
-        ));
-    let candidate = "\
-| Port | Bind |
-| --- | --- |
-| 22 | 0.0.0.0:22 |
-| 80 | 0.0.0.0:80 |
-| 443 | 0.0.0.0:443 |";
-
-    assert!(!structurally_satisfies_answer_contract(
-        &route, &journal, candidate
     ));
 }
 

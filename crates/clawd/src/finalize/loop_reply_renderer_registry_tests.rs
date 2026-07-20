@@ -32,7 +32,6 @@ fn finalizer_renderer_registry_covers_initial_shape_classes() {
         .collect::<BTreeSet<_>>();
 
     for required in [
-        FinalizerRendererShapeClass::CapabilityResult,
         FinalizerRendererShapeClass::FinalAnswerShape,
         FinalizerRendererShapeClass::ArtifactDelivery,
         FinalizerRendererShapeClass::TaskLifecycle,
