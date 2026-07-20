@@ -1220,7 +1220,7 @@ planner_capabilities = [
   { name = "web.search", action = "search", effect = "observe", required = ["query"], optional = ["top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll" },
 ]
 input_schema = { type = "object", required = ["action", "query"], properties = { action = { type = "string", enum = ["search", "search_extract"] }, query = { type = "string" }, top_k = { type = "integer" }, lang = { type = "string" }, time_range = { type = "string" }, domains_allow = { type = "array", items = { type = "string" } }, domains_deny = { type = "array", items = { type = "string" } }, backend = { type = "string" }, include_snippet = { type = "boolean" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "kb"

@@ -260,17 +260,6 @@ required_evidence = ["content_excerpt"]
 final_answer_shape = "summary_grounded_in_excerpt"
 failure_policy = "retry_with_alternatives"
 
-[contracts.web_search_summary]
-semantic_kind = "web_search_summary"
-operation = "summarize"
-target_object = "web"
-delivery_shape = "summary"
-allowed_actions = ["web_search_extract.search_extract", "web_search_extract.search", "browser_web.open_extract"]
-preferred_actions = ["web_search_extract.search_extract"]
-required_evidence = ["candidates"]
-final_answer_shape = "summary_grounded_in_listing"
-failure_policy = "retry_with_alternatives"
-
 [contracts.market_quote]
 semantic_kind = "market_quote"
 operation = "summarize"

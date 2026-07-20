@@ -316,8 +316,8 @@ fn browser_web_output_counts_as_content_excerpt_evidence() {
 #[test]
 fn web_search_extract_output_counts_as_candidates_evidence() {
     let mut journal = TaskJournal::for_task("task-web-search-summary", "ask", "总结搜索结果");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WebSearchSummary);
-    route.requires_content_evidence = true;
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -352,8 +352,8 @@ fn web_search_extract_output_counts_as_candidates_evidence() {
 #[test]
 fn web_search_extract_empty_candidates_count_as_candidates_evidence() {
     let mut journal = TaskJournal::for_task("task-web-search-empty", "ask", "总结搜索结果");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WebSearchSummary);
-    route.requires_content_evidence = true;
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),

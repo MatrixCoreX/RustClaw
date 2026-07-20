@@ -189,6 +189,34 @@ fn media_photo_and_publish_preview_resolve_without_domain_output_semantic_kinds(
 }
 
 #[test]
+fn web_search_capability_resolves_without_domain_output_semantic_kind() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "web.search_results",
+        json!({"query": "rust async", "top_k": 3}),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.output_semantic_kind, None);
+    let Some(AgentAction::CallTool { tool: skill, args }) = action else {
+        panic!("expected web_search_extract action, got {action:?}");
+    };
+    assert_eq!(skill, "web_search_extract");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("search_extract")
+    );
+    assert_eq!(
+        args.get("query").and_then(Value::as_str),
+        Some("rust async")
+    );
+}
+
+#[test]
 fn capability_metadata_binds_only_unclassified_output_contract() {
     let state = state_with_workspace_registry();
     let step = crate::plan_step_from_agent_action(

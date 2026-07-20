@@ -108,6 +108,44 @@ fn rss_result_preserves_items_and_sources_for_generic_synthesis() {
 }
 
 #[test]
+fn web_search_result_preserves_candidates_for_generic_synthesis() {
+    let output = json!({
+        "text": "machine fallback",
+        "extra": {
+            "action": "search_extract",
+            "candidates": [
+                {
+                    "title": "Async Rust",
+                    "source": "example.invalid",
+                    "url": "https://example.invalid/async-rust",
+                    "snippet": "A structured search result"
+                }
+            ]
+        }
+    });
+    let envelope = super::successful_execution_envelope(
+        "web_search_extract",
+        "step_3",
+        &json!({"action": "search_extract", "query": "rust async"}),
+        &output.to_string(),
+        output.get("extra"),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/candidates/0/title"),
+        Some(&json!("Async Rust"))
+    );
+    assert_eq!(
+        envelope.data.pointer("/extra/candidates/0/source"),
+        Some(&json!("example.invalid"))
+    );
+    assert_eq!(
+        envelope.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+}
+
+#[test]
 fn pending_result_becomes_poll_continuation() {
     let envelope = super::successful_execution_envelope(
         "video_generate",
