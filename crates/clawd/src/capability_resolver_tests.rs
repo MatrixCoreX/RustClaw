@@ -146,6 +146,49 @@ fn rss_capability_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
+fn media_photo_and_publish_preview_resolve_without_domain_output_semantic_kinds() {
+    let state = state_with_workspace_registry();
+    let cases = [
+        (
+            "image_vision.describe",
+            json!({"image": "https://example.invalid/image.png"}),
+            "image_vision",
+            "describe",
+        ),
+        (
+            "photo.prepare_source_candidates",
+            json!({}),
+            "photo_organize",
+            "prepare",
+        ),
+        (
+            "x.draft_preview",
+            json!({"text": "release notes", "dry_run": true}),
+            "x",
+            "preview",
+        ),
+    ];
+
+    for (capability, args, expected_skill, expected_action) in cases {
+        let (action, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, args);
+        assert_eq!(
+            record.reason_code,
+            "capability_resolver_registry_mapping_resolved"
+        );
+        assert_eq!(record.output_semantic_kind, None);
+        let Some(AgentAction::CallSkill { skill, args }) = action else {
+            panic!("expected skill action for {capability}, got {action:?}");
+        };
+        assert_eq!(skill, expected_skill);
+        assert_eq!(
+            args.get("action").and_then(Value::as_str),
+            Some(expected_action)
+        );
+    }
+}
+
+#[test]
 fn capability_metadata_binds_only_unclassified_output_contract() {
     let state = state_with_workspace_registry();
     let step = crate::plan_step_from_agent_action(

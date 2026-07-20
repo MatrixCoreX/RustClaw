@@ -332,8 +332,6 @@ impl EvidenceToken {
 #[serde(default)]
 pub(crate) struct MatrixContract {
     pub(crate) semantic_kind: String,
-    pub(crate) migration_status: String,
-    pub(crate) migration_owner: String,
     pub(crate) operation: String,
     pub(crate) target_object: String,
     pub(crate) delivery_shape: String,
@@ -1183,7 +1181,6 @@ impl ContractMatrix {
                     if !required.is_empty() && contract.observation_sources().is_empty() {
                         errors.push(format!("contract `{key}` missing observation_sources"));
                     }
-                    validate_transitional_contract_metadata(&mut errors, key, contract);
                     validate_contract_runtime_fields(
                         &mut errors,
                         &format!("contract `{key}`"),
@@ -1482,28 +1479,6 @@ impl ContractMatrix {
             }
         }
         refs.into_iter().collect()
-    }
-}
-
-fn validate_transitional_contract_metadata(
-    errors: &mut Vec<String>,
-    key: &str,
-    contract: &MatrixContract,
-) {
-    if key != "photo_organization" {
-        return;
-    }
-    if normalize_action_token(&contract.migration_status)
-        != "transitional_capability_owned_evidence_pending"
-    {
-        errors.push(
-            "contract `photo_organization` must declare migration_status=transitional_capability_owned_evidence_pending".to_string(),
-        );
-    }
-    if normalize_action_token(&contract.migration_owner) != "photo_organize.planner_capabilities" {
-        errors.push(
-            "contract `photo_organization` must declare migration_owner=photo_organize.planner_capabilities".to_string(),
-        );
     }
 }
 

@@ -449,15 +449,6 @@ fn workspace_contract_matrix_loads_and_has_shape() {
         matrix.trace_policy.provider_evidence_view,
         "provider_safe_redacted"
     );
-    let photo = matrix
-        .contracts
-        .get("photo_organization")
-        .expect("photo organization transitional contract");
-    assert_eq!(
-        photo.migration_status,
-        "transitional_capability_owned_evidence_pending"
-    );
-    assert_eq!(photo.migration_owner, "photo_organize.planner_capabilities");
 }
 
 #[test]
