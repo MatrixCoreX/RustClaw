@@ -459,13 +459,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("command_output".to_string());
     }
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly)
-        && (observed_canonical.contains("path")
-            || observed_canonical.contains("candidates")
-            || observed_field_with_prefix(observed_fields, "results["))
-    {
-        observed_canonical.insert("field_value".to_string());
-    }
     if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarCount)
         && (observed_canonical.contains("value") || observed_canonical.contains("field_value"))
     {

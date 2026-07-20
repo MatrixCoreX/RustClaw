@@ -87,9 +87,9 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
-        OutputSemanticKind::ServiceStatus
-        | OutputSemanticKind::ScalarPathOnly
-        | OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
+        OutputSemanticKind::ServiceStatus | OutputSemanticKind::ExistenceWithPath => {
+            TaskOperation::Inspect
+        }
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
         _ => operation_for_unclassified_output_contract(output_contract),
@@ -220,9 +220,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::ScalarCount => {
             fields.insert("count");
-        }
-        OutputSemanticKind::ScalarPathOnly => {
-            fields.insert("field_value");
         }
         OutputSemanticKind::ExistenceWithPath => {
             fields.insert("exists");

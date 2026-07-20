@@ -8,9 +8,9 @@ use super::{
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route,
     post_write_content_evidence_missing_before_verifier,
-    recent_structured_scalar_values_from_journal, route_contract_marker_is_scalar_path_only,
-    should_verify_answer, strict_list_route_allows_observed_subset,
-    structural_satisfaction_can_skip_verifier, structurally_satisfies_answer_contract,
+    recent_structured_scalar_values_from_journal, should_verify_answer,
+    strict_list_route_allows_observed_subset, structural_satisfaction_can_skip_verifier,
+    structurally_satisfies_answer_contract,
 };
 
 fn route_with_mode() -> crate::answer_verifier::AnswerContract {
@@ -21,15 +21,10 @@ fn route_with_mode() -> crate::answer_verifier::AnswerContract {
 }
 
 #[test]
-fn verifier_contract_markers_require_planner_semantic_contract() {
+fn verifier_list_contract_marker_requires_planner_semantic_contract() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     assert!(strict_list_route_allows_observed_subset(&route));
-
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    assert!(route_contract_marker_is_scalar_path_only(&route));
 }
 
 #[test]
@@ -406,7 +401,7 @@ fn config_guard_machine_payload_skips_missing_evidence_verifier_gap() {
 fn local_missing_evidence_gap_does_not_block_on_negative_evidence_only() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-local-negative-evidence-only",
@@ -439,10 +434,7 @@ fn local_missing_evidence_gap_does_not_block_on_negative_evidence_only() {
         &route.output_contract,
         &journal,
     );
-    assert_eq!(
-        coverage.missing_evidence,
-        vec!["negative_evidence(exists_false)"]
-    );
+    assert!(coverage.missing_evidence.is_empty());
     assert!(local_missing_evidence_verifier_gap(&route, &journal).is_none());
 }
 

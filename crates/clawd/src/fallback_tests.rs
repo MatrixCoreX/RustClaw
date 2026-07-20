@@ -283,7 +283,7 @@ fn user_response_contract_carries_resolved_intent_from_structured_clarify_contex
         "把那份本地配置直接甩给我，别贴正文",
         "missing locator",
         Some(
-            "clarify_case: missing_search_locator\nresolved_user_intent: 获取本地配置文件但不粘贴正文\nsemantic_kind: scalar_path_only",
+            "clarify_case: missing_search_locator\nresolved_user_intent: 获取本地配置文件但不粘贴正文\nstructured_field_selector: path",
         ),
         "zh-CN",
     );

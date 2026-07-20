@@ -7,7 +7,7 @@ pub(super) fn latest_path_batch_fact_delivery_for_requested_summary(
     agent_run_context: Option<&AgentRunContext>,
     requested_summary: &str,
 ) -> Option<String> {
-    if route_requests_scalar_path_only(agent_run_context) {
+    if route_requests_exact_scalar_path(agent_run_context) {
         return None;
     }
     loop_state
@@ -23,13 +23,10 @@ pub(super) fn latest_path_batch_fact_delivery_for_requested_summary(
         })
 }
 
-fn route_requests_scalar_path_only(agent_run_context: Option<&AgentRunContext>) -> bool {
+fn route_requests_exact_scalar_path(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
         .and_then(|ctx| ctx.output_contract())
-        .is_some_and(|route| {
-            route.response_shape == crate::OutputResponseShape::Scalar
-                && crate::finalize::route_matches_single_path_output_contract(route)
-        })
+        .is_some_and(crate::machine_kv_projection::output_contract_requests_exact_scalar_path)
 }
 
 struct PathBatchFactDelivery {

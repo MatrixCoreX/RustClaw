@@ -209,7 +209,7 @@ fn scalar_path_observed_answer_replaces_step_status_after_broad_fallback_search(
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Filename;
     route.locator_hint = "plan/extra_missing_repair_probe.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -723,45 +723,6 @@ fn generated_file_path_report_prefers_latest_path_synthesis_over_run_cmd_status(
 }
 
 #[test]
-fn loop_contract_scalar_observed_answer_replaces_status_and_drops_progress_summary() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
-    let mut contract = scalar_route_result();
-    contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    loop_state.output_contract = Some(contract);
-    loop_state
-        .executed_step_results
-        .push(err_step_result("step_1", "run_cmd", "command failed"));
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_2", "run_cmd", "/usr/bin/bash\n"));
-    loop_state.delivery_messages.push(
-        "**执行过程**\n1. 调用命令 `missing`\n   错误：\n```text\ncommand failed\n```".to_string(),
-    );
-    loop_state
-        .delivery_messages
-        .push("第 1 步 `run_cmd` 失败。第 2 步 `run_cmd` 成功。".to_string());
-    let task = claimed_task("task-loop-contract-scalar");
-    let mut finalizer_summary = None;
-
-    assert!(replace_delivery_with_loop_contract_observed_answer(
-        &task,
-        &mut loop_state,
-        None,
-        &mut finalizer_summary,
-    ));
-
-    assert_eq!(loop_state.delivery_messages, vec!["/usr/bin/bash"]);
-    assert!(loop_state
-        .delivery_messages
-        .iter()
-        .all(|message| !crate::finalize::is_execution_summary_message(message)));
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some("/usr/bin/bash")
-    );
-}
-
-#[test]
 fn loop_contract_path_observed_answer_replaces_status_and_drops_progress_summary() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result();
@@ -851,7 +812,7 @@ fn loop_contract_observed_answer_preserves_publishable_terminal_summary_for_free
 fn loop_contract_observed_answer_preserves_explicit_json_delivery() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result();
-    contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    contract.selection.structured_field_selector = Some("path".to_string());
     loop_state.output_contract = Some(contract);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1107,7 +1068,7 @@ fn loop_contract_observed_answer_requires_matrix_strict_extractor_when_route_is_
 fn loop_contract_observed_answer_does_not_hide_later_failure() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result();
-    contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    contract.selection.structured_field_selector = Some("path".to_string());
     loop_state.output_contract = Some(contract);
     loop_state
         .executed_step_results

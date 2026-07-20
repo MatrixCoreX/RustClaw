@@ -315,7 +315,7 @@ async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
     let state = test_state();
     let task = claimed_task("task-wrapped-scalar-path");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("resolved_path".to_string());
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -351,7 +351,7 @@ async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_obs
     let state = test_state();
     let task = claimed_task("task-recoverable-scalar-path-dot");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("resolved_path".to_string());
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -441,7 +441,7 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_pat
     let state = test_state();
     let task = claimed_task("task-scalar-path-field-placeholder");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("resolved_path".to_string());
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -477,7 +477,7 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_terminal_pat
     let state = test_state();
     let task = claimed_task("task-scalar-path-terminal-respond");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -1534,7 +1534,7 @@ fn scalar_path_from_write_file_is_not_dropped_as_meta_placeholder() {
         .written_file_aliases
         .insert("pwd_line.txt".to_string(), path.to_string());
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_hint = "pwd_line.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

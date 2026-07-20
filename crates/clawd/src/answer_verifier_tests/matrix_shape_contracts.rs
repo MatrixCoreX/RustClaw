@@ -77,7 +77,7 @@ fn matrix_scalar_count_shape_allows_observed_component_breakdown() {
 fn matrix_single_path_shape_accepts_root_prefixed_results() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-root-prefixed-path", "ask", "find it");
     journal

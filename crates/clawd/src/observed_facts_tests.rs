@@ -230,7 +230,7 @@ fn derives_bound_target_from_scalar_path_answer_contract() {
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::Path;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     let target =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD";
 

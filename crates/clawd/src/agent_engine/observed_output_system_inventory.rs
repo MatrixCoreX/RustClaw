@@ -475,37 +475,14 @@ pub(super) fn dir_compare_direct_answer_candidate(
 
 pub(super) fn inventory_dir_scalar_path_candidate(
     value: &serde_json::Value,
-    prefer_full_path: bool,
+    field: &str,
 ) -> Option<String> {
-    let names = inventory_dir_names(value)?;
-    if !prefer_full_path {
-        return Some(names.join("\n"));
-    }
-    let root = value
-        .get("resolved_path")
-        .or_else(|| value.get("path"))
+    value
+        .get(field)
         .and_then(|v| v.as_str())
         .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let paths = names
-        .into_iter()
-        .map(|name| {
-            let name_path = Path::new(&name);
-            if name_path.is_absolute() {
-                canonical_existing_path(name_path)
-            } else if let Some(root) = root {
-                let candidate = Path::new(root).join(&name);
-                if candidate.exists() {
-                    canonical_existing_path(&candidate)
-                } else {
-                    candidate.display().to_string()
-                }
-            } else {
-                name
-            }
-        })
-        .collect::<Vec<_>>();
-    (!paths.is_empty()).then(|| paths.join("\n"))
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn compact_inventory_dir_kind_lines(entries: &[serde_json::Value]) -> Option<Vec<String>> {

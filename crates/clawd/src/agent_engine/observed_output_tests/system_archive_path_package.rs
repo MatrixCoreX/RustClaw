@@ -209,9 +209,12 @@ fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() 
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ScalarPathOnly,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("resolved_path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -238,9 +241,12 @@ fn direct_scalar_extracts_cwd_from_system_basic_info_without_action_field() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ScalarPathOnly,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -276,9 +282,12 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ScalarPathOnly,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "pwd_line.txt".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -333,7 +342,7 @@ fn direct_scalar_uses_latest_list_dir_entries_when_listing_is_latest_step() {
 }
 
 #[test]
-fn direct_scalar_path_only_uses_auto_locator_full_path_for_unique_list_dir_match() {
+fn exact_path_selector_uses_auto_locator_full_path_for_unique_list_dir_match() {
     let temp_dir = std::env::temp_dir().join(format!(
         "clawd-observed-output-{}-{}",
         std::process::id(),
@@ -354,9 +363,12 @@ fn direct_scalar_path_only_uses_auto_locator_full_path_for_unique_list_dir_match
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "report.md".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -376,7 +388,7 @@ fn direct_scalar_path_only_uses_auto_locator_full_path_for_unique_list_dir_match
 }
 
 #[test]
-fn direct_scalar_path_only_uses_rooted_full_path_for_unique_find_name_match() {
+fn exact_path_selector_uses_rooted_full_path_for_unique_find_name_match() {
     let temp_dir = std::env::temp_dir().join(format!(
         "clawd-observed-output-find-name-{}-{}",
         std::process::id(),
@@ -402,9 +414,12 @@ fn direct_scalar_path_only_uses_rooted_full_path_for_unique_find_name_match() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "report.md".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -453,7 +468,7 @@ fn system_basic_find_path_normalization_prefers_existing_relative_path() {
 }
 
 #[test]
-fn direct_scalar_path_only_prefers_resolved_path_from_path_batch_facts() {
+fn exact_path_selector_prefers_resolved_path_from_path_batch_facts() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -467,9 +482,12 @@ fn direct_scalar_path_only_prefers_resolved_path_from_path_batch_facts() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "report.md".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("resolved_path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -478,6 +496,31 @@ fn direct_scalar_path_only_prefers_resolved_path_from_path_batch_facts() {
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
         Some("/tmp/case_only/Report.MD")
+    );
+}
+
+#[test]
+fn path_fact_without_exact_selector_defers_to_model_synthesis() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "system_basic",
+        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"Report.MD","resolved_path":"/tmp/case_only/Report.MD","size_bytes":33},"path":"Report.MD"}],"include_missing":true}"#,
+    ));
+    let route_result = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "Report.MD".to_string(),
+        ..Default::default()
+    };
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    assert!(
+        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
     );
 }
 
@@ -609,7 +652,7 @@ fn direct_count_uses_inventory_dir_total_for_non_scalar_shape() {
 }
 
 #[test]
-fn direct_scalar_path_lists_inventory_dir_candidates_without_choosing_first() {
+fn exact_path_selector_projects_inventory_directory_path() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -623,9 +666,12 @@ fn direct_scalar_path_lists_inventory_dir_candidates_without_choosing_first() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "/tmp/stem_multi".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -634,6 +680,6 @@ fn direct_scalar_path_lists_inventory_dir_candidates_without_choosing_first() {
 
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("/tmp/stem_multi/abcd.cpp\n/tmp/stem_multi/abcd.txt")
+        Some("/tmp/stem_multi")
     );
 }

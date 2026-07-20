@@ -717,9 +717,9 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
         &[
             crate::OutputSemanticKind::FilePaths,
             crate::OutputSemanticKind::FileNames,
-            crate::OutputSemanticKind::ScalarPathOnly,
         ],
-    ) {
+    ) && !route_requests_exact_scalar_path(route)
+    {
         if !super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::ExistenceWithPath,

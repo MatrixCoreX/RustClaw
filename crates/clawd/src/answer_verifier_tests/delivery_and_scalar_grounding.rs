@@ -218,7 +218,7 @@ fn matrix_delivery_artifact_shape_accepts_grounded_plain_path() {
 fn scalar_answer_grounded_in_plain_observation_skips_llm_verifier() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-scalar", "ask", "where am I");
     journal

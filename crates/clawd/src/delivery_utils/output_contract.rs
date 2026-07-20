@@ -684,10 +684,7 @@ fn extract_scalar_literal_for_contract(
 }
 
 fn allows_loose_scalar_token_extraction(kind: crate::OutputSemanticKind) -> bool {
-    matches!(
-        kind,
-        crate::OutputSemanticKind::ScalarCount | crate::OutputSemanticKind::ScalarPathOnly
-    )
+    matches!(kind, crate::OutputSemanticKind::ScalarCount)
 }
 
 fn extract_scalar_count_literal(text: &str) -> Option<String> {
@@ -829,7 +826,10 @@ fn scalar_candidate_is_path_or_locator_for_non_path_contract(
     candidate: &str,
     output_contract: &IntentOutputContract,
 ) -> bool {
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly) {
+    if crate::machine_kv_projection::output_contract_requests_exact_scalar_field(
+        output_contract,
+        &["path", "resolved_path"],
+    ) {
         return false;
     }
     let candidate = trim_scalar_token_punctuation(candidate);

@@ -383,7 +383,7 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         return false;
     }
     if current_delivery_is_terminal_scalar_answer(agent_run_context, &current)
-        && !requested_machine_summary_should_override_scalar(&current, &answer)
+        && !requested_machine_summary_should_override_scalar(agent_run_context, &current, &answer)
     {
         loop_state.last_user_visible_respond = Some(current);
         return false;
@@ -1049,6 +1049,7 @@ fn terminal_scalar_respond_matches_route(
 }
 
 fn requested_machine_summary_should_override_scalar(
+    agent_run_context: Option<&AgentRunContext>,
     current: &str,
     requested_summary: &str,
 ) -> bool {
@@ -1057,25 +1058,12 @@ fn requested_machine_summary_should_override_scalar(
     if requested.is_empty() || !requested.contains('=') || current.contains(requested) {
         return false;
     }
-    !requested_machine_summary_value_matches_scalar(current, requested)
-}
-
-fn requested_machine_summary_value_matches_scalar(current: &str, requested_summary: &str) -> bool {
-    let mut lines = requested_summary
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty());
-    let Some(line) = lines.next() else {
-        return false;
-    };
-    if lines.next().is_some() {
-        return false;
-    }
-    let Some((_key, value)) = line.split_once('=') else {
-        return false;
-    };
-    let value = value.trim();
-    !current.is_empty() && value == current
+    let route = agent_run_context
+        .and_then(|ctx| ctx.output_contract())
+        .filter(|route| route.response_shape == crate::OutputResponseShape::Scalar);
+    !crate::machine_kv_projection::requested_machine_summary_matches_scalar(
+        route, current, requested,
+    )
 }
 
 fn service_status_selector_only_summary(
