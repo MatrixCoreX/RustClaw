@@ -131,39 +131,6 @@ fn content_excerpt_summary_allows_runtime_equivalent_config_guard() {
 }
 
 #[test]
-fn archive_list_allows_compound_readonly_archive_and_db_observations() {
-    for (semantic_kind, skill, args, expected_action, expected_evidence) in [
-        (
-            OutputSemanticKind::ArchiveList,
-            "archive_basic",
-            serde_json::json!({"action":"list","archive":"tmp/test_bundle.zip"}),
-            "archive_basic.list",
-            vec!["candidates"],
-        ),
-        (
-            OutputSemanticKind::ArchiveRead,
-            "archive_basic",
-            serde_json::json!({"action":"read","archive":"tmp/test_bundle.zip","member":"notes.txt"}),
-            "archive_basic.read",
-            vec!["content_excerpt"],
-        ),
-    ] {
-        let output_contract = IntentOutputContract {
-            semantic_kind,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        };
-        let policy = action_policy_for_output_contract(Some(&output_contract), skill, &args)
-            .unwrap_or_else(|| panic!("output-contract policy decision for {expected_action}"));
-        assert!(policy.is_allowed(), "{policy:?}");
-        assert!(policy.action_matches_preferred(), "{policy:?}");
-        assert_eq!(policy.action_key, expected_action);
-        assert_eq!(policy.contract_match, semantic_kind.as_str());
-        assert_eq!(policy.required_evidence, expected_evidence);
-    }
-}
-
-#[test]
 fn service_status_allows_http_basic_observation() {
     let matrix = load_workspace_matrix();
     let contract = matrix
@@ -670,7 +637,7 @@ fn raw_command_observation_source_defaults_to_text_legacy_extractor() {
 }
 
 #[test]
-fn configured_legacy_text_observation_extractors_are_reflected_in_trace() {
+fn archive_count_uses_structured_action_observation() {
     let scalar_snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
         semantic_kind: OutputSemanticKind::ScalarCount,
         ..IntentOutputContract::default()
@@ -680,17 +647,17 @@ fn configured_legacy_text_observation_extractors_are_reflected_in_trace() {
         .get("observation_extractors")
         .and_then(Value::as_array)
         .expect("scalar observation extractors");
-    assert!(scalar_extractors.iter().any(|item| {
+    assert!(!scalar_extractors.iter().any(|item| {
         item.get("source").and_then(Value::as_str) == Some("archive_basic")
             && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
     }));
 
-    let archive_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ArchiveList,
+    let scalar_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ScalarCount,
         requires_content_evidence: true,
         ..IntentOutputContract::default()
     };
-    let archive_trace = action_trace_for_output_contract(&archive_contract, "archive_basic.list")
+    let archive_trace = action_trace_for_output_contract(&scalar_contract, "archive_basic.list")
         .expect("archive output-contract action trace");
     assert_eq!(
         archive_trace
@@ -708,7 +675,7 @@ fn configured_legacy_text_observation_extractors_are_reflected_in_trace() {
     );
     assert_eq!(
         archive_trace.get("contract_match").and_then(Value::as_str),
-        Some("archive_list")
+        Some("scalar_count")
     );
 }
 

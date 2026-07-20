@@ -604,7 +604,7 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
 }
 
 #[test]
-fn wrapped_fs_read_range_step_counts_as_text_content_read() {
+fn wrapped_machine_read_action_counts_as_text_content_read_without_skill_branch() {
     let mut journal = TaskJournal::for_task(
         "task-wrapped-read-range-content",
         "ask",
@@ -612,7 +612,7 @@ fn wrapped_fs_read_range_step_counts_as_text_content_read() {
     );
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_read".to_string(),
-        skill: "fs_basic".to_string(),
+        skill: "fixture_reader".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
         output: Some(
             json!({

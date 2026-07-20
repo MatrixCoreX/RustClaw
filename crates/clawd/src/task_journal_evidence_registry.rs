@@ -540,7 +540,14 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "archive_basic",
         "archive_basic.structured_json_v1",
-        &["candidates", "content_excerpt", "count", "path"],
+        &[
+            "artifact_refs",
+            "candidates",
+            "content_excerpt",
+            "count",
+            "field_value",
+            "path",
+        ],
     ),
     step_json_extractor(
         "archive_basic.list",
@@ -705,12 +712,12 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "archive_basic.pack",
         "archive_basic.pack.structured_json_v1",
-        &["path"],
+        &["artifact_refs", "field_value", "path"],
     ),
     step_json_extractor(
         "archive_basic.unpack",
         "archive_basic.unpack.structured_json_v1",
-        &["path"],
+        &["field_value", "path"],
     ),
     step_json_extractor(
         "kb.ingest",
@@ -757,11 +764,6 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "schedule.preview",
         "schedule.preview.structured_json_v1",
         &["datetime", "timezone", "title"],
-    ),
-    step_text_extractor(
-        "archive_basic",
-        "archive_basic.text_legacy_v1",
-        &["candidates", "count", "legacy_machine_tokens", "path"],
     ),
     step_text_extractor(
         "git_basic",

@@ -3,9 +3,8 @@ mod list_projection;
 #[cfg(test)]
 pub(super) use list_projection::matrix_strict_list_observed_answer;
 use list_projection::{
-    archive_member_list_prefers_observed_projection, file_name_list_prefers_observed_projection,
-    matrix_observed_answer_candidate_for_shape, stale_file_token_delivery_bounded_read_answer,
-    stale_file_token_delivery_listing_answer,
+    file_name_list_prefers_observed_projection, matrix_observed_answer_candidate_for_shape,
+    stale_file_token_delivery_bounded_read_answer, stale_file_token_delivery_listing_answer,
 };
 pub(super) use list_projection::{
     generic_observed_machine_projection_answer, matrix_grouped_name_list_observed_answer,
@@ -18,7 +17,6 @@ use crate::finalize::build_from_loop_state;
 use crate::{AppState, ClaimedTask};
 
 use super::{
-    direct_created_archive_path_from_observed_archive_pack,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_generated_file_path_report_from_dry_run_payload,
@@ -159,9 +157,6 @@ pub(super) fn current_synthesis_satisfies_evidence_policy_shape(
     if directory_entry_groups_prefers_observed_groups(route, loop_state) {
         return false;
     }
-    if archive_member_list_prefers_observed_projection(route) {
-        return false;
-    }
     if file_name_list_prefers_observed_projection(route, loop_state) {
         return false;
     }
@@ -282,7 +277,6 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     }
     if !current_answer.trim().is_empty()
         && !directory_entry_groups_prefers_observed_groups(route, loop_state)
-        && !archive_member_list_prefers_observed_projection(route)
         && !file_name_list_prefers_observed_projection(route, loop_state)
         && evidence_policy_candidate_satisfies_final_shape(
             task,
@@ -315,8 +309,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     ) else {
         return false;
     };
-    if !archive_member_list_prefers_observed_projection(route)
-        && !file_name_list_prefers_observed_projection(route, loop_state)
+    if !file_name_list_prefers_observed_projection(route, loop_state)
         && !evidence_policy_candidate_satisfies_final_shape(
             task,
             user_text,

@@ -7,7 +7,6 @@ use super::{
     current_synthesis_satisfies_evidence_policy_shape, delivery_is_raw_read_observation,
     delivery_is_single_line_text, delivery_matches_latest_publishable_synthesis,
     delivery_message_is_json_object, deterministic_matrix_observed_shape_answer,
-    direct_created_archive_path_from_observed_archive_pack,
     direct_quantity_comparison_from_compare_paths, direct_raw_command_output_projection,
     direct_scalar_observed_answer, direct_structured_observed_answer,
     directory_entry_groups_prefers_observed_groups,
@@ -496,9 +495,6 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
             (!prefer_exact_observed_command_output)
                 .then(|| latest_grounded_synthesis_for_mixed_listing_contract(route, loop_state))
                 .flatten()
-        })
-        .or_else(|| {
-            direct_created_archive_path_from_observed_archive_pack(loop_state, agent_run_context)
         })
         .or_else(|| {
             deterministic_matrix_observed_shape_answer(

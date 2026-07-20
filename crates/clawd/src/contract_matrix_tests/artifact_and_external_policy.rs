@@ -452,56 +452,6 @@ fn filesystem_mutation_result_allows_archive_pack_path_evidence() {
 }
 
 #[test]
-fn archive_pack_contract_allows_pack_and_post_pack_list_but_not_cleanup_delete() {
-    let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ArchivePack,
-        requires_content_evidence: true,
-        delivery_required: true,
-        locator_kind: OutputLocatorKind::Path,
-        ..IntentOutputContract::default()
-    };
-    for (skill, args, expected_action_key) in [
-        (
-            "archive_basic",
-            serde_json::json!({
-                "action": "pack",
-                "source": "scripts/source",
-                "archive": "tmp/bundle.zip",
-                "format": "zip"
-            }),
-            "archive_basic.pack",
-        ),
-        (
-            "archive_basic",
-            serde_json::json!({
-                "action": "list",
-                "archive": "tmp/bundle.zip"
-            }),
-            "archive_basic.list",
-        ),
-    ] {
-        let policy = action_policy_for_output_contract(Some(&output_contract), skill, &args)
-            .expect("policy decision");
-
-        assert!(policy.is_allowed(), "{policy:?}");
-        assert_eq!(policy.action_key, expected_action_key);
-        assert_eq!(policy.contract_match, "archive_pack");
-    }
-
-    let cleanup_policy = action_policy_for_output_contract(
-        Some(&output_contract),
-        "fs_basic",
-        &serde_json::json!({
-            "action": "remove_path",
-            "path": "tmp/bundle.zip",
-            "target_kind": "file"
-        }),
-    );
-    assert!(cleanup_policy
-        .is_some_and(|policy| { policy.decision == ActionPolicyDecision::RejectedNotAllowed }));
-}
-
-#[test]
 fn filesystem_mutation_result_allows_kb_ingest_path_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

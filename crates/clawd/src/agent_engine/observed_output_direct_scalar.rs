@@ -14,47 +14,6 @@ pub(super) fn structured_scalar_candidate(
     if skill == "git_basic" {
         return git_basic_scalar_candidate(route, body);
     }
-    if skill == "archive_basic" {
-        if let Some(route) = route {
-            if super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::ArchivePack,
-            ) {
-                if let Some(path) = archive_basic_path_value_from_body(
-                    body,
-                    &["archive", "archive_path", "output_path", "path"],
-                ) {
-                    return Some(path);
-                }
-            } else if super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::ArchiveUnpack,
-            ) {
-                if let Some(path) = archive_basic_path_value_from_body(
-                    body,
-                    &["dest", "dest_path", "destination", "path"],
-                ) {
-                    return Some(path);
-                }
-            }
-        }
-        let summary = archive_list_summary_from_body(body)?;
-        if route.is_some_and(route_requests_scalar_count) {
-            return Some(summary.entries.len().to_string());
-        }
-        return route
-            .filter(|route| route_requests_scalar_existence(route))
-            .and_then(|route| {
-                archive_entry_existence_direct_answer(
-                    state,
-                    route,
-                    request_text,
-                    &summary,
-                    auto_locator_path.or(locator_hint),
-                    prefer_english,
-                )
-            });
-    }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if let Some(answer) = selected_structured_scalar_candidate(route, &value) {
         return Some(answer);

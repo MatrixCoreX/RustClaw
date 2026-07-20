@@ -109,10 +109,6 @@ pub(crate) enum OutputSemanticKind {
     ConfigValidation,
     ConfigMutation,
     ConfigRiskAssessment,
-    ArchiveList,
-    ArchiveRead,
-    ArchivePack,
-    ArchiveUnpack,
 }
 
 impl OutputSemanticKind {
@@ -152,10 +148,6 @@ impl OutputSemanticKind {
         Self::ConfigValidation,
         Self::ConfigMutation,
         Self::ConfigRiskAssessment,
-        Self::ArchiveList,
-        Self::ArchiveRead,
-        Self::ArchivePack,
-        Self::ArchiveUnpack,
     ];
 
     pub(crate) fn as_str(self) -> &'static str {
@@ -195,10 +187,6 @@ impl OutputSemanticKind {
             Self::ConfigValidation => "config_validation",
             Self::ConfigMutation => "config_mutation",
             Self::ConfigRiskAssessment => "config_risk_assessment",
-            Self::ArchiveList => "archive_list",
-            Self::ArchiveRead => "archive_read",
-            Self::ArchivePack => "archive_pack",
-            Self::ArchiveUnpack => "archive_unpack",
         }
     }
 

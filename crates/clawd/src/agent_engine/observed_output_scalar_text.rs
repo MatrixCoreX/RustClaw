@@ -43,10 +43,6 @@ pub(super) fn scalar_count_diagnostic_line_for_answer(
         return None;
     }
     let observed = extract_latest_generic_successful_output(loop_state)?;
-    if observed.skill == "archive_basic" && archive_list_summary_from_body(&observed.body).is_some()
-    {
-        return None;
-    }
     let lines = observed
         .body
         .lines()

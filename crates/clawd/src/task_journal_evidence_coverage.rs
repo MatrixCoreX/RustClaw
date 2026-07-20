@@ -664,14 +664,28 @@ pub(crate) fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
         return false;
     };
     let action = step_output_action_value(&value).map(normalize_evidence_field);
-    match step.skill.as_str() {
-        "fs_basic" | "system_basic" => matches!(
-            action.as_deref(),
-            Some("read_range" | "read_text_range" | "read_file" | "read")
-        ),
-        "archive_basic" => matches!(action.as_deref(), Some("read")),
-        _ => false,
+    if matches!(
+        action.as_deref(),
+        Some("read_range" | "read_text_range" | "read_file")
+    ) {
+        return true;
     }
+    action.as_deref() == Some("read")
+        && [
+            "/content",
+            "/content_excerpt",
+            "/excerpt",
+            "/extra/content",
+            "/extra/content_excerpt",
+            "/extra/excerpt",
+        ]
+        .iter()
+        .any(|pointer| {
+            value
+                .pointer(pointer)
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty())
+        })
 }
 
 fn step_output_action_value(value: &Value) -> Option<&str> {

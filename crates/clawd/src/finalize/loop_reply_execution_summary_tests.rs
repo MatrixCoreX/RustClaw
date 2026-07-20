@@ -182,48 +182,6 @@ fn execution_summary_is_not_attached_before_final_delivery() {
 }
 
 #[test]
-fn contract_matrix_delivery_suppresses_hardcoded_execution_summary() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state
-        .round_traces
-        .push(crate::task_journal::TaskJournalRoundTrace {
-            round_no: 1,
-            goal: "list archive members".to_string(),
-            execution_recipe_summary: None,
-            plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
-                step_id: "step_1".to_string(),
-                action_type: "call_skill".to_string(),
-                skill: "archive_basic".to_string(),
-                args: serde_json::json!({"action": "list"}),
-                depends_on: Vec::new(),
-                why: String::new(),
-            }])),
-            verify_result: None,
-        });
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "archive_basic",
-        "notes.txt\nnested/config.ini\n",
-    ));
-    let mut route = free_route_result();
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.requires_content_evidence = true;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut delivery = vec![
-        "**执行过程**\n1. 调用技能 `archive_basic`".to_string(),
-        "notes.txt\nnested/config.ini".to_string(),
-    ];
-
-    attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
-
-    assert_eq!(delivery, vec!["notes.txt\nnested/config.ini".to_string()]);
-}
-
-#[test]
 fn evidence_contract_delivery_suppresses_execution_summary_for_name_list_answer() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(

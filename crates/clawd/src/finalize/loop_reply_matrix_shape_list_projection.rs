@@ -3,21 +3,6 @@ use std::path::Path;
 
 use super::*;
 
-pub(super) fn archive_member_list_prefers_observed_projection(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route_requests_archive_list(route)
-        && (crate::evidence_policy::final_answer_shape_for_output_contract(route)
-            == Some(crate::evidence_policy::FinalAnswerShape::ArchiveMemberList)
-            || route.response_shape == crate::OutputResponseShape::Strict)
-}
-
-fn route_requests_archive_list(route: &crate::IntentOutputContract) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::ArchiveList)
-        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
-            == Some(crate::evidence_policy::FinalAnswerShape::ArchiveMemberList)
-}
-
 pub(super) fn file_name_list_prefers_observed_projection(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
@@ -169,12 +154,6 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
                     )
                 })
                 .or_else(|| {
-                    direct_created_archive_path_from_observed_archive_pack(
-                        loop_state,
-                        agent_run_context,
-                    )
-                })
-                .or_else(|| {
                     direct_scalar_path_candidate_list_from_observed_outputs(
                         loop_state,
                         agent_run_context,
@@ -185,12 +164,6 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
             direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
                 .or_else(|| {
                     direct_generated_file_path_report_from_written_path(
-                        loop_state,
-                        agent_run_context,
-                    )
-                })
-                .or_else(|| {
-                    direct_created_archive_path_from_observed_archive_pack(
                         loop_state,
                         agent_run_context,
                     )
@@ -580,8 +553,7 @@ fn grep_text_matches_answer_from_value(value: &serde_json::Value) -> Option<Stri
 }
 
 fn route_supports_matrix_strict_list_observed_answer(route: &crate::IntentOutputContract) -> bool {
-    route_requests_archive_list(route)
-        || route_requests_name_list(route)
+    route_requests_name_list(route)
         || route_requests_filesystem_path_list(route)
         || route_requests_key_list_or_summary(route)
         || matches!(
@@ -971,10 +943,6 @@ fn collect_matrix_strict_list_items(
     if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
         collect_matrix_strict_list_items(route, extra, items);
     }
-    if route_requests_archive_list(route) {
-        collect_matrix_archive_member_items(route, value, items);
-        return;
-    }
     if route_requests_directory_name_list(route) {
         collect_matrix_directory_name_items(route, value, items);
         return;
@@ -1137,109 +1105,6 @@ fn collect_matrix_directory_name_object(
             return;
         }
     }
-}
-
-fn collect_matrix_archive_member_items(
-    route: &crate::IntentOutputContract,
-    value: &serde_json::Value,
-    items: &mut BTreeMap<String, String>,
-) {
-    let archive_hint = value
-        .get("archive")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|archive| !archive.is_empty());
-    for key in ["entries", "candidates"] {
-        let Some(array) = value.get(key).and_then(serde_json::Value::as_array) else {
-            continue;
-        };
-        for item in array {
-            match item {
-                serde_json::Value::String(raw) => {
-                    push_matrix_archive_member_item(route, archive_hint, raw, None, items);
-                }
-                serde_json::Value::Object(map) => {
-                    let kind = map.get("kind").and_then(serde_json::Value::as_str);
-                    let raw = map
-                        .get("name")
-                        .or_else(|| map.get("path"))
-                        .and_then(serde_json::Value::as_str);
-                    if let Some(raw) = raw {
-                        push_matrix_archive_member_item(route, archive_hint, raw, kind, items);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-fn push_matrix_archive_member_item(
-    route: &crate::IntentOutputContract,
-    archive_hint: Option<&str>,
-    raw: &str,
-    kind: Option<&str>,
-    items: &mut BTreeMap<String, String>,
-) {
-    if !archive_member_matches_list_selector(route, raw, kind) {
-        return;
-    }
-    let Some(display) = matrix_archive_member_display_item(raw, archive_hint) else {
-        return;
-    };
-    items.entry(display.to_ascii_lowercase()).or_insert(display);
-}
-
-fn archive_member_matches_list_selector(
-    route: &crate::IntentOutputContract,
-    raw: &str,
-    kind: Option<&str>,
-) -> bool {
-    let selector = &route.selection.list_selector;
-    let target_kind = if selector.target_kind == crate::OutputScalarCountTargetKind::Any
-        && !selector.target_kind_specified
-    {
-        crate::OutputScalarCountTargetKind::File
-    } else {
-        selector.target_kind
-    };
-    match target_kind {
-        crate::OutputScalarCountTargetKind::Any => true,
-        crate::OutputScalarCountTargetKind::File => kind
-            .map(|kind| kind.trim().eq_ignore_ascii_case("file"))
-            .unwrap_or_else(|| !raw.trim().ends_with('/')),
-        crate::OutputScalarCountTargetKind::Dir => kind
-            .map(|kind| kind.trim().eq_ignore_ascii_case("dir"))
-            .unwrap_or_else(|| raw.trim().ends_with('/')),
-    }
-}
-
-fn matrix_archive_member_display_item(raw: &str, archive_hint: Option<&str>) -> Option<String> {
-    let item = raw.trim().trim_matches('`').trim().replace('\\', "/");
-    if item.is_empty() {
-        return None;
-    }
-    let item_no_leading = item.trim_start_matches('/');
-    if let Some(parent_prefix) = archive_hint.and_then(archive_parent_prefix_for_member_display) {
-        if let Some(rest) = item_no_leading.strip_prefix(&parent_prefix) {
-            let rest = rest.trim_start_matches('/');
-            if !rest.is_empty() {
-                return Some(rest.to_string());
-            }
-        }
-    }
-    Some(item)
-}
-
-fn archive_parent_prefix_for_member_display(archive_hint: &str) -> Option<String> {
-    let parent = std::path::Path::new(archive_hint.trim()).parent()?;
-    let prefix = parent
-        .to_string_lossy()
-        .replace('\\', "/")
-        .trim_start_matches('/')
-        .trim_end_matches('/')
-        .to_string();
-    (!prefix.is_empty()).then_some(prefix)
 }
 
 fn push_matrix_string_arrays(

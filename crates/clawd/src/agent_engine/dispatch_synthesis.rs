@@ -238,61 +238,6 @@ fn json_contains_unresolved_terminal_value(value: &Value) -> bool {
     }
 }
 
-pub(super) fn archive_database_aggregate_structured_answer(
-    loop_state: &LoopState,
-) -> Option<String> {
-    let archive_list = loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok() && step.skill == "archive_basic")
-        .filter_map(|step| step.output.as_deref())
-        .filter_map(skill_output_payload)
-        .find(|payload| payload.get("action").and_then(Value::as_str) == Some("list"))?;
-    let archive_read = loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok() && step.skill == "archive_basic")
-        .filter_map(|step| step.output.as_deref())
-        .filter_map(skill_output_payload)
-        .find(|payload| payload.get("action").and_then(Value::as_str) == Some("read"))?;
-    let db_tables = loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok() && step.skill == "db_basic")
-        .filter_map(|step| step.output.as_deref())
-        .filter_map(skill_output_payload)
-        .find(|payload| payload.get("action").and_then(Value::as_str) == Some("list_tables"))?;
-
-    let entries = archive_entry_names(&archive_list)?;
-    let member = archive_read
-        .get("member")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    let content = archive_read
-        .get("content")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    let tables = sqlite_table_names(&db_tables)?;
-
-    Some(
-        serde_json::json!({
-            "archive": {
-                "entries": entries,
-                "member": {
-                    "name": member,
-                    "content": content,
-                },
-            },
-            "database": {
-                "tables": tables,
-            },
-        })
-        .to_string(),
-    )
-}
-
 #[cfg(test)]
 #[path = "dispatch_synthesis_tests.rs"]
 mod tests;
@@ -603,42 +548,6 @@ fn skill_output_payload(output: &str) -> Option<Value> {
         return Some(extra.clone());
     }
     Some(value)
-}
-
-fn archive_entry_names(payload: &Value) -> Option<Vec<String>> {
-    let mut names = Vec::new();
-    if let Some(entries) = payload.get("entries").and_then(Value::as_array) {
-        for entry in entries {
-            if let Some(name) = entry.get("name").and_then(Value::as_str) {
-                push_unique_string(&mut names, name);
-            }
-        }
-    }
-    if names.is_empty() {
-        if let Some(candidates) = payload.get("candidates").and_then(Value::as_array) {
-            for candidate in candidates {
-                if let Some(name) = candidate.as_str() {
-                    push_unique_string(&mut names, name);
-                }
-            }
-        }
-    }
-    (!names.is_empty()).then_some(names)
-}
-
-fn sqlite_table_names(payload: &Value) -> Option<Vec<String>> {
-    let rows = payload
-        .get("result")
-        .and_then(|result| result.get("rows"))
-        .or_else(|| payload.get("rows"))
-        .and_then(Value::as_array)?;
-    let mut names = Vec::new();
-    for row in rows {
-        if let Some(name) = row.get("name").and_then(Value::as_str) {
-            push_unique_string(&mut names, name);
-        }
-    }
-    (!names.is_empty()).then_some(names)
 }
 
 fn push_unique_string(values: &mut Vec<String>, value: &str) {

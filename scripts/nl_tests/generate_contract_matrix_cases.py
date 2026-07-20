@@ -26,7 +26,6 @@ FIXTURE_DOCS_DIR = f"{FIXTURE_ROOT}/docs"
 FIXTURE_PACKAGE = f"{FIXTURE_ROOT}/package.json"
 FIXTURE_CONFIG = f"{FIXTURE_ROOT}/configs/app_config.toml"
 FIXTURE_DB = f"{FIXTURE_ROOT}/data/test_contract.sqlite"
-FIXTURE_ARCHIVE = f"{FIXTURE_ROOT}/tmp/test_bundle.zip"
 
 
 PROBE_ACTIONS = [
@@ -74,10 +73,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
     "config_validation": f"验证 {FIXTURE_CONFIG} 是否是可读配置，并简短说明结果。",
     "config_risk_assessment": "检查 configs/config.toml 的风险配置项，简短说明是否有明显高风险设置。",
-    "archive_list": f"列出 {FIXTURE_ARCHIVE} 里的成员列表。",
-    "archive_read": f"读取 {FIXTURE_ARCHIVE} 里的 notes.txt 内容片段，并简短总结。",
-    "archive_pack": f"把 {FIXTURE_DOCS_DIR} 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。",
-    "archive_unpack": f"把 {FIXTURE_ARCHIVE} 解压到 tmp/contract_matrix_unpacked，并简短说明结果。",
 }
 
 NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -113,10 +108,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
     "config_validation": f"Validate whether {FIXTURE_CONFIG} is a readable config file, and briefly explain the result.",
     "config_risk_assessment": "Check the risk-related settings in configs/config.toml and briefly say whether there is any obvious high-risk setting.",
-    "archive_list": f"List the members inside {FIXTURE_ARCHIVE}.",
-    "archive_read": f"Read a content excerpt from notes.txt inside {FIXTURE_ARCHIVE}, then summarize it briefly.",
-    "archive_pack": f"Pack {FIXTURE_DOCS_DIR} into tmp/contract_matrix_docs_bundle.zip and tell me the generated path.",
-    "archive_unpack": f"Unpack {FIXTURE_ARCHIVE} into tmp/contract_matrix_unpacked and briefly describe the result.",
 }
 
 EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -542,10 +533,6 @@ def live_nl_action_preference_applicable(case: dict[str, Any]) -> bool:
     contract_id = str(case.get("contract_id") or "")
     action = normalize_token(action_ref).replace("-", "_")
     archive_action_contracts = {
-        "archive_basic.list": {"archive_list"},
-        "archive_basic.read": {"archive_read"},
-        "archive_basic.pack": {"archive_pack"},
-        "archive_basic.unpack": {"archive_unpack"},
     }
     allowed_contracts = archive_action_contracts.get(action)
     if allowed_contracts is not None:

@@ -844,20 +844,20 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
 
     let mut path_route = route_with_mode();
     path_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    path_route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+    path_route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
     let mut path_journal =
-        crate::task_journal::TaskJournal::for_task("task-synth-path", "ask", "pack logs");
+        crate::task_journal::TaskJournal::for_task("task-synth-path", "ask", "write report");
     path_journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
             "step_think",
             "think",
-            json!({"archive_path": "/tmp/rustclaw/report.zip"}).to_string(),
+            json!({"path": "/tmp/rustclaw/report.md"}).to_string(),
         ));
     assert!(!structurally_satisfies_answer_contract(
         &path_route,
         &path_journal,
-        "/tmp/rustclaw/report.zip"
+        "/tmp/rustclaw/report.md"
     ));
 
     let mut scalar_route = route_with_mode();
@@ -883,87 +883,31 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
 fn matrix_single_path_shape_uses_observed_evidence_map_paths() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-matrix-path-evidence", "ask", "pack logs");
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-matrix-path-evidence",
+        "ask",
+        "write report",
+    );
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
             "step_1",
-            "archive_basic",
+            "fs_basic",
             json!({
-                "archive_path": "/tmp/rustclaw/report.zip",
-                "source_paths": ["/tmp/rustclaw/report.md"]
+                "action": "write_text",
+                "path": "/tmp/rustclaw/report.md"
             })
             .to_string(),
         ));
 
-    assert!(observed_single_path_values_from_evidence_map(&journal)
-        .contains("/tmp/rustclaw/report.zip"));
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "/tmp/rustclaw/report.zip"
-    ));
-}
-
-#[test]
-fn archive_unpack_summary_is_satisfied_by_observed_destination_path() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveUnpack;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-archive-unpack-summary",
-        "ask",
-        "unpack archive",
+    assert!(
+        observed_single_path_values_from_evidence_map(&journal).contains("/tmp/rustclaw/report.md")
     );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "archive_basic",
-            "dest_path=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked\nexit=0\nArchive: /tmp/test_bundle.zip\n inflating: /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked/notes.txt\n",
-        ));
-
     assert!(structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "已解压到 /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked，包含 notes.txt。"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "已完成解压。"
-    ));
-}
-
-#[test]
-fn archive_unpack_contract_summary_is_grounded() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveUnpack;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-archive-unpack-capability-ref",
-        "ask",
-        "unpack archive",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "archive_basic",
-            "dest_path=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked\nexit=0\nArchive: /tmp/test_bundle.zip\n inflating: /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked/notes.txt\n",
-        ));
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "unpacked to /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route, &journal, "unpacked"
+        "/tmp/rustclaw/report.md"
     ));
 }
 

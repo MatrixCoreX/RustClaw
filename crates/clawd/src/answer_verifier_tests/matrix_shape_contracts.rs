@@ -204,20 +204,19 @@ fn matrix_strict_list_shape_rejects_unobserved_items() {
 fn matrix_single_path_shape_requires_plain_grounded_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
     let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-matrix-path", "ask", "pack logs");
+        crate::task_journal::TaskJournal::for_task("task-matrix-path", "ask", "write report");
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace {
             step_id: "step_1".to_string(),
-            skill: "archive_basic".to_string(),
+            skill: "fs_basic".to_string(),
             status: crate::executor::StepExecutionStatus::Ok,
             output_excerpt: Some(
                 json!({
-                    "action": "pack",
-                    "archive_path": "/tmp/rustclaw/report.zip",
-                    "source_paths": ["/tmp/rustclaw/report.md"]
+                    "action": "write_text",
+                    "path": "/tmp/rustclaw/report.md"
                 })
                 .to_string(),
             ),
@@ -229,17 +228,17 @@ fn matrix_single_path_shape_requires_plain_grounded_path() {
     assert!(structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "/tmp/rustclaw/report.zip"
+        "/tmp/rustclaw/report.md"
     ));
     assert!(!structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "Archive: /tmp/rustclaw/report.zip"
+        "Path: /tmp/rustclaw/report.md"
     ));
     assert!(!structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "The archive is /tmp/rustclaw/report.zip"
+        "The report is /tmp/rustclaw/report.md"
     ));
     assert!(!structurally_satisfies_answer_contract(
         &route,

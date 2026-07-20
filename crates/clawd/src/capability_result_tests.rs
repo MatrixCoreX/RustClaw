@@ -146,6 +146,42 @@ fn web_search_result_preserves_candidates_for_generic_synthesis() {
 }
 
 #[test]
+fn archive_pack_result_exposes_generic_artifact_reference() {
+    let extra = json!({
+        "action": "pack",
+        "archive": "/tmp/reports.zip",
+        "field_value": {
+            "archive": "/tmp/reports.zip",
+            "format": "zip",
+            "source": "/tmp/reports"
+        },
+        "artifacts": [{
+            "path": "/tmp/reports.zip",
+            "metadata": {
+                "action": "pack",
+                "format": "zip"
+            }
+        }]
+    });
+    let envelope = super::successful_execution_envelope(
+        "archive_basic",
+        "step_4",
+        &json!({"action": "pack"}),
+        "untrusted fallback",
+        Some(&extra),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/field_value/archive"),
+        Some(&json!("/tmp/reports.zip"))
+    );
+    assert_eq!(
+        envelope.artifacts[0].path.as_deref(),
+        Some("/tmp/reports.zip")
+    );
+}
+
+#[test]
 fn pending_result_becomes_poll_continuation() {
     let envelope = super::successful_execution_envelope(
         "video_generate",

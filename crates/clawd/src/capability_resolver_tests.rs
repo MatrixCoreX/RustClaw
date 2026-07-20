@@ -187,6 +187,43 @@ fn database_capabilities_resolve_without_domain_output_semantic_kinds() {
 }
 
 #[test]
+fn archive_capabilities_resolve_without_domain_output_semantic_kinds() {
+    let state = state_with_workspace_registry();
+    for (capability, expected_action, args) in [
+        ("archive.list", "list", json!({"archive": "tmp/bundle.zip"})),
+        (
+            "archive.read",
+            "read",
+            json!({"archive": "tmp/bundle.zip", "member": "notes.txt"}),
+        ),
+        (
+            "archive.pack",
+            "pack",
+            json!({"source": "reports", "archive": "tmp/reports.zip"}),
+        ),
+        (
+            "archive.unpack",
+            "unpack",
+            json!({"archive": "tmp/bundle.zip", "dest": "tmp/unpacked"}),
+        ),
+    ] {
+        let (action, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, args);
+
+        assert_eq!(record.output_semantic_kind, None, "{capability}");
+        let Some(AgentAction::CallTool { tool, args }) = action else {
+            panic!("expected archive tool action for {capability}");
+        };
+        assert_eq!(tool, "archive_basic", "{capability}");
+        assert_eq!(
+            args.get("action").and_then(Value::as_str),
+            Some(expected_action),
+            "{capability}"
+        );
+    }
+}
+
+#[test]
 fn weather_capability_resolves_without_domain_output_semantic_kind() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

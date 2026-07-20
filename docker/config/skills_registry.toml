@@ -554,7 +554,7 @@ planner_kind = "tool"
 group = "system"
 aliases = ["archive", "archive_tool"]
 description = "List, read, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
-semantic_tags = ["archive_list", "archive_read", "archive_pack", "archive_unpack"]
+semantic_tags = ["archive_catalog", "archive_content", "archive_artifact", "archive_extract"]
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
@@ -572,10 +572,10 @@ confirmation_exempt_when = [
   { action = "read" },
 ]
 planner_capabilities = [
-  { name = "archive.list", action = "list", effect = "observe", required = ["archive"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "archive_member_list" },
-  { name = "archive.read", action = "read", effect = "observe", required = ["archive", "member"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "archive_member_excerpt" },
-  { name = "archive.pack", action = "pack", effect = "mutate", required = ["source", "archive"], optional = ["format"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "created_archive_path" },
-  { name = "archive.unpack", action = "unpack", effect = "mutate", required = ["archive", "dest"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "unpack_destination_summary" },
+  { name = "archive.list", action = "list", effect = "observe", required = ["archive"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "archive.read", action = "read", effect = "observe", required = ["archive", "member"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "archive.pack", action = "pack", effect = "mutate", required = ["source", "archive"], optional = ["format"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
+  { name = "archive.unpack", action = "unpack", effect = "mutate", required = ["archive", "dest"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, archive = { type = "string" }, archive_path = { type = "string" }, path = { type = "string" }, member = { type = "string" }, entry = { type = "string" }, file = { type = "string" }, file_path = { type = "string" }, source = { type = "string" }, source_path = { type = "string" }, dest = { type = "string" }, dest_path = { type = "string" }, format = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }

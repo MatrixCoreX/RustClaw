@@ -251,7 +251,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary
-        | OutputSemanticKind::ArchiveRead
         | OutputSemanticKind::DocumentHeading
         | OutputSemanticKind::ExcerptKindJudgment => {
             fields.insert("content_excerpt");
@@ -276,8 +275,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::DirectoryNames
         | OutputSemanticKind::DirectoryEntryGroups
         | OutputSemanticKind::FilePaths
-        | OutputSemanticKind::HiddenEntriesCheck
-        | OutputSemanticKind::ArchiveList => {
+        | OutputSemanticKind::HiddenEntriesCheck => {
             fields.insert("candidates");
         }
         OutputSemanticKind::ServiceStatus
@@ -302,9 +300,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
-        | OutputSemanticKind::FilesystemMutationResult
-        | OutputSemanticKind::ArchivePack
-        | OutputSemanticKind::ArchiveUnpack => {
+        | OutputSemanticKind::FilesystemMutationResult => {
             fields.insert("path");
         }
         OutputSemanticKind::QuantityComparison => {

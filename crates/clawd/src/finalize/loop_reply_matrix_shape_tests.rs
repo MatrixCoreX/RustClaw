@@ -811,17 +811,6 @@ fn path_list_contract_requires_observed_projection() {
 }
 
 #[test]
-fn created_archive_path_contract_requires_observed_projection() {
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-    route.response_shape = crate::OutputResponseShape::Scalar;
-
-    assert!(super::super::route_requires_observed_output_projection(
-        &route
-    ));
-}
-
-#[test]
 fn structured_keys_contract_builds_observed_list() {
     let state = test_state();
     let task = claimed_task("task-config-key-list-capability-shape");
@@ -859,121 +848,6 @@ fn structured_keys_contract_builds_observed_list() {
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
         Some("model\nruntime\nskills")
-    );
-    assert!(finalizer_summary.is_some());
-}
-
-#[test]
-fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "archive_basic",
-        r#"{"extra":{"action":"list","archive":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","entries":[{"kind":"file","name":"notes.txt"},{"kind":"file","name":"nested/config.ini"},{"kind":"dir","name":"home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack/"},{"kind":"file","name":"home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack/notes.txt"}],"candidates":["notes.txt","nested/config.ini","home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack/"]},"text":"ignored"}"#,
-    ));
-
-    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
-        .expect("archive member list answer");
-
-    assert_eq!(
-        answer,
-        "manual_dynamic_guard_unpack/notes.txt\nnested/config.ini\nnotes.txt"
-    );
-    assert_eq!(summary.format_ok, Some(true));
-    assert_eq!(summary.grounded_ok, Some(true));
-}
-
-#[test]
-fn matrix_archive_member_list_defaults_untyped_selector_to_file_entries() {
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "archive_basic",
-        r#"{"action":"list","archive":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","entries":[{"kind":"file","name":"notes.txt"},{"kind":"dir","name":"manual_dynamic_guard_unpack/"},{"kind":"file","name":"nested/config.ini"}],"candidates":["notes.txt","manual_dynamic_guard_unpack/","nested/config.ini"]}"#,
-    ));
-
-    let (answer, _summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
-        .expect("archive member list answer");
-
-    assert_eq!(answer, "nested/config.ini\nnotes.txt");
-}
-
-#[test]
-fn matrix_archive_member_list_accepts_archive_list_contract() {
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "archive_basic",
-        r#"{"action":"list","archive":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","entries":[{"kind":"file","name":"notes.txt"},{"kind":"dir","name":"manual_dynamic_guard_unpack/"},{"kind":"file","name":"nested/config.ini"}],"candidates":["notes.txt","manual_dynamic_guard_unpack/","nested/config.ini"]}"#,
-    ));
-
-    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
-        .expect("archive capability ref member list answer");
-
-    assert_eq!(answer, "nested/config.ini\nnotes.txt");
-    assert_eq!(summary.format_ok, Some(true));
-    assert_eq!(summary.grounded_ok, Some(true));
-}
-
-#[test]
-fn matrix_archive_member_list_replaces_synthesis_with_observed_projection() {
-    let state = test_state();
-    let task = claimed_task("task-archive-member-list-observed-projection");
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "archive_basic",
-        r#"{"action":"list","archive":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","entries":[{"kind":"file","name":"notes.txt"},{"kind":"dir","name":"manual_dynamic_guard_unpack/"},{"kind":"file","name":"nested/config.ini"}],"candidates":["notes.txt","manual_dynamic_guard_unpack/","nested/config.ini"]}"#,
-    ));
-    let mut delivery =
-        vec!["notes.txt\nnested/config.ini\nmanual_dynamic_guard_unpack/".to_string()];
-    let mut finalizer_summary = None;
-    assert!(
-        super::super::replace_delivery_with_matrix_observed_shape_answer(
-            &state,
-            &task,
-            "list archive members",
-            &mut loop_state,
-            Some(&ctx),
-            &mut delivery,
-            &mut finalizer_summary,
-        )
-    );
-
-    assert_eq!(delivery, vec!["nested/config.ini\nnotes.txt"]);
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some("nested/config.ini\nnotes.txt")
     );
     assert!(finalizer_summary.is_some());
 }
