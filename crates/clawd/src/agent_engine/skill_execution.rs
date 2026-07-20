@@ -1166,7 +1166,8 @@ pub(super) async fn execute_prepared_skill_action(
             Ok(outcome)
         }
         None => {
-            if !repo::is_task_still_running(state, &task.task_id).unwrap_or(true) {
+            if !repo::is_task_claim_active(state, &task.task_id, task.claim_attempt).unwrap_or(true)
+            {
                 return Err(TASK_CANCELED_ERR.to_string());
             }
             let err = step_execution.error.clone().unwrap_or_default();

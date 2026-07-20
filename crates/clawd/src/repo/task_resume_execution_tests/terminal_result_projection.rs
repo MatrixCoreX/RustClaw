@@ -111,6 +111,7 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
     });
     assert!(record_paused_checkpoint_resume_execution_plan_internal(
         &state,
+        CLAIM_ATTEMPT,
         task_id,
         checkpoint_id,
         "executing_async_poll",
@@ -148,6 +149,7 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
     });
     assert!(record_planned_paused_checkpoint_resume_handoff_internal(
         &state,
+        CLAIM_ATTEMPT,
         task_id,
         checkpoint_id,
         "executing_async_poll",
@@ -180,6 +182,7 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
     assert!(
         record_claimed_handoff_paused_checkpoint_resume_dispatch_internal(
             &state,
+            CLAIM_ATTEMPT,
             task_id,
             checkpoint_id,
             "executing_async_poll",
@@ -221,6 +224,7 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
     assert!(
         record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
             &state,
+            CLAIM_ATTEMPT,
             task_id,
             checkpoint_id,
             "executing_async_poll",
@@ -249,6 +253,7 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             task_id,
             checkpoint_id,
             "executing_async_poll",
@@ -324,6 +329,27 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
         Some(&cancelled_seed),
         now,
     );
+    activate_resume_owner(
+        &state,
+        "terminal-completed",
+        "ckpt-terminal-completed",
+        now,
+        now + 30,
+    );
+    activate_resume_owner(
+        &state,
+        "terminal-failed",
+        "ckpt-terminal-failed",
+        now,
+        now + 30,
+    );
+    activate_resume_owner(
+        &state,
+        "terminal-cancelled",
+        "ckpt-terminal-cancelled",
+        now,
+        now + 30,
+    );
 
     claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
         &state,
@@ -357,6 +383,7 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
     assert!(
         !record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             "terminal-completed",
             "ckpt-terminal-completed",
             "executing_finalize",
@@ -383,6 +410,7 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             "terminal-completed",
             "ckpt-terminal-completed",
             "executing_finalize",
@@ -438,6 +466,7 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             "terminal-failed",
             "ckpt-terminal-failed",
             "executing_async_poll",
@@ -496,6 +525,7 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             "terminal-cancelled",
             "ckpt-terminal-cancelled",
             "executing_async_poll",
@@ -556,6 +586,13 @@ fn terminal_async_poll_projection_preserves_visible_ask_reply() {
     seed["text"] = json!("checkpoint_id=ckpt-ask-visible-terminal");
     seed["messages"] = json!(["checkpoint_id=ckpt-ask-visible-terminal"]);
     insert_task(&state, "ask-visible-terminal", "running", Some(&seed), now);
+    activate_resume_owner(
+        &state,
+        "ask-visible-terminal",
+        "ckpt-ask-visible-terminal",
+        now,
+        now + 30,
+    );
 
     claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
         &state,
@@ -574,6 +611,7 @@ fn terminal_async_poll_projection_preserves_visible_ask_reply() {
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             "ask-visible-terminal",
             "ckpt-ask-visible-terminal",
             "executing_async_poll",
@@ -637,6 +675,7 @@ fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
     seed["text"] = json!("old confirmation reply");
     seed["messages"] = json!(["old confirmation reply"]);
     insert_task(&state, task_id, "running", Some(&seed), now);
+    activate_resume_owner(&state, task_id, checkpoint_id, now, now + 30);
 
     claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
         &state,
@@ -655,6 +694,7 @@ fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             task_id,
             checkpoint_id,
             "executing_planner_resume",
@@ -720,6 +760,7 @@ fn terminal_agent_loop_async_poll_projection_replaces_waiting_visible_ask_reply(
     seed["text"] = json!("checkpoint accepted but not terminal");
     seed["messages"] = json!(["checkpoint accepted but not terminal"]);
     insert_task(&state, "ask-machine-terminal", "running", Some(&seed), now);
+    activate_resume_owner(&state, "ask-machine-terminal", checkpoint_id, now, now + 30);
 
     claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
         &state,
@@ -738,6 +779,7 @@ fn terminal_agent_loop_async_poll_projection_replaces_waiting_visible_ask_reply(
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             "ask-machine-terminal",
             checkpoint_id,
             "executing_async_poll",

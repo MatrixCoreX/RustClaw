@@ -207,6 +207,14 @@ fn claim_ready_paused_checkpoint_resume_executor_sets_machine_lease() {
         "task_checkpoint": checkpoint_json("ckpt-ready", vec!["write_file:tmp/report.txt"])
     });
     insert_task(&state, "ready-planner", "running", Some(&ready_planner), 10);
+    set_task_lease(
+        &state,
+        "ready-planner",
+        &state.worker.worker_id,
+        now + 30,
+        1,
+        now,
+    );
 
     assert!(
         claim_ready_paused_checkpoint_resume_executor_internal(
@@ -251,6 +259,7 @@ fn claim_ready_paused_checkpoint_resume_executor_sets_machine_lease() {
     assert_eq!(claimed.task.chat_id, 7);
     assert_eq!(claimed.task.channel, "ui");
     assert_eq!(claimed.task.kind, "ask");
+    assert_eq!(claimed.task.claim_attempt, 1);
     assert!(
         claimed.task.payload_json.contains("long task"),
         "claimed executor must carry original task payload for seeded replay"

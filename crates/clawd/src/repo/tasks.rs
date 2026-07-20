@@ -52,7 +52,7 @@ impl std::fmt::Display for WorkerTaskWriteRejected {
 
 impl std::error::Error for WorkerTaskWriteRejected {}
 
-fn worker_task_write_rejection(
+pub(crate) fn worker_task_write_rejection(
     db: &rusqlite::Connection,
     state: &AppState,
     task_id: &str,
@@ -115,6 +115,7 @@ fn worker_task_write_rejection(
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DuePausedCheckpointTask {
+    pub(crate) claim_attempt: i64,
     pub(crate) task_id: String,
     pub(crate) lifecycle_state: String,
     pub(crate) checkpoint_id: String,
@@ -413,25 +414,36 @@ pub(crate) fn worker_task_lease_expires_at(state: &AppState, now_ts: i64) -> i64
     now_ts.saturating_add(lease_seconds as i64)
 }
 
-pub(crate) fn is_task_still_running(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
+pub(crate) fn is_task_claim_active(
+    state: &AppState,
+    task_id: &str,
+    claim_attempt: i64,
+) -> anyhow::Result<bool> {
     let db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let status = db
+    let active = db
         .query_row(
-            "SELECT status FROM tasks WHERE task_id = ?1 LIMIT 1",
-            params![task_id],
-            |row| row.get::<_, String>(0),
+            "SELECT 1
+             FROM tasks
+             WHERE task_id = ?1
+               AND status = 'running'
+               AND lease_owner = ?2
+               AND claim_attempt = ?3
+             LIMIT 1",
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
+            |_| Ok(()),
         )
         .optional()?;
-    Ok(matches!(status.as_deref(), Some("running")))
+    Ok(active.is_some())
 }
 
-pub(crate) fn is_task_still_running_or_pending_ask_success_projection(
+pub(crate) fn is_task_claim_active_or_pending_ask_success_projection(
     state: &AppState,
     task_id: &str,
+    claim_attempt: i64,
 ) -> anyhow::Result<bool> {
     let db = state
         .core
@@ -440,14 +452,29 @@ pub(crate) fn is_task_still_running_or_pending_ask_success_projection(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let row = db
         .query_row(
-            "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            "SELECT status, result_json, lease_owner, COALESCE(claim_attempt, 0)
+             FROM tasks
+             WHERE task_id = ?1
+             LIMIT 1",
             params![task_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((status, result_json)) = row else {
+    let Some((status, result_json, lease_owner, active_claim_attempt)) = row else {
         return Ok(false);
     };
+    if lease_owner.as_deref() != Some(state.worker.worker_id.as_str())
+        || active_claim_attempt != claim_attempt
+    {
+        return Ok(false);
+    }
     if status == "running" {
         return Ok(true);
     }
@@ -876,7 +903,7 @@ pub(crate) fn list_due_paused_checkpoint_tasks_internal(
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
-        "SELECT task_id, result_json
+        "SELECT task_id, result_json, COALESCE(claim_attempt, 0)
          FROM tasks
          WHERE status = 'running'
            AND result_json IS NOT NULL
@@ -885,12 +912,16 @@ pub(crate) fn list_due_paused_checkpoint_tasks_internal(
                   task_id ASC",
     )?;
     let rows = stmt.query_map(params![now_ts], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (task_id, result_json) = row?;
+        let (task_id, result_json, claim_attempt) = row?;
         let Some(result_json) =
             result_json.and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
         else {
@@ -920,6 +951,7 @@ pub(crate) fn list_due_paused_checkpoint_tasks_internal(
         let resume_trigger =
             crate::task_lifecycle::checkpoint_resume_trigger(&result_json, &resume_entrypoint);
         out.push(DuePausedCheckpointTask {
+            claim_attempt,
             task_id,
             lifecycle_state: state,
             checkpoint_id,
@@ -1027,6 +1059,7 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
             "owner": state.worker.worker_id.clone(),
             "owner_layer": "worker_recovery",
             "checkpoint_id": ready_checkpoint_id.clone(),
+            "claim_attempt": claim_attempt,
             "claimed_at": now_ts,
             "expires_at": now_ts.saturating_add(lease_seconds),
         });
@@ -1084,6 +1117,7 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
         return Ok(None);
     }
     Ok(Some(DuePausedCheckpointTask {
+        claim_attempt,
         task_id: task_id.to_string(),
         lifecycle_state,
         checkpoint_id: ready_checkpoint_id,
@@ -1100,6 +1134,7 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
 
 pub(crate) fn record_paused_checkpoint_resume_work_item_internal(
     state: &AppState,
+    claim_attempt: i64,
     task_id: &str,
     checkpoint_id: &str,
     work_item_json: &Value,
@@ -1129,8 +1164,10 @@ pub(crate) fn record_paused_checkpoint_resume_work_item_internal(
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
+               AND claim_attempt = ?3
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?
@@ -1175,12 +1212,16 @@ pub(crate) fn record_paused_checkpoint_resume_work_item_internal(
              updated_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     Ok(changed > 0)
@@ -1188,6 +1229,7 @@ pub(crate) fn record_paused_checkpoint_resume_work_item_internal(
 
 pub(crate) fn record_paused_checkpoint_resume_executor_state_internal(
     state: &AppState,
+    claim_attempt: i64,
     task_id: &str,
     checkpoint_id: &str,
     executor_state: &str,
@@ -1226,8 +1268,10 @@ pub(crate) fn record_paused_checkpoint_resume_executor_state_internal(
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
+               AND claim_attempt = ?3
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?
@@ -1335,12 +1379,16 @@ pub(crate) fn record_paused_checkpoint_resume_executor_state_internal(
              updated_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     Ok(changed > 0)
@@ -1417,8 +1465,9 @@ pub(crate) fn claim_ready_paused_checkpoint_resume_executor_internal(
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str()],
             |row| {
                 Ok((
                     ClaimedTask {
@@ -1538,12 +1587,16 @@ pub(crate) fn claim_ready_paused_checkpoint_resume_executor_internal(
              updated_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            task.claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -1568,6 +1621,7 @@ pub(crate) fn claim_ready_paused_checkpoint_resume_executor_internal(
 
 pub(crate) fn record_paused_checkpoint_resume_execution_plan_internal(
     state: &AppState,
+    claim_attempt: i64,
     task_id: &str,
     checkpoint_id: &str,
     executor_state: &str,
@@ -1595,8 +1649,10 @@ pub(crate) fn record_paused_checkpoint_resume_execution_plan_internal(
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
+               AND claim_attempt = ?3
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?
@@ -1722,12 +1778,16 @@ pub(crate) fn record_paused_checkpoint_resume_execution_plan_internal(
              updated_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     Ok(changed > 0)

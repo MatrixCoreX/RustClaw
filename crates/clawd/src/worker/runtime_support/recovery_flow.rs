@@ -109,6 +109,7 @@ fn prepare_due_paused_checkpoint_resume_work(
                     let work_item_payload = work_item.to_machine_json();
                     match repo::record_paused_checkpoint_resume_work_item_internal(
                         state,
+                        claimed.claim_attempt,
                         &work_item.task_id,
                         &work_item.checkpoint_id,
                         &work_item_payload,
@@ -134,6 +135,7 @@ fn prepare_due_paused_checkpoint_resume_work(
                     );
                     match repo::record_paused_checkpoint_resume_executor_state_internal(
                         state,
+                        claimed.claim_attempt,
                         &work_item.task_id,
                         &work_item.checkpoint_id,
                         execution_decision.executor_state,
@@ -256,6 +258,7 @@ fn plan_ready_paused_checkpoint_resume_executors(
                     Some(plan) => {
                         match repo::record_paused_checkpoint_resume_execution_plan_internal(
                             state,
+                            claimed.task.claim_attempt,
                             &claimed.task_id,
                             &claimed.checkpoint_id,
                             &claimed.executor_state,
@@ -351,6 +354,7 @@ fn record_planned_paused_checkpoint_resume_handoffs(
         };
         match repo::record_planned_paused_checkpoint_resume_handoff_internal(
             state,
+            planned.task.claim_attempt,
             &planned.task_id,
             &planned.checkpoint_id,
             &planned.executor_state,
@@ -447,6 +451,7 @@ fn dispatch_handoff_paused_checkpoint_resume_executions(
                         );
                         match repo::record_claimed_handoff_paused_checkpoint_resume_dispatch_internal(
                             state,
+                            dispatch.task.claim_attempt,
                             &dispatch.task.task_id,
                             &dispatch.checkpoint_id,
                             &dispatch.executor_state,
@@ -759,6 +764,7 @@ fn project_recorded_paused_checkpoint_resume_dispatch_results(
                 {
                     match repo::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
                         state,
+                        claimed.task.claim_attempt,
                         &claimed.task_id,
                         &claimed.checkpoint_id,
                         &claimed.executor_state,

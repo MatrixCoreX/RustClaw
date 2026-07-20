@@ -140,12 +140,18 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         .get()
         .expect("task db")
         .execute(
-            "UPDATE tasks SET status = 'running' WHERE task_id = ?1",
-            rusqlite::params![task_id],
+            "UPDATE tasks
+             SET status = 'running',
+                 lease_owner = ?2,
+                 lease_expires_at = 9223372036854775807,
+                 claim_attempt = 1,
+                 claimed_at = 1
+             WHERE task_id = ?1",
+            rusqlite::params![task_id, state.worker.worker_id.as_str()],
         )
         .expect("mark fixture task running");
     let task = crate::ClaimedTask {
-        claim_attempt: 0,
+        claim_attempt: 1,
         task_id: task_id.clone(),
         user_id: 1,
         chat_id: 1,

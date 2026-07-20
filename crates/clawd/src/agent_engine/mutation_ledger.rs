@@ -26,15 +26,26 @@ pub(super) fn prepare_mutation_execution(
     let action_ref = mutation_action_ref(normalized_skill, args);
     match crate::repo::begin_task_mutation(
         &state.core.db,
+        &state.worker.worker_id,
+        task.claim_attempt,
         &task.task_id,
         action_fingerprint,
         &action_ref,
     )
     .map_err(|error| {
+        let claim_rejection = error.downcast_ref::<crate::repo::TaskMutationClaimRejected>();
+        let reason_code = claim_rejection
+            .map(|rejection| rejection.status_code)
+            .unwrap_or("mutation_ledger_unavailable");
+        let message_key = if claim_rejection.is_some() {
+            "clawd.task.worker_lease_lost"
+        } else {
+            "clawd.task.mutation_ledger_unavailable"
+        };
         json!({
-            "error_kind": "mutation_ledger_unavailable",
-            "reason_code": "mutation_ledger_unavailable",
-            "message_key": "clawd.task.mutation_ledger_unavailable",
+            "error_kind": reason_code,
+            "reason_code": reason_code,
+            "message_key": message_key,
             "owner_layer": "task_mutation_ledger",
             "action_ref": action_ref,
             "detail_code": crate::truncate_for_agent_trace(&error.to_string()),

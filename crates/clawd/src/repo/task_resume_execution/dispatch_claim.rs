@@ -156,8 +156,9 @@ pub(crate) fn claim_dispatched_paused_checkpoint_resume_execution_internal(
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str()],
             |row| {
                 Ok((
                     ClaimedTask {
@@ -278,12 +279,16 @@ pub(crate) fn claim_dispatched_paused_checkpoint_resume_execution_internal(
              updated_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            task.claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -313,6 +318,7 @@ pub(crate) fn claim_dispatched_paused_checkpoint_resume_execution_internal(
 
 pub(crate) fn record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
     state: &AppState,
+    claim_attempt: i64,
     task_id: &str,
     checkpoint_id: &str,
     executor_state: &str,
@@ -395,8 +401,10 @@ pub(crate) fn record_claimed_dispatched_paused_checkpoint_resume_execution_resul
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
+               AND claim_attempt = ?3
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?
@@ -487,12 +495,16 @@ pub(crate) fn record_claimed_dispatched_paused_checkpoint_resume_execution_resul
              updated_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     Ok(changed > 0)

@@ -148,6 +148,8 @@ CREATE TABLE IF NOT EXISTS task_mutation_ledger (
     action_ref         TEXT NOT NULL,
     status             TEXT NOT NULL CHECK (status IN ('started', 'completed', 'uncertain')),
     execution_token    TEXT NOT NULL,
+    lease_owner        TEXT NOT NULL,
+    claim_attempt      INTEGER NOT NULL,
     outcome_hash       TEXT,
     outcome_json       TEXT,
     started_at         INTEGER NOT NULL,

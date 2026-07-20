@@ -1,7 +1,10 @@
 use serde_json::json;
 use uuid::Uuid;
 
-use super::{get_task_query_record, update_task_timeout};
+use super::{
+    get_task_query_record, update_task_success, update_task_timeout, WorkerTaskWriteRejected,
+};
+use crate::repo::cancel_task_by_id;
 
 fn state_with_tasks_table() -> crate::AppState {
     let state = crate::AppState::test_default_with_fixture_provider();
@@ -183,4 +186,41 @@ fn update_task_timeout_preserves_recoverable_async_checkpoint() {
         stored["task_checkpoint"]["pending_async_job"]["job_id"],
         "local_process:async-timeout"
     );
+}
+
+#[test]
+fn cancellation_and_timeout_reject_late_worker_completion() {
+    let state = state_with_tasks_table();
+    let cancelled_task_id = Uuid::new_v4().to_string();
+    let timed_out_task_id = Uuid::new_v4().to_string();
+    insert_task(&state, &cancelled_task_id, "running", None, 1234);
+    insert_task(&state, &timed_out_task_id, "running", None, 1234);
+
+    assert_eq!(
+        cancel_task_by_id(&state, &cancelled_task_id).expect("cancel task"),
+        1
+    );
+    assert!(update_task_timeout(
+        &state,
+        &timed_out_task_id,
+        1,
+        "worker_task_timeout reason_code=tool_timeout_without_async_resume",
+    )
+    .expect("time out task"));
+
+    for (task_id, expected_status) in [
+        (&cancelled_task_id, "canceled"),
+        (&timed_out_task_id, "timeout"),
+    ] {
+        let terminal_result = stored_result_json(&state, task_id);
+        let error = update_task_success(&state, task_id, 1, r#"{"status":"late_worker_success"}"#)
+            .expect_err("late worker completion must be rejected");
+        let rejection = error
+            .downcast_ref::<WorkerTaskWriteRejected>()
+            .expect("typed worker write rejection");
+        assert_eq!(rejection.status_code, "worker_task_state_conflict");
+        assert_eq!(rejection.expected_claim_attempt, 1);
+        assert_eq!(stored_status(&state, task_id), expected_status);
+        assert_eq!(stored_result_json(&state, task_id), terminal_result);
+    }
 }

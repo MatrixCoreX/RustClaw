@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS task_mutation_ledger (
     action_ref         TEXT NOT NULL,
     status             TEXT NOT NULL CHECK (status IN ('started', 'completed', 'uncertain')),
     execution_token    TEXT NOT NULL,
+    lease_owner        TEXT NOT NULL,
+    claim_attempt      INTEGER NOT NULL,
     outcome_hash       TEXT,
     outcome_json       TEXT,
     started_at         INTEGER NOT NULL,
@@ -36,7 +38,41 @@ pub(crate) struct TaskMutationRecord {
 pub(crate) struct TaskMutationLease {
     pub(crate) record: TaskMutationRecord,
     pub(crate) execution_token: String,
+    pub(crate) lease_owner: String,
+    pub(crate) claim_attempt: i64,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskMutationClaimRejected {
+    pub(crate) status_code: &'static str,
+    pub(crate) task_id: String,
+    pub(crate) expected_lease_owner: String,
+    pub(crate) expected_claim_attempt: i64,
+    pub(crate) task_status: Option<String>,
+    pub(crate) active_lease_owner: Option<String>,
+    pub(crate) active_claim_attempt: Option<i64>,
+}
+
+impl std::fmt::Display for TaskMutationClaimRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "status_code={} task_id={} expected_lease_owner={} expected_claim_attempt={} task_status={} active_lease_owner={} active_claim_attempt={}",
+            self.status_code,
+            self.task_id,
+            self.expected_lease_owner,
+            self.expected_claim_attempt,
+            self.task_status.as_deref().unwrap_or("missing"),
+            self.active_lease_owner.as_deref().unwrap_or("none"),
+            self.active_claim_attempt
+                .map(|value| value.to_string())
+                .as_deref()
+                .unwrap_or("none")
+        )
+    }
+}
+
+impl std::error::Error for TaskMutationClaimRejected {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BeginTaskMutationOutcome {
@@ -47,11 +83,14 @@ pub(crate) enum BeginTaskMutationOutcome {
 
 pub(crate) fn begin_task_mutation(
     pool: &DbPool,
+    lease_owner: &str,
+    claim_attempt: i64,
     task_id: &str,
     action_fingerprint: &str,
     action_ref: &str,
 ) -> anyhow::Result<BeginTaskMutationOutcome> {
     let task_id = required_value(task_id, "task_id")?;
+    let lease_owner = required_value(lease_owner, "lease_owner")?;
     let action_fingerprint = required_value(action_fingerprint, "action_fingerprint")?;
     let action_ref = required_value(action_ref, "action_ref")?;
     let fingerprint_hash = sha256_hex(action_fingerprint.as_bytes());
@@ -60,12 +99,22 @@ pub(crate) fn begin_task_mutation(
     let mut db = pool.get().context("task mutation ledger db pool")?;
     ensure_task_mutation_ledger_schema(&db)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    require_active_task_claim(&tx, task_id, lease_owner, claim_attempt)?;
     let inserted = tx.execute(
         "INSERT OR IGNORE INTO task_mutation_ledger (
              task_id, fingerprint_hash, action_ref, status, execution_token,
-             outcome_hash, outcome_json, started_at, updated_at, completed_at
-         ) VALUES (?1, ?2, ?3, 'started', ?4, NULL, NULL, ?5, ?5, NULL)",
-        params![task_id, fingerprint_hash, action_ref, execution_token, now],
+             lease_owner, claim_attempt, outcome_hash, outcome_json,
+             started_at, updated_at, completed_at
+         ) VALUES (?1, ?2, ?3, 'started', ?4, ?5, ?6, NULL, NULL, ?7, ?7, NULL)",
+        params![
+            task_id,
+            fingerprint_hash,
+            action_ref,
+            execution_token,
+            lease_owner,
+            claim_attempt,
+            now
+        ],
     )?;
     let row = tx
         .query_row(
@@ -97,6 +146,8 @@ pub(crate) fn begin_task_mutation(
         return Ok(BeginTaskMutationOutcome::Acquired(TaskMutationLease {
             record,
             execution_token,
+            lease_owner: lease_owner.to_string(),
+            claim_attempt,
         }));
     }
     match row.1.as_str() {
@@ -118,9 +169,16 @@ pub(crate) fn complete_task_mutation(
         .map(serde_json::to_string)
         .transpose()
         .context("serialize task mutation outcome projection")?;
-    let db = pool.get().context("task mutation ledger db pool")?;
+    let mut db = pool.get().context("task mutation ledger db pool")?;
     ensure_task_mutation_ledger_schema(&db)?;
-    let changed = db.execute(
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    require_active_task_claim(
+        &tx,
+        &lease.record.task_id,
+        &lease.lease_owner,
+        lease.claim_attempt,
+    )?;
+    let changed = tx.execute(
         "UPDATE task_mutation_ledger
          SET status = 'completed',
              outcome_hash = ?4,
@@ -130,6 +188,8 @@ pub(crate) fn complete_task_mutation(
          WHERE task_id = ?1
            AND fingerprint_hash = ?2
            AND execution_token = ?3
+           AND lease_owner = ?7
+           AND claim_attempt = ?8
            AND status = 'started'",
         params![
             lease.record.task_id,
@@ -137,14 +197,18 @@ pub(crate) fn complete_task_mutation(
             lease.execution_token,
             outcome_hash,
             outcome_json,
-            now
+            now,
+            lease.lease_owner,
+            lease.claim_attempt
         ],
     )?;
     if changed == 1 {
+        tx.commit()?;
         return Ok(());
     }
-    let status = task_mutation_status(pool, lease)?;
+    let status = task_mutation_status(&tx, lease)?;
     if status.as_deref() == Some("completed") {
+        tx.commit()?;
         return Ok(());
     }
     Err(anyhow!("task mutation lease was not completable"))
@@ -155,46 +219,104 @@ pub(crate) fn mark_task_mutation_uncertain(
     lease: &TaskMutationLease,
 ) -> anyhow::Result<()> {
     let now = crate::now_ts_u64() as i64;
-    let db = pool.get().context("task mutation ledger db pool")?;
+    let mut db = pool.get().context("task mutation ledger db pool")?;
     ensure_task_mutation_ledger_schema(&db)?;
-    db.execute(
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    require_active_task_claim(
+        &tx,
+        &lease.record.task_id,
+        &lease.lease_owner,
+        lease.claim_attempt,
+    )?;
+    tx.execute(
         "UPDATE task_mutation_ledger
          SET status = 'uncertain',
              updated_at = ?4
          WHERE task_id = ?1
            AND fingerprint_hash = ?2
            AND execution_token = ?3
+           AND lease_owner = ?5
+           AND claim_attempt = ?6
            AND status = 'started'",
         params![
             lease.record.task_id,
             lease.record.fingerprint_hash,
             lease.execution_token,
-            now
+            now,
+            lease.lease_owner,
+            lease.claim_attempt
         ],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
 fn task_mutation_status(
-    pool: &DbPool,
+    db: &rusqlite::Connection,
     lease: &TaskMutationLease,
 ) -> anyhow::Result<Option<String>> {
-    let db = pool.get().context("task mutation ledger db pool")?;
     db.query_row(
         "SELECT status
          FROM task_mutation_ledger
          WHERE task_id = ?1
            AND fingerprint_hash = ?2
-           AND execution_token = ?3",
+           AND execution_token = ?3
+           AND lease_owner = ?4
+           AND claim_attempt = ?5",
         params![
             lease.record.task_id,
             lease.record.fingerprint_hash,
-            lease.execution_token
+            lease.execution_token,
+            lease.lease_owner,
+            lease.claim_attempt
         ],
         |row| row.get(0),
     )
     .optional()
     .map_err(Into::into)
+}
+
+fn require_active_task_claim(
+    db: &rusqlite::Connection,
+    task_id: &str,
+    expected_lease_owner: &str,
+    expected_claim_attempt: i64,
+) -> anyhow::Result<()> {
+    let row = db
+        .query_row(
+            "SELECT status, lease_owner, COALESCE(claim_attempt, 0)
+             FROM tasks
+             WHERE task_id = ?1
+             LIMIT 1",
+            params![task_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let (task_status, active_lease_owner, active_claim_attempt) = match row {
+        Some((status, owner, attempt)) => (Some(status), owner, Some(attempt)),
+        None => (None, None, None),
+    };
+    if task_status.as_deref() == Some("running")
+        && active_lease_owner.as_deref() == Some(expected_lease_owner)
+        && active_claim_attempt == Some(expected_claim_attempt)
+    {
+        return Ok(());
+    }
+    Err(anyhow::Error::new(TaskMutationClaimRejected {
+        status_code: crate::repo::WORKER_LEASE_LOST_STATUS_CODE,
+        task_id: task_id.to_string(),
+        expected_lease_owner: expected_lease_owner.to_string(),
+        expected_claim_attempt,
+        task_status,
+        active_lease_owner,
+        active_claim_attempt,
+    }))
 }
 
 fn required_value<'a>(value: &'a str, field: &str) -> anyhow::Result<&'a str> {
@@ -212,6 +334,18 @@ fn ensure_task_mutation_ledger_schema(db: &rusqlite::Connection) -> anyhow::Resu
         "task_mutation_ledger",
         "outcome_json",
         "ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "task_mutation_ledger",
+        "lease_owner",
+        "ALTER TABLE task_mutation_ledger ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "task_mutation_ledger",
+        "claim_attempt",
+        "ALTER TABLE task_mutation_ledger ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0",
     )
 }
 

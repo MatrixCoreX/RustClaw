@@ -25,6 +25,7 @@ use rusqlite::params;
 
 pub(super) fn test_state() -> AppState {
     let db_pool = crate::db_init::test_pool();
+    let worker = crate::WorkerConfig::test_default();
     {
         let db = db_pool.get().expect("get db conn");
         db.execute_batch(
@@ -33,13 +34,26 @@ pub(super) fn test_state() -> AppState {
                 task_id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
                 result_json TEXT,
-                updated_at INTEGER
+                updated_at INTEGER,
+                lease_owner TEXT,
+                lease_expires_at INTEGER NOT NULL DEFAULT 0,
+                claim_attempt INTEGER NOT NULL DEFAULT 0,
+                claimed_at INTEGER NOT NULL DEFAULT 0
             );
-            INSERT INTO tasks (task_id, status, result_json, updated_at)
-            VALUES ('task-skill-exec', 'running', NULL, 0);
             "#,
         )
         .expect("seed tasks");
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, status, result_json, updated_at, lease_owner,
+                lease_expires_at, claim_attempt, claimed_at
+             ) VALUES (
+                'task-skill-exec', 'running', NULL, 0, ?1,
+                9223372036854775807, 1, 0
+             )",
+            params![worker.worker_id.as_str()],
+        )
+        .expect("seed claimed task");
     }
     let agents_by_id = HashMap::from([(
         DEFAULT_AGENT_ID.to_string(),
@@ -64,7 +78,7 @@ pub(super) fn test_state() -> AppState {
             ..crate::SkillRuntime::test_default()
         },
         policy: crate::PolicyConfig::test_default(),
-        worker: crate::WorkerConfig::test_default(),
+        worker,
         metrics: crate::TaskMetricsRegistry::default(),
         channels: crate::ChannelConfig::default(),
         reload_ctx: crate::ReloadContext::default(),
@@ -83,7 +97,7 @@ fn default_action_policy_error(
 
 pub(super) fn test_task() -> ClaimedTask {
     ClaimedTask {
-        claim_attempt: 0,
+        claim_attempt: 1,
         task_id: "task-skill-exec".to_string(),
         user_id: 1,
         chat_id: 2,

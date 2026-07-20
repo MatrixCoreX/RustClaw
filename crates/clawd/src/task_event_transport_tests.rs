@@ -31,6 +31,86 @@ fn event_schema_is_ordered_deduplicated_and_replayable() {
 }
 
 #[test]
+fn claimed_event_rejects_stale_generation_from_same_worker() {
+    let state = state();
+    let task_id = "task-event-generation";
+    let db = state.core.db.get().expect("get db");
+    db.execute_batch(
+        "CREATE TABLE tasks (
+            task_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            user_key TEXT,
+            channel TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            lease_owner TEXT,
+            lease_expires_at INTEGER NOT NULL DEFAULT 0,
+            claim_attempt INTEGER NOT NULL DEFAULT 0,
+            claimed_at INTEGER NOT NULL DEFAULT 0
+        );",
+    )
+    .expect("create task table");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, created_at, updated_at, lease_owner, lease_expires_at,
+            claim_attempt, claimed_at
+         ) VALUES (
+            ?1, 42, 7, 'test-key', 'ui', 'ask', '{}', 'running',
+            '1', '1', ?2, 9223372036854775807, 1, 1
+         )",
+        rusqlite::params![task_id, state.worker.worker_id],
+    )
+    .expect("insert claimed task");
+    drop(db);
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: task_id.to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+
+    publish_claimed_event(&state, &task, "tool_started", json!({"step_id":"one"}))
+        .expect("publish active claim event");
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "UPDATE tasks SET claim_attempt = 2 WHERE task_id = ?1",
+        rusqlite::params![task_id],
+    )
+    .expect("advance task generation");
+    drop(db);
+
+    let error = publish_claimed_event(&state, &task, "tool_finished", json!({"step_id":"one"}))
+        .expect_err("stale generation event must be fenced");
+    let rejection = error
+        .downcast_ref::<crate::repo::WorkerTaskWriteRejected>()
+        .expect("typed worker event rejection");
+    assert_eq!(
+        rejection.status_code,
+        crate::repo::WORKER_LEASE_LOST_STATUS_CODE
+    );
+    assert_eq!(rejection.expected_claim_attempt, 1);
+    assert_eq!(rejection.active_claim_attempt, Some(2));
+    assert_eq!(
+        replay_events_after(&state, task_id, 0)
+            .unwrap()
+            .events
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn coding_projection_appends_a_new_authoritative_event_after_green_verification() {
     let state = state();
     let mut journal =

@@ -332,6 +332,7 @@ pub(crate) fn record_paused_checkpoint_resume_dispatch_result(
     let recorded =
         repo::record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
             state,
+            claimed.task.claim_attempt,
             &claimed.task_id,
             &claimed.checkpoint_id,
             &claimed.executor_state,
@@ -366,6 +367,7 @@ pub(crate) fn record_concrete_paused_checkpoint_resume_dispatch_result(
     let recorded =
         repo::record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
             state,
+            claimed.task.claim_attempt,
             &claimed.task_id,
             &claimed.checkpoint_id,
             &claimed.executor_state,

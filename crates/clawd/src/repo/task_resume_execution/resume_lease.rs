@@ -54,7 +54,7 @@ pub(crate) fn renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let task_row = db
         .query_row(
-            "SELECT result_json, lease_owner, lease_expires_at
+            "SELECT result_json, lease_owner, lease_expires_at, COALESCE(claim_attempt, 0)
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
@@ -65,14 +65,18 @@ pub(crate) fn renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
                 ))
             },
         )
         .optional()?;
-    let Some((Some(raw_result_json), lease_owner, task_lease_expires_at)) = task_row else {
+    let Some((Some(raw_result_json), lease_owner, task_lease_expires_at, active_claim_attempt)) =
+        task_row
+    else {
         return Ok(false);
     };
     if lease_owner.as_deref() != Some(state.worker.worker_id.as_str())
+        || active_claim_attempt != claimed.task.claim_attempt
         || task_lease_expires_at <= now_ts
     {
         return Ok(false);
@@ -121,14 +125,16 @@ pub(crate) fn renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_
            AND status = 'running'
            AND result_json = ?5
            AND lease_owner = ?6
-           AND lease_expires_at > ?3",
+           AND lease_expires_at > ?3
+           AND claim_attempt = ?7",
         params![
             claimed.task_id,
             updated_result_json,
             now_ts,
             expires_at,
             raw_result_json,
-            state.worker.worker_id
+            state.worker.worker_id,
+            claimed.task.claim_attempt
         ],
     )?;
     Ok(changed > 0)

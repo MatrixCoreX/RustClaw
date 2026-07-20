@@ -142,8 +142,9 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str()],
             |row| {
                 Ok((
                     ClaimedTask {
@@ -277,12 +278,16 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
              updated_at = ?3
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            task.claim_attempt
         ],
     )?;
     if changed == 0 {
@@ -309,6 +314,7 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
 
 pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
     state: &AppState,
+    claim_attempt: i64,
     task_id: &str,
     checkpoint_id: &str,
     executor_state: &str,
@@ -394,6 +400,7 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
     if terminal_dispatch_result_status(executor_action, executor_result_status) {
         return record_claimed_paused_checkpoint_resume_terminal_projection_internal(
             state,
+            claim_attempt,
             task_id,
             checkpoint_id,
             executor_state,
@@ -439,8 +446,10 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
+               AND claim_attempt = ?3
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?
@@ -564,8 +573,17 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
                  lease_expires_at = 0
              WHERE task_id = ?1
                AND status = 'running'
-               AND result_json = ?4",
-            params![task_id, updated_result_json, now_ts, raw_result_json],
+               AND result_json = ?4
+               AND lease_owner = ?5
+               AND claim_attempt = ?6",
+            params![
+                task_id,
+                updated_result_json,
+                now_ts,
+                raw_result_json,
+                state.worker.worker_id.as_str(),
+                claim_attempt
+            ],
         )?;
         return Ok(changed > 0);
     }
@@ -673,12 +691,16 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
              lease_expires_at = 0
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?4",
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
         params![
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     Ok(changed > 0)
@@ -716,6 +738,7 @@ fn deferred_seeded_loop_checkpoint_result(
 
 fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     state: &AppState,
+    claim_attempt: i64,
     task_id: &str,
     checkpoint_id: &str,
     executor_state: &str,
@@ -738,8 +761,10 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
+               AND lease_owner = ?2
+               AND claim_attempt = ?3
              LIMIT 1",
-            params![task_id],
+            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .optional()?
@@ -890,14 +915,18 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
              updated_at = ?5
          WHERE task_id = ?1
            AND status = 'running'
-           AND result_json = ?6",
+           AND result_json = ?6
+           AND lease_owner = ?7
+           AND claim_attempt = ?8",
         params![
             task_id,
             db_status,
             updated_result_json,
             error_text,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id.as_str(),
+            claim_attempt
         ],
     )?;
     Ok(changed > 0)

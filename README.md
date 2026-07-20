@@ -487,7 +487,7 @@ flowchart LR
 - Terminal async poll projection preserves an existing visible ask reply. If the ask task has only machine executor output, projection adds a machine JSON reply with `checkpoint_id`, `poll_ref`, `task_id`, and `final_result_json`.
 - Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
-- Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; current runtime uses `tasks.updated_at` plus checkpoint `resume_executor` machine fields, so new database lease columns are deferred until multi-worker claims require them.
+- Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; every foreground and resume-executor write is fenced by the exact task-row `(lease_owner, claim_attempt)`. Heartbeat only renews that claim, checkpoint recovery advances the generation, and stale workers cannot publish claimed process events or terminal results.
 
 ### Detailed Flow Diagrams
 
@@ -521,27 +521,29 @@ Task event stream projection flow:
 
 ```mermaid
 flowchart TD
-    A[TaskJournal] --> B[task_goal summary]
-    A --> C[context_bundle_summary]
+    A[TaskJournal] --> X{Exact worker claim<br/>lease_owner + claim_attempt}
+    X -->|stale| X1[Reject worker_lease_lost<br/>no claimed event append]
+    X -->|active| B[task_goal summary]
+    X -->|active| C[context_bundle_summary]
     C --> C1[context_budget event]
     C --> C2[context_compaction event]
-    A --> D[task_lifecycle + checkpoint]
+    X -->|active| D[task_lifecycle + checkpoint]
     D --> D1[task_lifecycle event]
     D --> D2[checkpoint_created event]
-    A --> E[ask transitions]
+    X -->|active| E[ask transitions]
     E --> E1[task_transition events]
-    A --> F[LLM prompt metrics]
+    X -->|active| F[LLM prompt metrics]
     F --> F1[provider_call events]
-    A --> G[step_results]
+    X -->|active| G[step_results]
     G --> G1[tool_started]
     G --> G2[tool_step]
     G --> G3[tool_finished]
     G --> G4[coding_checkpoint / coding_task_contract / coding_evidence]
-    A --> H[task_observations]
+    X -->|active| H[task_observations]
     H --> H1[agent_hook]
     H --> H2[subagent]
     H2 --> H3[agent_team_started / subagent_started / subagent_finished / subagent_failed / agent_team_aggregated]
-    A --> I[final status]
+    X -->|active| I[final status]
     I --> I1[task_final]
     B --> Z[event_stream]
     C1 --> Z

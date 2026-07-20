@@ -10,7 +10,7 @@ Both layers are structural protocol. Runtime recovery, cancellation, resume, and
 ## Current Model
 
 - `tasks.status` remains the coarse database state: `queued`, `running`, `succeeded`, `failed`, `canceled`, or `timeout`.
-- `tasks.lease_owner`, `tasks.lease_expires_at`, `tasks.claim_attempt`, and `tasks.claimed_at` are the task worker lease fields. They are set when a worker claims a queued task and refreshed while the task is running.
+- `tasks.lease_owner`, `tasks.lease_expires_at`, `tasks.claim_attempt`, and `tasks.claimed_at` are the task worker lease fields. A queued claim sets the owner and increments `claim_attempt`; heartbeat only renews the exact active owner/generation.
 - `tasks.updated_at` is still the coarse heartbeat and ordering timestamp. Query projection exposes it as `task_lifecycle.last_heartbeat_ts` for active states, but it is no longer the only lease signal.
 - `task_lifecycle.state` is the user/operator state projected by `crates/clawd/src/task_lifecycle.rs`: `queued`, `running`, `waiting`, `background`, `needs_user`, `succeeded`, `failed`, or `cancelled`.
 - Paused/background checkpoint recovery uses structured JSON fields in `result_json`, not natural-language text:
@@ -57,15 +57,18 @@ Both layers are structural protocol. Runtime recovery, cancellation, resume, and
 
 - `lease_owner = state.worker.worker_id`
 - `claimed_at = now`
-- `lease_expires_at = now + max(worker_task_heartbeat_seconds * 4, 60)`
+- `lease_expires_at = now + max(worker_task_heartbeat_seconds * 4, 300)`
 - `claim_attempt = claim_attempt + 1`
 
-`touch_running_task()` refreshes `updated_at`, `lease_owner`, and `lease_expires_at` while the worker still owns a running task. Query/list APIs project these fields into `task_lifecycle` so CLI/UI can display claim state and distinguish an active worker from stale work.
+`touch_running_task()` refreshes only `updated_at` and `lease_expires_at`, and only when both `lease_owner` and `claim_attempt` match the `ClaimedTask`. It never assigns or steals ownership. Progress, checkpoint, success, failure, timeout, mutation receipt, and claimed journal-event writes use the same exact claim fence. A rejected worker write returns a structured `worker_lease_lost` or task-state conflict instead of silently mutating the row.
+
+The generation is required even when the same worker id is reused. If recovery or takeover advances `claim_attempt`, work produced by an older generation cannot heartbeat, publish authoritative worker events, commit a side-effect receipt, or finalize the task.
 
 ### Checkpoint Resume-Executor Lease
 
 Checkpointed `waiting`, `background`, and `needs_user` work remains in `tasks.status = 'running'` and stores the recoverable state in `result_json`. When a checkpoint is due, the recovery path claims it through `task_lifecycle.resume_executor` and records a bounded claim:
 
+- `resume_claim.claim_attempt`
 - `executor_state`
 - `previous_executor_state`
 - `executor_state_at`
@@ -75,11 +78,12 @@ Checkpointed `waiting`, `background`, and `needs_user` work remains in `tasks.st
 - `resume_executor_claim.claimed_at`
 - `resume_executor_claim.expires_at`
 
-An active resume-executor lease blocks duplicate resume work until it expires. Expired claims become eligible for recovery from the checkpoint and completed side-effect ledger.
+An active resume-executor lease blocks duplicate resume work until it expires. Expired claims become eligible for recovery from the checkpoint and completed side-effect ledger. Claiming due checkpoint recovery increments the task-row `claim_attempt`. Every subsequent resume work-item, executor-plan, handoff, dispatch, execution result, result projection, and lease renewal carries that generation and requires the same task-row owner/generation.
 
 ## Recovery Rules
 
 - Ordinary stale `running` tasks can be marked `timeout` from machine timestamps and worker lease state.
+- Cancellation or terminal timeout wins over a late worker result. A terminal row cannot be overwritten by the former owner even if its process completes later.
 - `waiting`, `background`, and `needs_user` checkpoint states are preserved as `running` in the database so worker recovery can claim the checkpoint by `checkpoint_id`.
 - A resume executor claim is valid only while its `lease_expires_at` is active. Expired claims become eligible for recovery.
 - Direct `run_skill` async starts and planner-triggered async work both converge through `task_checkpoint.pending_async_job` and `resume_entrypoint = "poll_async_job"` when they need background polling.
