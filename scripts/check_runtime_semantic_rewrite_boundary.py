@@ -29,11 +29,6 @@ from runtime_semantic_rewrite_user_text_guards import (
     scan_config_change_preview_user_text_selection,
     scan_git_deterministic_user_text_action_selection,
     scan_runtime_surface_user_text_token_selection,
-    scan_service_status_identity_user_text_selection,
-    scan_service_status_process_user_text_selection,
-    scan_service_status_scalar_shape_health_selection,
-    scan_service_status_url_user_text_selection,
-    scan_service_status_workspace_product_text_selection,
     scan_sqlite_route_request_semantic_fallback,
     scan_task_control_legacy_token_fallback,
     scan_task_control_task_id_user_text_selection,
@@ -128,6 +123,9 @@ REMOVED_SEMANTIC_PRODUCTION_TOKENS: tuple[str, ...] = (
     "executable_contract_preserved_for_agent_loop",
     "is_normalizer_schema_capability_bridge",
     "is_registry_capability_bridge",
+    "service_status_deterministic_plan_result",
+    "service_status_requests_system_basic_identity",
+    "service_status_url_locator",
 )
 
 REMOVED_SEMANTIC_RESOURCE_TOKENS: tuple[tuple[Path, str], ...] = (
@@ -242,11 +240,6 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
     findings.extend(scan_git_deterministic_user_text_action_selection())
     findings.extend(scan_sqlite_route_request_semantic_fallback())
-    findings.extend(scan_service_status_identity_user_text_selection())
-    findings.extend(scan_service_status_process_user_text_selection())
-    findings.extend(scan_service_status_url_user_text_selection())
-    findings.extend(scan_service_status_workspace_product_text_selection())
-    findings.extend(scan_service_status_scalar_shape_health_selection())
     findings.extend(scan_task_control_task_id_user_text_selection())
     findings.extend(scan_task_control_legacy_token_fallback())
     findings.extend(scan_async_job_start_user_text_command_selection())

@@ -113,7 +113,7 @@ fn output_contract_semantic_methods_use_direct_contract() {
     assert!(contract.semantic_kind_is(crate::OutputSemanticKind::FilePaths));
     assert!(!contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::DirectoryNames,
-        crate::OutputSemanticKind::ServiceStatus,
+        crate::OutputSemanticKind::CommandOutputSummary,
     ]));
     assert!(!contract.semantic_kind_is_unclassified());
 }

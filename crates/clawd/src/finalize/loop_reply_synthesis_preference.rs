@@ -3,58 +3,6 @@ use tracing::info;
 use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
 use crate::ClaimedTask;
 
-pub(super) fn replace_delivery_with_service_status_observed_answer(
-    task: &ClaimedTask,
-    loop_state: &mut LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
-        return false;
-    };
-    let Some(answer) =
-        super::service_status::service_status_system_basic_info_answer(route, loop_state)
-    else {
-        return false;
-    };
-    if answer.trim().is_empty() {
-        return false;
-    }
-    let summary = crate::task_journal::TaskJournalFinalizerSummary {
-        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-        parsed: true,
-        contract_ok: true,
-        completion_ok: Some(true),
-        grounded_ok: Some(true),
-        format_ok: Some(true),
-        needs_clarify: Some(false),
-        used_evidence_ids_count: 1,
-        ..Default::default()
-    };
-    if loop_state
-        .delivery_messages
-        .last()
-        .is_some_and(|message| message.trim() == answer.trim())
-    {
-        loop_state.last_user_visible_respond = Some(answer);
-        *finalizer_summary = Some(summary);
-        return true;
-    }
-    loop_state.delivery_messages.clear();
-    loop_state.last_user_visible_respond = Some(answer.clone());
-    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-    *finalizer_summary = Some(summary);
-    super::delivery_record::log_deterministic_delivery_record(
-        &task.task_id,
-        "service_status_observed_fields",
-        "replaced",
-        agent_run_context,
-        loop_state.executed_step_results.len(),
-    );
-    true
-}
-
 pub(super) fn replace_raw_passthrough_delivery_with_publishable_synthesis(
     task: &ClaimedTask,
     loop_state: &mut LoopState,

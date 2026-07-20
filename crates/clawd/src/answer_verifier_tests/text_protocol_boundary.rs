@@ -56,33 +56,3 @@ fn verifier_scalar_observation_accepts_extra_machine_payload() {
         "{values:?}"
     );
 }
-
-#[test]
-fn verifier_health_check_ignores_json_hidden_in_visible_text() {
-    let output = json!({
-        "text": "{\"clawd_process_count\":1,\"clawd_health_port_open\":true}"
-    })
-    .to_string();
-
-    assert_eq!(health_check_value_from_output(&output), None);
-}
-
-#[test]
-fn verifier_health_check_accepts_extra_machine_payload() {
-    let output = json!({
-        "extra": {
-            "clawd_process_count": 1,
-            "clawd_health_port_open": true
-        },
-        "text": "display only"
-    })
-    .to_string();
-
-    let value = health_check_value_from_output(&output).expect("health payload");
-    assert_eq!(
-        value
-            .get("clawd_process_count")
-            .and_then(serde_json::Value::as_i64),
-        Some(1)
-    );
-}

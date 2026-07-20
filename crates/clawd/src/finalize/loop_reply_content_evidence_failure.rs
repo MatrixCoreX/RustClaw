@@ -9,10 +9,6 @@ use super::{
     route_requires_content_evidence, route_resolved_intent, truncate_with_ellipsis,
 };
 
-#[cfg(test)]
-#[path = "loop_reply_content_evidence_failure_tests.rs"]
-mod tests;
-
 fn error_looks_like_os_permission_denied(error: &str) -> bool {
     crate::skills::error_looks_like_os_permission_denied(error)
 }
@@ -22,110 +18,6 @@ fn error_looks_like_missing_file_or_directory(error: &str) -> bool {
         return structured.error_kind == "not_found";
     }
     error.trim().starts_with("__RC_READ_FILE_NOT_FOUND__:")
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ServiceStatusFailureObservation {
-    UnitNotFound,
-    Inactive,
-    Failed,
-}
-
-impl ServiceStatusFailureObservation {
-    fn status_code(self) -> &'static str {
-        match self {
-            Self::UnitNotFound => "service_unit_not_found",
-            Self::Inactive => "service_inactive",
-            Self::Failed => "service_failed",
-        }
-    }
-}
-
-fn route_is_service_status(agent_run_context: Option<&AgentRunContext>) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
-        return false;
-    };
-    crate::finalize::route_matches_service_control_machine_summary(route)
-}
-
-fn service_status_observation_from_error(error: &str) -> Option<ServiceStatusFailureObservation> {
-    if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
-        return match structured.error_kind.as_str() {
-            "not_found" => Some(ServiceStatusFailureObservation::UnitNotFound),
-            "service_inactive" => Some(ServiceStatusFailureObservation::Inactive),
-            "service_failed" | "service_control_failed" => {
-                Some(ServiceStatusFailureObservation::Failed)
-            }
-            _ => None,
-        };
-    }
-    None
-}
-
-fn extract_systemd_unit_from_error(error: &str) -> Option<String> {
-    let _ = error;
-    None
-}
-
-fn service_status_target_label(error: &str, agent_run_context: Option<&AgentRunContext>) -> String {
-    agent_run_context
-        .and_then(|ctx| ctx.output_contract())
-        .map(|route| route.locator_hint.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            crate::skills::parse_structured_skill_error(error)
-                .and_then(|structured| structured.service_name)
-        })
-        .or_else(|| extract_systemd_unit_from_error(error))
-        .unwrap_or_else(|| "requested service".to_string())
-}
-
-fn service_status_failure_answer(
-    _state: &AppState,
-    _user_text: &str,
-    error: &str,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<String> {
-    if !route_is_service_status(agent_run_context) {
-        return None;
-    }
-    let observation = service_status_observation_from_error(error)?;
-    let target = service_status_target_label(error, agent_run_context);
-    Some(service_status_failure_envelope(error, &target, observation))
-}
-
-fn service_status_failure_envelope(
-    error: &str,
-    target: &str,
-    observation: ServiceStatusFailureObservation,
-) -> String {
-    let structured = crate::skills::parse_structured_skill_error(error);
-    let mut envelope = serde_json::json!({
-        "message_key": "service.status.failure",
-        "status_code": observation.status_code(),
-        "error_kind": structured
-            .as_ref()
-            .map(|value| value.error_kind.as_str())
-            .unwrap_or(observation.status_code()),
-        "target": target,
-        "source": "service_control"
-    });
-    if let Some(manager_type) = structured
-        .as_ref()
-        .and_then(|value| value.manager_type.as_deref())
-    {
-        envelope["manager_type"] = serde_json::Value::String(manager_type.to_string());
-    }
-    if let Some(service_name) = structured
-        .as_ref()
-        .and_then(|value| value.service_name.as_deref())
-    {
-        envelope["service_name"] = serde_json::Value::String(service_name.to_string());
-    }
-    serde_json::to_string(&envelope).unwrap_or_else(|_| {
-        "message_key=service.status.failure status_code=service_status_failure".to_string()
-    })
 }
 
 fn crypto_account_access_failure_answer(
@@ -430,25 +322,6 @@ pub(super) async fn content_evidence_step_failure_answer(
             raw_error.to_string()
         };
     let error = error_observation.as_str();
-
-    if let Some(answer) =
-        service_status_failure_answer(state, user_text, raw_error, agent_run_context)
-    {
-        return Some((
-            answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: 1,
-                ..Default::default()
-            },
-        ));
-    }
 
     if let Some(answer) = crypto_account_access_failure_answer(
         state,

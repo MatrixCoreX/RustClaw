@@ -499,27 +499,6 @@ fn command_output_summary_allows_structured_config_field_observation() {
 }
 
 #[test]
-fn service_status_allows_task_control_list_observation() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ServiceStatus,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::None,
-            ..IntentOutputContract::default()
-        }),
-        "task_control",
-        &serde_json::json!({
-            "action": "list",
-        }),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "task_control.list");
-    assert_eq!(policy.contract_match, "service_status");
-}
-
-#[test]
 fn command_output_summary_allows_task_control_get_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -863,7 +842,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 57);
+    let cases = generated_contract_cases(&matrix, 54);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

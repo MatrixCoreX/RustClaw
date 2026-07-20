@@ -554,7 +554,7 @@ pub(super) fn structured_observed_body(skill: &str, body: &str) -> Option<String
             }
         }
         "config_basic" => validate_structured_observed_candidate(&value),
-        "service_control" => service_control_summary_candidate(&value),
+        "service_control" => None,
         "fs_search" | "fs_basic" => {
             if skill == "fs_basic" {
                 match value.get("action").and_then(|v| v.as_str()) {

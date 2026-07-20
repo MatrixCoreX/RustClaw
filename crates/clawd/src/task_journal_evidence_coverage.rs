@@ -461,15 +461,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if (output_contract.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
-        || output_contract_has_service_status_answer_shape(output_contract))
-        && (observed_canonical.contains("status")
-            || observed_canonical.contains("command_output")
-            || observed_canonical.contains("content_excerpt")
-            || observed_fields.contains("text_excerpt"))
-    {
-        observed_canonical.insert("field_value".to_string());
-    }
     if output_contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
@@ -496,24 +487,6 @@ fn current_workspace_inventory_fields_present(
             || observed_field_present(observed_fields, "counts")
             || observed_field_with_prefix(observed_fields, "counts.")
             || observed_field_with_prefix(observed_fields, "extra.counts."))
-}
-
-fn output_contract_final_answer_shape(
-    output_contract: &crate::IntentOutputContract,
-) -> Option<crate::evidence_policy::FinalAnswerShape> {
-    crate::evidence_policy::final_answer_shape_for_output_contract(output_contract)
-}
-
-fn output_contract_has_service_status_answer_shape(
-    output_contract: &crate::IntentOutputContract,
-) -> bool {
-    matches!(
-        output_contract_final_answer_shape(output_contract),
-        Some(
-            crate::evidence_policy::FinalAnswerShape::LifecycleResult
-                | crate::evidence_policy::FinalAnswerShape::StatusWithSource
-        )
-    )
 }
 
 pub(super) fn http_response_body_fields_present(observed_fields: &BTreeSet<String>) -> bool {

@@ -150,13 +150,13 @@ fn selected_keys_array_counts_as_generic_selector_evidence() {
 }
 
 #[test]
-fn command_not_found_text_counts_as_service_status_evidence() {
+fn command_not_found_text_counts_as_generic_command_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-command-not-found",
         "ask",
         "Check service availability",
     );
-    let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+    let route = route_for_semantic(crate::OutputSemanticKind::None);
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -170,10 +170,7 @@ fn command_not_found_text_counts_as_service_status_evidence() {
 
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(
-        coverage.observed_canonical.contains("field_value"),
-        "coverage: {coverage:?}"
-    );
+    assert!(coverage.observed_canonical.contains("command_output"));
 }
 
 #[test]
@@ -1002,10 +999,10 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
 }
 
 #[test]
-fn service_status_health_check_fields_count_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-service-status", "ask", "检查 clawd 服务状态");
+fn health_check_fields_count_as_generic_field_value_evidence() {
+    let mut journal = TaskJournal::for_task("task-health-fields", "ask", "inspect runtime health");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ServiceStatus,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::None,
         ..Default::default()
     };
@@ -1026,9 +1023,9 @@ fn service_status_health_check_fields_count_as_field_value_evidence() {
 }
 
 #[test]
-fn service_status_wrapped_system_basic_info_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-service-status-info", "ask", "show status");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+fn wrapped_system_basic_info_counts_as_generic_field_value_evidence() {
+    let mut journal = TaskJournal::for_task("task-system-info", "ask", "show runtime information");
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1114,10 +1111,10 @@ fn doc_parse_metadata_path_counts_as_required_path_before_truncation() {
 }
 
 #[test]
-fn service_status_run_cmd_output_counts_as_field_value_evidence() {
+fn run_cmd_process_output_counts_as_generic_command_evidence() {
     let mut journal =
-        TaskJournal::for_task("task-service-status-run-cmd", "ask", "检查 clawd 服务状态");
-    let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+        TaskJournal::for_task("task-process-run-cmd", "ask", "inspect the running process");
+    let route = route_for_semantic(crate::OutputSemanticKind::None);
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1134,18 +1131,14 @@ fn service_status_run_cmd_output_counts_as_field_value_evidence() {
 
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("command_output"));
 }
 
 #[test]
-fn service_status_http_basic_text_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-service-status-http-basic",
-        "ask",
-        "检查本地 health 接口",
-    );
-    let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+fn http_basic_text_counts_as_generic_field_value_evidence() {
+    let mut journal =
+        TaskJournal::for_task("task-http-basic-fields", "ask", "检查本地 health 接口");
+    let route = route_for_semantic(crate::OutputSemanticKind::None);
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1164,13 +1157,13 @@ fn service_status_http_basic_text_counts_as_field_value_evidence() {
 }
 
 #[test]
-fn service_status_http_basic_json_wrapper_extracts_embedded_body_status_fields() {
+fn http_basic_json_wrapper_extracts_embedded_body_status_fields() {
     let mut journal = TaskJournal::for_task(
-        "task-service-status-http-basic-json",
+        "task-http-basic-json",
         "ask",
         "observe local health endpoint",
     );
-    let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+    let route = route_for_semantic(crate::OutputSemanticKind::None);
     journal.record_output_contract(&route.clone());
     let body = json!({
         "ok": true,

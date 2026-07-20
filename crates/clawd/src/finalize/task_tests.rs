@@ -1469,62 +1469,6 @@ fn resume_failure_unbound_path_lookup_does_not_reclassify_delivery() {
 }
 
 #[test]
-fn resume_failure_structured_service_status_is_success_result() {
-    let mut route = crate::IntentOutputContract::default();
-    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    let resume_ctx = json!({
-        "failed_step": {
-            "action": "skill(service_control)",
-            "error": "no matching service found for the given target",
-            "structured_error": {
-                "skill": "service_control",
-                "error_kind": "not_found",
-                "error_text": "no matching service found for the given target",
-                "service_name": "definitely_missing_rustclaw_demo",
-                "platform": "linux",
-                "manager_type": "unknown"
-            }
-        },
-        "remaining_actions": []
-    });
-
-    assert!(super::resume_failure_is_structured_service_status_result(
-        &route,
-        &resume_ctx
-    ));
-
-    let messages = super::resume_context_execution_summary_messages(&resume_ctx, false);
-    assert_eq!(messages.len(), 1);
-    let summary: serde_json::Value = serde_json::from_str(&messages[0]).unwrap();
-    assert_eq!(
-        summary
-            .pointer("/message_key")
-            .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.execution.summary")
-    );
-    assert_eq!(
-        summary
-            .pointer("/reason_code")
-            .and_then(serde_json::Value::as_str),
-        Some("resume_failed_step_summary")
-    );
-    assert_eq!(
-        summary
-            .pointer("/skill")
-            .and_then(serde_json::Value::as_str),
-        Some("service_control")
-    );
-    assert_eq!(
-        summary
-            .pointer("/error_kind")
-            .and_then(serde_json::Value::as_str),
-        Some("not_found")
-    );
-    assert!(summary.pointer("/error").is_none());
-    assert!(!messages[0].contains("__RC_SKILL_ERROR__"));
-}
-
-#[test]
 fn resume_failure_execution_failed_step_is_success_answer_with_remaining_actions() {
     let mut route = crate::IntentOutputContract::default();
     route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;

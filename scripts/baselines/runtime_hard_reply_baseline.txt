@@ -346,7 +346,6 @@ crates/clawd/src/finalize/loop_reply_missing_delivery.rs	no publishable final an
 crates/clawd/src/finalize/loop_reply_missing_delivery.rs	no publishable final answer was produced; {}	"no publishable final answer was produced; {}",
 crates/clawd/src/finalize/loop_reply_route_helpers.rs	clarify_case: {clarify_case}	format!("clarify_case: {clarify_case}"),
 crates/clawd/src/finalize/task.rs	上一次状态	// from = None 因为 dispatch 内部各分支态没向调用面回传"上一次状态"；
-crates/clawd/src/finalize/task_machine_kv_summary.rs	Return target, status, manager_type.	"Return target, status, manager_type.",
 crates/clawd/src/finalize/task_terminal_clarify.rs	Which file do you want me to read?	args: json!({"content": "Which file do you want me to read?"}),
 crates/clawd/src/finalize/task_terminal_clarify.rs	Which file do you want me to read?	let mut answer_text = "Which file do you want me to read?".to_string();
 crates/clawd/src/fixture_replay_e2e.rs	acquire main-db conn for mark_running: {e}	.map_err(|e| format!("acquire main-db conn for mark_running: {e}"))?

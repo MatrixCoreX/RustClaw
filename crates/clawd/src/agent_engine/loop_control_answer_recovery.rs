@@ -1,7 +1,5 @@
 use super::*;
 
-#[path = "loop_control_answer_recovery/http_health.rs"]
-mod http_health;
 #[path = "loop_control_answer_recovery/observed_rewrite.rs"]
 mod observed_rewrite;
 #[path = "loop_control_answer_recovery/structured_evidence_table.rs"]
@@ -11,7 +9,6 @@ mod structured_listing;
 #[path = "loop_control_answer_recovery/terminal_format.rs"]
 mod terminal_format;
 
-pub(super) use http_health::try_recover_http_health_answer_verifier_gap;
 #[cfg(test)]
 pub(super) use observed_rewrite::{
     answer_verifier_gap_fields_are_observed, answer_verifier_gap_has_observed_content_evidence,

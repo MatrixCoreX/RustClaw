@@ -59,20 +59,6 @@ pub(crate) fn should_attempt_observed_fallback(
     has_tool_or_skill_output || has_recoverable_failure_context
 }
 
-pub(crate) fn route_matches_service_status_output_contract(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
-        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
-            == Some(crate::evidence_policy::FinalAnswerShape::StatusWithSource)
-}
-
-pub(crate) fn route_matches_service_control_machine_summary(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
-}
-
 pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::IntentOutputContract) -> bool {
     crate::evidence_policy::final_answer_shape_for_output_contract(route)
         == Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
@@ -618,22 +604,6 @@ pub(crate) fn observed_read_path_matches_request(
 mod tests {
     fn unclassified_output_contract() -> crate::IntentOutputContract {
         crate::IntentOutputContract::default()
-    }
-
-    #[test]
-    fn service_status_output_contract_uses_status_shape_for_system_health_check() {
-        let mut contract = crate::IntentOutputContract::default();
-        contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-        let route = contract;
-
-        assert!(super::route_matches_service_status_output_contract(&route));
-    }
-
-    #[test]
-    fn service_status_output_contract_does_not_match_unclassified_contract() {
-        let route = unclassified_output_contract();
-
-        assert!(!super::route_matches_service_status_output_contract(&route));
     }
 
     #[test]

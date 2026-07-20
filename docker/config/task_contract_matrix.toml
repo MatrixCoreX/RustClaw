@@ -137,18 +137,6 @@ failure_policy = "retry_with_alternatives"
 [contracts.command_output_summary.evidence_expression]
 any_of = ["command_output", "field_value", "content_excerpt", "count", "exists", "path"]
 
-[contracts.service_status]
-semantic_kind = "service_status"
-operation = "inspect"
-target_object = "service"
-delivery_shape = "summary"
-allowed_actions = ["health_check", "process_basic", "http_basic", "service_control", "system_basic.info", "system_basic.runtime_status", "task_control.list", "task_control.list_with_first_detail", "task_control.get", "package_manager.detect", "docker_basic", "run_cmd"]
-preferred_actions = ["service_control", "health_check", "process_basic", "http_basic", "system_basic.info", "task_control.list", "task_control.list_with_first_detail", "task_control.get", "package_manager.detect", "docker_basic"]
-forbidden_actions = []
-required_evidence = ["field_value"]
-final_answer_shape = "status_with_source"
-failure_policy = "retry_with_alternatives"
-
 [contracts.file_names]
 semantic_kind = "file_names"
 operation = "list"

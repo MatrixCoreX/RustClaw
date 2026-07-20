@@ -11,7 +11,7 @@ fn unclassified_service_evidence_contract() -> crate::IntentOutputContract {
 }
 
 #[test]
-fn service_status_capability_refs_complete_field_value_evidence_without_semantic_kind() {
+fn service_capability_refs_complete_machine_field_evidence_without_semantic_kind() {
     for capability_ref in [
         "capability_ref=service.status",
         "capability_ref=service_control.status",
@@ -24,7 +24,7 @@ fn service_status_capability_refs_complete_field_value_evidence_without_semantic
         journal.push_task_observation(json!({
             "observed_evidence": {
                 "extractor": {
-                    "extractor_ref": "service_status.machine_status_v1"
+                    "extractor_ref": "capability_result.machine_field_v1"
                 },
                 "items": [
                     {

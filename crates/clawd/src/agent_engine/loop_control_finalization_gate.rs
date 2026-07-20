@@ -171,12 +171,6 @@ pub(super) async fn attach_answer_verifier_if_missing(
     if journal.answer_verifier_summary.is_some() {
         return;
     }
-    if let Some(answer_verifier) =
-        machine_status_visible_output_format_gap(answer_contract, journal, &reply.text)
-    {
-        journal.record_answer_verifier_summary(answer_verifier);
-        return;
-    }
     if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
         state,
         task,

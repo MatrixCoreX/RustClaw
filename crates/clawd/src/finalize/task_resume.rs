@@ -620,27 +620,6 @@ fn resume_context_structured_skill_error_from_value(
     })
 }
 
-fn structured_service_status_error_is_answerable(
-    error: &crate::skills::StructuredSkillError,
-) -> bool {
-    error.skill == "service_control"
-        && matches!(
-            error.error_kind.as_str(),
-            "not_found" | "service_inactive" | "service_failed" | "service_control_failed"
-        )
-}
-
-pub(super) fn resume_failure_is_structured_service_status_result(
-    route_result: &crate::IntentOutputContract,
-    resume_ctx: &Value,
-) -> bool {
-    crate::finalize::route_matches_service_control_machine_summary(route_result)
-        && !resume_context_has_remaining_actions(resume_ctx)
-        && resume_context_failed_structured_skill_error(resume_ctx)
-            .as_ref()
-            .is_some_and(structured_service_status_error_is_answerable)
-}
-
 fn resume_context_extra_string<'a>(
     error: &'a crate::skills::StructuredSkillError,
     key: &str,

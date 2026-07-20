@@ -166,52 +166,6 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
-    let answer_is_service_status_selector =
-        service_status_selector_only_summary(agent_run_context, &answer);
-    let current_is_service_status_selector =
-        service_status_selector_only_summary(agent_run_context, &current);
-    if answer_is_service_status_selector || current_is_service_status_selector {
-        if let Some(restored) =
-            latest_publishable_service_status_terminal_delivery(loop_state, agent_run_context)
-        {
-            delivery_messages.clear();
-            delivery_messages.push(restored.clone());
-            loop_state.delivery_messages.clear();
-            append_delivery_message(
-                &task.task_id,
-                &mut loop_state.delivery_messages,
-                restored.clone(),
-            );
-            loop_state.last_user_visible_respond = Some(restored);
-            *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                parsed: true,
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: loop_state.executed_step_results.len(),
-                ..Default::default()
-            });
-            log_deterministic_delivery_record(
-                &task.task_id,
-                if answer_is_service_status_selector {
-                    "requested_machine_kv_summary_service_status_terminal_delivery"
-                } else {
-                    "requested_machine_kv_summary_service_status_current_selector_terminal_delivery"
-                },
-                "restored",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-            return true;
-        }
-        if answer_is_service_status_selector {
-            return false;
-        }
-    }
     if let Some(restored) =
         path_fact_delivery::latest_path_batch_fact_delivery_for_requested_summary(
             loop_state,
@@ -338,10 +292,6 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         );
         return true;
     }
-    if service_status_one_sentence_delivery_should_be_preserved(agent_run_context, &current) {
-        loop_state.last_user_visible_respond = Some(current);
-        return false;
-    }
     if delivery_contains_agent_loop_control_envelope(loop_state, delivery_messages) {
         loop_state.last_user_visible_respond = Some(current);
         return false;
@@ -352,16 +302,12 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
-    if current_delivery_satisfies_service_status_selector(agent_run_context, &current)
+    if current_delivery_satisfies_explicit_selector(agent_run_context, &current)
         || current_delivery_is_execution_recipe_closeout(&current)
         || current_delivery_is_structured_json_answer(&current)
         || current_delivery_is_generated_file_report_machine_projection(&current)
         || current_delivery_is_async_adapter_machine_projection(&current)
     {
-        loop_state.last_user_visible_respond = Some(current);
-        return false;
-    }
-    if current_delivery_is_service_control_observed_field_projection(&current) {
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
@@ -603,37 +549,13 @@ fn looks_like_markdown_table_separator(line: &str) -> bool {
         .all(|cell| cell.trim().chars().all(|ch| matches!(ch, '-' | ':' | ' ')))
 }
 
-fn service_status_one_sentence_delivery_should_be_preserved(
+fn current_delivery_satisfies_explicit_selector(
     agent_run_context: Option<&AgentRunContext>,
     current: &str,
 ) -> bool {
     let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if !route_is_service_status_contract(route)
-        || route.response_shape != crate::OutputResponseShape::OneSentence
-    {
-        return false;
-    }
-    let current = current.trim();
-    !current.is_empty()
-        && !service_status_selector_only_summary(agent_run_context, current)
-        && !current.starts_with('{')
-        && !current.starts_with('[')
-        && !current.contains('\n')
-        && !current.contains('=')
-}
-
-fn current_delivery_satisfies_service_status_selector(
-    agent_run_context: Option<&AgentRunContext>,
-    current: &str,
-) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
-        return false;
-    };
-    if !route_is_service_status_contract(route) {
-        return false;
-    }
     let Some(selector) = route
         .selection
         .structured_field_selector
@@ -1030,88 +952,6 @@ fn requested_machine_summary_should_override_scalar(
     )
 }
 
-fn service_status_selector_only_summary(
-    agent_run_context: Option<&AgentRunContext>,
-    current: &str,
-) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
-        return false;
-    };
-    if !route_is_service_status_contract(route) {
-        return false;
-    }
-    let Some(selector) = route
-        .selection
-        .structured_field_selector
-        .as_deref()
-        .map(str::trim)
-        .filter(|selector| !selector.is_empty())
-    else {
-        return false;
-    };
-    current.trim() == selector
-}
-
-fn latest_publishable_service_status_terminal_delivery(
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
-    if !route_is_service_status_contract(route) {
-        return None;
-    }
-    loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .filter(|step| {
-            step.is_ok() && matches!(step.skill.as_str(), "respond" | "synthesize_answer")
-        })
-        .filter_map(|step| step.output.as_deref())
-        .find_map(|candidate| publishable_service_status_terminal_delivery(route, candidate))
-        .or_else(|| {
-            loop_state
-                .last_user_visible_respond
-                .as_deref()
-                .and_then(|candidate| {
-                    publishable_service_status_terminal_delivery(route, candidate)
-                })
-        })
-        .or_else(|| {
-            loop_state
-                .last_publishable_synthesis_output
-                .as_deref()
-                .and_then(|candidate| {
-                    publishable_service_status_terminal_delivery(route, candidate)
-                })
-        })
-}
-
-fn route_is_service_status_contract(route: &crate::IntentOutputContract) -> bool {
-    crate::finalize::route_matches_service_status_output_contract(route)
-}
-
-fn publishable_service_status_terminal_delivery(
-    route: &crate::IntentOutputContract,
-    candidate: &str,
-) -> Option<String> {
-    let candidate = candidate.trim();
-    if candidate.is_empty()
-        || candidate.starts_with('{')
-        || candidate.starts_with('[')
-        || route
-            .selection
-            .structured_field_selector
-            .as_deref()
-            .map(str::trim)
-            .filter(|selector| !selector.is_empty())
-            .is_some_and(|selector| candidate == selector)
-    {
-        return None;
-    }
-    Some(candidate.to_string())
-}
-
 fn current_delivery_is_richer_than_requested_machine_summary(
     agent_run_context: Option<&AgentRunContext>,
     current: &str,
@@ -1146,28 +986,6 @@ fn current_delivery_is_richer_than_requested_machine_summary(
         return false;
     }
     machine_kv_units_strictly_extend(current, requested_summary)
-}
-
-fn current_delivery_is_service_control_observed_field_projection(current: &str) -> bool {
-    let units = machine_kv_units(current);
-    if units.is_empty()
-        || !units
-            .iter()
-            .any(|unit| unit.as_str() == "source=service_control")
-    {
-        return false;
-    }
-    let has_key = |key: &str| {
-        units.iter().any(|unit| {
-            unit.split_once('=')
-                .is_some_and(|(unit_key, _)| unit_key == key)
-        })
-    };
-    has_key("target")
-        && has_key("service_name")
-        && has_key("status")
-        && has_key("verified")
-        && (has_key("post_state") || has_key("pre_state"))
 }
 
 fn marker_only_requested_summary(summary: &str) -> bool {

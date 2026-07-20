@@ -660,7 +660,7 @@ fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ServiceStatus,
+        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Strict,
         ..crate::IntentOutputContract::default()

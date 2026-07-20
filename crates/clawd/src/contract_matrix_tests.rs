@@ -106,21 +106,6 @@ fn content_excerpt_summary_allows_runtime_equivalent_config_guard() {
 }
 
 #[test]
-fn service_status_allows_http_basic_observation() {
-    let matrix = load_workspace_matrix();
-    let contract = matrix
-        .semantic_contract(OutputSemanticKind::ServiceStatus)
-        .expect("service status contract");
-    let matched = MatchedContract::Semantic(contract);
-    let action_ref = ActionRef::parse("http_basic.get").expect("action parses");
-
-    assert_eq!(
-        matched.action_policy(&action_ref),
-        ActionPolicyDecision::Allowed
-    );
-}
-
-#[test]
 fn execution_failed_step_contract_accepts_command_output_evidence() {
     let matrix = load_workspace_matrix();
     let contract = matrix
@@ -136,21 +121,6 @@ fn execution_failed_step_contract_accepts_command_output_evidence() {
             "missing {token} in {evidence_expression:?}"
         );
     }
-}
-
-#[test]
-fn service_status_allows_system_basic_info_observation() {
-    let matrix = load_workspace_matrix();
-    let contract = matrix
-        .semantic_contract(OutputSemanticKind::ServiceStatus)
-        .expect("service status contract");
-    let matched = MatchedContract::Semantic(contract);
-    let action_ref = ActionRef::parse("system_basic.info").expect("action parses");
-
-    assert_eq!(
-        matched.action_policy(&action_ref),
-        ActionPolicyDecision::Allowed
-    );
 }
 
 fn load_registry_from_text(raw: &str) -> SkillsRegistry {

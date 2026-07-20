@@ -1,6 +1,5 @@
 use serde_json::json;
 
-use super::health_check_value_from_output;
 use super::{
     local_compound_listing_answer_verifier_gap, local_missing_evidence_verifier_gap,
     local_missing_evidence_verifier_gap_for_answer, observed_scalar_values_from_evidence_map,
@@ -901,78 +900,6 @@ fn structural_satisfaction_does_not_skip_missing_contract_evidence() {
 }
 
 #[test]
-fn structural_satisfaction_skips_verifier_for_health_check_diagnostic_fields() {
-    let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.requires_content_evidence = true;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-health-check-structural",
-        "ask",
-        "health check",
-    );
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "health_check".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "clawd_process_count": 1,
-                    "clawd_health_port_open": true,
-                    "telegramd_process_count": 0,
-                    "clawd_log": {"exists": true, "keyword_error_count": 43},
-                    "telegramd_log": {"exists": true, "keyword_error_count": 1},
-                    "system_health": {
-                        "os_family": "linux",
-                        "service_manager": "systemd",
-                        "cpu_count": 8,
-                        "load_avg_1m": 7.65,
-                        "load_avg_5m": 6.1,
-                        "load_avg_15m": 3.37,
-                        "memory_available_bytes": 8403259392u64,
-                        "memory_total_bytes": 15937286144u64,
-                        "disk_root_available_bytes": 14794739712u64,
-                        "disk_root_total_bytes": 156546629632u64,
-                        "warnings": ["disk_root_low"]
-                    }
-                },
-                "text": "{}"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    let answer = concat!(
-        "health_check.summary: clawd.status=running; clawd_process_count=1; ",
-        "clawd_health_port_open=true; telegramd_process_count=0; ",
-        "clawd_log.exists=true; clawd_log.keyword_error_count=43; ",
-        "telegramd_log.exists=true; telegramd_log.keyword_error_count=1; ",
-        "system_health.os_family=linux; system_health.service_manager=systemd; ",
-        "system_health.cpu_count=8; system_health.load_avg_1m=7.65; ",
-        "system_health.load_avg_5m=6.1; system_health.load_avg_15m=3.37; ",
-        "system_health.memory_available_bytes=8403259392; ",
-        "system_health.memory_total_bytes=15937286144; ",
-        "system_health.disk_root_available_bytes=14794739712; ",
-        "system_health.disk_root_total_bytes=156546629632; ",
-        "system_health.warnings=disk_root_low."
-    );
-
-    assert!(structurally_satisfies_answer_contract(
-        &route, &journal, answer
-    ));
-    assert!(structural_satisfaction_can_skip_verifier(
-        &route, &journal, answer
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "health_check.summary: clawd.status=running; clawd_process_count=1."
-    ));
-}
-
-#[test]
 fn structural_satisfaction_skips_verifier_for_deterministic_finalizer_summary() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = true;
@@ -1028,9 +955,6 @@ mod matrix_shape_contracts;
 
 #[path = "answer_verifier_tests/matrix_grounding.rs"]
 mod matrix_grounding;
-
-#[path = "answer_verifier_tests/service_control_capability_grounding.rs"]
-mod service_control_capability_grounding;
 
 #[path = "answer_verifier_tests/scalar_capability_shape.rs"]
 mod scalar_capability_shape;

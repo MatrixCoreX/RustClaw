@@ -217,7 +217,7 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_status_answer() {
     ));
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Free;
-    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

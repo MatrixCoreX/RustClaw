@@ -559,35 +559,6 @@ fn trace_json_reports_missing_evidence_expression_alternative() {
 }
 
 #[test]
-fn non_content_route_ignores_doc_parse_observation_as_structured_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-non-content-doc-parse-evidence",
-        "ask",
-        "service status",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    route.requires_content_evidence = false;
-    journal.record_output_contract(&route.clone());
-    journal.step_results.push(TaskJournalStepTrace::ok(
-        "step_parse",
-        "doc_parse",
-        json!({
-            "action": "parse_doc",
-            "path": "/tmp/service-notes.md",
-            "status": "running",
-            "content": "operator notes say the service should be running"
-        })
-        .to_string(),
-    ));
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-
-    assert!(!coverage.is_complete());
-    assert_eq!(coverage.missing_evidence, vec!["field_value"]);
-    assert!(!coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
 fn trace_json_counts_nested_builtin_tool_evidence() {
     let mut journal = TaskJournal::for_task("task-nested-evidence", "ask", "这个路径是否存在");
     let route = crate::IntentOutputContract {

@@ -74,9 +74,6 @@ pub(super) fn route_has_evidence_policy_final_shape(route: &crate::IntentOutputC
 pub(super) fn route_requires_observed_output_projection(
     route: &crate::IntentOutputContract,
 ) -> bool {
-    if crate::finalize::route_matches_service_status_output_contract(route) {
-        return true;
-    }
     if matches!(
         evidence_policy_final_answer_shape_class(route),
         Some(

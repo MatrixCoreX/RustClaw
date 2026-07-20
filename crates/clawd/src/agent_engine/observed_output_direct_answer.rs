@@ -55,33 +55,8 @@ pub(super) fn extract_answer_from_observed_output_impl(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
         );
-    let health_check_service_status_direct_allowed = route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::ServiceStatus,
-        )
-    });
-    if route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::ServiceStatus,
-        )
-    }) {
-        if let Some(answer) = latest_process_basic_service_status_direct_answer_candidate(
-            state,
-            loop_state,
-            response_shape,
-            prefers_english_free_text,
-        )
-        .and_then(|answer| {
-            evidence_policy_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
-        }) {
-            return Some(answer);
-        }
-    }
     if has_successful_step_for_skill(loop_state, "health_check")
         && !health_check_prefers_raw_payload
-        && !health_check_service_status_direct_allowed
         && matches!(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
@@ -168,46 +143,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                     health_check_prefers_raw_payload.then_some(observed_output.body.clone())
                 }
                 "http_basic" => None,
-                "process_basic" => route.and_then(|route| {
-                    if process_basic_port_list_should_use_llm_synthesis(
-                        route,
-                        &observed_output.body,
-                    ) {
-                        return None;
-                    }
-                    super::output_route_policy::route_contract_marker_is(
-                        route,
-                        crate::OutputSemanticKind::ServiceStatus,
-                    )
-                    .then(|| {
-                        process_basic_service_status_direct_answer_candidate(
-                            state,
-                            &observed_output.body,
-                            response_shape,
-                            prefers_english_free_text,
-                        )
-                    })
-                    .flatten()
-                }),
-                "service_control" => {
-                    serde_json::from_str::<serde_json::Value>(&observed_output.body)
-                        .ok()
-                        .and_then(|value| {
-                            route
-                                .filter(|route| {
-                                    super::output_route_policy::route_contract_marker_is(
-                                        route,
-                                        crate::OutputSemanticKind::ServiceStatus,
-                                    )
-                                })
-                                .and_then(|_| {
-                                    service_control_status_direct_answer_candidate(
-                                        &value,
-                                        response_shape,
-                                    )
-                                })
-                        })
-                }
+                "process_basic" | "service_control" => None,
                 "fs_search" => serde_json::from_str::<serde_json::Value>(&observed_output.body)
                     .ok()
                     .and_then(|value| {
@@ -239,14 +175,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                     if let Some(info) = system_basic_info.as_ref() {
                         if route.is_some_and(route_requests_exact_scalar_path) {
                             return system_basic_info_scalar_path_candidate(info);
-                        }
-                        if route.is_some_and(|route| {
-                            super::output_route_policy::route_contract_marker_is(
-                                route,
-                                crate::OutputSemanticKind::ServiceStatus,
-                            )
-                        }) {
-                            return None;
                         }
                     }
                     let value = serde_json::from_str::<serde_json::Value>(&observed_output.body)
@@ -597,40 +525,17 @@ pub(super) fn route_allows_raw_read_range_direct_passthrough(
 
 pub(super) fn allows_normalized_scalar_direct_fallback(
     skill: &str,
-    route: Option<&crate::IntentOutputContract>,
+    _route: Option<&crate::IntentOutputContract>,
     response_shape: Option<crate::OutputResponseShape>,
 ) -> bool {
     match skill {
         "package_manager" => false,
-        "http_basic" => {
-            !matches!(
-                response_shape,
-                Some(crate::OutputResponseShape::OneSentence)
-            ) && !route_requires_http_body_synthesis(route)
-        }
+        "http_basic" => !matches!(
+            response_shape,
+            Some(crate::OutputResponseShape::OneSentence)
+        ),
         _ => true,
     }
-}
-
-pub(super) fn route_requires_http_body_synthesis(
-    route: Option<&crate::IntentOutputContract>,
-) -> bool {
-    let Some(route) = route else {
-        return false;
-    };
-    if !route.requires_content_evidence {
-        return false;
-    }
-    let Some(shape) = crate::evidence_policy::final_answer_shape_for_output_contract(route) else {
-        return false;
-    };
-    if super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::ServiceStatus,
-    ) {
-        return shape.class() == crate::evidence_policy::FinalAnswerShapeClass::Verdict;
-    }
-    false
 }
 
 fn inventory_dir_can_use_direct_names(

@@ -52,7 +52,6 @@ Rules:
 - Suggestions must stay conservative and grounded. Prefer 1-3 concise, practical suggestions over broad speculative advice, and omit suggestions entirely when the evidence is too weak.
 - If the user requested a scalar-only answer, return only that scalar value in `answer`.
 - If the user requested a scalar-only answer and the observed outputs are directory/file listings, derive the scalar required by the request from those listings instead of pasting the raw multi-line listing.
-- If `Output contract.final_answer_shape` is `status_with_source` and `Output contract.response_shape` is not `scalar`, do not answer with only a raw machine status field or summary field. Produce a concise status verdict in the request language, preserving the observed target identifier, status value, and source/manager when available.
 - For scalar counts, a numeric stdout value is not reliable when the same observed command output also contains a non-warning diagnostic showing the target could not be read, found, or accessed. In that case, report the blocker concisely instead of inventing a valid count such as `0`.
 - Do not collapse multi-dimensional structured evidence into only an aggregate field such as `total`, `count`, or `summary` unless the original request or output contract explicitly asks for a scalar-only aggregate.
 - When observed structured output contains component fields plus an aggregate, preserve the requested component dimensions in `answer`; use the aggregate only as a supplement when it helps.

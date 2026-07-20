@@ -4,7 +4,7 @@ use super::*;
 fn system_basic_info_evidence_ignores_json_hidden_in_visible_text() {
     let mut journal =
         TaskJournal::for_task("task-system-basic-info-text-boundary", "ask", "show status");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -34,7 +34,7 @@ fn system_basic_info_evidence_ignores_json_hidden_in_visible_text() {
 #[test]
 fn system_basic_info_evidence_accepts_extra_machine_payload() {
     let mut journal = TaskJournal::for_task("task-system-basic-info-extra", "ask", "show status");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {

@@ -170,12 +170,6 @@ fn route_expects_terminal_user_answer(route_result: &IntentOutputContract) -> bo
     )
 }
 
-fn route_requires_direct_candidate_for_observed_stop(route_result: &IntentOutputContract) -> bool {
-    route_result.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
-        && crate::evidence_policy::final_answer_shape_for_output_contract(route_result)
-            .is_some_and(|shape| shape.allows_model_language())
-}
-
 fn has_discussion_followup_action(actions: &[AgentAction]) -> bool {
     actions.iter().any(|action| match action {
         AgentAction::Respond { .. } | AgentAction::SynthesizeAnswer { .. } => true,
@@ -362,12 +356,8 @@ fn should_stop_for_observed_finalize(
     let has_direct_observed_answer =
         super::observed_output::extract_answer_from_observed_output(loop_state, agent_run_context)
             .is_some();
-    let has_observed_stop_candidate =
-        if route_requires_direct_candidate_for_observed_stop(route_result) {
-            has_direct_observed_answer
-        } else {
-            super::observed_output::has_observed_answer_candidates(loop_state)
-        };
+    let has_observed_stop_candidate = has_direct_observed_answer
+        || super::observed_output::has_observed_answer_candidates(loop_state);
     if read_observe_round_should_continue(&output_contract, loop_state, actions) {
         return false;
     }
@@ -1362,9 +1352,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 return Ok(reply);
             }
             if try_recover_structured_evidence_table_answer_verifier_gap(route_result, &mut reply) {
-                return Ok(reply);
-            }
-            if try_recover_http_health_answer_verifier_gap(route_result, &mut reply) {
                 return Ok(reply);
             }
             if try_recover_local_health_answer_verifier_gap(route_result, &mut reply) {

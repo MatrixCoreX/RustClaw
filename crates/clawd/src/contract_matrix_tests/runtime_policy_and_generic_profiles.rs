@@ -578,7 +578,7 @@ fn contract_runtime_rejects_natural_language_evidence_profile() {
 #[test]
 fn configured_observation_extractors_must_exist_in_registry() {
     let source = format!(
-            "{}\n[[contracts.service_status.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
+            "{}\n[[contracts.content_excerpt_summary.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
             include_str!("../../../../configs/task_contract_matrix.toml")
         );
     let err = parse_contract_matrix_source(&source)

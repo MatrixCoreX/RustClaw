@@ -906,7 +906,7 @@ fn grounded_latest_synthesis_replaces_structured_json_delivery() {
     let task = claimed_task("task-grounded-synthesis");
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = true;

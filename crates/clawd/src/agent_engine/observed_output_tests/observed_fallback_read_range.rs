@@ -30,8 +30,7 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
     assert!(prompt.contains("include_all_deliverables=true"));
     assert!(prompt.contains("Do not collapse multi-dimensional structured evidence"));
     assert!(prompt.contains("combine the deliverables into one grammatical sentence"));
-    assert!(prompt.contains("final_answer_shape` is `status_with_source"));
-    assert!(prompt.contains("do not answer with only a raw machine status field"));
+    assert!(prompt.contains("Do not invent missing files"));
     let data_start = prompt
         .find("BEGIN_OBSERVED_OUTPUTS_DATA")
         .expect("observed data start marker");
@@ -80,13 +79,13 @@ fn observed_fallback_overlays_bound_observed_data_exactly_once() {
 }
 
 #[test]
-fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts() {
+fn unclassified_status_observation_uses_regular_synthesis_template() {
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route_result.semantic_kind = OutputSemanticKind::None;
     route_result.requires_content_evidence = true;
     route_result.delivery_required = false;
     route_result.delivery_intent = OutputDeliveryIntent::None;
-    route_result.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route_result.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
@@ -97,7 +96,7 @@ fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts(
         "status=ok\nprocess=clawd\nport=8787",
     );
 
-    assert_eq!(path, "prompts/observed_answer_fallback_compact_prompt.md");
+    assert_eq!(path, "prompts/observed_answer_fallback_prompt.md");
 }
 
 #[test]
@@ -254,7 +253,7 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
     );
 
     let mut terminal_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    terminal_route.semantic_kind = OutputSemanticKind::ServiceStatus;
+    terminal_route.semantic_kind = OutputSemanticKind::None;
     let terminal_context = AgentRunContext {
         output_contract: Some(terminal_route.clone()),
         ..AgentRunContext::default()

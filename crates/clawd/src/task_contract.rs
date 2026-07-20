@@ -48,7 +48,6 @@ pub(crate) fn target_object_for_output_contract(
         return target;
     }
     match semantic_kind {
-        OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
         OutputSemanticKind::FilesystemMutationResult => return TaskTargetObject::Path,
         OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
         _ => {}
@@ -87,9 +86,7 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
-        OutputSemanticKind::ServiceStatus | OutputSemanticKind::ExistenceWithPath => {
-            TaskOperation::Inspect
-        }
+        OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
     }
@@ -234,9 +231,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::DirectoryEntryGroups
         | OutputSemanticKind::FilePaths => {
             fields.insert("candidates");
-        }
-        OutputSemanticKind::ServiceStatus => {
-            fields.insert("field_value");
         }
         OutputSemanticKind::ExecutionFailedStep => {
             fields.insert("command_output");
