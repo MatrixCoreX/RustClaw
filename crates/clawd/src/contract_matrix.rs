@@ -555,7 +555,6 @@ impl ObservationExtractor {
 pub(crate) enum FinalAnswerShape {
     ComparisonVerdict,
     DeliveryTokenOrPath,
-    ExistenceSummaryWithPath,
     ExistenceVerdictWithPath,
     ExcerptPlusSummary,
     FailedStepWithEvidence,
@@ -625,7 +624,6 @@ impl FinalAnswerShape {
     pub(crate) const ALL: &'static [Self] = &[
         Self::ComparisonVerdict,
         Self::DeliveryTokenOrPath,
-        Self::ExistenceSummaryWithPath,
         Self::ExistenceVerdictWithPath,
         Self::ExcerptPlusSummary,
         Self::FailedStepWithEvidence,
@@ -655,7 +653,6 @@ impl FinalAnswerShape {
         match raw.trim() {
             "comparison_verdict" => Some(Self::ComparisonVerdict),
             "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
-            "existence_summary_with_path" => Some(Self::ExistenceSummaryWithPath),
             "existence_verdict_with_path" => Some(Self::ExistenceVerdictWithPath),
             "excerpt_plus_summary" => Some(Self::ExcerptPlusSummary),
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
@@ -687,7 +684,6 @@ impl FinalAnswerShape {
         match self {
             Self::ComparisonVerdict => "comparison_verdict",
             Self::DeliveryTokenOrPath => "delivery_token_or_path",
-            Self::ExistenceSummaryWithPath => "existence_summary_with_path",
             Self::ExistenceVerdictWithPath => "existence_verdict_with_path",
             Self::ExcerptPlusSummary => "excerpt_plus_summary",
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
@@ -733,8 +729,7 @@ impl FinalAnswerShape {
             | Self::ScalarEqualityVerdict
             | Self::StatusWithSource
             | Self::ValidationVerdict => FinalAnswerShapeClass::Verdict,
-            Self::ExistenceSummaryWithPath
-            | Self::ExcerptPlusSummary
+            Self::ExcerptPlusSummary
             | Self::FailedStepWithEvidence
             | Self::ProjectSummaryGroundedInFiles
             | Self::RawOutputOrShortSummary

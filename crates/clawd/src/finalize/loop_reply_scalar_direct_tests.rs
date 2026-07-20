@@ -503,11 +503,11 @@ async fn finalize_loop_reply_restores_recent_scalar_existence_fields_after_late_
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_preserves_richer_existence_summary_delivery_with_same_path_marker() {
+async fn finalize_loop_reply_preserves_richer_generic_path_facts_delivery() {
     let state = test_state();
     let task = claimed_task("task-existence-summary-same-path-richer");
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPathSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     route.requires_content_evidence = true;
     route.delivery_required = false;

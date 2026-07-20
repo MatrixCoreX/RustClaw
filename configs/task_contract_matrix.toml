@@ -410,17 +410,6 @@ all_of = ["path", "kind"]
 one_of = ["exists_true", "exists_false"]
 negative_evidence = ["exists_false"]
 
-[contracts.existence_with_path_summary]
-semantic_kind = "existence_with_path_summary"
-operation = "summarize"
-target_object = "path"
-delivery_shape = "summary"
-allowed_actions = ["fs_basic.stat_paths", "fs_basic.read_text_range", "fs_basic.find_entries"]
-preferred_actions = ["fs_basic.stat_paths", "fs_basic.read_text_range"]
-required_evidence = ["content_excerpt", "exists", "kind", "path"]
-final_answer_shape = "existence_summary_with_path"
-failure_policy = "retry_with_alternatives"
-
 [contracts.recent_scalar_equality_check]
 semantic_kind = "recent_scalar_equality_check"
 operation = "validate"

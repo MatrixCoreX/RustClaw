@@ -1284,28 +1284,3 @@ fn direct_observation_passthrough_detector_matches_raw_output() {
         &loop_state
     ));
 }
-
-#[test]
-fn route_observation_facts_pin_resolved_path_for_existence_summary() {
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Filename,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPathSummary,
-            locator_hint: "rustclaw.service".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let ctx = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/home/guagua/rustclaw/rustclaw.service".to_string()),
-        ..AgentRunContext::default()
-    };
-
-    let facts = route_observation_facts_entry(Some(&ctx)).expect("route facts");
-
-    assert!(facts.contains("resolved_target_path: /home/guagua/rustclaw/rustclaw.service"));
-    assert!(facts.contains("do not infer the target path from file content fields"));
-}

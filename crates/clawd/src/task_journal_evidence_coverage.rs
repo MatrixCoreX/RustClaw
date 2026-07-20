@@ -613,7 +613,6 @@ pub(super) fn step_error_supplies_negative_contract_evidence(
         crate::OutputSemanticKind::ContentExcerptWithSummary,
         crate::OutputSemanticKind::ExcerptKindJudgment,
         crate::OutputSemanticKind::ExistenceWithPath,
-        crate::OutputSemanticKind::ExistenceWithPathSummary,
     ]) {
         return false;
     }

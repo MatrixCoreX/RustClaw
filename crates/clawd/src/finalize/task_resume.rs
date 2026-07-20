@@ -189,7 +189,6 @@ pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
             || route_result.semantic_kind_is_any(&[
                 crate::OutputSemanticKind::ScalarPathOnly,
                 crate::OutputSemanticKind::ExistenceWithPath,
-                crate::OutputSemanticKind::ExistenceWithPathSummary,
                 crate::OutputSemanticKind::FilePaths,
             ]))
         && resume_context_failed_step_skill(resume_ctx).as_deref() == Some("fs_search")

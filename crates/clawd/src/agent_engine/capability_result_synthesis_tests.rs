@@ -265,6 +265,50 @@ fn path_facts_result_uses_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn compound_path_existence_and_content_use_generic_synthesis() {
+    let mut loop_state = LoopState::default();
+    loop_state.capability_results.extend([
+        CapabilityResultEnvelope::ok(
+            "system_basic",
+            Some("path_batch_facts".to_string()),
+            json!({
+                "extra": {
+                    "action": "path_batch_facts",
+                    "facts": [{"path": "Cargo.toml", "exists": true, "kind": "file"}]
+                }
+            }),
+        ),
+        CapabilityResultEnvelope::ok(
+            "system_basic",
+            Some("read_range".to_string()),
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "Cargo.toml",
+                    "excerpt": "1|[workspace]"
+                }
+            }),
+        ),
+    ]);
+    let route = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        locator_hint: "Cargo.toml".to_string(),
+        ..Default::default()
+    };
+    let context = AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&context)
+    ));
+}
+
+#[test]
 fn exact_machine_and_artifact_delivery_bypass_language_synthesis() {
     let mut loop_state = LoopState::default();
     let mut result =

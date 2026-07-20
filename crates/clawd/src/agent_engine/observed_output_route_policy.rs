@@ -125,9 +125,6 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
     {
         return format!("style_policy=exact_sentence_count sentence_count={count}");
     }
-    if route_has_marker(crate::OutputSemanticKind::ExistenceWithPathSummary) {
-        return "style_policy=existence_with_path_summary include=verdict,path,summary evidence_preference=content_when_available".to_string();
-    }
     if route_has_marker(crate::OutputSemanticKind::ExistenceWithPath) {
         return "style_policy=existence_with_path include=verdict,path scalar_override=path_required".to_string();
     }
