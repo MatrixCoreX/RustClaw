@@ -397,8 +397,9 @@ fn web_search_extract_empty_candidates_count_as_candidates_evidence() {
 #[test]
 fn weather_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-weather-query", "ask", "查天气");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WeatherQuery);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),

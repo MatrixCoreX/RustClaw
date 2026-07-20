@@ -259,10 +259,6 @@ use machine_payload::{
     visible_machine_payload_should_remain_structured,
 };
 
-#[path = "loop_reply_weather.rs"]
-mod weather;
-use weather::replace_delivery_with_weather_query_fields;
-
 #[path = "loop_reply_clarify_envelope.rs"]
 mod clarify_envelope;
 
@@ -1647,13 +1643,6 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
         &mut delivery_deduped,
         &mut finalizer_summary,
-    );
-    replace_delivery_with_weather_query_fields(
-        task,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
     );
     replace_final_delivery_with_quantity_compare_paths_required_metadata(
         state,

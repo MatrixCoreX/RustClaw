@@ -30,6 +30,45 @@ fn successful_result_wraps_json_and_extra_as_untrusted_data() {
 }
 
 #[test]
+fn weather_result_preserves_structured_fields_for_generic_synthesis() {
+    let output = json!({
+        "text": "provider-localized fallback",
+        "extra": {
+            "action": "query",
+            "mode": "current",
+            "location": "Beijing",
+            "temperature": 25.2,
+            "weather_code": "partly_cloudy",
+            "weather_code_raw": 3
+        }
+    });
+    let envelope = super::successful_execution_envelope(
+        "weather",
+        "step_1",
+        &json!({"action": "query", "city": "Beijing"}),
+        &output.to_string(),
+        output.get("extra"),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/temperature"),
+        Some(&json!(25.2))
+    );
+    assert_eq!(
+        envelope.data.pointer("/extra/weather_code_raw"),
+        Some(&json!(3))
+    );
+    assert_eq!(
+        envelope.data.pointer("/output/extra/location"),
+        Some(&json!("Beijing"))
+    );
+    assert_eq!(
+        envelope.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+}
+
+#[test]
 fn pending_result_becomes_poll_continuation() {
     let envelope = super::successful_execution_envelope(
         "video_generate",

@@ -27,11 +27,11 @@ SYNTHESIS_PROMPT = (
 
 # Baseline after introducing the generic envelope. These are ceilings, not
 # targets. Track C must drive them toward 0/0/<=15_000 as legacy cohorts leave.
-MAX_SEMANTIC_VARIANTS = 58
-MAX_SEMANTIC_PRODUCTION_FILES = 85
-MAX_FINALIZER_PRODUCTION_MODULES = 77
-MAX_FINALIZER_PRODUCTION_LINES = 35_051
-MAX_FINALIZER_REGISTRY_TOKEN_OCCURRENCES = 175
+MAX_SEMANTIC_VARIANTS = 57
+MAX_SEMANTIC_PRODUCTION_FILES = 83
+MAX_FINALIZER_PRODUCTION_MODULES = 76
+MAX_FINALIZER_PRODUCTION_LINES = 34_895
+MAX_FINALIZER_REGISTRY_TOKEN_OCCURRENCES = 172
 
 
 def relative(path: Path) -> str:
@@ -211,7 +211,7 @@ enum OutputSemanticKind {
 """
     assert semantic_variants(sample) == ["None", "ScalarCount"]
     assert classify_semantic_owner(
-        FINALIZE_DIR / "loop_reply_weather.rs"
+        FINALIZE_DIR / "loop_reply_git_state.rs"
     ) == "business_language_rendering"
     assert classify_semantic_owner(
         FINALIZE_DIR / "loop_reply_machine_kv.rs"

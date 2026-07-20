@@ -328,9 +328,6 @@ mod route_helpers_tests;
 #[path = "loop_reply_tail_read_tests.rs"]
 mod tail_read_tests;
 
-#[path = "loop_reply_weather_tests.rs"]
-mod weather_tests;
-
 #[path = "loop_reply_tests/requested_machine_kv_summary.rs"]
 mod requested_machine_kv_summary_tests;
 
