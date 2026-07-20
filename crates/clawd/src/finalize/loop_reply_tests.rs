@@ -76,7 +76,7 @@ fn visible_answer_machine_payload_detection_is_structural() {
         r#"{"status":"ok","candidates":["tools.allow_sudo=true"]}"#
     ));
     assert!(visible_answer_is_machine_payload(
-        r#"{"contract_marker":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
+        r#"{"schema_version":1,"status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
     ));
     assert!(!visible_answer_is_machine_payload(
         "configs/config.toml has one observed risk."
@@ -226,9 +226,6 @@ mod file_delivery_tests;
 
 #[path = "loop_reply_file_missing_tests.rs"]
 mod file_missing_tests;
-
-#[path = "loop_reply_filesystem_mutation_tests.rs"]
-mod filesystem_mutation_tests;
 
 #[path = "loop_reply_delivery_backfill_tests.rs"]
 mod delivery_backfill_tests;

@@ -317,18 +317,11 @@ fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contrac
 #[test]
 fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
     let matrix = load_workspace_matrix();
-    let cases = [
-        (
-            "filesystem_mutation_result",
-            OutputSemanticKind::FilesystemMutationResult,
-            "fs_basic.write_text",
-        ),
-        (
-            "existence_with_path",
-            OutputSemanticKind::ExistenceWithPath,
-            "fs_basic.stat_paths",
-        ),
-    ];
+    let cases = [(
+        "existence_with_path",
+        OutputSemanticKind::ExistenceWithPath,
+        "fs_basic.stat_paths",
+    )];
 
     for (contract_name, semantic_kind, preferred_action) in cases {
         let contract = matrix
@@ -615,7 +608,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 36);
+    let cases = generated_contract_cases(&matrix, 33);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

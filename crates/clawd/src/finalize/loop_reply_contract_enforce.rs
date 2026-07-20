@@ -51,28 +51,6 @@ pub(super) async fn enforce_delivery_output_contract(
         loop_state.delivery_messages = delivery_messages;
         return;
     }
-    if let Some(synthesis) = publishable_synthesis
-        .as_deref()
-        .filter(|text| route_accepts_filesystem_mutation_synthesis(route, text))
-    {
-        let mut delivery_messages = loop_state
-            .delivery_messages
-            .iter()
-            .filter(|message| crate::finalize::is_execution_summary_message(message))
-            .cloned()
-            .collect::<Vec<_>>();
-        append_delivery_message(&task.task_id, &mut delivery_messages, synthesis.to_string());
-        loop_state.last_user_visible_respond = Some(synthesis.to_string());
-        loop_state.delivery_messages = delivery_messages;
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "final_result_use_filesystem_mutation_synthesis",
-            "kept",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-        return;
-    }
     if let (Some(synthesis), Some(token)) = (
         publishable_synthesis.as_deref(),
         generated_delivery_existing_file_content_synthesis_token(
@@ -378,57 +356,6 @@ fn model_language_evidence_summary_should_skip_low_level_reshape(
     let token_count = candidate.split_whitespace().count();
     let char_count = candidate.chars().count();
     nonempty_lines > 1 || token_count >= 8 || char_count >= 64
-}
-
-pub(super) fn route_accepts_filesystem_mutation_synthesis(
-    route: &crate::IntentOutputContract,
-    synthesis: &str,
-) -> bool {
-    if !filesystem_mutation_synthesis_payload_is_complete(synthesis) {
-        return false;
-    }
-    let route_accepts_lifecycle = route
-        .semantic_kind_is(crate::OutputSemanticKind::FilesystemMutationResult)
-        || (!route.delivery_required
-            && !route.delivery_required
-            && (route.requires_content_evidence
-                || matches!(
-                    route.response_shape,
-                    crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-                ))
-            && matches!(
-                route.semantic_kind,
-                crate::OutputSemanticKind::None | crate::OutputSemanticKind::ExecutionFailedStep
-            ));
-    route_accepts_lifecycle
-}
-
-fn filesystem_mutation_synthesis_payload_is_complete(synthesis: &str) -> bool {
-    let Ok(payload) = serde_json::from_str::<serde_json::Value>(synthesis.trim()) else {
-        return false;
-    };
-    let contract_marker_matches = payload
-        .pointer("/contract_marker")
-        .and_then(serde_json::Value::as_str)
-        == Some("filesystem_mutation_result");
-    let lifecycle_shape_matches = payload
-        .pointer("/final_answer_shape")
-        .and_then(serde_json::Value::as_str)
-        == Some("lifecycle_result");
-    (contract_marker_matches || lifecycle_shape_matches)
-        && payload
-            .pointer("/status")
-            .and_then(serde_json::Value::as_str)
-            == Some("ok")
-        && payload
-            .pointer("/steps")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|steps| !steps.is_empty())
-        && (!lifecycle_shape_matches
-            || payload
-                .pointer("/final_state/cleanup_observed")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false))
 }
 
 pub(super) fn route_prefers_content_evidence_synthesis(

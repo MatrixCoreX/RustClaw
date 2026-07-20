@@ -80,7 +80,6 @@ pub(crate) enum OutputSemanticKind {
     ContentExcerptWithSummary,
     ScalarCount,
     ExecutionFailedStep,
-    FilesystemMutationResult,
     ExistenceWithPath,
 }
 
@@ -92,7 +91,6 @@ impl OutputSemanticKind {
         Self::ContentExcerptWithSummary,
         Self::ScalarCount,
         Self::ExecutionFailedStep,
-        Self::FilesystemMutationResult,
         Self::ExistenceWithPath,
     ];
 
@@ -104,7 +102,6 @@ impl OutputSemanticKind {
             Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
             Self::ScalarCount => "scalar_count",
             Self::ExecutionFailedStep => "execution_failed_step",
-            Self::FilesystemMutationResult => "filesystem_mutation_result",
             Self::ExistenceWithPath => "existence_with_path",
         }
     }

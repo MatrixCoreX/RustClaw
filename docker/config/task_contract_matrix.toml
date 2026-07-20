@@ -194,17 +194,6 @@ observation_sources = ["run_cmd", "log_analyze", "health_check", "service_contro
 [contracts.execution_failed_step.evidence_expression]
 any_of = ["command_output", "field_value"]
 
-[contracts.filesystem_mutation_result]
-semantic_kind = "filesystem_mutation_result"
-operation = "mutate"
-target_object = "path"
-delivery_shape = "summary"
-allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.append_text", "fs_basic.remove_path", "fs_basic.read_text_range", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "archive_basic.pack", "http_basic.get", "kb.ingest", "kb.search", "kb.stats"]
-preferred_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.append_text", "fs_basic.remove_path", "archive_basic.pack", "http_basic.get", "kb.ingest", "kb.search", "kb.stats"]
-required_evidence = ["path"]
-final_answer_shape = "lifecycle_result"
-failure_policy = "retry_with_alternatives"
-
 [contracts.existence_with_path]
 semantic_kind = "existence_with_path"
 operation = "inspect"

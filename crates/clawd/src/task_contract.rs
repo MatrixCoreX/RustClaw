@@ -41,15 +41,10 @@ pub(crate) enum TaskDeliveryShape {
 pub(crate) fn target_object_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> TaskTargetObject {
-    let semantic_kind = output_contract.semantic_kind;
     if let Some(target) = matrix_contract_for_output_contract(output_contract)
         .and_then(|contract| task_target_object_from_token(&contract.target_object))
     {
         return target;
-    }
-    match semantic_kind {
-        OutputSemanticKind::FilesystemMutationResult => return TaskTargetObject::Path,
-        _ => {}
     }
     target_object_for_locator_kind(output_contract.locator_kind)
 }
@@ -80,7 +75,6 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary => TaskOperation::Summarize,
-        OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
         OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
@@ -229,9 +223,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::ExecutionFailedStep => {
             fields.insert("command_output");
-        }
-        OutputSemanticKind::FilesystemMutationResult => {
-            fields.insert("path");
         }
         _ => {}
     }

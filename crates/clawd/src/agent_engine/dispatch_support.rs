@@ -36,7 +36,6 @@ use dispatch_local_code_projection_gate::{
     LOCAL_CODE_PROJECTION_PENDING_READBACK, LOCAL_CODE_PROJECTION_PENDING_VALIDATION,
 };
 use dispatch_synthesis::{
-    filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
     local_code_task_strict_json_projection, requested_local_code_json_fields,
     route_resolved_intent, step_has_observable_synthesis_fact,
     strict_json_projection_answer_satisfies_request, synthesize_answer_allows_direct_fallback,
@@ -863,16 +862,6 @@ pub(super) async fn handle_synthesize_answer_action(
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
             if let Some(answer) = capability_synthesis_answer {
-                return Ok(answer);
-            }
-            if let Some(answer) =
-                kb_filesystem_mutation_structured_answer(loop_state, agent_run_context)
-            {
-                return Ok(answer);
-            }
-            if let Some(answer) =
-                filesystem_mutation_lifecycle_structured_answer(state, loop_state, agent_run_context)
-            {
                 return Ok(answer);
             }
             if let Some(answer) =

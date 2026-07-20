@@ -58,9 +58,6 @@ LOOP_CONTROL_FILE = SRC_ROOT / "agent_engine/loop_control.rs"
 LOOP_CONTROL_MACHINE_STATUS_GAP_FILE = (
     SRC_ROOT / "agent_engine/loop_control_machine_status_gap.rs"
 )
-LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE = (
-    SRC_ROOT / "agent_engine/loop_control_filesystem_mutation_recovery.rs"
-)
 DRY_RUN_CONTRACT_PLAN_FILE = SRC_ROOT / "agent_engine/dry_run_contract_plan.rs"
 OBSERVED_OUTPUT_FILE = SRC_ROOT / "agent_engine/observed_output.rs"
 PLANNING_PROMPT_FILE = SRC_ROOT / "agent_engine/planning_prompt.rs"
@@ -613,25 +610,6 @@ def scan_loop_recovery_contract_marker_fields() -> list[Finding]:
                     "loop control machine JSON detection must not read legacy semantic_kind",
                 )
             )
-    fs_text = LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE.read_text(encoding="utf-8")
-    if '.get("contract_marker")' not in fs_text:
-        findings.append(
-            Finding(
-                rel(LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE),
-                1,
-                "filesystem_mutation_recovery_contract_marker_missing",
-                "filesystem mutation recovery should read contract_marker",
-            )
-        )
-    if '.get("semantic_kind")' in fs_text:
-        findings.append(
-            Finding(
-                rel(LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE),
-                1,
-                "filesystem_mutation_recovery_semantic_kind_reader",
-                "filesystem mutation recovery must not read legacy semantic_kind",
-            )
-        )
     return findings
 
 

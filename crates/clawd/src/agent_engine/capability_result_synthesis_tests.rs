@@ -49,6 +49,29 @@ fn config_mutation_receipt_uses_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn filesystem_mutation_receipt_uses_generic_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "filesystem.write_text",
+            Some("write_text".to_string()),
+            json!({
+                "extra": {
+                    "path": "tmp/job-a/note.txt",
+                    "content_bytes": 5,
+                    "changed": true
+                }
+            }),
+        ));
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
 fn config_validation_receipt_uses_generic_synthesis_without_domain_contract() {
     let mut loop_state = LoopState::default();
     loop_state

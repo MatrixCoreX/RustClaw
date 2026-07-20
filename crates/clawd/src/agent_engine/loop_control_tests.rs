@@ -21,7 +21,6 @@ use super::{
     terminal_user_answer_stop_signal, text_has_exact_marker_line,
     try_accept_language_only_output_format_answer_verifier_gap,
     try_recover_content_excerpt_summary_answer_verifier_gap,
-    try_recover_filesystem_mutation_success_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
     try_recover_inconsistent_boundary_clarify, try_recover_latest_synthesis_answer_verifier_gap,
     try_recover_local_health_answer_verifier_gap,
