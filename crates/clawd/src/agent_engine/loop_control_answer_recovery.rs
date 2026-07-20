@@ -334,9 +334,6 @@ pub(super) fn answer_verifier_gap_is_structurally_satisfied(
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison) {
-        return quantity_comparison_reply_has_derived_numeric_answer(reply);
-    }
     if terminal_content_access_blocker_reply_satisfies_contract(reply, route) {
         return true;
     }
@@ -443,96 +440,6 @@ pub(super) fn final_user_answer_candidate(reply: &AskReply) -> Option<&str> {
             let trimmed = reply.text.trim();
             (!trimmed.is_empty()).then_some(trimmed)
         })
-}
-
-pub(super) fn collect_size_bytes_from_json(value: &serde_json::Value, out: &mut Vec<u64>) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(size) = map
-                .get("size_bytes")
-                .or_else(|| map.get("total_size_bytes"))
-                .and_then(|value| value.as_u64())
-            {
-                out.push(size);
-            }
-            for value in map.values() {
-                collect_size_bytes_from_json(value, out);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for value in items {
-                collect_size_bytes_from_json(value, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-pub(super) fn observed_size_bytes(reply: &AskReply) -> Vec<u64> {
-    let mut sizes = Vec::new();
-    let Some(journal) = reply.task_journal.as_ref() else {
-        return sizes;
-    };
-    for step in &journal.step_results {
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
-            collect_size_bytes_from_json(&value, &mut sizes);
-        }
-    }
-    sizes.sort_unstable();
-    sizes.dedup();
-    sizes
-}
-
-pub(super) fn numeric_literals(text: &str) -> Vec<f64> {
-    let mut values = Vec::new();
-    let mut token = String::new();
-    let mut has_digit = false;
-    for ch in text.chars() {
-        if ch.is_ascii_digit() || ch == ',' || ch == '.' {
-            if ch.is_ascii_digit() {
-                has_digit = true;
-            }
-            token.push(ch);
-            continue;
-        }
-        if has_digit {
-            push_numeric_literal(&mut values, &token);
-        }
-        token.clear();
-        has_digit = false;
-    }
-    if has_digit {
-        push_numeric_literal(&mut values, &token);
-    }
-    values
-}
-
-pub(super) fn push_numeric_literal(values: &mut Vec<f64>, token: &str) {
-    let normalized = token.trim_matches('.').replace(',', "");
-    if normalized.is_empty() || normalized == "." {
-        return;
-    }
-    if let Ok(value) = normalized.parse::<f64>() {
-        values.push(value);
-    }
-}
-
-pub(super) fn quantity_comparison_reply_has_derived_numeric_answer(reply: &AskReply) -> bool {
-    let observed_sizes = observed_size_bytes(reply);
-    if observed_sizes.len() < 2 {
-        return false;
-    }
-    let Some(answer) = final_user_answer_candidate(reply) else {
-        return false;
-    };
-    numeric_literals(answer).into_iter().any(|number| {
-        !observed_sizes
-            .iter()
-            .any(|size| (number - *size as f64).abs() < 0.000_001)
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

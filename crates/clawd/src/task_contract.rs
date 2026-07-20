@@ -90,7 +90,6 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
-        OutputSemanticKind::QuantityComparison => TaskOperation::Validate,
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
         _ => operation_for_unclassified_output_contract(output_contract),
@@ -262,19 +261,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => {
             fields.insert("path");
-        }
-        OutputSemanticKind::QuantityComparison => {
-            fields.insert("field_value");
-            fields.insert("size_bytes");
-            if matches!(
-                output_contract.locator_kind,
-                OutputLocatorKind::Path
-                    | OutputLocatorKind::Filename
-                    | OutputLocatorKind::CurrentWorkspace
-            ) {
-                fields.insert("exists");
-                fields.insert("kind");
-            }
         }
         _ => {}
     }

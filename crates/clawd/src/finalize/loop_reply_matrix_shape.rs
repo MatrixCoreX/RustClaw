@@ -87,10 +87,7 @@ pub(super) fn route_requires_observed_output_projection(
     ) {
         return true;
     }
-    matches!(
-        route.semantic_kind,
-        crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::QuantityComparison
-    )
+    route.semantic_kind_is(crate::OutputSemanticKind::DirectoryNames)
 }
 
 pub(super) fn evidence_policy_candidate_satisfies_final_shape(

@@ -687,7 +687,7 @@ fn scalar_output_does_not_guess_an_unselected_structured_field() {
 }
 
 #[test]
-fn multi_count_quantity_comparison_guard_lists_all_count_rows() {
+fn multi_count_observation_guard_lists_all_count_rows() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -699,11 +699,7 @@ fn multi_count_quantity_comparison_guard_lists_all_count_rows() {
         "fs_basic",
         r#"{"action":"count_inventory","path":"crates/skills","resolved_path":"/repo/crates/skills","recursive":false,"counts":{"total":35,"files":0,"dirs":35,"hidden":0}}"#,
     ));
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route.semantic_kind = OutputSemanticKind::QuantityComparison;
-
-    let guard = multi_count_quantity_comparison_guard_entry(&loop_state, Some(&route))
-        .expect("multi-count guard");
+    let guard = multi_count_observation_guard_entry(&loop_state).expect("multi-count guard");
 
     assert!(
         guard.contains("delivery_constraint=cover_all_observed_count_rows"),
@@ -1125,12 +1121,6 @@ fn observed_output_route_policy_uses_direct_output_contract() {
         &failed_step_route
     ));
 
-    let mut quantity_route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    quantity_route.semantic_kind = OutputSemanticKind::QuantityComparison;
-    quantity_route.requires_content_evidence = true;
-    assert!(route_quantity_comparison_requires_model_language_synthesis(
-        &quantity_route
-    ));
 }
 
 #[test]
@@ -1574,39 +1564,6 @@ fn direct_scalar_formats_config_validation_result_in_request_language() {
         )
         .as_deref(),
         Some("message_key=clawd.msg.validate_structured_pass\nreason_code=validate_structured_pass\nfinal_answer_shape=structured_validation\nvalid=true\nformat=toml")
-    );
-}
-
-#[test]
-fn direct_scalar_defers_recent_structured_scalar_comparison_to_llm() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"extract_fields","path":"UI/package.json","resolved_path":"/tmp/UI/package.json","count":1,"results":[{"field_path":"name","exists":true,"value_type":"string","value_text":"react-example","value":"react-example"}]}"#,
-        ));
-    loop_state.executed_step_results.push(ok_step(
-            "step_2",
-            "system_basic",
-            r#"{"action":"extract_field","path":"crates/clawd/Cargo.toml","resolved_path":"/tmp/crates/clawd/Cargo.toml","field_path":"package.name","exists":true,"value_type":"string","value_text":"clawd","value":"clawd"}"#,
-        ));
-    let route_result = IntentOutputContract {
-                exact_sentence_count: None,
-                response_shape: OutputResponseShape::Scalar,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: crate::OutputSemanticKind::QuantityComparison,
-                locator_hint: "UI/package.json|crates/clawd/Cargo.toml".to_string(),
-                selection: crate::OutputSelectionContract::default(),
-            };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-    assert!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
     );
 }
 

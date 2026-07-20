@@ -95,7 +95,7 @@ fn output_has_count_inventory_total(output: &str) -> bool {
             .is_some()
 }
 
-fn quantity_comparison_has_multiple_count_observations(loop_state: &LoopState) -> bool {
+fn multiple_count_inventory_observations_need_synthesis(loop_state: &LoopState) -> bool {
     loop_state
         .executed_step_results
         .iter()
@@ -105,18 +105,6 @@ fn quantity_comparison_has_multiple_count_observations(loop_state: &LoopState) -
         .take(2)
         .count()
         >= 2
-}
-
-fn synthesize_direct_fallback_blocked_by_multi_count_quantity_comparison(
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    agent_run_context
-        .and_then(|context| context.output_contract())
-        .is_some_and(|route| {
-            route.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison)
-                && quantity_comparison_has_multiple_count_observations(loop_state)
-        })
 }
 
 pub(super) fn synthesize_direct_observed_fallback_answer(
@@ -143,10 +131,7 @@ pub(super) fn synthesize_direct_observed_fallback_answer(
     if route_needs_synthesis_for_multi_observation_grounded_summary(loop_state, agent_run_context) {
         return None;
     }
-    if synthesize_direct_fallback_blocked_by_multi_count_quantity_comparison(
-        loop_state,
-        agent_run_context,
-    ) {
+    if multiple_count_inventory_observations_need_synthesis(loop_state) {
         return None;
     }
     crate::agent_engine::observed_output::extract_answer_from_observed_output_i18n(
@@ -643,10 +628,7 @@ pub(super) fn synthesize_evidence_policy_direct_observed_fallback_answer(
     if crate::agent_engine::observed_output::route_disallows_direct_observation_passthrough(route) {
         return None;
     }
-    if synthesize_direct_fallback_blocked_by_multi_count_quantity_comparison(
-        loop_state,
-        agent_run_context,
-    ) {
+    if multiple_count_inventory_observations_need_synthesis(loop_state) {
         return None;
     }
     if synthesize_direct_fallback_would_passthrough_multiline_read_range(

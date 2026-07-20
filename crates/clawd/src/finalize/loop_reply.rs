@@ -67,21 +67,13 @@ use delivery_text::{delivery_is_single_line_text, final_answer_text_from_deliver
 mod service_status;
 pub(crate) use service_status::service_status_system_basic_info_answer;
 
-#[path = "loop_reply_quantity.rs"]
-mod quantity;
-#[cfg(test)]
-use quantity::{
-    compare_paths_size_ratio_answer, latest_delivery_preserves_observed_quantity_size_facts,
-    path_batch_size_comparison_answer,
-};
-use quantity::{
-    direct_quantity_comparison_from_compare_paths, inventory_ranked_size_list_answer,
-    replace_delivery_with_deterministic_quantity_comparison_answer,
-};
+#[path = "loop_reply_machine_projections.rs"]
+mod machine_projections;
+use machine_projections::inventory_ranked_size_list_answer;
 
 #[path = "loop_reply_compare_paths_metadata.rs"]
 mod compare_paths_metadata;
-use compare_paths_metadata::replace_final_delivery_with_quantity_compare_paths_required_metadata;
+use compare_paths_metadata::replace_final_delivery_with_compare_paths_required_metadata;
 
 #[path = "loop_reply_config_edit.rs"]
 mod config_edit;
@@ -98,7 +90,7 @@ use structured_observation::{
     attach_deterministic_structured_file_validation_from_read_range,
     deterministic_structured_container_summary_answer, direct_db_basic_observed_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
-    latest_successful_synthesis_output_matches, message_is_non_answer_separator,
+    message_is_non_answer_separator,
     replace_delivery_with_deterministic_rustclaw_config_risk_answer,
 };
 
@@ -109,7 +101,7 @@ use execution_status::{
     attach_deterministic_observed_execution_status_answer, delivery_is_content_answer_candidate,
     deterministic_execution_failed_step_answer, deterministic_missing_observed_target_answer,
     deterministic_observed_execution_status_answer,
-    deterministic_observed_execution_status_summary, path_display_label,
+    deterministic_observed_execution_status_summary,
     planned_delivery_identifies_failed_observed_step,
     replace_delivery_with_deterministic_execution_failed_step_answer,
     replace_delivery_with_deterministic_observed_execution_status_answer,
@@ -668,26 +660,6 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.delivery_messages.is_empty() {
-        if let Some((answer, summary)) = direct_quantity_comparison_from_compare_paths(
-            state,
-            user_text,
-            &loop_state,
-            agent_run_context,
-        ) {
-            finalizer_summary = Some(summary);
-            loop_state.last_user_visible_respond = Some(answer.clone());
-            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-            log_deterministic_delivery_record(
-                &task.task_id,
-                "fallback_from_compare_paths_quantity",
-                "attached",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-        }
-    }
-
-    if loop_state.delivery_messages.is_empty() {
         if let Some(reply) = missing_file_delivery_reply_from_loop(
             state,
             task,
@@ -998,11 +970,10 @@ pub(crate) async fn finalize_loop_reply(
     } else {
         false
     };
-    let replaced_quantity_comparison = if !replaced_grounded_answer && !replaced_service_status {
-        replace_delivery_with_deterministic_quantity_comparison_answer(
+    let replaced_direct_scalar = if !replaced_grounded_answer && !replaced_service_status {
+        replace_delivery_with_direct_scalar_observed_answer(
             state,
             task,
-            user_text,
             &mut loop_state,
             agent_run_context,
             &mut finalizer_summary,
@@ -1010,9 +981,9 @@ pub(crate) async fn finalize_loop_reply(
     } else {
         false
     };
-    let replaced_direct_scalar =
-        if !replaced_grounded_answer && !replaced_service_status && !replaced_quantity_comparison {
-            replace_delivery_with_direct_scalar_observed_answer(
+    let replaced_direct_structured =
+        if !replaced_grounded_answer && !replaced_service_status && !replaced_direct_scalar {
+            replace_delivery_with_direct_structured_observed_answer(
                 state,
                 task,
                 &mut loop_state,
@@ -1022,24 +993,8 @@ pub(crate) async fn finalize_loop_reply(
         } else {
             false
         };
-    let replaced_direct_structured = if !replaced_grounded_answer
-        && !replaced_service_status
-        && !replaced_quantity_comparison
-        && !replaced_direct_scalar
-    {
-        replace_delivery_with_direct_structured_observed_answer(
-            state,
-            task,
-            &mut loop_state,
-            agent_run_context,
-            &mut finalizer_summary,
-        )
-    } else {
-        false
-    };
     let replaced_contract_answer = if !replaced_grounded_answer
         && !replaced_service_status
-        && !replaced_quantity_comparison
         && !replaced_direct_scalar
         && !replaced_direct_structured
     {
@@ -1054,7 +1009,6 @@ pub(crate) async fn finalize_loop_reply(
     };
     let replaced_failed_step = if !replaced_grounded_answer
         && !replaced_service_status
-        && !replaced_quantity_comparison
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
@@ -1072,7 +1026,6 @@ pub(crate) async fn finalize_loop_reply(
     };
     let replaced_matrix_observed_shape = if !replaced_grounded_answer
         && !replaced_service_status
-        && !replaced_quantity_comparison
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
@@ -1096,7 +1049,6 @@ pub(crate) async fn finalize_loop_reply(
     };
     if !replaced_grounded_answer
         && !replaced_service_status
-        && !replaced_quantity_comparison
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
@@ -1509,10 +1461,8 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
-    replace_final_delivery_with_quantity_compare_paths_required_metadata(
-        state,
+    replace_final_delivery_with_compare_paths_required_metadata(
         task,
-        user_text,
         &mut loop_state,
         agent_run_context,
         &mut delivery_deduped,

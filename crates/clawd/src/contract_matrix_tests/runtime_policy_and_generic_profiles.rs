@@ -1,32 +1,6 @@
 use super::*;
 
 #[test]
-fn runtime_contract_snapshot_uses_planner_output_contract_evidence() {
-    let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::QuantityComparison,
-        response_shape: OutputResponseShape::Strict,
-        requires_content_evidence: true,
-        locator_kind: OutputLocatorKind::Filename,
-        locator_hint: "README.md | AGENTS.md".to_string(),
-        ..IntentOutputContract::default()
-    };
-
-    let snapshot = runtime_contract_snapshot_for_output_contract(&output_contract)
-        .expect("runtime output-contract snapshot");
-    let required = snapshot
-        .get("contract")
-        .and_then(|value| value.get("required_evidence"))
-        .and_then(Value::as_array)
-        .expect("required evidence")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-
-    assert!(required.contains(&"exists"));
-    assert!(required.contains(&"kind"));
-}
-
-#[test]
 fn unclassified_inline_contract_uses_generic_inline_transform() {
     let output_contract = IntentOutputContract {
         semantic_kind: OutputSemanticKind::None,
@@ -335,43 +309,6 @@ fn contract_matrix_evidence_matches_task_contract_defaults() {
 }
 
 #[test]
-fn route_specific_evidence_augments_matrix_base_contract() {
-    let required = required_evidence_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::QuantityComparison,
-        locator_kind: OutputLocatorKind::Filename,
-        ..IntentOutputContract::default()
-    })
-    .expect("required evidence");
-
-    assert_eq!(
-        required,
-        vec!["exists", "field_value", "kind", "size_bytes"]
-    );
-}
-
-#[test]
-fn quantity_comparison_allows_directory_count_size_observation() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::QuantityComparison,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            ..IntentOutputContract::default()
-        }),
-        "fs_basic",
-        &serde_json::json!({
-            "action": "count_entries",
-            "path": "target",
-            "recursive": true
-        }),
-    )
-    .expect("action policy");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "fs_basic.count_entries");
-}
-
-#[test]
 fn generic_profile_matches_untyped_path_content_contract() {
     let matrix = load_workspace_matrix();
     let matched = matrix
@@ -581,37 +518,6 @@ fn existence_with_path_prefers_path_facts_but_allows_verifier_requested_excerpt(
     assert!(read_policy.is_allowed(), "{read_policy:?}");
     assert_eq!(read_policy.action_key, "fs_basic.read_text_range");
     assert_eq!(read_policy.contract_match, "existence_with_path");
-}
-
-#[test]
-fn quantity_comparison_allows_readonly_content_followup() {
-    let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::QuantityComparison,
-        requires_content_evidence: true,
-        locator_kind: OutputLocatorKind::Path,
-        response_shape: OutputResponseShape::Strict,
-        ..IntentOutputContract::default()
-    };
-
-    let read_policy = action_policy_for_output_contract(
-            Some(&contract),
-            "fs_basic",
-            &json!({"action":"read_text_range", "path":"prompts/schemas/intent_normalizer.schema.json"}),
-        )
-        .expect("read policy");
-    assert!(read_policy.is_allowed(), "{read_policy:?}");
-    assert_eq!(read_policy.action_key, "fs_basic.read_text_range");
-    assert_eq!(read_policy.contract_match, "quantity_comparison");
-
-    let config_policy = action_policy_for_output_contract(
-            Some(&contract),
-            "config_basic",
-            &json!({"action":"read_fields", "path":"prompts/schemas/intent_normalizer.schema.json", "field_paths":["title","description"]}),
-        )
-        .expect("config field policy");
-    assert!(config_policy.is_allowed(), "{config_policy:?}");
-    assert_eq!(config_policy.action_key, "config_basic.read_fields");
-    assert_eq!(config_policy.contract_match, "quantity_comparison");
 }
 
 #[test]

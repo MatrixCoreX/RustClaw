@@ -122,7 +122,7 @@ pub(crate) use output_structured_scalar::recent_structured_scalar_observation_co
 use output_structured_scalar::structured_scalar_observation_from_extract_item;
 use output_structured_scalar::{
     multiple_structured_scalar_observations_need_synthesis,
-    route_needs_structured_scalar_pair_synthesis, structured_scalar_observation_from_value,
+    structured_scalar_observation_from_value,
 };
 
 #[path = "observed_output_structured_fields.rs"]
@@ -137,9 +137,7 @@ use output_route_policy::{
     route_should_synthesize_non_bilingual_existence_with_path,
 };
 pub(crate) use output_route_policy::{
-    route_disallows_direct_observation_passthrough,
-    route_quantity_comparison_requires_model_language_synthesis,
-    route_requires_synthesized_delivery,
+    route_disallows_direct_observation_passthrough, route_requires_synthesized_delivery,
 };
 
 #[path = "observed_output_process_service.rs"]
@@ -503,7 +501,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         return None;
     }
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
-        if route_needs_structured_scalar_pair_synthesis(loop_state, agent_run_context) {
+        if multiple_structured_scalar_observations_need_synthesis(Some(route), loop_state) {
             return None;
         }
         if let Some(answer) =
@@ -564,7 +562,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
     let allow_localized_direct_template =
         observed_language_supports_bilingual_template(request_language_hint);
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
-        if route_needs_structured_scalar_pair_synthesis(loop_state, agent_run_context) {
+        if multiple_structured_scalar_observations_need_synthesis(Some(route), loop_state) {
             return None;
         }
         if let Some(answer) = count_inventory_planned_file_dir_breakdown_answer(
@@ -697,8 +695,7 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
     }
     matches!(
         shape,
-        FinalAnswerShape::ComparisonVerdict
-            | FinalAnswerShape::ExistenceVerdictWithPath
+        FinalAnswerShape::ExistenceVerdictWithPath
             | FinalAnswerShape::RawOutputOrShortSummary
             | FinalAnswerShape::StatusWithSource
             | FinalAnswerShape::ValidationVerdict
@@ -761,10 +758,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     ) {
         observed_entries = vec![guard];
     } else {
-        if let Some(guard) = multi_count_quantity_comparison_guard_entry(
-            loop_state,
-            agent_run_context.and_then(|ctx| ctx.output_contract()),
-        ) {
+        if let Some(guard) = multi_count_observation_guard_entry(loop_state) {
             observed_entries.insert(0, guard);
         }
         if let Some(guard) = compound_listing_content_delivery_guard_entry(

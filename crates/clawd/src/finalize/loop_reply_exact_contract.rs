@@ -7,9 +7,8 @@ use super::{
     current_synthesis_satisfies_evidence_policy_shape, delivery_is_raw_read_observation,
     delivery_is_single_line_text, delivery_matches_latest_publishable_synthesis,
     delivery_message_is_json_object, deterministic_matrix_observed_shape_answer,
-    direct_quantity_comparison_from_compare_paths, direct_raw_command_output_projection,
-    direct_scalar_observed_answer, direct_structured_observed_answer,
-    directory_entry_groups_prefers_observed_groups,
+    direct_raw_command_output_projection, direct_scalar_observed_answer,
+    direct_structured_observed_answer, directory_entry_groups_prefers_observed_groups,
     evidence_policy_candidate_satisfies_final_shape,
     latest_grounded_synthesis_for_mixed_listing_contract, latest_publishable_respond_step_output,
     latest_publishable_synthesis_matches_written_file_path,
@@ -504,9 +503,6 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
                 loop_state,
                 agent_run_context,
             )
-        })
-        .or_else(|| {
-            direct_quantity_comparison_from_compare_paths(state, "", loop_state, agent_run_context)
         })
         .or_else(|| direct_scalar_observed_answer(Some(state), loop_state, agent_run_context))
         .or_else(|| {

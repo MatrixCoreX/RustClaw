@@ -37,7 +37,6 @@ mod channel_send;
 mod child_task_contract;
 mod clarify_state;
 mod contract_matrix;
-mod contract_test_hints;
 mod conversation_state;
 mod db_init;
 mod delivery_utils;

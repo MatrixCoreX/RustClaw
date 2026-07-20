@@ -1046,28 +1046,6 @@ fn chat_wrapped_one_sentence_unclassified_contract_requires_synthesized_delivery
 }
 
 #[test]
-fn quantity_comparison_free_shape_requires_model_synthesis() {
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::QuantityComparison;
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-
-    assert!(route_quantity_comparison_requires_model_language_synthesis(
-        &route
-    ));
-    assert!(route_requires_synthesized_delivery(&route));
-
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("synthesis=quantity_comparison"));
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("include=requested_model_language_synthesis"));
-}
-
-#[test]
 fn chat_wrapped_strict_exact_sentence_contract_requires_synthesized_delivery() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route.exact_sentence_count = Some(1);

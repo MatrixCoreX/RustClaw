@@ -134,12 +134,6 @@ fn next_last_primary_task_prompt(
         {
             return Some(current_prompt.to_string());
         }
-        if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
-            return Some(current_prompt.to_string());
-        }
-        if false && prior_prompt.is_none() {
-            return Some(current_prompt.to_string());
-        }
         return prior_prompt;
     };
     if !is_primary_task_turn_type(turn_type) {
@@ -280,38 +274,6 @@ fn prior_last_primary_task_output(prior_state: Option<&ConversationState>) -> Op
     prior_state.and_then(|state| state.last_primary_task_output.clone())
 }
 
-fn standalone_contextual_chat_result_starts_primary_task(
-    route_result: &crate::IntentOutputContract,
-    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
-) -> bool {
-    let allowed_turn = turn_analysis.is_none()
-        || matches!(
-            (
-                turn_analysis.and_then(|analysis| analysis.turn_type),
-                turn_analysis.and_then(|analysis| analysis.target_task_policy),
-            ),
-            (
-                Some(crate::turn_context::TurnType::TaskRequest),
-                Some(crate::turn_context::TargetTaskPolicy::Standalone)
-            )
-        );
-    if !allowed_turn
-        || route_result.requires_content_evidence
-        || route_result.delivery_required
-        || !matches!(route_result.locator_kind, crate::OutputLocatorKind::None)
-        || !matches!(
-            route_result.delivery_intent,
-            crate::OutputDeliveryIntent::None
-        )
-    {
-        return false;
-    }
-    matches!(
-        route_result.semantic_kind,
-        crate::OutputSemanticKind::QuantityComparison
-    )
-}
-
 fn has_prior_primary_task(prior_state: Option<&ConversationState>) -> bool {
     prior_state.is_some_and(|state| {
         state
@@ -393,9 +355,6 @@ fn standalone_task_request_preserves_prior_primary(
     route_result: &crate::IntentOutputContract,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
-    if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
-        return false;
-    }
     if state_patch_requests_primary_task_replacement(turn_analysis) {
         return false;
     }
@@ -553,10 +512,6 @@ fn next_last_primary_task_output(
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }
         if unannotated_structured_listing_starts_primary_task(turn_analysis, journal) {
-            let latest_output = current_turn_answer_text(answer_text, answer_messages);
-            return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
-        }
-        if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
             let latest_output = current_turn_answer_text(answer_text, answer_messages);
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }

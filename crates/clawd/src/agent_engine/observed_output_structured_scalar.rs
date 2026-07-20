@@ -133,7 +133,7 @@ pub(crate) fn latest_structured_scalar_observation_text(loop_state: &LoopState) 
 }
 
 pub(super) fn multiple_structured_scalar_observations_need_synthesis(
-    route: Option<&crate::IntentOutputContract>,
+    _route: Option<&crate::IntentOutputContract>,
     loop_state: &LoopState,
 ) -> bool {
     let observations = recent_structured_scalar_observations(loop_state, 2);
@@ -145,25 +145,5 @@ pub(super) fn multiple_structured_scalar_observations_need_synthesis(
     {
         return false;
     }
-    !route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::QuantityComparison,
-        )
-    })
-}
-
-pub(super) fn route_needs_structured_scalar_pair_synthesis(
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    agent_run_context
-        .and_then(|ctx| ctx.output_contract())
-        .is_some_and(|route| {
-            recent_structured_scalar_observation_count(loop_state) > 1
-                && super::output_route_policy::route_contract_marker_is(
-                    route,
-                    crate::OutputSemanticKind::QuantityComparison,
-                )
-        })
+    true
 }

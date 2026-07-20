@@ -1,16 +1,11 @@
 use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
-use crate::{AppState, ClaimedTask};
+use crate::ClaimedTask;
 
-use super::quantity::{
-    direct_compare_paths_required_metadata_from_observed_output,
-    direct_quantity_compare_paths_required_metadata_from_compare_paths,
-};
+use super::machine_projections::direct_compare_paths_required_metadata_from_observed_output;
 use super::{final_answer_text_from_delivery, log_deterministic_delivery_record};
 
-pub(super) fn replace_final_delivery_with_quantity_compare_paths_required_metadata(
-    state: &AppState,
+pub(super) fn replace_final_delivery_with_compare_paths_required_metadata(
     task: &ClaimedTask,
-    user_text: &str,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
     delivery_messages: &mut Vec<String>,
@@ -18,14 +13,6 @@ pub(super) fn replace_final_delivery_with_quantity_compare_paths_required_metada
 ) -> bool {
     let Some((answer, summary)) =
         direct_compare_paths_required_metadata_from_observed_output(loop_state, agent_run_context)
-            .or_else(|| {
-                direct_quantity_compare_paths_required_metadata_from_compare_paths(
-                    state,
-                    user_text,
-                    loop_state,
-                    agent_run_context,
-                )
-            })
     else {
         return false;
     };
@@ -41,7 +28,7 @@ pub(super) fn replace_final_delivery_with_quantity_compare_paths_required_metada
     *finalizer_summary = Some(summary);
     log_deterministic_delivery_record(
         &task.task_id,
-        "quantity_compare_paths_required_metadata",
+        "compare_paths_required_metadata",
         "replaced",
         agent_run_context,
         loop_state.executed_step_results.len(),

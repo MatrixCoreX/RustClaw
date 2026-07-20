@@ -12,7 +12,7 @@ use super::{
     extract_direct_scalar_from_generic_output_with_locator_hint,
     extract_field_direct_answer_candidate, freeform_observed_answer_fallback,
     has_observed_answer_candidates, inventory_dir_direct_answer_candidate,
-    multi_count_quantity_comparison_guard_entry, multi_field_machine_record_is_language_neutral,
+    multi_count_observation_guard_entry, multi_field_machine_record_is_language_neutral,
     non_code_markdown_text, normalize_system_basic_match_path, normalized_observed_listing,
     observed_answer_fallback_prompt_logical_path, observed_answer_language_compatible,
     observed_answer_language_compatible_for_route, observed_contract_json,
@@ -22,13 +22,12 @@ use super::{
     replace_internal_missing_sentinel_with_structured_observation,
     route_allows_path_batch_scalar_path_observed_answer, route_allows_raw_listing_direct_answer,
     route_disallows_direct_observation_passthrough, route_prefers_plain_fs_search_paths,
-    route_quantity_comparison_requires_model_language_synthesis, route_requests_scalar_path_only,
-    route_requires_synthesized_delivery, scalar_count_diagnostic_line_for_answer,
-    scalar_count_diagnostic_machine_answer, scalar_route_prefers_structured_observed_answer,
-    selected_capability_result_scalar_candidate, strip_bare_json_language_prefix,
-    structured_observed_body, tree_summary_direct_answer_candidate,
-    try_synthesize_answer_from_observed_output, AgentRunContext, ObservedAnswerFallbackOut,
-    OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+    route_requests_scalar_path_only, route_requires_synthesized_delivery,
+    scalar_count_diagnostic_line_for_answer, scalar_count_diagnostic_machine_answer,
+    scalar_route_prefers_structured_observed_answer, selected_capability_result_scalar_candidate,
+    strip_bare_json_language_prefix, structured_observed_body,
+    tree_summary_direct_answer_candidate, try_synthesize_answer_from_observed_output,
+    AgentRunContext, ObservedAnswerFallbackOut, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
