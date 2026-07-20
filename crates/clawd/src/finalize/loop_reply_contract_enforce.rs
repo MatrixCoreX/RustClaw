@@ -365,10 +365,8 @@ fn model_language_evidence_summary_should_skip_low_level_reshape(
     if !planned_delivery_is_publishable_model_language_answer(candidate) {
         return false;
     }
-    if route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::RawCommandOutput,
-        crate::OutputSemanticKind::CommandOutputSummary,
-    ]) && !publishable_summary_has_multi_source_observation(loop_state)
+    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        && !publishable_summary_has_multi_source_observation(loop_state)
     {
         return false;
     }
@@ -400,9 +398,7 @@ pub(super) fn route_accepts_filesystem_mutation_synthesis(
                 ))
             && matches!(
                 route.semantic_kind,
-                crate::OutputSemanticKind::None
-                    | crate::OutputSemanticKind::CommandOutputSummary
-                    | crate::OutputSemanticKind::ExecutionFailedStep
+                crate::OutputSemanticKind::None | crate::OutputSemanticKind::ExecutionFailedStep
             ));
     route_accepts_lifecycle
 }
@@ -455,7 +451,6 @@ pub(super) fn route_prefers_content_evidence_synthesis(
             || route.semantic_kind_is_any(&[
                 crate::OutputSemanticKind::ContentExcerptSummary,
                 crate::OutputSemanticKind::ContentExcerptWithSummary,
-                crate::OutputSemanticKind::CommandOutputSummary,
             ]));
     if !contract.requires_content_evidence
         || contract.delivery_required

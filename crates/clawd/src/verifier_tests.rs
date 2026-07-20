@@ -1083,7 +1083,7 @@ fn observe_mode_allows_user_named_output_path_marker_without_contract_rejection(
 fn summary_contract_allows_registry_observe_config_preview_without_confirmation() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::CommandOutputSummary);
+    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
     let result = verify_plan(
         &state,
         &task,
@@ -1125,7 +1125,7 @@ fn summary_contract_allows_registry_observe_config_preview_without_confirmation(
 fn summary_contract_does_not_reject_registry_config_apply_by_semantic_matrix() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::CommandOutputSummary);
+    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
     let result = verify_plan(
         &state,
         &task,

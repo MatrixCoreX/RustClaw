@@ -65,16 +65,14 @@ pub(super) fn synthesize_route_allows_direct_fallback(
     ) || route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
 }
 
-pub(super) fn synthesize_route_prefers_model_language_observed_status(
+pub(super) fn synthesize_route_prefers_model_language_failure_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
         .and_then(|context| context.output_contract())
         .is_some_and(|route| {
-            route.semantic_kind_is_any(&[
-                crate::OutputSemanticKind::CommandOutputSummary,
-                crate::OutputSemanticKind::ExecutionFailedStep,
-            ]) && route.requires_content_evidence
+            route.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep)
+                && route.requires_content_evidence
                 && !route.delivery_required
         })
 }

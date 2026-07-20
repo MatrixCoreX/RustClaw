@@ -1062,9 +1062,9 @@ fn chat_wrapped_strict_exact_sentence_contract_requires_synthesized_delivery() {
 }
 
 #[test]
-fn strict_plain_observation_contract_allows_passthrough() {
+fn strict_plain_observation_contract_requires_synthesis() {
     let route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    assert!(!route_requires_synthesized_delivery(&route));
+    assert!(route_requires_synthesized_delivery(&route));
 
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -1077,12 +1077,9 @@ fn strict_plain_observation_contract_allows_passthrough() {
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("strict plain observation passthrough");
-
     assert_eq!(
-        answer,
-        "model_io.log.2026-05-14 215M\nmodel_io.log.2026-05-11 149M"
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+        None
     );
 }
 

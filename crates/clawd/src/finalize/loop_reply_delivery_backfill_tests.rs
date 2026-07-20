@@ -660,7 +660,7 @@ async fn finalize_loop_reply_uses_multi_locator_route_for_compound_synthesis() {
         .push(ok_step_result("step_3", "respond", partial_table));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Free;
     route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {

@@ -39,9 +39,9 @@ use output_listing::{
     normalized_listing_text, recent_file_path_candidate_for_scalar_path,
     resolve_listing_entry_full_path, route_allows_path_batch_scalar_path_observed_answer,
     route_allows_raw_listing_direct_answer, route_allows_scalar_read_range_direct_answer,
-    route_allows_strict_plain_observation_passthrough, route_prefers_plain_fs_search_paths,
-    route_requests_exact_scalar_path, route_requests_scalar_count, route_requests_scalar_existence,
-    route_scalar_has_plain_path_terminal_respond, strict_plain_observation_passthrough_candidate,
+    route_prefers_plain_fs_search_paths, route_requests_exact_scalar_path,
+    route_requests_scalar_count, route_requests_scalar_existence,
+    route_scalar_has_plain_path_terminal_respond,
 };
 
 #[path = "observed_output_system_inventory.rs"]
@@ -444,7 +444,6 @@ fn route_uses_enforced_generic_path_content_profile(route: &crate::IntentOutputC
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::CurrentWorkspace
         )
-        && !route_allows_strict_plain_observation_passthrough(route)
 }
 
 #[cfg(test)]

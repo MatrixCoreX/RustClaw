@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn local_health_verifier_gap_recovers_with_machine_fields() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::None;
     route.requires_content_evidence = true;
 
@@ -186,7 +186,7 @@ fn local_health_verifier_gap_recovers_from_loop_state_raw_outputs() {
 #[test]
 fn local_health_recovery_ignores_user_visible_json_text() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::None;
     route.requires_content_evidence = true;
 

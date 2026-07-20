@@ -172,10 +172,7 @@ fn route_allows_publishable_summary_over_observed_projection(
             contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         );
-    if route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::RawCommandOutput,
-        crate::OutputSemanticKind::CommandOutputSummary,
-    ]) {
+    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput) {
         return publishable_summary_has_multi_source_observation(loop_state);
     }
     if contract.requires_content_evidence
@@ -226,7 +223,6 @@ fn latest_terminal_scalar_respond_answer_from_loop_contract(
         || matches!(
             route.semantic_kind,
             crate::OutputSemanticKind::RawCommandOutput
-                | crate::OutputSemanticKind::CommandOutputSummary
                 | crate::OutputSemanticKind::ExecutionFailedStep
         )
     {

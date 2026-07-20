@@ -1284,7 +1284,7 @@ fn strict_scalar_count_keeps_planned_explanatory_answer() {
 }
 
 #[test]
-fn strict_command_output_summary_prefers_exact_observed_command_output() {
+fn unclassified_strict_summary_preserves_publishable_model_answer() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
@@ -1298,9 +1298,9 @@ fn strict_command_output_summary_prefers_exact_observed_command_output() {
         .push(ok_step_result("step_2", "synthesize_answer", synthesis));
     loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
     let mut delivery_messages = vec![synthesis.to_string()];
-    let mut route = scalar_route_result();
+    let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = true;
@@ -1312,23 +1312,14 @@ fn strict_command_output_summary_prefers_exact_observed_command_output() {
 
     prefer_observed_answer_for_exact_contract(
         &state,
-        "task-strict-command-output-summary",
+        "task-unclassified-strict-summary",
         &mut loop_state,
         Some(&agent_run_context),
         &mut delivery_messages,
         &mut finalizer_summary,
     );
 
-    assert_eq!(
-        delivery_messages,
-        vec!["/home/guagua/rustclaw\nguagua\nThinkPad-X1"]
-    );
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some("/home/guagua/rustclaw\nguagua\nThinkPad-X1")
-    );
-    assert_eq!(
-        finalizer_summary.and_then(|summary| summary.format_ok),
-        Some(true)
-    );
+    assert_eq!(delivery_messages, vec![synthesis.to_string()]);
+    assert!(loop_state.last_user_visible_respond.is_none());
+    assert!(finalizer_summary.is_none());
 }

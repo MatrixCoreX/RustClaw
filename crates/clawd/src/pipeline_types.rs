@@ -76,7 +76,6 @@ pub(crate) enum OutputSemanticKind {
     #[default]
     None,
     RawCommandOutput,
-    CommandOutputSummary,
     FileNames,
     DirectoryNames,
     DirectoryEntryGroups,
@@ -95,7 +94,6 @@ impl OutputSemanticKind {
     pub(crate) const ALL: &'static [Self] = &[
         Self::None,
         Self::RawCommandOutput,
-        Self::CommandOutputSummary,
         Self::FileNames,
         Self::DirectoryNames,
         Self::DirectoryEntryGroups,
@@ -114,7 +112,6 @@ impl OutputSemanticKind {
         match self {
             Self::None => "none",
             Self::RawCommandOutput => "raw_command_output",
-            Self::CommandOutputSummary => "command_output_summary",
             Self::FileNames => "file_names",
             Self::DirectoryNames => "directory_names",
             Self::DirectoryEntryGroups => "directory_entry_groups",

@@ -428,7 +428,7 @@ fn sync_output_payload_preserves_model_language_summary_before_markdown_table() 
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Free,
-        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
         ..IntentOutputContract::default()
     };

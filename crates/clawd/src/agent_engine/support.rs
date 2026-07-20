@@ -204,6 +204,7 @@ impl AgentLoopGuardPolicy {
                         | crate::evidence_policy::EvidenceOperation::Validate
                         | crate::evidence_policy::EvidenceOperation::Run
                         | crate::evidence_policy::EvidenceOperation::List
+                        | crate::evidence_policy::EvidenceOperation::Inspect
                 ))
         {
             return LoopBudgetProfile::GroundedSummary;
