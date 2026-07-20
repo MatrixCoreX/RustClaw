@@ -34,12 +34,12 @@ use output_listing::route_prefers_direct_observed_answer_for_scalar;
 pub(crate) use output_listing::scalar_route_prefers_structured_observed_answer;
 use output_listing::{
     canonical_existing_path, count_answer_from_latest_fs_search, count_answer_from_latest_listing,
-    current_turn_request_text, directory_purpose_summary_find_ext_answer_candidate,
-    hidden_entries_direct_answer, is_user_hidden_entry, latest_hidden_entries,
-    latest_successful_list_dir_answer_candidate, looks_like_shell_long_listing_line,
-    normalized_listing_text, recent_file_path_candidate_for_scalar_path,
-    resolve_listing_entry_full_path, route_allows_path_batch_scalar_path_observed_answer,
-    route_allows_raw_listing_direct_answer, route_allows_scalar_read_range_direct_answer,
+    current_turn_request_text, hidden_entries_direct_answer, is_user_hidden_entry,
+    latest_hidden_entries, latest_successful_list_dir_answer_candidate,
+    looks_like_shell_long_listing_line, normalized_listing_text,
+    recent_file_path_candidate_for_scalar_path, resolve_listing_entry_full_path,
+    route_allows_path_batch_scalar_path_observed_answer, route_allows_raw_listing_direct_answer,
+    route_allows_scalar_read_range_direct_answer,
     route_allows_strict_plain_observation_passthrough, route_prefers_plain_fs_search_paths,
     route_requests_hidden_entries_check, route_requests_scalar_count,
     route_requests_scalar_existence, route_requests_scalar_path_only,
@@ -62,10 +62,10 @@ use output_system_inventory::{
 mod output_fs_search;
 use output_fs_search::{
     absolutize_fs_search_answer_paths, fs_search_contract_listing_candidate,
-    fs_search_direct_answer_candidate, fs_search_find_ext_results,
-    fs_search_find_name_observed_candidate, fs_search_find_name_results,
-    fs_search_grep_text_observed_candidate, fs_search_route_filtered_listing_candidate,
-    fs_search_scalar_candidate, normalized_find_name_pattern, preferred_fs_search_exact_match,
+    fs_search_direct_answer_candidate, fs_search_find_name_observed_candidate,
+    fs_search_find_name_results, fs_search_grep_text_observed_candidate,
+    fs_search_route_filtered_listing_candidate, fs_search_scalar_candidate,
+    normalized_find_name_pattern, preferred_fs_search_exact_match,
 };
 
 #[path = "observed_output_path_facts.rs"]
@@ -164,9 +164,7 @@ use output_scalar_text::{
 
 #[path = "observed_output_status_json.rs"]
 mod output_status_json;
-use output_status_json::{
-    find_ext_representative_lines, latest_find_ext_results, multi_status_json_summary_candidate,
-};
+use output_status_json::multi_status_json_summary_candidate;
 
 #[path = "observed_output_machine_candidates.rs"]
 mod output_machine_candidates;
@@ -794,7 +792,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
         FinalAnswerShape::ComparisonVerdict
             | FinalAnswerShape::ExistenceVerdictWithPath
             | FinalAnswerShape::RawOutputOrShortSummary
-            | FinalAnswerShape::RecentArtifactJudgment
             | FinalAnswerShape::ScalarEqualityVerdict
             | FinalAnswerShape::StatusWithSource
             | FinalAnswerShape::ValidationVerdict

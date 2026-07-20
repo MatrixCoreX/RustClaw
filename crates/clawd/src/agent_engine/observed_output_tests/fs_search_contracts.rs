@@ -428,29 +428,6 @@ fn virtual_fs_basic_find_ext_directory_contract_returns_parent_dirs() {
 }
 
 #[test]
-fn directory_purpose_summary_find_ext_waits_when_content_evidence_required() {
-    let mut loop_state = LoopState::new(3);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"find_ext","count":5,"ext":"toml","results":["Cargo.toml","configs/config.toml","configs/skills_registry.toml","configs/channels/telegram.toml","configs/i18n/rss_fetch.en-US.toml"],"root":""},"text":"{\"action\":\"find_ext\",\"count\":5,\"ext\":\"toml\",\"results\":[\"Cargo.toml\",\"configs/config.toml\",\"configs/skills_registry.toml\",\"configs/channels/telegram.toml\",\"configs/i18n/rss_fetch.en-US.toml\"],\"root\":\"\"}"}"#,
-    ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    route_result.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
-    route_result.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
-        ..AgentRunContext::default()
-    };
-
-    assert!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none(),
-        "candidate-only find_ext output should stay intermediate for content-evidence summaries"
-    );
-}
-
-#[test]
 fn multi_status_json_direct_answer_keeps_all_observed_status_files() {
     let mut loop_state = LoopState::new(3);
     loop_state.executed_step_results.push(ok_step(

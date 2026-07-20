@@ -393,6 +393,85 @@ fn workspace_inventory_and_read_excerpt_use_generic_synthesis() {
 }
 
 #[test]
+fn mtime_ranked_listing_and_excerpts_use_generic_judgment_synthesis() {
+    let mut loop_state = LoopState::default();
+    loop_state.capability_results.extend([
+        CapabilityResultEnvelope::ok(
+            "fs_basic",
+            Some("list_dir".to_string()),
+            json!({
+                "extra": {
+                    "action": "list_dir",
+                    "path": "docs",
+                    "sort_by": "mtime_desc",
+                    "entries": [
+                        {
+                            "name": "release.md",
+                            "kind": "file",
+                            "modified_ts": 200,
+                            "path": "docs/release.md"
+                        },
+                        {
+                            "name": "notes.md",
+                            "kind": "file",
+                            "modified_ts": 100,
+                            "path": "docs/notes.md"
+                        }
+                    ]
+                }
+            }),
+        ),
+        CapabilityResultEnvelope::ok(
+            "fs_basic",
+            Some("read_text_range".to_string()),
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "docs/release.md",
+                    "excerpt": "1|# Release Checklist"
+                }
+            }),
+        ),
+    ]);
+    let route = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        locator_hint: "docs".to_string(),
+        selection: crate::OutputSelectionContract {
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::pipeline_types::OutputScalarCountTargetKind::File,
+                target_kind_specified: true,
+                limit: Some(2),
+                sort_by: Some("mtime_desc".to_string()),
+                include_metadata: Some(true),
+                include_hidden: Some(false),
+            },
+            structured_field_selector: None,
+        },
+        ..Default::default()
+    };
+    let context = AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&context)
+    ));
+    let bounded = bounded_result(&loop_state.capability_results[0]);
+    assert_eq!(
+        bounded.data.pointer("/extra/sort_by"),
+        Some(&json!("mtime_desc"))
+    );
+    assert_eq!(
+        bounded.data.pointer("/extra/entries/0/modified_ts"),
+        Some(&json!(200))
+    );
+}
+
+#[test]
 fn grep_results_use_generic_synthesis_without_domain_contract() {
     let mut loop_state = LoopState::default();
     loop_state

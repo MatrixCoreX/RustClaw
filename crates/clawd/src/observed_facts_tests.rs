@@ -65,7 +65,7 @@ fn derives_structural_bullet_entries_from_generic_visible_candidate_answer() {
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "在 `fuzzy_top3` 目录下找到4个文件名包含 \"abcd\" 的文件：\n- `abcd_report.md`\n- `my_abcd.txt`\n- `x_abcd_log.txt`\n- `zz_abcd_backup.log`\n这些都是模糊匹配测试的 fixture 文件。",
         &[],

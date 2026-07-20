@@ -83,9 +83,7 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
         OutputSemanticKind::CommandOutputSummary
         | OutputSemanticKind::ContentExcerptSummary
-        | OutputSemanticKind::ContentExcerptWithSummary
-        | OutputSemanticKind::DirectoryPurposeSummary
-        | OutputSemanticKind::RecentArtifactsJudgment => TaskOperation::Summarize,
+        | OutputSemanticKind::ContentExcerptWithSummary => TaskOperation::Summarize,
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
@@ -237,13 +235,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary => {
-            fields.insert("content_excerpt");
-        }
-        OutputSemanticKind::DirectoryPurposeSummary => {
-            fields.insert("candidates");
-        }
-        OutputSemanticKind::RecentArtifactsJudgment => {
-            fields.insert("candidates");
             fields.insert("content_excerpt");
         }
         OutputSemanticKind::FileNames

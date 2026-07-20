@@ -810,7 +810,7 @@ fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_foll
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: root.to_string(),
         selection: crate::OutputSelectionContract::default(),
     };

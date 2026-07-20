@@ -989,65 +989,6 @@ fn json_observed_evidence_array_items_include_provider_safe_sample_values() {
 }
 
 #[test]
-fn recent_artifacts_judgment_content_excerpt_satisfies_field_value_requirement() {
-    let mut journal = TaskJournal::for_task(
-        "task-recent-artifacts-content",
-        "ask",
-        "list docs and explain the most relevant one",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::RecentArtifactsJudgment);
-    route.requires_content_evidence = true;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "document".to_string();
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "inventory_dir",
-                "names": ["manual_note.txt", "manual_fixture_note.txt"],
-                "names_by_kind": {
-                    "files": ["manual_note.txt", "manual_fixture_note.txt"],
-                    "dirs": [],
-                    "other": []
-                },
-                "path": "document"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "read_range",
-                "path": "document/manual_note.txt",
-                "excerpt": "1|RustClaw manual test note",
-                "start_line": 1,
-                "end_line": 1
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 3,
-        finished_at: 4,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
 fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated() {
     let entries = (0..68)
         .map(|idx| {

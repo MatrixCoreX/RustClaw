@@ -32,8 +32,6 @@ mod loop_control_observe_round;
 mod loop_control_plan_verifier_recovery;
 #[path = "loop_control_post_write_evidence_guard.rs"]
 mod loop_control_post_write_evidence_guard;
-#[path = "loop_control_recent_artifacts_recovery.rs"]
-mod loop_control_recent_artifacts_recovery;
 #[path = "loop_control_structured_clarify.rs"]
 mod loop_control_structured_clarify;
 #[path = "loop_control_verifier_retry_commit.rs"]
@@ -52,7 +50,6 @@ use loop_control_observe_round::{
 };
 use loop_control_plan_verifier_recovery::*;
 use loop_control_post_write_evidence_guard::*;
-use loop_control_recent_artifacts_recovery::*;
 use loop_control_structured_clarify::*;
 use loop_control_verifier_retry_commit::verifier_retry_answer_has_required_machine_evidence;
 
@@ -408,19 +405,6 @@ fn should_stop_for_observed_finalize(
         return required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
-    }
-    if has_executable_observation_or_action(actions)
-        && !has_discussion_followup_action(actions)
-        && recent_artifacts_inventory_observation_can_finalize(route_result, loop_state)
-    {
-        return required_success_marker.is_none_or(|marker| {
-            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
-        });
-    }
-    if route_result.semantic_kind_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
-        && !has_discussion_followup_action(actions)
-    {
-        return false;
     }
     if quantity_comparison_one_sentence_needs_model_language_before_stop(route_result)
         && !has_discussion_followup_action(actions)
@@ -1421,9 +1405,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 return Ok(reply);
             }
             if try_recover_local_health_answer_verifier_gap(route_result, &mut reply) {
-                return Ok(reply);
-            }
-            if try_recover_recent_artifacts_answer_verifier_gap(route_result, &mut reply) {
                 return Ok(reply);
             }
             if try_recover_generic_path_content_read_range_answer_verifier_gap(

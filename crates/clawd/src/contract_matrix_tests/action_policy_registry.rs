@@ -176,74 +176,6 @@ fn content_excerpt_with_summary_allows_supplemental_directory_listing() {
 }
 
 #[test]
-fn directory_purpose_summary_allows_log_analyze_evidence() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            locator_hint: "logs".to_string(),
-            ..IntentOutputContract::default()
-        }),
-        "log_analyze",
-        &serde_json::json!({"path":"logs"}),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "log_analyze");
-    assert_eq!(policy.contract_match, "directory_purpose_summary");
-}
-
-#[test]
-fn directory_purpose_summary_allows_structured_field_evidence() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        }),
-        "system_basic",
-        &serde_json::json!({
-            "action": "extract_field",
-            "path": "UI/package.json",
-            "field_path": "name"
-        }),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "config_basic.read_field");
-    assert_eq!(policy.contract_match, "directory_purpose_summary");
-}
-
-#[test]
-fn recent_artifacts_judgment_allows_bounded_content_evidence() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            locator_hint: "docs".to_string(),
-            ..IntentOutputContract::default()
-        }),
-        "fs_basic",
-        &serde_json::json!({
-            "action": "read_text_range",
-            "path": "docs/config_basic_contract.md",
-            "mode": "head",
-            "n": 40
-        }),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "fs_basic.read_text_range");
-    assert_eq!(policy.contract_match, "recent_artifacts_judgment");
-}
-
-#[test]
 fn generic_delivery_allows_directory_listing_for_selection() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -1150,7 +1082,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 84);
+    let cases = generated_contract_cases(&matrix, 78);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

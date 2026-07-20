@@ -28,7 +28,6 @@ use super::{
     try_recover_local_health_answer_verifier_gap_from_loop_state,
     try_recover_log_analyze_answer_verifier_gap,
     try_recover_machine_kv_summary_output_format_answer_verifier_gap,
-    try_recover_recent_artifacts_answer_verifier_gap,
     try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_evidence_table_answer_verifier_gap,
     try_recover_structured_listing_answer_verifier_gap,
@@ -283,50 +282,6 @@ fn structured_search_verifier_exhaustion_recovers_with_full_candidate_list() {
         Some(crate::task_journal::TaskJournalFinalStatus::Success)
     );
     assert!(journal.answer_verifier_summary.is_none());
-}
-
-#[test]
-fn structured_search_recovery_does_not_override_directory_purpose_summary() {
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["candidates".to_string()],
-        answer_incomplete_reason: "answer used recursive candidates instead of direct entries"
-            .to_string(),
-        should_retry: true,
-        retry_instruction: "answer from the direct list_dir evidence".to_string(),
-        confidence: 0.94,
-    });
-    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: StepExecutionStatus::Ok,
-        output_excerpt: Some(
-            r#"{"action":"find_ext","count":50,"ext":"toml","results":["Cargo.toml","configs/config.toml"],"root":"/repo"}"#
-                .to_string(),
-        ),
-        error_excerpt: None,
-        started_at: 0,
-        finished_at: 0,
-    });
-    let mut reply =
-        AskReply::non_llm("Found 50 candidates.".to_string()).with_task_journal(journal);
-    let mut route = route_result(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
-
-    assert!(!try_recover_structured_search_answer_verifier_gap(
-        Some(&answer_contract(&route)),
-        "List top-level toml files and explain them briefly.",
-        &mut reply
-    ));
-    assert!(!reply.should_fail_task);
-    assert_eq!(reply.text, "Found 50 candidates.");
-    assert!(reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-        .is_some());
 }
 
 #[test]
@@ -1210,8 +1165,6 @@ mod machine_status_visible;
 mod observed_finalize;
 #[path = "loop_control_tests/post_write_validation_reserve.rs"]
 mod post_write_validation_reserve;
-#[path = "loop_control_tests/recent_artifacts_recovery.rs"]
-mod recent_artifacts_recovery;
 #[path = "loop_control_tests/soft_budget_checkpoint.rs"]
 mod soft_budget_checkpoint;
 #[path = "loop_control_tests/structured_listing_recovery.rs"]

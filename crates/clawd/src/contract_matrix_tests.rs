@@ -3,9 +3,6 @@ use std::{collections::BTreeMap, path::PathBuf};
 use super::*;
 use crate::task_contract::fallback_required_evidence_fields_for_output_contract;
 use crate::{OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape};
-#[path = "contract_matrix_recent_artifacts_tests.rs"]
-mod recent_artifacts_tests;
-
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }

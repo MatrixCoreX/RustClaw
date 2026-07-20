@@ -5,7 +5,6 @@ use std::sync::{Arc, RwLock};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::directory_purpose;
 use super::{
     agent_context_allows_observed_output_language_fallback,
     append_compound_file_delivery_token_from_route,
@@ -21,8 +20,7 @@ use super::{
     deterministic_execution_failed_step_answer, deterministic_matrix_observed_shape_answer,
     deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
     deterministic_structured_file_validation_from_read_range, direct_config_edit_observed_answer,
-    direct_db_basic_observed_answer, direct_directory_purpose_summary_from_size_facts,
-    direct_file_token_from_observed_auto_locator_filename,
+    direct_db_basic_observed_answer, direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_generated_file_path_report_from_dry_run_payload, direct_non_builtin_skill_raw_answer,
     direct_path_from_active_bound_inventory, direct_publishable_observed_answer,
@@ -52,11 +50,9 @@ use super::{
     preserve_compound_content_summary_with_file_token, priority_last_respond_for_final_delivery,
     promote_observed_language_delivery_summary, replace_config_edit_machine_marker_delivery,
     replace_config_edit_machine_marker_final_answer,
-    replace_delivery_with_deterministic_directory_purpose_answer,
     replace_delivery_with_deterministic_execution_failed_step_answer,
     replace_delivery_with_deterministic_observed_execution_status_answer,
     replace_delivery_with_deterministic_quantity_comparison_answer,
-    replace_delivery_with_deterministic_recent_artifacts_judgment_answer,
     replace_delivery_with_deterministic_rustclaw_config_risk_answer,
     replace_delivery_with_latest_tail_read_range_answer,
     replace_delivery_with_requested_machine_kv_summary,
@@ -223,9 +219,6 @@ mod exact_contract_tests;
 
 #[path = "loop_reply_content_evidence_tests.rs"]
 mod content_evidence_tests;
-
-#[path = "loop_reply_directory_purpose_tests.rs"]
-mod directory_purpose_tests;
 
 #[path = "loop_reply_quantity_tests.rs"]
 mod quantity_tests;

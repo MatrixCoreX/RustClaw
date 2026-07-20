@@ -471,13 +471,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
-        && (observed_canonical.contains("content_excerpt")
-            || observed_fields.contains("excerpt")
-            || observed_fields.contains("text_excerpt"))
-    {
-        observed_canonical.insert("field_value".to_string());
-    }
     if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarCount)
         && (observed_canonical.contains("value") || observed_canonical.contains("field_value"))
     {
@@ -517,9 +510,7 @@ fn current_workspace_inventory_fields_present(
     observed_fields: &BTreeSet<String>,
     observed_canonical: &BTreeSet<String>,
 ) -> bool {
-    (observed_canonical.contains("directory_structure")
-        || observed_canonical.contains("candidates")
-        || observed_canonical.contains("count"))
+    (observed_canonical.contains("candidates") || observed_canonical.contains("count"))
         && (observed_field_present(observed_fields, "names_by_kind")
             || observed_field_with_prefix(observed_fields, "names_by_kind.")
             || observed_field_with_prefix(observed_fields, "extra.names_by_kind.")
@@ -830,17 +821,6 @@ pub(super) fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<S
                 "stderr",
                 "output",
                 "text_excerpt",
-            ][..],
-        ),
-        (
-            "directory_structure",
-            &[
-                "child_count",
-                "children",
-                "directory_structure",
-                "names_by_kind",
-                "omitted_children",
-                "tree",
             ][..],
         ),
     ] {

@@ -30,25 +30,6 @@ fn file_path_search_maps_to_directory_list_evidence() {
 }
 
 #[test]
-fn directory_summary_uses_listing_candidates() {
-    let output_contract = IntentOutputContract {
-        locator_kind: OutputLocatorKind::CurrentWorkspace,
-        semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-        requires_content_evidence: true,
-        ..IntentOutputContract::default()
-    };
-
-    assert_eq!(
-        operation_for_output_contract(&output_contract),
-        TaskOperation::Summarize
-    );
-    assert_eq!(
-        required_evidence_fields_for_output_contract(&output_contract),
-        vec!["candidates"]
-    );
-}
-
-#[test]
 fn existence_contract_requires_structural_path_evidence() {
     let output_contract = IntentOutputContract {
         locator_kind: OutputLocatorKind::Path,

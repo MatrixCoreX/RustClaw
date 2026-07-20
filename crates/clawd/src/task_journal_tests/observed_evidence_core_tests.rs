@@ -956,7 +956,6 @@ fn current_workspace_inventory_names_by_kind_satisfies_field_value_evidence() {
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("directory_structure"));
     assert!(coverage.observed_canonical.contains("field_value"));
 }
 
@@ -1345,51 +1344,6 @@ fn generic_path_content_directory_counts_can_complete_from_count_evidence() {
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("count"));
     assert!(coverage.observed_canonical.contains("path"));
-}
-
-#[test]
-fn directory_purpose_tree_summary_children_satisfy_candidates_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-directory-purpose-tree-summary",
-        "ask",
-        "summarize relevant documentation entries",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::DirectoryPurposeSummary);
-    route.requires_content_evidence = true;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.response_shape = crate::OutputResponseShape::Free;
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "system_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "tree_summary",
-                "path": "document",
-                "tree": {
-                    "children": [
-                        {
-                            "kind": "file",
-                            "path": "document/README.md",
-                            "size_bytes": 128
-                        }
-                    ]
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage
-        .observed_extractors
-        .contains("system_basic.tree_summary.structured_json_v1"));
 }
 
 #[test]

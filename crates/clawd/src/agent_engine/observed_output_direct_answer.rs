@@ -120,18 +120,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                 answer,
             );
         }
-        if let Some(answer) = directory_purpose_summary_find_ext_answer_candidate(route, loop_state)
-            .and_then(|answer| {
-                evidence_policy_checked_direct_candidate(
-                    Some(route),
-                    loop_state,
-                    auto_locator_path,
-                    answer,
-                )
-            })
-        {
-            return Some(answer);
-        }
         if let Some(answer) =
             multi_status_json_summary_candidate(route, loop_state).and_then(|answer| {
                 evidence_policy_checked_direct_candidate(
@@ -352,20 +340,11 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             prefers_english_free_text,
                         )
                     } else if action == Some("tree_summary") {
-                        if route.is_some_and(|route| {
-                            super::output_route_policy::route_contract_marker_is(
-                                route,
-                                crate::OutputSemanticKind::DirectoryPurposeSummary,
-                            )
-                        }) {
-                            None
-                        } else {
-                            tree_summary_direct_answer_candidate(
-                                state,
-                                &value,
-                                prefers_english_free_text,
-                            )
-                        }
+                        tree_summary_direct_answer_candidate(
+                            state,
+                            &value,
+                            prefers_english_free_text,
+                        )
                     } else if action == Some("dir_compare") {
                         dir_compare_direct_answer_candidate(
                             state,
@@ -525,14 +504,6 @@ pub(super) fn fs_search_output_direct_answer_candidate(
     allow_multi_result_list: bool,
     prefer_full_path: bool,
 ) -> Option<String> {
-    if route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::DirectoryPurposeSummary,
-        ) && route.requires_content_evidence
-    }) {
-        return None;
-    }
     if route.is_some_and(|route| {
         super::output_route_policy::route_contract_marker_is(
             route,

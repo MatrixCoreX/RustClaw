@@ -456,7 +456,6 @@ pub(super) fn route_prefers_content_evidence_synthesis(
                 crate::OutputSemanticKind::ContentExcerptSummary,
                 crate::OutputSemanticKind::ContentExcerptWithSummary,
                 crate::OutputSemanticKind::CommandOutputSummary,
-                crate::OutputSemanticKind::DirectoryPurposeSummary,
             ]));
     if !contract.requires_content_evidence
         || contract.delivery_required
