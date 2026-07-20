@@ -103,8 +103,7 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::FileBasename
         | OutputSemanticKind::ExistenceWithPath
         | OutputSemanticKind::StructuredKeys
-        | OutputSemanticKind::ConfigFieldRead
-        | OutputSemanticKind::SchedulePreview => TaskOperation::Inspect,
+        | OutputSemanticKind::ConfigFieldRead => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
             TaskOperation::Validate
         }
@@ -201,6 +200,14 @@ fn task_delivery_shape_from_token(value: &str) -> Option<TaskDeliveryShape> {
 pub(crate) fn required_evidence_fields_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> Vec<String> {
+    if let Some(fields) = output_contract
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+    {
+        return fields;
+    }
     let fallback = fallback_required_evidence_fields_for_output_contract(output_contract);
     match crate::evidence_policy::required_evidence_for_output_contract(output_contract) {
         Some(fields) if !fields.is_empty() => fields,
@@ -281,11 +288,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::SqliteSchemaVersion
         | OutputSemanticKind::RecentScalarEqualityCheck => {
             fields.insert("field_value");
-        }
-        OutputSemanticKind::SchedulePreview => {
-            fields.insert("datetime");
-            fields.insert("timezone");
-            fields.insert("title");
         }
         OutputSemanticKind::ExecutionFailedStep => {
             fields.insert("command_output");

@@ -1,30 +1,6 @@
 use super::*;
 
 #[test]
-fn schedule_preview_semantic_owns_read_only_schedule_policy() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::SchedulePreview,
-            requires_content_evidence: true,
-            response_shape: OutputResponseShape::Strict,
-            locator_kind: OutputLocatorKind::None,
-            ..IntentOutputContract::default()
-        }),
-        "schedule",
-        &serde_json::json!({"action":"preview","text":"schedule source text"}),
-    )
-    .expect("schedule preview policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "schedule.preview");
-    assert_eq!(policy.contract_match, "schedule_preview");
-    assert_eq!(
-        policy.required_evidence,
-        vec!["datetime", "timezone", "title"]
-    );
-}
-
-#[test]
 fn non_bridge_package_actions_remain_structured_contract_inputs() {
     let cases = [
         (

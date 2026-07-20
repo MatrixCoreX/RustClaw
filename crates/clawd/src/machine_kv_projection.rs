@@ -217,20 +217,9 @@ pub(crate) fn requested_machine_markers_for_projection(input: &str) -> Vec<Strin
 }
 
 pub(crate) fn structured_json_satisfies_field_selector(selector: &str, output: &str) -> bool {
-    let fields = selector
-        .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';'))
-        .map(str::trim)
-        .filter(|field| !field.is_empty())
-        .collect::<Vec<_>>();
-    if fields.is_empty()
-        || fields.iter().any(|field| {
-            !valid_machine_key(field)
-                || field.contains('*')
-                || field.split('.').any(field_is_visible_text_boundary)
-        })
-    {
+    let Some(fields) = exact_machine_field_selector(selector) else {
         return false;
-    }
+    };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
         return false;
     };
@@ -238,6 +227,31 @@ pub(crate) fn structured_json_satisfies_field_selector(selector: &str, output: &
         let path = field.split('.').collect::<Vec<_>>();
         structured_json_contains_field_path(&value, &path)
     })
+}
+
+pub(crate) fn exact_machine_field_selector(selector: &str) -> Option<Vec<String>> {
+    let fields = selector
+        .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';'))
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    if fields.is_empty()
+        || fields.len() > 32
+        || fields.iter().any(|field| {
+            !valid_machine_key(field)
+                || field.contains('*')
+                || field.split('.').any(field_is_visible_text_boundary)
+        })
+    {
+        return None;
+    }
+    let mut normalized = Vec::with_capacity(fields.len());
+    for field in fields {
+        if !normalized.iter().any(|existing| existing == field) {
+            normalized.push(field.to_string());
+        }
+    }
+    Some(normalized)
 }
 
 fn structured_json_contains_field_path(value: &serde_json::Value, path: &[&str]) -> bool {
