@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  appendLiveTaskEvent,
   buildReplaySummary,
   buildTaskApprovalRequest,
   buildTaskGoalView,
@@ -14,6 +15,55 @@ import {
   traceEventMeta,
 } from "./task-result.ts";
 import type { TaskQueryResponse } from "../types/api.ts";
+
+test("appends progressive model events into the live task trace", () => {
+  const first = appendLiveTaskEvent(null, "task-live", {
+    schema_version: 1,
+    seq: 1,
+    task_id: "task-live",
+    event_kind: "model_turn",
+    payload: {
+      type: "tool_call_delta",
+      model_event_index: 2,
+      tool_name: "call_capability",
+      arguments_delta_bytes: 12,
+    },
+  });
+  const duplicate = appendLiveTaskEvent(first, "task-live", {
+    schema_version: 1,
+    seq: 1,
+    task_id: "task-live",
+    event_kind: "model_turn",
+    payload: { type: "tool_call_delta" },
+  });
+
+  const events = taskTraceEvents(duplicate);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event_type, "model_turn");
+  assert.equal(
+    events[0].payload && (events[0].payload as Record<string, unknown>).tool_name,
+    "call_capability",
+  );
+});
+
+test("renders safe model turn lifecycle fields", () => {
+  const view = buildTaskTraceEventView(
+    {
+      event_type: "model_turn",
+      payload: {
+        type: "tool_call",
+        provider: "vendor-minimax:MiniMax-M3",
+        tool_name: "call_capability",
+      },
+    },
+    "en",
+  );
+
+  assert.equal(view.title, "Model turn");
+  assert.equal(view.detail, "The model selected call_capability.");
+  assert.ok(view.meta.includes("provider=vendor-minimax:MiniMax-M3"));
+  assert.ok(view.meta.includes("tool_name=call_capability"));
+});
 
 test("extracts visible task text before falling back to error text", () => {
   const result: TaskQueryResponse = {

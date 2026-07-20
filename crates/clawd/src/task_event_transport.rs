@@ -96,7 +96,7 @@ pub(crate) fn publish_event(
     publish_event_internal(state, task_id, event_kind, payload, None)
 }
 
-fn publish_claimed_event(
+pub(crate) fn publish_claimed_event(
     state: &AppState,
     task: &ClaimedTask,
     event_kind: &str,

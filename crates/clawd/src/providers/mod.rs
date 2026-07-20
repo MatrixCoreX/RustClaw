@@ -4,6 +4,7 @@ pub(crate) mod client;
 pub(crate) mod fixture_replay;
 pub(crate) mod google_gemini;
 pub(crate) mod openai_compat;
+pub(crate) mod openai_model_turn;
 pub(crate) mod output;
 pub(crate) mod pricing;
 pub(crate) mod routing;
@@ -15,8 +16,8 @@ mod pricing_tests;
 
 pub(crate) use circuit::{AttemptDecision, CircuitBreaker, CircuitBreakerSnapshot};
 pub(crate) use client::{
-    build_llm_http_client, call_provider_with_retry, call_provider_with_retry_with_hints,
-    ChatRequestHints, LlmRoutingPreference,
+    build_llm_http_client, call_model_turn_with_retry, call_provider_with_retry,
+    call_provider_with_retry_with_hints, ChatRequestHints, LlmRoutingPreference,
 };
 pub(crate) use output::{
     append_model_io_log, log_color_enabled, maybe_sanitize_llm_text_output,

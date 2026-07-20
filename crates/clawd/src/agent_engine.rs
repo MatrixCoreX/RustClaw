@@ -136,8 +136,6 @@ pub(crate) const CLAWD_RUNTIME_ASYNC_JOB_START_ARG: &str = "_clawd_runtime_async
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
 const PLAN_REPAIR_PROMPT_LOGICAL_PATH: &str = "prompts/plan_repair_prompt.md";
-const PLANNER_ABORT_COMPACT_RETRY_PROMPT_LOGICAL_PATH: &str =
-    "prompts/planner_abort_compact_retry_prompt.md";
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
 
 fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), String> {

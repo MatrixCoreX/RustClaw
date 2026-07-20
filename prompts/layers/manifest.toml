@@ -4,6 +4,11 @@ base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/agent_tool_spec.md"]
 
 [[prompts]]
+logical_path = "prompts/native_action_protocol.md"
+base = []
+overlay = ["prompts/layers/overlays/native_action_protocol.md"]
+
+[[prompts]]
 logical_path = "prompts/single_plan_execution_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",
@@ -28,15 +33,6 @@ base = [
   "prompts/layers/base/execution/common_rules.md",
 ]
 overlay = ["prompts/layers/overlays/plan_repair_prompt.md"]
-vendor_patch = "execution/common.md"
-
-[[prompts]]
-logical_path = "prompts/planner_abort_compact_retry_prompt.md"
-base = [
-  "prompts/layers/base/system_truth.md",
-  "prompts/layers/base/execution/common_rules.md",
-]
-overlay = ["prompts/layers/overlays/planner_abort_compact_retry_prompt.md"]
 vendor_patch = "execution/common.md"
 
 [[prompts]]

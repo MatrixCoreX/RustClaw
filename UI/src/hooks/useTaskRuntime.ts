@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { followTaskEventStream } from "../lib/task-event-stream";
+import { appendLiveTaskEvent } from "../lib/task-result";
 import type {
   ActiveTaskItem,
   ActiveTasksResponse,
@@ -577,23 +578,24 @@ export function useTaskRuntime({
       apiFetch,
       trackingTaskId,
       (event) => {
-        if (event.event_kind !== "task_state") return;
-        const status = event.payload?.status;
-        if (typeof status !== "string" || !isTaskQueryStatus(status)) return;
-        setTaskResult((current) => ({
-          task_id: trackingTaskId,
-          status,
-          execution_state:
-            typeof event.payload?.execution_state === "string"
-              ? event.payload.execution_state
-              : current?.execution_state,
-          result_json: current?.result_json ?? null,
-          error_text: current?.error_text ?? null,
-          lifecycle:
-            event.payload?.lifecycle && typeof event.payload.lifecycle === "object"
-              ? (event.payload.lifecycle as TaskQueryResponse["lifecycle"])
-              : current?.lifecycle,
-        }));
+        setTaskResult((current) => {
+          const withEvent = appendLiveTaskEvent(current, trackingTaskId, event);
+          if (event.event_kind !== "task_state") return withEvent;
+          const status = event.payload?.status;
+          if (typeof status !== "string" || !isTaskQueryStatus(status)) return withEvent;
+          return {
+            ...withEvent,
+            status,
+            execution_state:
+              typeof event.payload?.execution_state === "string"
+                ? event.payload.execution_state
+                : withEvent.execution_state,
+            lifecycle:
+              event.payload?.lifecycle && typeof event.payload.lifecycle === "object"
+                ? (event.payload.lifecycle as TaskQueryResponse["lifecycle"])
+                : withEvent.lifecycle,
+          };
+        });
       },
       controller.signal,
     )

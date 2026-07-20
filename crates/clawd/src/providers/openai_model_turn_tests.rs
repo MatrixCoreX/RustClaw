@@ -1,0 +1,258 @@
+use claw_core::config::{LlmProviderConfig, LlmProviderParams};
+use claw_core::model_turn::{ModelMessage, ModelRole, ModelToolDefinition, ModelTurnRequest};
+
+use super::*;
+
+fn provider() -> LlmProviderRuntime {
+    LlmProviderRuntime {
+        config: LlmProviderConfig {
+            name: "vendor-minimax".to_string(),
+            provider_type: "openai_compat".to_string(),
+            base_url: "https://example.invalid/v1".to_string(),
+            api_key: "test".to_string(),
+            model: "MiniMax-M3".to_string(),
+            context_window_tokens: Some(1_000_000),
+            input_modalities: vec!["text".to_string()],
+            supports_tools: true,
+            expected_latency_ms: None,
+            priority: 1,
+            timeout_seconds: 30,
+            max_concurrency: 1,
+            params: LlmProviderParams::default(),
+        },
+        pricing: None,
+        latency: Arc::new(crate::providers::LlmProviderLatencyTracker::default()),
+        client: reqwest::Client::new(),
+        semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        breaker: Arc::new(crate::providers::CircuitBreaker::new()),
+    }
+}
+
+fn native_request() -> ModelTurnRequest {
+    ModelTurnRequest {
+        messages: vec![ModelMessage::text(ModelRole::User, "inspect README.md")],
+        tools: vec![ModelToolDefinition {
+            name: "call_capability".to_string(),
+            description: "Resolve and execute a runtime capability.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["capability", "args"],
+                "properties": {
+                    "capability": {"type": "string"},
+                    "args": {"type": "object"}
+                },
+                "additionalProperties": false
+            }),
+            strict: true,
+        }],
+        response_schema: None,
+        stream: false,
+        metadata: BTreeMap::new(),
+    }
+}
+
+#[test]
+fn native_request_maps_messages_and_function_tools() {
+    let body = build_openai_request(&provider(), &native_request(), &ChatRequestHints::default())
+        .expect("build request");
+
+    assert_eq!(body["model"], "MiniMax-M3");
+    assert_eq!(body["messages"][0]["role"], "user");
+    assert_eq!(body["tools"][0]["function"]["name"], "call_capability");
+    assert_eq!(
+        body["tools"][0]["function"]["parameters"]["required"],
+        json!(["capability", "args"])
+    );
+    assert_eq!(body["parallel_tool_calls"], true);
+}
+
+#[test]
+fn response_maps_parallel_tool_calls_without_prose_parsing() {
+    let response = json!({
+        "choices": [{
+            "message": {
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "call_capability",
+                            "arguments": "{\"capability\":\"fs.read\",\"args\":{\"path\":\"README.md\"}}"
+                        }
+                    },
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "call_capability",
+                            "arguments": "{\"capability\":\"fs.list\",\"args\":{\"path\":\"docs\"}}"
+                        }
+                    }
+                ]
+            },
+            "finish_reason": "tool_calls"
+        }],
+        "usage": {
+            "prompt_tokens": 20,
+            "completion_tokens": 8,
+            "total_tokens": 28
+        }
+    });
+
+    let turn = parse_openai_model_turn(&response).expect("parse turn");
+
+    assert_eq!(turn.tool_calls.len(), 2);
+    assert_eq!(turn.tool_calls[0].arguments["capability"], "fs.read");
+    assert_eq!(turn.finish_reason, ModelFinishReason::ToolCalls);
+    assert_eq!(turn.usage.and_then(|usage| usage.total_tokens), Some(28));
+}
+
+#[test]
+fn malformed_tool_arguments_fail_with_machine_code() {
+    let response = json!({
+        "choices": [{
+            "message": {
+                "content": null,
+                "tool_calls": [{
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "call_capability",
+                        "arguments": "{not-json"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    });
+
+    assert_eq!(
+        parse_openai_model_turn(&response),
+        Err("model_turn_tool_arguments_invalid index=0".to_string())
+    );
+}
+
+#[test]
+fn sse_decoder_assembles_split_parallel_calls_and_usage() {
+    let first_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call-1",
+                        "function": {
+                            "name": "call_capability",
+                            "arguments": "{\"capability\":\"fs.read\",\"args\":{"
+                        }
+                    }]
+                }
+            }]
+        })
+    );
+    let split_at = first_frame.len() / 2;
+    let chunks = vec![
+        first_frame.as_bytes()[..split_at].to_vec(),
+        first_frame.as_bytes()[split_at..].to_vec(),
+        format!(
+            "data: {}\r\n\r\n",
+            json!({
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 1,
+                            "id": "call-2",
+                            "function": {
+                                "name": "call_capability",
+                                "arguments": "{\"capability\":\"fs.list\",\"args\":{}}"
+                            }
+                        }]
+                    }
+                }]
+            })
+        )
+        .into_bytes(),
+        format!(
+            "data: {}\n\n",
+            json!({
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "function": {"arguments": "}}"}
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 6,
+                    "total_tokens": 18
+                }
+            })
+        )
+        .into_bytes(),
+        b"data: [DONE]\n\n".to_vec(),
+    ];
+    let mut decoder = SseDecoder::default();
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    for chunk in chunks {
+        for frame in decoder.push(&chunk).expect("decode SSE frame") {
+            accumulator.apply(frame, None).expect("apply SSE frame");
+        }
+    }
+
+    let output = accumulator.finish(None).expect("finish stream");
+
+    assert_eq!(output.turn.tool_calls.len(), 2);
+    assert_eq!(output.turn.tool_calls[0].arguments["capability"], "fs.read");
+    assert_eq!(output.turn.tool_calls[1].arguments["capability"], "fs.list");
+    assert_eq!(
+        output.turn.usage.and_then(|usage| usage.total_tokens),
+        Some(18)
+    );
+    assert!(output
+        .turn
+        .events
+        .iter()
+        .any(|event| matches!(event, ModelTurnEvent::ToolCallDelta { index: 0, .. })));
+}
+
+#[test]
+fn sse_disconnect_before_done_is_retryable_machine_condition() {
+    let mut decoder = SseDecoder::default();
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    for frame in decoder
+        .push(b"data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+        .expect("decode partial")
+    {
+        accumulator.apply(frame, None).expect("apply partial");
+    }
+
+    assert_eq!(
+        accumulator.finish(None).expect_err("missing done rejected"),
+        "model_turn_stream_disconnected"
+    );
+}
+
+#[test]
+fn hidden_reasoning_delta_is_not_collected_or_emitted() {
+    let mut decoder = SseDecoder::default();
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    for frame in decoder
+        .push(
+            b"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"private\",\"content\":\"public\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+        )
+        .expect("decode frame")
+    {
+        accumulator.apply(frame, None).expect("apply frame");
+    }
+
+    let output = accumulator.finish(None).expect("finish stream");
+
+    assert_eq!(output.turn.text, "public");
+    assert!(output.turn.reasoning_metadata.is_empty());
+    assert!(!output.raw_response.contains("private"));
+}

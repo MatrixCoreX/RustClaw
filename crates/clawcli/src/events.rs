@@ -410,6 +410,12 @@ fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
         .unwrap_or("unknown")
         .to_string();
     let payload = event.get("payload");
+    push_scalar_token(
+        &mut parts,
+        &mut fields,
+        "model_phase",
+        payload.and_then(|value| value.get("type")),
+    );
     for key in [
         "status",
         "state",
@@ -424,6 +430,16 @@ fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
         "owner_layer",
         "stage",
         "phase",
+        "model_event_index",
+        "provider",
+        "tool_index",
+        "tool_call_id",
+        "tool_name",
+        "arguments_delta_bytes",
+        "text_delta_bytes",
+        "finish_reason",
+        "retryable",
+        "code",
         "decision",
         "reason_code",
         "status_code",

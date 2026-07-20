@@ -262,6 +262,7 @@ impl<'a> MachineTokenMarkers<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlanKind {
+    Native,
     Single,
     Incremental,
     Repair,
@@ -270,6 +271,7 @@ pub(crate) enum PlanKind {
 impl PlanKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::Native => "Native",
             Self::Single => "Single",
             Self::Incremental => "Incremental",
             Self::Repair => "Repair",

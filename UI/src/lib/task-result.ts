@@ -1,4 +1,4 @@
-import type { TaskApprovalDecision, TaskQueryResponse } from "../types/api";
+import type { TaskApprovalDecision, TaskEventEnvelope, TaskQueryResponse } from "../types/api";
 import type { TaskLifecycleLang } from "./task-lifecycle";
 
 export interface TaskOutcomeView {
@@ -293,6 +293,54 @@ export function taskTraceEvents(result: TaskQueryResponse): Record<string, unkno
   );
 }
 
+export function appendLiveTaskEvent(
+  current: TaskQueryResponse | null,
+  taskId: string,
+  event: TaskEventEnvelope,
+): TaskQueryResponse {
+  const result: TaskQueryResponse =
+    current?.task_id === taskId
+      ? current
+      : {
+          task_id: taskId,
+          status: "running",
+          result_json: null,
+          error_text: null,
+        };
+  const resultJson = asRecord(result.result_json) ?? {};
+  const taskJournal = asRecord(resultJson.task_journal) ?? {};
+  const trace = asRecord(taskJournal.trace) ?? {};
+  const existing = Array.isArray(trace.event_stream)
+    ? trace.event_stream.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+  const normalized: Record<string, unknown> = {
+    ...event,
+    event_type:
+      typeof event.event_type === "string" && event.event_type.trim()
+        ? event.event_type
+        : event.event_kind,
+  };
+  const duplicate =
+    typeof event.seq === "number" && existing.some((item) => item.seq === event.seq);
+  const eventStream = duplicate ? existing : [...existing, normalized].slice(-1024);
+  return {
+    ...result,
+    result_json: {
+      ...resultJson,
+      task_journal: {
+        ...taskJournal,
+        trace: {
+          ...trace,
+          event_stream: eventStream,
+        },
+      },
+    },
+  };
+}
+
 function traceEventPayload(event: Record<string, unknown>): Record<string, unknown> | null {
   const payload = event.payload;
   return payload && typeof payload === "object" && !Array.isArray(payload)
@@ -444,6 +492,15 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "unverified_risk",
     "final_status",
     "final_stop_signal",
+    "model_event_index",
+    "provider",
+    "type",
+    "tool_index",
+    "tool_call_id",
+    "tool_name",
+    "arguments_delta_bytes",
+    "text_delta_bytes",
+    "finish_reason",
   ]) {
     const value = payload[key];
     if ((typeof value === "string" && value.trim()) || typeof value === "number" || typeof value === "boolean") {
@@ -492,6 +549,36 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
         : eventType === "tool_finished" || eventType === "coding_evidence" || eventType === "coding_checkpoint" || eventType === "coding_task_contract"
           ? "ok"
           : "running";
+
+  if (eventType === "model_turn") {
+    const phase = field("type");
+    const tool = field("tool_name");
+    const detail =
+      phase === "started"
+        ? tLocal("模型已开始处理本轮请求。", "The model started this turn.")
+        : phase === "text_delta"
+          ? tLocal("收到新的回复片段。", "A response fragment arrived.")
+          : phase === "tool_call_delta"
+            ? tool
+              ? tLocal(`正在构造 ${tool} 调用。`, `Building the ${tool} call.`)
+              : tLocal("正在构造工具调用。", "Building a tool call.")
+            : phase === "tool_call"
+              ? tool
+                ? tLocal(`模型选择了 ${tool}。`, `The model selected ${tool}.`)
+                : tLocal("模型选择了一个工具。", "The model selected a tool.")
+              : phase === "usage"
+                ? tLocal("本轮用量已更新。", "Turn usage was updated.")
+                : phase === "finished"
+                  ? field("finish_reason") || tLocal("本轮模型处理完成。", "The model turn finished.")
+                  : field("code") || tLocal("本轮模型处理被中断。", "The model turn was interrupted.");
+    return {
+      eventType,
+      title: tLocal("模型回合", "Model turn"),
+      detail,
+      tone: phase === "interrupted" ? "failed" : phase === "finished" ? "ok" : "running",
+      meta,
+    };
+  }
 
   if (eventType === "task_transition") {
     const from = field("state_from");

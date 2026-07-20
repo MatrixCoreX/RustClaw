@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use super::{is_quota_exhausted_response, BreakerImpact, ProviderError, PROVIDER_IMPLS};
 use serde_json::Value;
@@ -188,4 +190,32 @@ async fn provider_call_future_is_bounded_by_dispatch_timeout() {
     assert_eq!(err.observability_kind(), "timeout");
     assert!(err.message.contains("provider_call_timeout"));
     assert!(err.message.contains("timeout_seconds=1"));
+}
+
+#[tokio::test]
+async fn model_turn_timeout_cancels_the_inflight_future() {
+    struct DropSignal(Arc<AtomicBool>);
+    impl Drop for DropSignal {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_from_future = cancelled.clone();
+    let err = super::await_model_turn_call_with_timeout(
+        "openai_compat",
+        1,
+        Box::pin(async move {
+            let _drop_signal = DropSignal(cancelled_from_future);
+            pending::<Result<super::ModelTurnProviderResponse, super::ProviderError>>().await
+        }),
+    )
+    .await
+    .expect_err("pending model turn should time out");
+
+    assert!(cancelled.load(Ordering::SeqCst));
+    assert!(err.retryable);
+    assert_eq!(err.observability_kind(), "timeout");
+    assert!(err.message.contains("provider_model_turn_timeout"));
 }

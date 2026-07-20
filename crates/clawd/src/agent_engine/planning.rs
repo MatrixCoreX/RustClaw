@@ -6,6 +6,11 @@ use super::planning_prompt::{
     runtime_shell_label,
 };
 use super::planning_repair::repair_plan_actions;
+use claw_core::model_turn::{
+    ModelMessage, ModelRole, ModelToolCall, ModelToolDefinition, ModelTurnRequest,
+    ModelTurnResponse,
+};
+use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use super::{
@@ -14,6 +19,8 @@ use super::{
     AgentLoopGuardPolicy, LoopState,
 };
 use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult};
+
+const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_protocol.md";
 
 /// Planner-visible tool and skill inventory for one loop round.
 ///
@@ -42,10 +49,6 @@ impl<'a> PlannerToolLibrary<'a> {
         Ok(format!("runtime_capability_map_v2\n{capability_map}"))
     }
 }
-
-#[path = "planner_abort_recovery.rs"]
-mod planner_abort_recovery;
-use planner_abort_recovery::*;
 
 pub(super) async fn plan_round_actions(
     state: &AppState,
@@ -189,6 +192,31 @@ pub(super) async fn plan_round_actions(
         recent_assistant_replies.chars().count(),
         crate::truncate_for_log(user_text)
     );
+    let native_protocol = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+        state,
+        NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH,
+    )
+    .map_err(|error| error.to_string())?;
+    let native_prompt = format!("{prompt_text}\n\n{}", native_protocol.template);
+    let native_request = native_planner_request(&native_prompt);
+    if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback(
+        state,
+        task,
+        &native_prompt,
+        &prompt_source,
+        &native_request,
+    )
+    .await?
+    {
+        let plan_actions =
+            normalize_planned_actions(state, actions_from_native_turn(&native_turn)?);
+        let raw_plan_text =
+            serde_json::to_string(&native_turn).map_err(|error| error.to_string())?;
+        let plan_result =
+            build_plan_result_with_notes(goal, &raw_plan_text, PlanKind::Native, &plan_actions, "");
+        log_plan_split(task, loop_state, &plan_result);
+        return Ok(plan_result);
+    }
     let plan_raw = llm_gateway::run_with_fallback_with_prompt_source(
         state,
         task,
@@ -233,31 +261,7 @@ pub(super) async fn plan_round_actions(
                 actions,
                 PlanKind::Repair,
                 repaired,
-                planner_notes_for_repair_success(repair_reason, None),
-            )
-        } else if let Some((actions, raw)) = try_compact_abort_recovery_plan(
-            state,
-            task,
-            goal,
-            &turn_analysis,
-            user_text,
-            loop_state,
-            &tool_spec_template,
-            &skill_playbooks,
-            &attempt_ledger,
-            &plan_raw,
-            Some(&repaired),
-        )
-        .await?
-        {
-            (
-                actions,
-                PlanKind::Repair,
-                raw,
-                planner_notes_for_repair_success(
-                    repair_reason,
-                    Some("planner_abort_compact_retry"),
-                ),
+                planner_notes_for_repair_success(repair_reason),
             )
         } else {
             return Err("plan_parse_failed_no_executable_steps".to_string());
@@ -281,6 +285,82 @@ pub(super) async fn plan_round_actions(
         &plan_actions,
         &planner_notes,
     );
+    log_plan_split(task, loop_state, &plan_result);
+    Ok(plan_result)
+}
+
+fn native_planner_request(prompt: &str) -> ModelTurnRequest {
+    ModelTurnRequest {
+        messages: vec![ModelMessage::text(ModelRole::User, prompt)],
+        tools: vec![ModelToolDefinition {
+            name: "call_capability".to_string(),
+            description: "Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["capability", "args"],
+                "properties": {
+                    "capability": {
+                        "type": "string",
+                        "description": "Registry capability name from the supplied runtime capability map."
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": "Structured capability arguments."
+                    }
+                },
+                "additionalProperties": false
+            }),
+            strict: true,
+        }],
+        response_schema: None,
+        stream: true,
+        metadata: Default::default(),
+    }
+}
+
+fn actions_from_native_turn(turn: &ModelTurnResponse) -> Result<Vec<AgentAction>, String> {
+    if !turn.tool_calls.is_empty() {
+        return turn
+            .tool_calls
+            .iter()
+            .map(action_from_native_tool_call)
+            .collect();
+    }
+    let content = turn.text.trim();
+    if content.is_empty() {
+        return Err("native_plan_empty".to_string());
+    }
+    Ok(vec![AgentAction::Respond {
+        content: content.to_string(),
+    }])
+}
+
+fn action_from_native_tool_call(call: &ModelToolCall) -> Result<AgentAction, String> {
+    if call.name != "call_capability" {
+        return Err("native_plan_unknown_tool".to_string());
+    }
+    let arguments = call
+        .arguments
+        .as_object()
+        .ok_or_else(|| "native_plan_arguments_not_object".to_string())?;
+    let capability = arguments
+        .get("capability")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "native_plan_capability_missing".to_string())?;
+    let args = arguments
+        .get("args")
+        .cloned()
+        .filter(Value::is_object)
+        .ok_or_else(|| "native_plan_args_not_object".to_string())?;
+    Ok(AgentAction::CallCapability {
+        capability: capability.to_string(),
+        args,
+    })
+}
+
+fn log_plan_split(task: &ClaimedTask, loop_state: &LoopState, plan_result: &PlanResult) {
     let labels = plan_result.step_labels();
     info!(
         "act_split_trace task_id={} round={} split_steps={}",
@@ -288,51 +368,12 @@ pub(super) async fn plan_round_actions(
         loop_state.round_no,
         serde_json::to_string(&labels).unwrap_or_else(|_| "[]".to_string())
     );
-    Ok(plan_result)
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn try_compact_abort_recovery_plan(
-    state: &AppState,
-    task: &ClaimedTask,
-    goal: &str,
-    turn_analysis: &str,
-    user_text: &str,
-    loop_state: &LoopState,
-    tool_spec_template: &str,
-    skill_playbooks: &str,
-    attempt_ledger: &str,
-    first_raw_plan: &str,
-    latest_raw_plan: Option<&str>,
-) -> Result<Option<(Vec<AgentAction>, String)>, String> {
-    let Some((actions, raw)) = compact_retry_plan_actions(
-        state,
-        task,
-        PlannerAbortRecoveryInput {
-            goal,
-            turn_analysis,
-            user_text,
-            tool_spec: tool_spec_template,
-            skill_playbooks,
-            attempt_ledger,
-            first_raw_plan,
-            latest_raw_plan,
-            round_no: loop_state.round_no,
-            loop_state,
-        },
-    )
-    .await?
-    else {
-        return Ok(None);
-    };
-    let actions = normalize_planned_actions(state, actions);
-    Ok(Some((actions, raw)))
+fn planner_notes_for_repair_success(repair_reason: &str) -> String {
+    format!("repair_reason_code={repair_reason}")
 }
 
-fn planner_notes_for_repair_success(first_reason: &str, second_reason: Option<&str>) -> String {
-    let mut notes = vec![format!("repair_reason_code={first_reason}")];
-    if let Some(second_reason) = second_reason {
-        notes.push(format!("second_repair_reason_code={second_reason}"));
-    }
-    notes.join(" ")
-}
+#[cfg(test)]
+#[path = "planning_native_tests.rs"]
+mod native_tests;

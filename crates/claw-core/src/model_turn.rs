@@ -103,7 +103,7 @@ pub struct ModelTurnUsage {
     pub cache_read_input_tokens: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelFinishReason {
     Stop,
@@ -112,6 +112,7 @@ pub enum ModelFinishReason {
     ContentFilter,
     Cancelled,
     Error,
+    #[default]
     Unknown,
 }
 
