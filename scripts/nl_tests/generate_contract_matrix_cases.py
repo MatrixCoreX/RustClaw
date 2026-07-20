@@ -50,7 +50,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
     "file_names": f"列出 {FIXTURE_DOCS_DIR} 目录下的文件名，只输出文件名列表。",
     "directory_names": f"列出 {FIXTURE_ROOT} 下的文件夹名，只输出名称列表。",
-    "directory_entry_groups": f"列出 {FIXTURE_ROOT} 下的直接子项，并按文件和文件夹分组。",
     "file_paths": f"找出 {FIXTURE_ROOT} 下的 markdown 文件路径，只输出路径列表。",
     "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
     "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
@@ -70,7 +69,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "raw_command_output": "Run pwd and briefly tell me what the command printed.",
     "file_names": f"List the file names under {FIXTURE_DOCS_DIR}. Output only the file-name list.",
     "directory_names": f"List the folder names under {FIXTURE_ROOT}. Output only the names.",
-    "directory_entry_groups": f"List the direct children under {FIXTURE_ROOT}, grouped into files and folders.",
     "file_paths": f"Find markdown file paths under {FIXTURE_ROOT}. Output only the path list.",
     "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
     "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
@@ -330,8 +328,6 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
     contract_id = str(case.get("contract_id") or "")
     if contract_id == "file_names":
         lines.append("selector_target_kind=file")
-    elif contract_id == "directory_entry_groups":
-        lines.append("selector_target_kind=any")
     elif contract_id == "directory_names":
         lines.append("selector_target_kind=dir")
     elif contract_id == "file_paths":
@@ -585,8 +581,6 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
     if contract_id == "file_names":
         row["final_contains"] = ["release_checklist.md", "service_notes.md"]
         row["final_not_contains"] = ["archive"]
-    elif contract_id == "directory_entry_groups":
-        row["final_contains"] = ["configs", "data", "docs", "logs", "tmp", "README.md", "package.json"]
     elif contract_id == "directory_names":
         row["final_contains"] = ["configs", "data", "docs", "logs", "tmp"]
         row["final_not_contains"] = ["README.md", "package.json"]

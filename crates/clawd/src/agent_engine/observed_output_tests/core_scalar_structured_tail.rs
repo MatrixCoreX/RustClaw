@@ -62,32 +62,6 @@ fn direct_count_inventory_uses_total_when_response_contract_is_known() {
 }
 
 #[test]
-fn inventory_dir_grouped_contract_uses_names_by_kind() {
-    let value = serde_json::json!({
-        "action": "inventory_dir",
-        "names_only": true,
-        "names": ["Cargo.toml", "src", "README.md"],
-        "names_by_kind": {
-            "files": ["Cargo.toml", "README.md"],
-            "dirs": ["src"],
-            "other": []
-        },
-        "counts": {"files": 2, "dirs": 1, "total": 3}
-    });
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
-
-    let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
-        .expect("grouped inventory answer");
-
-    assert!(answer.contains("dirs:"));
-    assert!(answer.contains("- src"));
-    assert!(answer.contains("files:"));
-    assert!(answer.contains("- Cargo.toml"));
-    assert!(answer.contains("- README.md"));
-}
-
-#[test]
 fn inventory_dir_file_names_contract_filters_names_by_kind() {
     let value = serde_json::json!({
         "action": "inventory_dir",
@@ -133,32 +107,6 @@ fn inventory_dir_file_names_contract_uses_direct_semantic_kind() {
     assert!(answer.contains("release_checklist.md"));
     assert!(answer.contains("service_notes.md"));
     assert!(!answer.contains("archive"));
-}
-
-#[test]
-fn direct_answer_groups_inventory_dir_for_chat_wrapped_directory_entry_contract() {
-    let mut loop_state = LoopState::new(1);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"inventory_dir","path":"/tmp/root","names_only":false,"names":["docs","README.md"],"names_by_kind":{"files":["README.md"],"dirs":["docs"],"other":[]},"counts":{"files":1,"dirs":1,"total":2}}"#,
-        ));
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.requires_content_evidence = true;
-    route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
-    let context = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&context))
-        .expect("inventory_dir should produce grouped direct answer");
-
-    assert!(answer.contains("dirs:"));
-    assert!(answer.contains("- docs"));
-    assert!(answer.contains("files:"));
-    assert!(answer.contains("- README.md"));
 }
 
 #[test]

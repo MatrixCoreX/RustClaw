@@ -8,14 +8,12 @@ use super::{
     delivery_is_single_line_text, delivery_matches_latest_publishable_synthesis,
     delivery_message_is_json_object, deterministic_matrix_observed_shape_answer,
     direct_raw_command_output_projection, direct_scalar_observed_answer,
-    direct_structured_observed_answer, directory_entry_groups_prefers_observed_groups,
-    evidence_policy_candidate_satisfies_final_shape,
-    latest_grounded_synthesis_for_mixed_listing_contract, latest_publishable_respond_step_output,
-    latest_publishable_synthesis_matches_written_file_path,
+    direct_structured_observed_answer, evidence_policy_candidate_satisfies_final_shape,
+    latest_publishable_respond_step_output, latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, latest_successful_observation_body,
     log_deterministic_delivery_record, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, matrix_grouped_name_list_observed_answer,
-    output_contract_requests_exact_delivery, planned_delivery_is_publishable_model_language_answer,
+    looks_like_structured_machine_output, output_contract_requests_exact_delivery,
+    planned_delivery_is_publishable_model_language_answer,
     publishable_summary_has_multi_source_observation,
     raw_command_output_needs_structural_projection, route_allows_model_language_final_answer,
     route_expects_synthesis_over_raw_observation, route_requires_file_token,
@@ -234,47 +232,6 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         );
         return;
     }
-    if directory_entry_groups_prefers_observed_groups(route, loop_state) {
-        if let Some((answer, summary)) = matrix_grouped_name_list_observed_answer(route, loop_state)
-        {
-            let answer = answer.trim();
-            if answer.is_empty() {
-                return;
-            }
-            if delivery_messages
-                .last()
-                .map(|message| message.trim() == answer)
-                .unwrap_or(false)
-            {
-                loop_state.last_user_visible_respond = Some(answer.to_string());
-                *finalizer_summary = Some(summary);
-                return;
-            }
-            info!(
-                "delivery exact_contract_grouped_names_from_observed task_id={} previous={} observed={}",
-                task_id,
-                crate::truncate_for_log(
-                    delivery_messages
-                        .last()
-                        .map(String::as_str)
-                        .unwrap_or_default()
-                ),
-                crate::truncate_for_log(answer)
-            );
-            log_deterministic_delivery_record(
-                task_id,
-                "exact_contract_grouped_names_from_observed",
-                "replaced",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-            delivery_messages.clear();
-            delivery_messages.push(answer.to_string());
-            loop_state.last_user_visible_respond = Some(answer.to_string());
-            *finalizer_summary = Some(summary);
-            return;
-        }
-    }
     if let Some(synthesis) = loop_state
         .last_publishable_synthesis_output
         .as_deref()
@@ -433,23 +390,16 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         }
     }
     let synthetic_task = synthetic_task_for_evidence_policy_shape_check(task_id);
-    let Some((answer, summary)) =
-        latest_grounded_synthesis_for_mixed_listing_contract(route, loop_state)
-            .or_else(|| {
-                deterministic_matrix_observed_shape_answer(
-                    state,
-                    &synthetic_task,
-                    "",
-                    loop_state,
-                    agent_run_context,
-                )
-            })
-            .or_else(|| direct_scalar_observed_answer(Some(state), loop_state, agent_run_context))
-            .or_else(|| {
-                direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
-            })
-            .or_else(|| exact_contract_fallback_observed_answer(route, loop_state))
-    else {
+    let Some((answer, summary)) = deterministic_matrix_observed_shape_answer(
+        state,
+        &synthetic_task,
+        "",
+        loop_state,
+        agent_run_context,
+    )
+    .or_else(|| direct_scalar_observed_answer(Some(state), loop_state, agent_run_context))
+    .or_else(|| direct_structured_observed_answer(Some(state), loop_state, agent_run_context))
+    .or_else(|| exact_contract_fallback_observed_answer(route, loop_state)) else {
         return;
     };
     let answer = answer.trim();
@@ -776,7 +726,6 @@ fn list_contract_candidate_is_line_list(
         route.semantic_kind,
         crate::OutputSemanticKind::FileNames
             | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::DirectoryEntryGroups
             | crate::OutputSemanticKind::FilePaths
     ) {
         return true;
@@ -849,7 +798,6 @@ fn route_allows_prior_step_error_observed_replacement(route: &crate::IntentOutpu
     route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::FileNames,
         crate::OutputSemanticKind::DirectoryNames,
-        crate::OutputSemanticKind::DirectoryEntryGroups,
         crate::OutputSemanticKind::FilePaths,
         crate::OutputSemanticKind::ExistenceWithPath,
     ])

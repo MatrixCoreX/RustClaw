@@ -215,46 +215,13 @@ fn inventory_dir_names_by_kind(value: &serde_json::Value, kind: &str) -> Vec<Str
         .unwrap_or_default()
 }
 
-fn inventory_dir_grouped_names_candidate(
+pub(super) fn inventory_dir_direct_answer_candidate(
     _state: Option<&AppState>,
+    route: Option<&crate::IntentOutputContract>,
     value: &serde_json::Value,
     _prefer_english: bool,
 ) -> Option<String> {
-    let files = inventory_dir_names_by_kind(value, "files");
-    let dirs = inventory_dir_names_by_kind(value, "dirs");
-    let other = inventory_dir_names_by_kind(value, "other");
-    if files.is_empty() && dirs.is_empty() && other.is_empty() {
-        return None;
-    }
-    let mut lines = Vec::new();
-    let mut push_group = |title: &str, items: Vec<String>| {
-        if items.is_empty() {
-            return;
-        }
-        lines.push(format!("{title}:"));
-        lines.extend(items.into_iter().map(|name| format!("- {name}")));
-    };
-    push_group("dirs", dirs);
-    push_group("files", files);
-    push_group("other", other);
-    normalized_listing_text(&lines.join("\n"))
-}
-
-pub(super) fn inventory_dir_direct_answer_candidate(
-    state: Option<&AppState>,
-    route: Option<&crate::IntentOutputContract>,
-    value: &serde_json::Value,
-    prefer_english: bool,
-) -> Option<String> {
     let value = inventory_dir_payload(value)?;
-    if route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::DirectoryEntryGroups,
-        )
-    }) {
-        return inventory_dir_grouped_names_candidate(state, value, prefer_english);
-    }
     if route.is_some_and(|route| {
         super::output_route_policy::route_contract_marker_is(
             route,

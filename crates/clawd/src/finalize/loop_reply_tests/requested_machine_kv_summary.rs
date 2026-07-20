@@ -1189,7 +1189,7 @@ fn requested_machine_kv_summary_ignores_internal_user_request_machine_tokens() {
 }
 
 #[test]
-fn requested_machine_kv_summary_restores_count_after_grouped_listing_render() {
+fn requested_machine_kv_summary_restores_count_after_listing_render() {
     let task = claimed_task("task-machine-kv-structured-listing");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     loop_state.executed_step_results.push(ok_step_result(
@@ -1202,7 +1202,7 @@ fn requested_machine_kv_summary_restores_count_after_grouped_listing_render() {
     let mut delivery_messages = vec![grouped.to_string()];
     let mut finalizer_summary = None;
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route),
         ..Default::default()

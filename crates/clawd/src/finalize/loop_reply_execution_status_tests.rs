@@ -310,7 +310,7 @@ fn observed_fallback_allowed_for_matrix_route_after_planned_synthesis() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -338,7 +338,7 @@ fn content_answer_candidate_prevents_status_summary_replacement() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -353,7 +353,7 @@ fn content_answer_candidate_prevents_status_summary_replacement() {
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
         "system_basic",
-        "action `system_basic.validate_structured` is rejected by contract `directory_entry_groups`",
+        "action `system_basic.validate_structured` was rejected by policy",
     ));
     let delivery_messages =
         vec!["intent_normalizer.schema.json 最大；这个目录保存 JSON Schema。".to_string()];

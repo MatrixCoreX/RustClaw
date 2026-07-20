@@ -2,16 +2,15 @@ use std::path::Path;
 
 use crate::agent_engine::{AgentRunContext, LoopState};
 
+use super::valid_publishable_synthesis_output;
 #[cfg(test)]
 use super::{
     delivery_message_is_json_container, last_respond_matches_single_line_observation,
-    looks_like_raw_command_snapshot, message_is_non_answer_separator,
-    output_contract_requests_exact_delivery, route_has_evidence_policy_final_shape,
+    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
+    message_is_non_answer_separator, output_contract_requests_exact_delivery,
+    route_has_evidence_policy_final_shape,
     route_requires_evidence_policy_deterministic_final_answer, single_publishable_delivery_message,
-};
-use super::{
-    looks_like_structured_machine_output, step_output_is_read_range,
-    valid_publishable_synthesis_output,
+    step_output_is_read_range,
 };
 
 #[cfg(test)]
@@ -38,104 +37,6 @@ pub(super) fn latest_publishable_synthesis_step_matches(loop_state: &LoopState) 
         .and_then(|step| step.output.as_deref())
         .map(str::trim)
         .is_some_and(|output| output == synthesis)
-}
-
-fn loop_has_structured_listing_observation(loop_state: &LoopState) -> bool {
-    loop_state.executed_step_results.iter().any(|step| {
-        if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
-            return false;
-        }
-        let Some(output) = step.output.as_deref() else {
-            return false;
-        };
-        serde_json::from_str::<serde_json::Value>(output.trim())
-            .ok()
-            .is_some_and(|value| value_has_structured_listing_observation(&value))
-    })
-}
-
-fn value_has_structured_listing_observation(value: &serde_json::Value) -> bool {
-    if value.get("names_by_kind").is_some()
-        || value
-            .get("names")
-            .and_then(|value| value.as_array())
-            .is_some_and(|items| !items.is_empty())
-        || matches!(
-            value.get("action").and_then(|value| value.as_str()),
-            Some("inventory_dir" | "list_dir" | "tree_summary")
-        )
-    {
-        return true;
-    }
-    if value
-        .get("extra")
-        .filter(|extra| extra.is_object())
-        .is_some_and(value_has_structured_listing_observation)
-    {
-        return true;
-    }
-    false
-}
-
-#[cfg(test)]
-pub(super) fn structured_listing_observation_for_test(value: &serde_json::Value) -> bool {
-    value_has_structured_listing_observation(value)
-}
-
-pub(super) fn directory_entry_groups_prefers_observed_groups(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-) -> bool {
-    crate::finalize::route_prefers_grouped_name_list_output(route)
-        && loop_has_structured_listing_observation(loop_state)
-        && !loop_state
-            .executed_step_results
-            .iter()
-            .any(step_output_is_read_range)
-}
-
-pub(super) fn latest_grounded_synthesis_for_mixed_listing_contract(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !crate::finalize::route_prefers_grouped_name_list_output(route)
-        || !latest_publishable_synthesis_step_matches(loop_state)
-        || !loop_has_structured_listing_observation(loop_state)
-        || !loop_state
-            .executed_step_results
-            .iter()
-            .any(step_output_is_read_range)
-    {
-        return None;
-    }
-    let synthesis = loop_state
-        .last_publishable_synthesis_output
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())?;
-    if crate::finalize::looks_like_planner_artifact(synthesis)
-        || crate::finalize::looks_like_internal_trace_artifact(synthesis)
-        || crate::finalize::parse_delivery_token(synthesis).is_some()
-        || looks_like_structured_machine_output(synthesis)
-    {
-        return None;
-    }
-
-    Some((
-        synthesis.to_string(),
-        crate::task_journal::TaskJournalFinalizerSummary {
-            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-            parsed: true,
-            contract_ok: true,
-            completion_ok: Some(true),
-            grounded_ok: Some(true),
-            format_ok: Some(true),
-            needs_clarify: Some(false),
-            used_evidence_ids_count: 2,
-            ..Default::default()
-        },
-    ))
 }
 
 pub(super) fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {

@@ -188,9 +188,6 @@ fn subagent_runtime_machine_payload_remains_structured_for_final_delivery() {
 #[path = "loop_reply_execution_summary_tests.rs"]
 mod execution_summary_tests;
 
-#[path = "loop_reply_execution_summary_text_boundary_tests.rs"]
-mod execution_summary_text_boundary_tests;
-
 #[path = "loop_reply_exact_contract_tests.rs"]
 mod exact_contract_tests;
 

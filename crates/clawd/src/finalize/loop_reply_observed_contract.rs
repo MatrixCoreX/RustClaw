@@ -376,7 +376,6 @@ fn latest_path_observed_answer_from_loop_contract(
         crate::OutputSemanticKind::FilePaths
             | crate::OutputSemanticKind::FileNames
             | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::DirectoryEntryGroups
     ) {
         return None;
     }

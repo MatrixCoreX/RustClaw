@@ -914,6 +914,20 @@ fn structured_selector_requires_every_field_in_machine_payload() {
 }
 
 #[test]
+fn structured_selector_accepts_inventory_names_by_kind_without_a_domain_contract() {
+    let output = r#"{"extra":{"action":"inventory_dir","names_by_kind":{"dirs":["crates"],"files":["README.md"],"other":[]},"path":"."},"text":"localized fallback"}"#;
+
+    assert!(structured_json_satisfies_field_selector(
+        "names_by_kind",
+        output,
+    ));
+    assert!(!structured_json_satisfies_field_selector(
+        "names_by_kind,missing_field",
+        output,
+    ));
+}
+
+#[test]
 fn structured_selector_does_not_use_visible_text_fallback() {
     let output =
         r#"{"extra":{"checkpoint":{"status":"planned"}},"text":"diff={\"status\":\"planned\"}"}"#;

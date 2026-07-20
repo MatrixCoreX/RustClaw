@@ -144,17 +144,6 @@ required_evidence = ["candidates"]
 final_answer_shape = "name_list"
 failure_policy = "retry_with_alternatives"
 
-[contracts.directory_entry_groups]
-semantic_kind = "directory_entry_groups"
-operation = "list"
-target_object = "directory"
-delivery_shape = "list"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.read_text_range", "system_basic.tree_summary"]
-preferred_actions = ["fs_basic.list_dir"]
-required_evidence = ["candidates"]
-final_answer_shape = "grouped_name_list"
-failure_policy = "retry_with_alternatives"
-
 [contracts.file_paths]
 semantic_kind = "file_paths"
 operation = "list"

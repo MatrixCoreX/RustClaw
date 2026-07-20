@@ -1046,7 +1046,6 @@ pub(super) fn output_contract_requests_exact_delivery(route: &crate::IntentOutpu
         crate::OutputSemanticKind::RawCommandOutput,
         crate::OutputSemanticKind::FileNames,
         crate::OutputSemanticKind::DirectoryNames,
-        crate::OutputSemanticKind::DirectoryEntryGroups,
         crate::OutputSemanticKind::FilePaths,
     ])
 }

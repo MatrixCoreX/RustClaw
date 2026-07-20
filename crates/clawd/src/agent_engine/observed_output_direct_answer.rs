@@ -547,7 +547,6 @@ fn inventory_dir_can_use_direct_names(
                 &[
                     crate::OutputSemanticKind::FileNames,
                     crate::OutputSemanticKind::DirectoryNames,
-                    crate::OutputSemanticKind::DirectoryEntryGroups,
                     crate::OutputSemanticKind::FilePaths,
                 ],
             )
@@ -564,14 +563,7 @@ fn inventory_dir_can_use_direct_names(
     if has_machine_names && latest_plan_requests_observation_only_names_listing(loop_state) {
         return true;
     }
-    (has_route_contract
-        || route.is_some_and(|route| {
-            super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::DirectoryEntryGroups,
-            )
-        }))
-        && allow_raw_listing_direct_answer
+    has_route_contract && allow_raw_listing_direct_answer
 }
 
 fn value_requests_terminal_inventory_names(value: &serde_json::Value) -> bool {

@@ -55,7 +55,6 @@ pub(super) fn run_cmd_contract_listing_text_candidate(
         &[
             crate::OutputSemanticKind::DirectoryNames,
             crate::OutputSemanticKind::FileNames,
-            crate::OutputSemanticKind::DirectoryEntryGroups,
             crate::OutputSemanticKind::FilePaths,
         ],
     ) {
