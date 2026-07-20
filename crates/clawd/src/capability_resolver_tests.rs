@@ -514,6 +514,34 @@ fn registry_resolves_crypto_positions_capability() {
 }
 
 #[test]
+fn registry_resolves_market_quote_capabilities_without_domain_contracts() {
+    let state = state_with_workspace_registry();
+    for (capability, expected_skill, symbol) in [
+        ("crypto.quote", "crypto", "BTCUSDT"),
+        ("stock.quote", "stock", "600519"),
+    ] {
+        let (action, record) = resolve_capability_action_with_record_for_state(
+            &state,
+            capability,
+            json!({"symbol": symbol}),
+        );
+        let action = action.unwrap_or_else(|| panic!("{capability} should resolve"));
+        let AgentAction::CallSkill { skill, args } = action else {
+            panic!("unexpected resolved action for {capability}: {action:?}");
+        };
+        assert_eq!(skill, expected_skill);
+        assert_eq!(args.get("action").and_then(Value::as_str), Some("quote"));
+        assert_eq!(args.get("symbol").and_then(Value::as_str), Some(symbol));
+        assert_eq!(
+            record.reason_code,
+            "capability_resolver_registry_mapping_resolved"
+        );
+        assert_eq!(record.source, "registry");
+        assert_eq!(record.capability_ref, capability);
+    }
+}
+
+#[test]
 fn registry_resolves_bare_skill_capability_by_machine_action() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

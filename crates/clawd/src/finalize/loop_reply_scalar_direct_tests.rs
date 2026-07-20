@@ -695,20 +695,20 @@ async fn finalize_loop_reply_extracts_file_basename_from_path_facts() {
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_replaces_wrapped_market_quote_scalar_delivery() {
+async fn finalize_loop_reply_projects_selected_scalar_from_wrapped_capability_output() {
     let state = test_state_with_registry(
         r#"
         [[skills]]
         name = "crypto"
         enabled = true
         kind = "runner"
-        semantic_tags = ["market_quote_scalar"]
+        semantic_tags = []
         "#,
         &["crypto"],
     );
     let task = claimed_task("task-wrapped-market-quote-scalar");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::MarketQuote;
+    route.selection.structured_field_selector = Some("quote.price_usd".to_string());
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -734,8 +734,8 @@ async fn finalize_loop_reply_replaces_wrapped_market_quote_scalar_delivery() {
     .await
     .expect("finalize should unwrap market quote scalar");
 
-    assert_eq!(reply.text, "BTCUSDT $67216.01");
-    assert_eq!(reply.messages, vec!["BTCUSDT $67216.01".to_string()]);
+    assert_eq!(reply.text, "67216.01");
+    assert_eq!(reply.messages, vec!["67216.01".to_string()]);
     assert!(!reply.text.contains(r#""quote":"#));
 }
 

@@ -274,7 +274,6 @@ async fn finalize_loop_reply_treats_wrapped_crypto_account_error_as_success() {
     let task = claimed_task("task-finalize-wrapped-crypto-account-error");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::MarketQuote;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

@@ -74,19 +74,19 @@ fn observed_outputs_exclude_synthesis_steps() {
 }
 
 #[test]
-fn market_quote_scalar_direct_answer_uses_planner_contract_and_registry_semantic_tag() {
+fn structured_field_selector_projects_scalar_from_any_capability_output() {
     let state = test_state_with_registry(
         r#"
         [[skills]]
         name = "market_probe"
         enabled = true
         kind = "runner"
-        semantic_tags = ["market_quote_scalar"]
+        semantic_tags = []
         "#,
         &["market_probe"],
     );
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::MarketQuote;
+    route.selection.structured_field_selector = Some("quote.price_usd".to_string());
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
@@ -105,12 +105,12 @@ fn market_quote_scalar_direct_answer_uses_planner_contract_and_registry_semantic
             Some(&agent_run_context)
         )
         .as_deref(),
-        Some("BTC $123.45")
+        Some("123.45")
     );
 }
 
 #[test]
-fn market_quote_scalar_direct_answer_does_not_use_skill_name_branch() {
+fn scalar_output_does_not_guess_an_unselected_structured_field() {
     let state = test_state_with_registry(
         r#"
         [[skills]]
@@ -121,8 +121,7 @@ fn market_quote_scalar_direct_answer_does_not_use_skill_name_branch() {
         "#,
         &["crypto"],
     );
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::MarketQuote;
+    let route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()

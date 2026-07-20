@@ -428,10 +428,11 @@ fn weather_output_counts_as_content_excerpt_evidence() {
 }
 
 #[test]
-fn market_quote_output_counts_as_content_excerpt_evidence() {
+fn stock_output_counts_as_generic_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-market-quote", "ask", "查行情");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::MarketQuote);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -459,10 +460,11 @@ fn market_quote_output_counts_as_content_excerpt_evidence() {
 }
 
 #[test]
-fn crypto_quote_extra_content_excerpt_counts_as_market_quote_evidence() {
+fn crypto_quote_extra_content_excerpt_counts_as_generic_evidence() {
     let mut journal = TaskJournal::for_task("task-crypto-quote", "ask", "查 BTCUSDT 价格");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::MarketQuote);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),

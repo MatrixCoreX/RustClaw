@@ -706,7 +706,6 @@ fn should_verify_answer_skips_grounded_structured_machine_projection() {
 fn local_missing_evidence_gap_skips_crypto_account_access_terminal_finalizer() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::MarketQuote;
     route.output_contract.requires_content_evidence = true;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap-crypto", "ask", "positions");
