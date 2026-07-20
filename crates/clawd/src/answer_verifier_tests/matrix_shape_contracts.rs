@@ -108,51 +108,6 @@ fn matrix_single_path_shape_accepts_root_prefixed_results() {
 }
 
 #[test]
-fn structured_keys_answer_covering_all_keys_skips_llm_verifier() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-keys", "ask", "list keys");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "config_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "action": "structured_keys",
-                    "exists": true,
-                    "container_type": "object",
-                    "count": 3,
-                    "keys": ["app", "features", "paths"]
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "app, features, paths"
-    ));
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "app\nfeatures\npaths"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "app, features"
-    ));
-}
-
-#[test]
 fn matrix_strict_list_shape_rejects_unobserved_items() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;

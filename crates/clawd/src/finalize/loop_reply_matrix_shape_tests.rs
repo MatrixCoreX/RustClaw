@@ -811,48 +811,6 @@ fn path_list_contract_requires_observed_projection() {
 }
 
 #[test]
-fn structured_keys_contract_builds_observed_list() {
-    let state = test_state();
-    let task = claimed_task("task-config-key-list-capability-shape");
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "config_basic",
-        r#"{"action":"list_keys","keys":["model","skills","runtime"]}"#,
-    ));
-    let mut delivery = vec!["config has several sections".to_string()];
-    let mut finalizer_summary = None;
-
-    assert!(
-        super::super::replace_delivery_with_matrix_observed_shape_answer(
-            &state,
-            &task,
-            "list config keys",
-            &mut loop_state,
-            Some(&ctx),
-            &mut delivery,
-            &mut finalizer_summary,
-        )
-    );
-
-    assert_eq!(delivery, vec!["model\nruntime\nskills"]);
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some("model\nruntime\nskills")
-    );
-    assert!(finalizer_summary.is_some());
-}
-
-#[test]
 fn matrix_strict_list_shape_builds_hidden_entry_list_from_inventory() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;

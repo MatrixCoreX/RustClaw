@@ -1,94 +1,66 @@
 #[test]
-fn direct_answer_formats_structured_keys_result_without_llm() {
+fn structured_keys_exact_selector_uses_generic_capability_result() {
     let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
+    let extra = serde_json::json!({
+        "action": "structured_keys",
+        "exists": true,
+        "container_type": "object",
+        "count": 3,
+        "keys": ["build", "dev", "lint"],
+    });
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "config_basic",
             "step_1",
-            "system_basic",
-            r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
+            &serde_json::json!({"action": "list_keys"}),
+            "untrusted fallback",
+            Some(&extra),
         ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
-            locator_hint: "/tmp/package.json".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.requires_content_evidence = true;
+    route_result.selection.structured_field_selector = Some("keys".to_string());
     let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
+        output_contract: Some(route_result),
         ..AgentRunContext::default()
     };
+
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("build\ndev\nlint")
+        Some(r#"["build","dev","lint"]"#)
     );
 }
 
 #[test]
-fn direct_answer_formats_structured_keys_presence_without_llm() {
+fn structured_array_identity_selector_uses_generic_capability_result() {
     let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
+    let extra = serde_json::json!({
+        "action": "structured_keys",
+        "exists": true,
+        "container_type": "array",
+        "count": 2,
+        "identity_values": ["fs_basic", "config_basic"],
+    });
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
             "config_basic",
-            r#"{"action":"structured_keys","path":"/tmp/en-US.toml","resolved_path":"/tmp/en-US.toml","field_path":"","exists":true,"container_type":"object","count":3,"keys":["execute_prefixes","locale","result_suffixes"]}"#,
+            "step_1",
+            &serde_json::json!({"action": "list_keys"}),
+            "untrusted fallback",
+            Some(&extra),
         ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::StructuredKeys,
-            locator_hint: "/tmp/en-US.toml".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.requires_content_evidence = true;
+    route_result.selection.structured_field_selector = Some("identity_values".to_string());
     let agent_run_context = AgentRunContext {
-        original_user_request: Some(
-            "读取 configs/command_intent/en-US.toml，只回答是否还有 negative_markers 字段"
-                .to_string(),
-        ),
-        output_contract: Some(route_result.clone()),
+        output_contract: Some(route_result),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("message_key=clawd.msg.structured_keys_missing_key\nreason_code=structured_key_presence\nfinal_answer_shape=structured_presence\ncontains=false\nkey=negative_markers")
-    );
-}
 
-#[test]
-fn direct_answer_formats_structured_array_identity_presence_without_llm() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "config_basic",
-            r#"{"action":"structured_keys","path":"/tmp/skills_registry.toml","resolved_path":"/tmp/skills_registry.toml","field_path":"skills","exists":true,"container_type":"array","count":2,"identity_values":["fs_basic","config_basic"],"identity_omitted":0,"indices_preview":[{"index":0,"value_type":"object","keys":["name","planner_kind"],"identity_key":"name","identity_value":"fs_basic"},{"index":1,"value_type":"object","keys":["name","planner_kind"],"identity_key":"name","identity_value":"config_basic"}]}"#,
-        ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::StructuredKeys,
-            locator_hint: "/tmp/skills_registry.toml".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        original_user_request: Some(
-            "读取 docker/config/skills_registry.toml，回答 fs_basic 是否注册".to_string(),
-        ),
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("message_key=clawd.msg.structured_array_identity_contains_value\nreason_code=structured_array_identity_presence\nfinal_answer_shape=structured_presence\ncontains=true\nvalue=fs_basic")
+        Some(r#"["fs_basic","config_basic"]"#)
     );
 }
 

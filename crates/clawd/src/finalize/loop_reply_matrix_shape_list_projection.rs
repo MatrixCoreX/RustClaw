@@ -555,14 +555,12 @@ fn grep_text_matches_answer_from_value(value: &serde_json::Value) -> Option<Stri
 fn route_supports_matrix_strict_list_observed_answer(route: &crate::IntentOutputContract) -> bool {
     route_requests_name_list(route)
         || route_requests_filesystem_path_list(route)
-        || route_requests_key_list_or_summary(route)
         || matches!(
             route.semantic_kind,
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::HiddenEntriesCheck
                 | crate::OutputSemanticKind::FilePaths
-                | crate::OutputSemanticKind::StructuredKeys
         )
 }
 
@@ -574,11 +572,6 @@ fn route_requests_name_list(route: &crate::IntentOutputContract) -> bool {
 fn route_requests_filesystem_path_list(route: &crate::IntentOutputContract) -> bool {
     crate::evidence_policy::final_answer_shape_for_output_contract(route)
         == Some(crate::evidence_policy::FinalAnswerShape::PathList)
-}
-
-fn route_requests_key_list_or_summary(route: &crate::IntentOutputContract) -> bool {
-    crate::evidence_policy::final_answer_shape_for_output_contract(route)
-        == Some(crate::evidence_policy::FinalAnswerShape::KeyListOrKeySummary)
 }
 
 fn matrix_list_selector_limit(route: &crate::IntentOutputContract) -> Option<usize> {

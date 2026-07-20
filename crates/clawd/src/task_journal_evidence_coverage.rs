@@ -495,12 +495,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("count".to_string());
     }
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::StructuredKeys)
-        && (observed_canonical.contains("keys")
-            || observed_field_with_prefix(observed_fields, "keys["))
-    {
-        observed_canonical.insert("field_value".to_string());
-    }
     if output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && output_contract.requires_content_evidence
         && current_workspace_inventory_fields_present(observed_fields, observed_canonical)

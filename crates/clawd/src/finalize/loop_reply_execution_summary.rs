@@ -477,9 +477,6 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     {
         return true;
     }
-    if delivery_matches_latest_structured_scalar_observation(loop_state, route, delivery_messages) {
-        return true;
-    }
     if delivery_matches_config_guard_answer(loop_state, delivery_messages) {
         return true;
     }
@@ -697,22 +694,6 @@ fn delivery_matches_latest_read_range_synthesis(
         .executed_step_results
         .iter()
         .any(step_output_is_read_range)
-}
-
-#[cfg(test)]
-fn delivery_matches_latest_structured_scalar_observation(
-    loop_state: &LoopState,
-    route: &crate::IntentOutputContract,
-    delivery_messages: &[String],
-) -> bool {
-    if !route.semantic_kind_is(crate::OutputSemanticKind::StructuredKeys) {
-        return false;
-    }
-    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
-        return false;
-    };
-    crate::agent_engine::observed_output::latest_structured_scalar_observation_text(loop_state)
-        .is_some_and(|observed_text| delivery_text == observed_text.trim())
 }
 
 #[cfg(test)]

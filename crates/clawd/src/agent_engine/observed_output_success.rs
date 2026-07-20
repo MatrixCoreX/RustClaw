@@ -74,7 +74,6 @@ pub(super) fn extract_latest_generic_successful_output_with_state(
                 || super::structured_scalar_candidate(
                     state,
                     None,
-                    None,
                     &step.skill,
                     body,
                     None,

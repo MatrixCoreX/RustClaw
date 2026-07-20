@@ -238,6 +238,39 @@ fn git_result_preserves_structured_state_and_subject_fields() {
 }
 
 #[test]
+fn config_key_result_preserves_generic_listing_fields() {
+    let extra = json!({
+        "action": "structured_keys",
+        "exists": true,
+        "container_type": "array",
+        "count": 2,
+        "keys": ["name", "planner_kind"],
+        "identity_values": ["fs_basic", "config_basic"]
+    });
+    let envelope = super::successful_execution_envelope(
+        "config_basic",
+        "step_1",
+        &json!({"action": "list_keys", "path": "configs/skills_registry.toml"}),
+        "untrusted fallback",
+        Some(&extra),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/keys"),
+        Some(&json!(["name", "planner_kind"]))
+    );
+    assert_eq!(
+        envelope.data.pointer("/extra/identity_values"),
+        Some(&json!(["fs_basic", "config_basic"]))
+    );
+    assert_eq!(envelope.data.pointer("/extra/count"), Some(&json!(2)));
+    assert_eq!(
+        envelope.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+}
+
+#[test]
 fn pending_result_becomes_poll_continuation() {
     let envelope = super::successful_execution_envelope(
         "video_generate",

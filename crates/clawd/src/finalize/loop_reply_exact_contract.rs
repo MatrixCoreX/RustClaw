@@ -860,7 +860,6 @@ fn list_contract_candidate_is_line_list(
             | crate::OutputSemanticKind::DirectoryNames
             | crate::OutputSemanticKind::DirectoryEntryGroups
             | crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::StructuredKeys
     ) {
         return true;
     }

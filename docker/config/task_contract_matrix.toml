@@ -457,17 +457,6 @@ required_evidence = ["field_value"]
 final_answer_shape = "scalar_equality_verdict"
 failure_policy = "retry_with_alternatives"
 
-[contracts.structured_keys]
-semantic_kind = "structured_keys"
-operation = "inspect"
-target_object = "config_key"
-delivery_shape = "summary"
-allowed_actions = ["config_basic.list_keys", "config_basic.read_field", "config_basic.read_fields"]
-preferred_actions = ["config_basic.list_keys"]
-required_evidence = ["field_value"]
-final_answer_shape = "key_list_or_key_summary"
-failure_policy = "retry_with_alternatives"
-
 [contracts.config_field_read]
 semantic_kind = "config_field_read"
 operation = "read"

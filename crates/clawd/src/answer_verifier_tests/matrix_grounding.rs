@@ -794,66 +794,6 @@ fn matrix_single_path_shape_uses_observed_evidence_map_paths() {
 }
 
 #[test]
-fn structured_keys_answer_accepts_array_identity_values() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-array-keys", "ask", "list names");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "config_basic",
-            json!({
-                "action": "structured_keys",
-                "exists": true,
-                "container_type": "array",
-                "count": 2,
-                "identity_values": ["fs_basic", "config-basic"]
-            })
-            .to_string(),
-        ));
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "`fs_basic`, `config-basic`"
-    ));
-}
-
-#[test]
-fn structured_keys_answer_uses_observed_action_when_semantic_label_missing() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-keys-missing-label", "ask", "keys");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "config_basic",
-            json!({
-                "action": "structured_keys",
-                "exists": true,
-                "container_type": "object",
-                "count": 3,
-                "keys": ["app", "features", "paths"]
-            })
-            .to_string(),
-        ));
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "app, features, paths"
-    ));
-}
-
-#[test]
 fn markdown_heading_answer_grounded_in_read_range_skips_llm_verifier() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
