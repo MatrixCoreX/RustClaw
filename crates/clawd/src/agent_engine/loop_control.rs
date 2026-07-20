@@ -1360,9 +1360,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             ) {
                 return Ok(reply);
             }
-            if try_recover_content_excerpt_summary_answer_verifier_gap(route_result, &mut reply) {
-                return Ok(reply);
-            }
             if try_accept_language_only_output_format_answer_verifier_gap(route_result, &mut reply)
             {
                 return Ok(reply);

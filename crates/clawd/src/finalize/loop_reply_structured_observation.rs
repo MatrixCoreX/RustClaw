@@ -145,10 +145,7 @@ pub(super) fn deterministic_structured_container_summary_answer(
     ) {
         return None;
     }
-    if !matches!(
-        route.semantic_kind,
-        crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
-    ) {
+    if !matches!(route.semantic_kind, crate::OutputSemanticKind::None) {
         return None;
     }
     let _ = state;

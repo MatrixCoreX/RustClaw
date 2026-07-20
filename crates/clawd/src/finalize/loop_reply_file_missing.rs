@@ -34,8 +34,6 @@ pub(super) fn route_requires_compound_content_file_delivery(
                     contract.response_shape,
                     crate::OutputResponseShape::FileToken
                 )
-                && (route.semantic_kind.is_content_excerpt_summary()
-                    || route.semantic_kind_is_unclassified())
         })
 }
 

@@ -1618,11 +1618,11 @@ fn contract_structured_errors_project_machine_observation() {
     let err = structured_skill_error_from_parts(
         "system_basic",
         "contract_action_rejected",
-        "action `system_basic.inventory_dir` is rejected by contract `content_excerpt_summary`",
+        "action `system_basic.inventory_dir` is rejected by contract `generic_path_content`",
         None,
         Some(json!({
             "action": "system_basic.inventory_dir",
-            "contract_match": "content_excerpt_summary"
+            "contract_match": "generic_path_content"
         })),
     );
 
@@ -1640,7 +1640,7 @@ fn contract_structured_errors_project_machine_observation() {
         observation
             .pointer("/extra/contract_match")
             .and_then(serde_json::Value::as_str),
-        Some("content_excerpt_summary")
+        Some("generic_path_content")
     );
     assert!(!observation.to_string().contains("__RC_SKILL_ERROR__"));
 }

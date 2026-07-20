@@ -20,7 +20,6 @@ use super::{
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
     terminal_user_answer_stop_signal, text_has_exact_marker_line,
     try_accept_language_only_output_format_answer_verifier_gap,
-    try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
     try_recover_inconsistent_boundary_clarify, try_recover_latest_synthesis_answer_verifier_gap,
     try_recover_local_health_answer_verifier_gap,
@@ -64,9 +63,9 @@ fn route_result(shape: OutputResponseShape) -> IntentOutputContract {
     IntentOutputContract {
         exact_sentence_count: None,
         response_shape: shape,
-        requires_content_evidence: true,
+        requires_content_evidence: false,
         delivery_required: false,
-        locator_kind: OutputLocatorKind::Path,
+        locator_kind: OutputLocatorKind::None,
         delivery_intent: OutputDeliveryIntent::None,
         semantic_kind: Default::default(),
         locator_hint: String::new(),
@@ -341,70 +340,6 @@ fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
 }
 
 #[test]
-fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() {
-    let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.record_output_contract(&route.clone());
-    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["content_excerpt".to_string()],
-        answer_incomplete_reason: "final answer dropped synthesized summary".to_string(),
-        should_retry: true,
-        retry_instruction: "use the full synthesized summary".to_string(),
-        confidence: 0.94,
-    });
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_0",
-            "fs_basic",
-            r#"{"action":"read_range","path":"README.md","excerpt":"1|# RustClaw\n2|Observed excerpt for summary."}"#,
-        ));
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "synthesize_answer".to_string(),
-            status: StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                "Summary from observed excerpt covering all required facts.".to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    let mut reply = AskReply::non_llm("partial answer".to_string())
-        .with_messages(vec![
-            "**Execution**\n1. Read file excerpt.".to_string(),
-            "partial answer".to_string(),
-        ])
-        .with_task_journal(journal);
-
-    assert!(try_recover_content_excerpt_summary_answer_verifier_gap(
-        Some(&answer_contract(&route)),
-        &mut reply
-    ));
-
-    assert!(!reply.should_fail_task);
-    assert_eq!(
-        reply.text,
-        "Summary from observed excerpt covering all required facts."
-    );
-    assert_eq!(
-        reply.messages,
-        vec!["Summary from observed excerpt covering all required facts.".to_string()]
-    );
-    let journal = reply.task_journal.as_ref().expect("journal");
-    assert_eq!(
-        journal.final_status,
-        Some(crate::task_journal::TaskJournalFinalStatus::Success)
-    );
-    assert!(journal.answer_verifier_summary.is_none());
-}
-
-#[test]
 fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_excerpt() {
     let route = route_result(OutputResponseShape::Free);
     let mut journal =
@@ -475,6 +410,7 @@ fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_exce
 fn structured_scalar_output_format_gap_recovers_quoted_observed_value() {
     let mut route = route_result(OutputResponseShape::Scalar);
     route.semantic_kind = OutputSemanticKind::None;
+    route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Filename;
     route.locator_hint = "package.json".to_string();
     let mut journal =
@@ -777,6 +713,8 @@ fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
             started_at: 0,
             finished_at: 0,
         });
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
     let mut reply = AskReply::non_llm("failed".to_string())
         .with_messages(vec!["failed".to_string()])
         .with_task_journal(journal);
@@ -795,7 +733,8 @@ fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
 #[test]
 fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md"

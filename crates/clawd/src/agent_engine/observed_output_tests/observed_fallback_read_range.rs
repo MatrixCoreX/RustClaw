@@ -10,7 +10,7 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
                 ),
                 (
                     "__OUTPUT_CONTRACT__",
-                    r#"{"response_shape":"one_sentence","contract_marker":"content_excerpt_summary"}"#,
+                    r#"{"response_shape":"one_sentence","final_answer_shape":"summary_with_evidence"}"#,
                 ),
                 (
                     "__OBSERVED_OUTPUTS__",
@@ -211,7 +211,7 @@ fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_mach
 #[test]
 fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts() {
     let mut content_route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    content_route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    content_route.semantic_kind = OutputSemanticKind::None;
     content_route.requires_content_evidence = true;
     let content_context = AgentRunContext {
         output_contract: Some(content_route.clone()),
@@ -320,7 +320,7 @@ count=2"#,
 }
 
 #[test]
-fn content_excerpt_summary_is_not_hard_summarized_by_observed_output() {
+fn generic_content_is_not_hard_summarized_by_observed_output() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -334,7 +334,7 @@ fn content_excerpt_summary_is_not_hard_summarized_by_observed_output() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/config.toml".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -395,134 +395,7 @@ async fn observed_fallback_keeps_strict_raw_tail_read_before_composer() {
 }
 
 #[test]
-fn content_excerpt_with_summary_composes_observed_slice_and_synthesis() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"read_range","mode":"range","start_line":6,"end_line":8,"excerpt":"6|{\"status\":\"ok\",\"prompt_source\":\"clarify\"}\n7|{\"status\":\"ok\",\"prompt_source\":\"dynamic_guard\"}\n8|{\"status\":\"ok\",\"prompt_source\":\"context\"}"}"#,
-    ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
-    route_result.response_shape = OutputResponseShape::Strict;
-    route_result.requires_content_evidence = true;
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    let answer = super::compose_content_excerpt_with_summary_answer(
-        "All observed records are ok.",
-        &loop_state,
-        true,
-        Some(&agent_run_context),
-    );
-
-    assert!(answer.contains(r#""prompt_source":"clarify""#));
-    assert!(answer.contains(r#""prompt_source":"dynamic_guard""#));
-    assert!(answer.contains(r#""prompt_source":"context""#));
-    assert!(answer.contains("All observed records are ok."));
-}
-
-#[test]
-fn content_excerpt_with_summary_does_not_prepend_log_excerpt() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"read_range","mode":"tail","requested_n":5,"path":"logs/clawd.run.log","resolved_path":"/workspace/logs/clawd.run.log","excerpt":"1700|2026-05-27T08:04:44Z INFO task_call\n1701|2026-05-27T08:04:45Z INFO task_journal_summary {\"kind\":\"ask\"}\n1702|2026-05-27T08:04:46Z WARN memory_intent"}"#,
-    ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
-    route_result.response_shape = OutputResponseShape::Strict;
-    route_result.requires_content_evidence = true;
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/workspace/logs/clawd.run.log".to_string()),
-        ..AgentRunContext::default()
-    };
-
-    let answer = super::compose_content_excerpt_with_summary_answer(
-        "没有 ERROR 行",
-        &loop_state,
-        false,
-        Some(&agent_run_context),
-    );
-
-    assert_eq!(answer, "没有 ERROR 行");
-}
-
-#[test]
-fn content_excerpt_with_summary_strips_log_excerpt_prefix() {
-    let mut loop_state = LoopState::new(2);
-    let excerpt = "2026-05-27T08:04:44Z INFO task_call\n2026-05-27T08:04:45Z WARN memory_intent";
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        &format!(
-            r#"{{"action":"read_range","mode":"tail","requested_n":2,"path":"logs/clawd.run.log","resolved_path":"/workspace/logs/clawd.run.log","excerpt":"1|{}"}}"#,
-            excerpt.replace('\n', r"\n2|")
-        ),
-    ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
-    route_result.response_shape = OutputResponseShape::Strict;
-    route_result.requires_content_evidence = true;
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/workspace/logs/clawd.run.log".to_string()),
-        ..AgentRunContext::default()
-    };
-
-    let answer = super::compose_content_excerpt_with_summary_answer(
-        &format!("{excerpt}\n\n最后 2 行中没有 ERROR 行。"),
-        &loop_state,
-        false,
-        Some(&agent_run_context),
-    );
-
-    assert_eq!(answer, "最后 2 行中没有 ERROR 行。");
-}
-
-#[test]
-fn content_excerpt_with_summary_prefers_auto_locator_slice_over_latest_read() {
-    let mut loop_state = LoopState::new(3);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"read_range","mode":"head","requested_n":3,"resolved_path":"/tmp/service_notes.md","excerpt":"1|# Service Notes\n2|Runtime status lives here.\n3|Use this for service checks."}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_2",
-        "fs_basic",
-        r#"{"action":"read_range","mode":"head","requested_n":3,"resolved_path":"/tmp/README.md","excerpt":"1|# Device Local Fixture\n2|This repository contains the sample project.\n3|It is used for filesystem tests."}"#,
-    ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
-    route_result.requires_content_evidence = true;
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/tmp/service_notes.md".to_string()),
-        ..AgentRunContext::default()
-    };
-
-    let answer = super::compose_content_excerpt_with_summary_answer(
-        "README.md describes the sample project.",
-        &loop_state,
-        true,
-        Some(&agent_run_context),
-    );
-
-    assert!(answer.starts_with("# Service Notes"), "answer: {answer}");
-    assert!(answer.contains("README.md describes the sample project."));
-    assert!(
-        !answer.starts_with("# Device Local Fixture"),
-        "answer: {answer}"
-    );
-}
-
-#[test]
-fn direct_answer_keeps_fallback_for_unstructured_content_excerpt_summary() {
+fn direct_answer_keeps_fallback_for_unstructured_content() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -536,7 +409,7 @@ fn direct_answer_keeps_fallback_for_unstructured_content_excerpt_summary() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/README.txt".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -552,7 +425,7 @@ fn direct_answer_keeps_fallback_for_unstructured_content_excerpt_summary() {
 }
 
 #[test]
-fn direct_answer_summarizes_doc_parse_content_excerpt_without_llm() {
+fn direct_answer_defers_doc_parse_content_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -566,7 +439,7 @@ fn direct_answer_summarizes_doc_parse_content_excerpt_without_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -574,13 +447,9 @@ fn direct_answer_summarizes_doc_parse_content_excerpt_without_llm() {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some(
-                "RustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution."
-            )
-        );
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
 }
 
 #[test]
@@ -598,7 +467,7 @@ fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -614,7 +483,7 @@ fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
 }
 
 #[test]
-fn direct_answer_passthroughs_contract_filename_read_range_excerpt_without_llm() {
+fn direct_answer_defers_filename_content_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -637,9 +506,8 @@ fn direct_answer_passthroughs_contract_filename_read_range_excerpt_without_llm()
         auto_locator_path: Some("/tmp/README.md".to_string()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n")
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
     );
 }
 
@@ -658,7 +526,7 @@ fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -705,7 +573,7 @@ fn raw_command_output_read_range_direct_answer_preserves_visible_blank_line() {
 }
 
 #[test]
-fn direct_answer_sanitizes_read_range_log_excerpt_without_llm() {
+fn raw_read_range_direct_answer_sanitizes_log_excerpt() {
     let mut loop_state = LoopState::new(2);
     let skill_output = serde_json::json!({
             "action": "read_range",
@@ -724,7 +592,7 @@ fn direct_answer_sanitizes_read_range_log_excerpt_without_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
+            semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: "feishud.log".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -794,8 +662,7 @@ fn scalar_route_fs_basic_tail_read_range_prefers_structured_excerpt() {
 }
 
 #[test]
-fn direct_answer_passthroughs_chat_wrapped_execution_path_read_range_when_no_transform_is_requested(
-) {
+fn direct_answer_defers_path_content_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -818,9 +685,8 @@ fn direct_answer_passthroughs_chat_wrapped_execution_path_read_range_when_no_tra
         auto_locator_path: Some("/tmp/config.toml".to_string()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("[app]\nname = \"fixture\"\nmode = \"test\"")
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
     );
 }
 
@@ -839,7 +705,7 @@ fn direct_answer_does_not_passthrough_read_range_when_summary_is_requested() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -934,7 +800,7 @@ fn direct_answer_prefers_current_turn_excerpt_summary_request_over_resolved_inte
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };

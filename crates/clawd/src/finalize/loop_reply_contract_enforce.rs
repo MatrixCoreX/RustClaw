@@ -363,22 +363,16 @@ pub(super) fn route_prefers_content_evidence_synthesis(
     synthesis: &str,
 ) -> bool {
     let contract = route.clone();
-    let content_summary_contract = route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::ContentExcerptSummary,
-        crate::OutputSemanticKind::ContentExcerptWithSummary,
-    ]) && !matches!(
-        contract.response_shape,
-        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-    );
+    let content_summary_contract = route.semantic_kind_is_unclassified()
+        && !matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        );
     let constrained_sentence_summary_contract = contract.requires_content_evidence
         && !contract.delivery_required
         && (contract.response_shape == crate::OutputResponseShape::OneSentence
             || contract.exact_sentence_count.is_some())
-        && (route.semantic_kind_is_unclassified()
-            || route.semantic_kind_is_any(&[
-                crate::OutputSemanticKind::ContentExcerptSummary,
-                crate::OutputSemanticKind::ContentExcerptWithSummary,
-            ]));
+        && route.semantic_kind_is_unclassified();
     if !contract.requires_content_evidence
         || contract.delivery_required
         || (output_contract_requests_exact_delivery(route)

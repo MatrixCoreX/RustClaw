@@ -52,7 +52,7 @@ fn unclassified_path_contract_rejects_action_outside_generic_profile() {
         ..IntentOutputContract::default()
     };
 
-    let trace = action_trace_for_output_contract(&output_contract, "db_basic.schema_version")
+    let trace = action_trace_for_output_contract(&output_contract, "unsupported.probe")
         .expect("output-contract action trace");
 
     assert_eq!(
@@ -68,14 +68,14 @@ fn unclassified_path_contract_rejects_action_outside_generic_profile() {
             .get("observation_extractor")
             .and_then(|value| value.get("source"))
             .and_then(Value::as_str),
-        Some("db_basic.schema_version")
+        Some("unsupported.probe")
     );
     assert!(trace
         .get("allowed_actions")
         .and_then(Value::as_array)
         .is_some_and(|actions| actions
             .iter()
-            .all(|action| { action.as_str() != Some("db_basic.schema_version") })));
+            .all(|action| { action.as_str() != Some("unsupported.probe") })));
 }
 
 #[test]
@@ -344,16 +344,22 @@ fn generic_profile_matches_untyped_path_content_contract() {
         })
         .expect("generic profile match");
 
-    assert_eq!(matched.required_evidence(), vec!["content_excerpt", "path"]);
+    assert_eq!(matched.required_evidence(), vec!["content_excerpt"]);
     assert_eq!(matched.final_answer_shape(), "summary_with_evidence");
     let evidence_expression = matched
         .evidence_expression()
         .to_trace_json(&matched.required_evidence());
     assert_eq!(
         evidence_expression
-            .pointer("/all_of/0")
+            .pointer("/one_of/0")
             .and_then(Value::as_str),
         Some("path")
+    );
+    assert_eq!(
+        evidence_expression
+            .pointer("/one_of/1")
+            .and_then(Value::as_str),
+        Some("url")
     );
     assert!(evidence_expression
         .get("any_of")
@@ -592,9 +598,10 @@ failure_policy = "no_retry"
 
 #[test]
 fn contract_runtime_rejects_natural_language_evidence_profile() {
-    let source = include_str!("../../../../configs/task_contract_matrix.toml").replace(
-        "evidence_profile = \"workspace_user_docs_first\"",
+    let source = include_str!("../../../../configs/task_contract_matrix.toml").replacen(
+        "evidence_profile = \"generic\"",
         "evidence_profile = \"read user setup docs first\"",
+        1,
     );
     let err = parse_contract_matrix_source(&source)
         .expect_err("natural-language evidence profile should fail shape validation");
@@ -605,7 +612,7 @@ fn contract_runtime_rejects_natural_language_evidence_profile() {
 #[test]
 fn configured_observation_extractors_must_exist_in_registry() {
     let source = format!(
-            "{}\n[[contracts.content_excerpt_summary.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
+            "{}\n[[contracts.raw_command_output.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
             include_str!("../../../../configs/task_contract_matrix.toml")
         );
     let err = parse_contract_matrix_source(&source)

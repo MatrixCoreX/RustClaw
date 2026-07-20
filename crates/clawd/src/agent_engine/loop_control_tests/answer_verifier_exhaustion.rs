@@ -62,7 +62,7 @@ fn answer_verifier_exhaustion_marks_reply_failure() {
 fn answer_verifier_exhaustion_recovers_latest_contractual_synthesis() {
     let mut route = route_result(OutputResponseShape::Free);
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let answer =
@@ -337,7 +337,7 @@ fn unclassified_search_does_not_use_semantic_specific_recovery() {
 fn answer_verifier_exhaustion_recovers_latest_terminal_respond_after_retry() {
     let mut route = route_result(OutputResponseShape::Free);
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let corrected_answer =
@@ -542,7 +542,7 @@ fn answer_verifier_exhaustion_does_not_recover_unstructured_terminal_for_field_v
 fn answer_verifier_exhaustion_does_not_recover_same_rejected_terminal_respond() {
     let mut route = route_result(OutputResponseShape::Free);
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "docs/service_notes.md".to_string();
     let rejected_answer = "Candidate includes an unsupported section.";

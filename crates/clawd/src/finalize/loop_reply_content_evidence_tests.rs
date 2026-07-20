@@ -399,7 +399,7 @@ async fn finalize_loop_reply_treats_missing_read_target_as_user_result() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "document/missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -600,7 +600,7 @@ async fn finalize_loop_reply_treats_read_file_not_found_marker_as_user_result() 
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "/tmp/missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

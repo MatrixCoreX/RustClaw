@@ -1,9 +1,8 @@
 use serde_json::json;
 
 use super::{
-    local_compound_listing_answer_verifier_gap, local_missing_evidence_verifier_gap,
-    local_missing_evidence_verifier_gap_for_answer, observed_scalar_values_from_evidence_map,
-    observed_scalar_values_from_evidence_map_for_route,
+    local_missing_evidence_verifier_gap, local_missing_evidence_verifier_gap_for_answer,
+    observed_scalar_values_from_evidence_map, observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route,
     post_write_content_evidence_missing_before_verifier,
@@ -173,10 +172,10 @@ fn unclassified_chat_with_backend_reference_does_not_require_model_answer_verifi
 }
 
 #[test]
-fn classified_contract_marker_still_uses_answer_verifier() {
+fn unclassified_content_evidence_still_uses_answer_verifier() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.requires_content_evidence = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -186,10 +185,10 @@ fn classified_contract_marker_still_uses_answer_verifier() {
 }
 
 #[test]
-fn output_contract_marker_verification_does_not_depend_on_route_trace() {
+fn content_evidence_verification_does_not_depend_on_route_trace() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.requires_content_evidence = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -263,8 +262,8 @@ fn local_missing_evidence_gap_skips_non_path_status_observation() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.requires_content_evidence = false;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-docker-status-gap", "ask", "docker");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -424,7 +423,7 @@ fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
 fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_hint = "/tmp/rustclaw-missing.md".to_string();
@@ -455,7 +454,7 @@ fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
 fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_hint = "/tmp/rustclaw-missing.md | README.md".to_string();
@@ -500,7 +499,7 @@ fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path()
 fn structural_satisfaction_keeps_verifier_when_not_found_answer_omits_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_hint = "/tmp/rustclaw-missing.md".to_string();
@@ -529,7 +528,7 @@ fn structural_satisfaction_keeps_verifier_when_not_found_answer_omits_path() {
 fn should_verify_answer_skips_permission_denied_terminal_finalizer() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/etc/shadow".to_string();
@@ -705,165 +704,6 @@ fn local_missing_evidence_gap_keeps_gap_for_non_missing_terminal_error() {
     let gap = local_missing_evidence_verifier_gap(&route, &journal).expect("gap should remain");
 
     assert_eq!(gap.missing_evidence_fields, vec!["candidates"]);
-}
-
-#[test]
-fn local_compound_listing_gap_rejects_answer_that_drops_observed_names() {
-    let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.request_text = "selector_limit=3; summarize listed content".to_string();
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-compound-list", "ask", "prompt");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "inventory_dir",
-                "names": ["archive", "release_checklist.md", "service_notes.md"]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "read_range",
-                "excerpt": "1|# Release Checklist\n3|1. Verify configuration loads correctly."
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 2,
-        finished_at: 3,
-    });
-
-    let gap = local_compound_listing_answer_verifier_gap(
-        &route,
-        &journal,
-        "release_checklist.md is an operator checklist.",
-    )
-    .expect("compound listing gap");
-
-    assert_eq!(gap.missing_evidence_fields, vec!["candidates"]);
-    assert_eq!(
-        gap.answer_incomplete_reason,
-        "observed_listing_candidates_omitted"
-    );
-    assert_eq!(
-        gap.retry_instruction,
-        "retry_policy=use_observed_listing_candidates_and_content_excerpt;repeat_rejected_answer=false"
-    );
-    assert!(gap.should_retry);
-}
-
-#[test]
-fn local_compound_listing_gap_accepts_answer_with_observed_names() {
-    let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.requires_content_evidence = true;
-    route.request_text = "selector_limit=3; summarize listed content".to_string();
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-compound-list-ok", "ask", "prompt");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "inventory_dir",
-                "names": ["archive", "release_checklist.md", "service_notes.md"]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "read_range",
-                "excerpt": "1|# Release Checklist\n3|1. Verify configuration loads correctly."
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 2,
-        finished_at: 3,
-    });
-
-    assert!(local_compound_listing_answer_verifier_gap(
-        &route,
-        &journal,
-        "archive, release_checklist.md, and service_notes.md are listed, and release_checklist.md is an operator checklist."
-    )
-    .is_none());
-}
-
-#[test]
-fn content_excerpt_summary_line_count_number_is_not_listing_limit() {
-    let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.requires_content_evidence = true;
-    route.request_text = "summarize observed content and keep answer within 5 lines".to_string();
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-content-summary-line-count",
-        "ask",
-        "prompt",
-    );
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "inventory_dir",
-                "names": [
-                    "answer_verifier.schema.json",
-                    "contract_repair_judge.schema.json",
-                    "delivery_text_classifier.schema.json",
-                    "intent_normalizer.schema.json"
-                ]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "read_range",
-                "path": "prompts/schemas/intent_normalizer.schema.json",
-                "excerpt": "1|title IntentNormalizerOut"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 2,
-        finished_at: 3,
-    });
-
-    let answer = "intent_normalizer.schema.json; content_excerpt=IntentNormalizerOut";
-
-    assert!(local_compound_listing_answer_verifier_gap(&route, &journal, answer).is_none());
 }
 
 #[test]

@@ -184,10 +184,7 @@ fn route_allows_publishable_summary_over_observed_projection(
     {
         return true;
     }
-    route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::ContentExcerptSummary,
-        crate::OutputSemanticKind::ContentExcerptWithSummary,
-    ]) && shape_allows_publishable_summary
+    false
 }
 
 fn publishable_evidence_summary_should_own_scalar_delivery(candidate: &str) -> bool {

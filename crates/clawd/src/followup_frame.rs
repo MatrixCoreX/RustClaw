@@ -491,7 +491,7 @@ fn op_kind_from_route(
     if derive_code_workspace_bound_target_from_route_and_journal(route_result, journal).is_some() {
         return FollowupOpKind::CodeWorkspace;
     }
-    if route_result.delivery_required || route_result.delivery_required {
+    if route_result.delivery_required {
         return FollowupOpKind::Delivery;
     }
     if output_contract_prefers_listing_followup(route_result)
@@ -501,19 +501,6 @@ fn op_kind_from_route(
     }
     if !crate::observed_facts::route_allows_observed_bound_target(route_result) {
         return FollowupOpKind::Generic;
-    }
-    if route_result.requires_content_evidence
-        && (matches!(
-            route_result.locator_kind,
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::Url
-        ) || route_result.semantic_kind_is_any(&[
-            crate::OutputSemanticKind::ContentExcerptSummary,
-            crate::OutputSemanticKind::ContentExcerptWithSummary,
-        ]))
-    {
-        return FollowupOpKind::Read;
     }
     if route_result.requires_content_evidence {
         return FollowupOpKind::Read;

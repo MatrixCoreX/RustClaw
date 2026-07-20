@@ -15,19 +15,6 @@ fn answer_verifier_requests_filtered_entry(journal: &crate::task_journal::TaskJo
         })
 }
 
-fn answer_verifier_requests_content_excerpt(journal: &crate::task_journal::TaskJournal) -> bool {
-    journal
-        .answer_verifier_summary
-        .as_ref()
-        .filter(|summary| summary.high_confidence_retry_gap())
-        .is_some_and(|summary| {
-            summary
-                .missing_evidence_fields
-                .iter()
-                .any(|field| field.trim() == "content_excerpt")
-        })
-}
-
 fn log_path_from_read_range_value(value: &Value) -> Option<String> {
     if value.get("action").and_then(Value::as_str) != Some("read_range") {
         return None;
@@ -140,53 +127,6 @@ pub(super) fn deterministic_filtered_log_entry_recovery(
             .as_deref()
             .and_then(read_range_log_excerpt_from_output)?;
         most_notable_log_alert_entry(&excerpt).map(|entry| filtered_log_entry_answer(&entry))
-    })
-}
-
-fn content_tail_read_route_allows_failure_recovery(
-    route_result: &crate::IntentOutputContract,
-) -> bool {
-    let contract = route_result.clone();
-    !matches!(
-        contract.response_shape,
-        crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
-    ) && contract.requires_content_evidence
-        && !contract.delivery_required
-        && route_result.semantic_kind_is_any(&[crate::OutputSemanticKind::ContentExcerptSummary])
-}
-
-fn content_tail_read_answer_from_step_output(output: &str, prefer_english: bool) -> Option<String> {
-    crate::finalize::selected_tail_read_range_line_from_step_output(output, prefer_english)
-        .or_else(|| raw_tail_read_answer_from_step_output(output, prefer_english))
-        .map(|answer| answer.trim().to_string())
-        .filter(|answer| !answer.is_empty())
-}
-
-pub(super) fn deterministic_content_tail_read_failure_recovery(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    user_request: &str,
-    route_result: &crate::IntentOutputContract,
-    journal: &crate::task_journal::TaskJournal,
-) -> Option<String> {
-    if !content_tail_read_route_allows_failure_recovery(route_result)
-        || !answer_verifier_requests_content_excerpt(journal)
-    {
-        return None;
-    }
-    let language_hint =
-        crate::language_policy::task_response_language_hint(state, task, user_request);
-    let prefer_english =
-        crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
-    journal.step_results.iter().rev().find_map(|step| {
-        if step.status != crate::executor::StepExecutionStatus::Ok
-            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
-        {
-            return None;
-        }
-        step.output_excerpt
-            .as_deref()
-            .and_then(|output| content_tail_read_answer_from_step_output(output, prefer_english))
     })
 }
 

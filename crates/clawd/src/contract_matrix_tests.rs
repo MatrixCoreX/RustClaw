@@ -11,10 +11,10 @@ fn load_workspace_matrix() -> ContractMatrix {
 }
 
 #[test]
-fn content_excerpt_summary_allows_runtime_equivalent_config_guard() {
+fn generic_path_content_allows_runtime_equivalent_config_guard() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             ..IntentOutputContract::default()
@@ -26,11 +26,11 @@ fn content_excerpt_summary_allows_runtime_equivalent_config_guard() {
             "format": "toml",
         }),
     )
-    .expect("content excerpt contract should classify config guard");
+    .expect("generic path content profile should classify config guard");
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "config_basic.guard_rustclaw_config");
-    assert_eq!(policy.contract_match, "content_excerpt_summary");
+    assert_eq!(policy.contract_match, "generic_path_content");
 }
 
 fn load_registry_from_text(raw: &str) -> SkillsRegistry {

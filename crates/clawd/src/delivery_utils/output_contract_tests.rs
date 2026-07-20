@@ -45,30 +45,6 @@ fn one_sentence_contract_skips_leading_ordered_list() {
 }
 
 #[test]
-fn content_excerpt_one_sentence_prefers_tail_summary_over_code_excerpt() {
-    let state = crate::AppState::test_default_with_fixture_provider();
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
-        ..Default::default()
-    };
-    let mut text = "脚本的前15行内容为：\n#!/usr/bin/env bash\nset -euo pipefail\n\n该脚本主要用于为重启 clawd 服务准备环境和运行目录。".to_string();
-    let mut messages = vec![text.clone()];
-
-    enforce_output_contract(
-        &state,
-        "读脚本并一句话说明",
-        &contract,
-        &mut text,
-        &mut messages,
-    );
-
-    assert_eq!(text, "该脚本主要用于为重启 clawd 服务准备环境和运行目录。");
-    assert_eq!(messages, vec![text.clone()]);
-}
-
-#[test]
 fn content_evidence_one_sentence_prefers_tail_conclusion_over_inventory_first_line() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let contract = IntentOutputContract {
@@ -126,7 +102,7 @@ fn exact_sentence_count_overrides_mislabelled_one_sentence_contract() {
     let contract = IntentOutputContract {
         exact_sentence_count: Some(3),
         response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+        semantic_kind: OutputSemanticKind::None,
         ..Default::default()
     };
     let expected = "第一句概括背景。第二句说明重点。第三句给出结论。";

@@ -579,80 +579,6 @@ pub(super) fn route_allows_structured_search_recovery(
     route.output_contract.requests_exact_path_list()
 }
 
-pub(super) fn try_recover_content_excerpt_summary_answer_verifier_gap(
-    route_result: Option<&crate::answer_verifier::AnswerContract>,
-    reply: &mut AskReply,
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if !route_allows_synthesis_recovery(route) {
-        return false;
-    }
-    let Some(verifier) = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-    else {
-        return false;
-    };
-    if !verifier.high_confidence_retry_gap() {
-        return false;
-    }
-    if !verifier.missing_evidence_fields.iter().any(|field| {
-        field == "content_excerpt" || field == "any_of(command_output|content_excerpt|field_value)"
-    }) {
-        return false;
-    }
-    if !reply.task_journal.as_ref().is_some_and(|journal| {
-        crate::task_journal::evidence_coverage_for_output_contract(
-            &route.effective_output_contract(),
-            journal,
-        )
-        .is_complete()
-    }) {
-        return false;
-    }
-    let Some(answer) = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| {
-            journal
-                .step_results
-                .iter()
-                .rev()
-                .find(|step| {
-                    step.skill == "synthesize_answer"
-                        && step.status == crate::executor::StepExecutionStatus::Ok
-                        && step
-                            .output_excerpt
-                            .as_deref()
-                            .is_some_and(|text| !text.trim().is_empty())
-                })
-                .and_then(|step| step.output_excerpt.as_deref())
-        })
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .filter(|text| !crate::finalize::looks_like_planner_artifact(text))
-        .filter(|text| !crate::finalize::looks_like_internal_trace_artifact(text))
-        .filter(|text| !crate::finalize::is_execution_summary_message(text))
-        .map(ToString::to_string)
-    else {
-        return false;
-    };
-    let messages = vec![answer.clone()];
-    if let Some(journal) = reply.task_journal.as_mut() {
-        mark_answer_verifier_recovery_success(journal, &answer);
-    }
-    reply.text = answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = false;
-    info!("answer_verifier_retry_exhausted_recovered_with_content_excerpt_summary_synthesis");
-    true
-}
-
 pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
     route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
@@ -967,18 +893,6 @@ fn route_allows_latest_respond_retry_recovery(
                 .map(str::trim)
                 .is_some_and(|output| !output.is_empty())
     })
-}
-
-pub(super) fn route_allows_synthesis_recovery(
-    route: &crate::answer_verifier::AnswerContract,
-) -> bool {
-    if route.output_contract_marker_is_any(&[
-        crate::OutputSemanticKind::ContentExcerptSummary,
-        crate::OutputSemanticKind::ContentExcerptWithSummary,
-    ]) {
-        return true;
-    }
-    false
 }
 
 pub(super) fn try_recover_generic_path_content_read_range_answer_verifier_gap(

@@ -1259,13 +1259,13 @@ fn raw_command_output_grep_text_satisfies_command_output_evidence() {
 }
 
 #[test]
-fn content_excerpt_summary_directory_inventory_can_complete_from_listing_evidence() {
+fn generic_path_content_directory_inventory_can_complete_from_listing_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-content-summary-listing",
         "ask",
         "summarize repository layout from directory counts",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ContentExcerptSummary);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;

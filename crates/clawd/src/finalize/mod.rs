@@ -45,5 +45,4 @@ pub(crate) use loop_reply::{
     deterministic_matrix_observed_shape_answer, finalize_loop_reply,
     raw_command_machine_field_delivery_satisfies_request,
     raw_command_machine_field_projection_from_journal,
-    selected_tail_read_range_line_from_step_output,
 };

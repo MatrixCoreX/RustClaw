@@ -461,10 +461,8 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if output_contract.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::ContentExcerptSummary,
-        crate::OutputSemanticKind::ContentExcerptWithSummary,
-    ]) && http_response_body_fields_present(observed_fields)
+    if output_contract.requires_content_evidence
+        && http_response_body_fields_present(observed_fields)
     {
         observed_canonical.insert("content_excerpt".to_string());
     }
@@ -539,11 +537,9 @@ pub(super) fn step_error_supplies_negative_contract_evidence(
     let Some(output_contract) = output_contract else {
         return false;
     };
-    if !output_contract.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::ContentExcerptSummary,
-        crate::OutputSemanticKind::ContentExcerptWithSummary,
-        crate::OutputSemanticKind::ExistenceWithPath,
-    ]) {
+    if !output_contract.requires_content_evidence
+        && !output_contract.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
+    {
         return false;
     }
     let Some(error) = step

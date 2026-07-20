@@ -910,18 +910,6 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(
     {
         return true;
     }
-    if contract.requires_content_evidence
-        && route.semantic_kind_is_any(&[
-            crate::OutputSemanticKind::ContentExcerptSummary,
-            crate::OutputSemanticKind::ContentExcerptWithSummary,
-        ])
-        && !matches!(
-            contract.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-        )
-    {
-        return true;
-    }
     let constrained_sentence_delivery = contract.response_shape
         == crate::OutputResponseShape::OneSentence
         || contract.exact_sentence_count.is_some();
@@ -929,11 +917,7 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(
         return false;
     }
     route.semantic_kind_is_unclassified()
-        || route.semantic_kind_is_any(&[
-            crate::OutputSemanticKind::RawCommandOutput,
-            crate::OutputSemanticKind::ContentExcerptSummary,
-            crate::OutputSemanticKind::ContentExcerptWithSummary,
-        ])
+        || route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
 }
 
 pub(super) fn delivery_is_raw_read_observation(delivery: &str, loop_state: &LoopState) -> bool {

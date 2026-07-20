@@ -3,11 +3,11 @@ use super::*;
 #[test]
 fn non_bridge_package_actions_remain_structured_contract_inputs() {
     let cases = [(
-        OutputSemanticKind::ContentExcerptSummary,
+        OutputSemanticKind::None,
         "package_manager",
         serde_json::json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
         "package_manager.smart_install",
-        "content_excerpt_summary",
+        "generic_path_content",
     )];
 
     for (semantic_kind, skill, args, expected_action, expected_contract) in cases {
@@ -16,6 +16,7 @@ fn non_bridge_package_actions_remain_structured_contract_inputs() {
                 semantic_kind,
                 requires_content_evidence: true,
                 response_shape: OutputResponseShape::Strict,
+                locator_kind: OutputLocatorKind::Path,
                 ..IntentOutputContract::default()
             }),
             skill,
@@ -115,9 +116,9 @@ fn generic_inline_transform_allows_kb_search_capability() {
 }
 
 #[test]
-fn content_excerpt_with_summary_contract_has_parsed_final_shape() {
+fn generic_path_content_contract_has_parsed_final_shape() {
     let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ContentExcerptWithSummary,
+        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::Path,
@@ -128,15 +129,15 @@ fn content_excerpt_with_summary_contract_has_parsed_final_shape() {
     let shape =
         final_answer_shape_for_output_contract(&output_contract).expect("final answer shape");
 
-    assert_eq!(shape, FinalAnswerShape::ExcerptPlusSummary);
-    assert_eq!(shape.as_str(), "excerpt_plus_summary");
+    assert_eq!(shape, FinalAnswerShape::SummaryWithEvidence);
+    assert_eq!(shape.as_str(), "summary_with_evidence");
     assert_eq!(shape.class(), FinalAnswerShapeClass::GroundedSummary);
 }
 
 #[test]
-fn content_excerpt_with_summary_allows_supplemental_directory_listing() {
+fn generic_path_content_allows_supplemental_directory_listing() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ContentExcerptWithSummary,
+        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::Path,
@@ -153,7 +154,7 @@ fn content_excerpt_with_summary_allows_supplemental_directory_listing() {
     .expect("list policy");
     assert!(list_policy.is_allowed(), "{list_policy:?}");
     assert_eq!(list_policy.action_key, "fs_basic.list_dir");
-    assert_eq!(list_policy.contract_match, "content_excerpt_with_summary");
+    assert_eq!(list_policy.contract_match, "generic_path_content");
 
     let read_policy = action_policy_for_output_contract(
         Some(&contract),
@@ -163,7 +164,7 @@ fn content_excerpt_with_summary_allows_supplemental_directory_listing() {
     .expect("read policy");
     assert!(read_policy.is_allowed(), "{read_policy:?}");
     assert_eq!(read_policy.action_key, "fs_basic.read_text_range");
-    assert_eq!(read_policy.contract_match, "content_excerpt_with_summary");
+    assert_eq!(read_policy.contract_match, "generic_path_content");
 }
 
 #[test]
@@ -222,7 +223,7 @@ fn action_policy_blocks_forbidden_action_for_generic_content_contract() {
 
     assert_eq!(policy.decision, ActionPolicyDecision::RejectedForbidden);
     assert_eq!(policy.contract_match, "generic_path_content");
-    assert_eq!(policy.required_evidence, vec!["content_excerpt", "path"]);
+    assert_eq!(policy.required_evidence, vec!["content_excerpt"]);
 }
 
 #[test]
@@ -423,7 +424,10 @@ fn contract_matrix_action_refs_have_registry_schemas() {
 #[test]
 fn legacy_canonicalization_records_original_and_replacement_refs() {
     let route = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+        semantic_kind: OutputSemanticKind::None,
+        requires_content_evidence: true,
+        response_shape: OutputResponseShape::Strict,
+        locator_kind: OutputLocatorKind::Path,
         ..IntentOutputContract::default()
     };
     let policy =
@@ -610,7 +614,7 @@ fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
     // Each current semantic contract and generic profile contributes an
     // evidence-shape, allowed-action, and rejected-action path.
-    let cases = generated_contract_cases(&matrix, 30);
+    let cases = generated_contract_cases(&matrix, 24);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

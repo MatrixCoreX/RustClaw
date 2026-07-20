@@ -36,9 +36,12 @@ fn observed_config_basic_strict_output_continues_for_synthesis() {
         tool: "config_basic".to_string(),
         args: json!({"action":"read_field","path":"configs/skills_registry.toml","field_path":"run_cmd.planner_kind"}),
     }];
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            output_contract: Some(route_result(OutputResponseShape::Strict)),
+            output_contract: Some(route),
             ..Default::default()
         }),
         &loop_state,
@@ -60,9 +63,12 @@ fn observed_call_capability_inventory_names_continue_for_synthesis() {
         args: json!({"path":"/workspace/document","files_only":true,"names_only":true,"max_entries":5}),
     }];
 
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            output_contract: Some(route_result(OutputResponseShape::Strict)),
+            output_contract: Some(route),
             ..Default::default()
         }),
         &loop_state,
@@ -131,7 +137,9 @@ fn capability_inventory_names_continue_to_incremental_planner() {
         capability: "filesystem.list_file_names".to_string(),
         args: json!({"path":"/workspace/document","files_only":true,"names_only":true,"max_entries":5}),
     }];
-    let route = route_result(OutputResponseShape::Strict);
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
 
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
@@ -204,7 +212,7 @@ fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_secon
 }
 
 #[test]
-fn bounded_read_range_observe_only_round_does_not_force_incremental_planner() {
+fn bounded_read_range_observe_only_round_uses_incremental_planner() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -221,12 +229,12 @@ fn bounded_read_range_observe_only_round_does_not_force_incremental_planner() {
     route.locator_kind = OutputLocatorKind::Path;
     route.semantic_kind = OutputSemanticKind::None;
 
-    assert!(!observe_only_round_should_continue(
+    assert!(observe_only_round_should_continue(
         &route,
         &loop_state,
         &actions,
     ));
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route.clone()),
             ..Default::default()
@@ -250,7 +258,9 @@ fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
         args: json!({"action":"read_text_range","path":"/tmp/service_notes.md","mode":"head","n":3}),
     }];
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::None;
 
     assert!(observe_only_round_should_continue(
         &route,
@@ -288,6 +298,7 @@ fn service_control_status_protocol_output_continues_for_model_synthesis() {
         .push(ok_step("step_1", "service_control", &protocol_output));
 
     let mut route = route_result(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::None;
     route.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
@@ -325,6 +336,7 @@ fn raw_strict_model_language_output_does_not_stop_on_bare_observation() {
         args: json!({"command":"pwd"}),
     }];
     let mut route = route_result(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::None;
     route.semantic_kind = OutputSemanticKind::RawCommandOutput;
 
@@ -371,6 +383,7 @@ fn unscoped_workspace_evidence_drafting_does_not_stop_on_search_only() {
         r#"{"action":"find_name","count":2,"results":["README.md","USAGE.md"]}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
+    route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
     route.semantic_kind = OutputSemanticKind::None;
@@ -389,7 +402,7 @@ fn unscoped_workspace_evidence_drafting_does_not_stop_on_search_only() {
 }
 
 #[test]
-fn unscoped_workspace_evidence_drafting_can_stop_after_doc_read() {
+fn unscoped_workspace_evidence_drafting_continues_after_doc_read() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -398,6 +411,7 @@ fn unscoped_workspace_evidence_drafting_can_stop_after_doc_read() {
         r#"{"action":"read_range","path":"README.md","excerpt":"1|# RustClaw\n2|## Setup"}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
+    route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
     route.semantic_kind = OutputSemanticKind::None;
@@ -405,7 +419,7 @@ fn unscoped_workspace_evidence_drafting_can_stop_after_doc_read() {
         skill: "system_basic".to_string(),
         args: json!({"action":"read_range","path":"README.md","mode":"head","n":120}),
     }];
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route.clone()),
             ..Default::default()
@@ -515,7 +529,7 @@ fn missing_path_batch_facts_content_contract_continues_for_possible_fallback() {
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "plan/missing.md".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -714,7 +728,9 @@ fn strict_json_read_only_round_continues_planner_for_live_code_workspace() {
         "fs_basic",
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/test_calc_core.py","excerpt":"1|from calc_core import add, sub"}}"#,
     ));
-    let route = route_result(OutputResponseShape::Strict);
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -750,7 +766,9 @@ fn bounded_capability_observation_still_requires_synthesis_at_round_cap() {
         "fs_basic",
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a,b): return a+b"}}"#,
     ));
-    let route = route_result(OutputResponseShape::Strict);
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
     let actions = vec![AgentAction::CallCapability {
         capability: "filesystem.read_text_range".to_string(),
         args: json!({"path":"/workspace/project/calc_core.py","start_line":1,"end_line":16}),

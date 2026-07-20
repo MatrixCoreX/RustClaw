@@ -2,16 +2,12 @@ use super::*;
 
 #[path = "answer_verifier_runtime/compacted_machine_ref_gap.rs"]
 mod compacted_machine_ref_gap;
-#[path = "answer_verifier_runtime/compound_listing_gap.rs"]
-mod compound_listing_gap;
 #[path = "answer_verifier_runtime/prompt_evidence_blocks.rs"]
 mod prompt_evidence_blocks;
 #[path = "answer_verifier_runtime/structured_read_scalar_gap.rs"]
 mod structured_read_scalar_gap;
 
 use compacted_machine_ref_gap::local_compacted_machine_ref_answer_verifier_gap;
-pub(crate) use compound_listing_gap::local_compound_listing_answer_verifier_gap;
-pub(super) use compound_listing_gap::structured_json_values_from_step_output;
 pub(super) use prompt_evidence_blocks::{
     current_context_prompt_block, evidence_policy_context_prompt_block,
     execution_evidence_prompt_block, output_contract_prompt_block,
@@ -54,18 +50,6 @@ pub(crate) async fn verify_answer_observe_only(
             answer_incomplete_reason = %local_gap.answer_incomplete_reason,
             retry_instruction = %local_gap.retry_instruction,
             "answer_verifier_local_missing_evidence_gap"
-        );
-        return Some(local_gap);
-    }
-    if let Some(local_gap) =
-        local_compound_listing_answer_verifier_gap(route_result, journal, candidate_answer)
-    {
-        tracing::warn!(
-            task_id = %task.task_id,
-            missing_evidence_fields = ?local_gap.missing_evidence_fields,
-            answer_incomplete_reason = %local_gap.answer_incomplete_reason,
-            retry_instruction = %local_gap.retry_instruction,
-            "answer_verifier_local_compound_listing_gap"
         );
         return Some(local_gap);
     }
@@ -196,6 +180,17 @@ pub(crate) async fn verify_answer_observe_only(
         );
     }
     Some(validation)
+}
+
+pub(super) fn structured_json_values_from_step_output(output: &str) -> Vec<serde_json::Value> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+        return Vec::new();
+    };
+    let mut values = vec![value.clone()];
+    if let Some(extra) = value.get("extra") {
+        values.push(extra.clone());
+    }
+    values
 }
 
 #[cfg(test)]

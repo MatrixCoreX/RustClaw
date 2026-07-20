@@ -174,9 +174,7 @@ pub(super) fn enforce_output_contract(
             // structured count says the user requested more than one sentence.
         }
         OutputResponseShape::OneSentence => {
-            *normalized_text = if output_contract.requires_content_evidence
-                || output_contract.semantic_kind.is_content_excerpt_summary()
-            {
+            *normalized_text = if output_contract.requires_content_evidence {
                 take_tail_sentence(normalized_text)
                     .unwrap_or_else(|| take_first_sentence(normalized_text))
             } else {

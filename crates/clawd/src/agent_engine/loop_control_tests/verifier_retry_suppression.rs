@@ -1348,7 +1348,7 @@ fn raw_observation_output_format_gap_does_not_suppress_structural_retry() {
     let mut route = route_result(OutputResponseShape::Free);
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step(
@@ -1584,6 +1584,8 @@ fn terminal_model_answer_does_not_replace_single_machine_projection_with_observe
 fn permission_denied_content_access_suppresses_missing_evidence_retry() {
     let mut route = route_result(OutputResponseShape::Strict);
     route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/etc/shadow".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-permission-denied", "ask", "prompt");

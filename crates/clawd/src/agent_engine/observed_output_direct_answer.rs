@@ -145,15 +145,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             prefer_full_path,
                         )
                     }),
-                "doc_parse" => {
-                    content_excerpt_summary_direct_answer_candidate(route, &observed_output.body)
-                        .filter(|candidate| {
-                            !direct_free_text_conflicts_with_request_language(
-                                candidate,
-                                request_language_hint,
-                            )
-                        })
-                }
+                "doc_parse" => None,
                 "transform" => transform_skill_formatted_output_candidate(&observed_output.body),
                 "log_analyze" => None,
                 "system_basic" | "config_basic" | "fs_basic" => {
@@ -462,13 +454,10 @@ pub(super) fn route_allows_tail_read_range_direct_passthrough(
         return false;
     }
     route.requires_content_evidence
-        && super::output_route_policy::route_contract_marker_is_any(
+        && (super::output_route_policy::route_contract_marker_is(
             route,
-            &[
-                crate::OutputSemanticKind::ContentExcerptSummary,
-                crate::OutputSemanticKind::RawCommandOutput,
-            ],
-        )
+            crate::OutputSemanticKind::RawCommandOutput,
+        ) || super::output_route_policy::route_is_unclassified_contract(route))
 }
 
 pub(super) fn route_allows_read_range_direct_passthrough(
@@ -484,7 +473,9 @@ pub(super) fn route_allows_read_range_direct_passthrough(
     let Some(route) = route else {
         return false;
     };
-    if !super::output_route_policy::route_is_unclassified_contract(route) {
+    if !super::output_route_policy::route_is_unclassified_contract(route)
+        || route.requires_content_evidence
+    {
         return false;
     }
     true

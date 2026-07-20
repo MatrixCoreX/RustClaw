@@ -147,7 +147,6 @@ use file_missing::{
 
 #[path = "loop_reply_tail_read.rs"]
 mod tail_read;
-pub(crate) use tail_read::selected_tail_read_range_line_from_step_output;
 use tail_read::{
     current_user_visible_delivery_text, latest_bounded_read_range_answer_from_loop,
     latest_path_batch_facts_has_implicit_metadata_fields, latest_plan_requested_synthesis,
@@ -281,7 +280,7 @@ use missing_delivery::{
 use missing_delivery::{
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
-    pre_execution_confirmation_checkpoint_seed, promote_observed_language_delivery_summary,
+    pre_execution_confirmation_checkpoint_seed,
     verify_summary_requires_resume_confirmation,
 };
 
@@ -437,11 +436,18 @@ pub(crate) async fn finalize_loop_reply(
             .with_failure(message));
     }
 
-    if let Some(reply) =
-        finalize_capability_synthesis(state, task, user_text, &mut loop_state, agent_run_context)
-            .await
-    {
-        return Ok(reply);
+    if !machine_envelope::loop_has_machine_envelope(&loop_state) {
+        if let Some(reply) = finalize_capability_synthesis(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            agent_run_context,
+        )
+        .await
+        {
+            return Ok(reply);
+        }
     }
 
     let requires_content_evidence = route_requires_content_evidence(agent_run_context);
@@ -460,12 +466,38 @@ pub(crate) async fn finalize_loop_reply(
     );
     backfill_delivery_from_last_outputs(task, &mut loop_state, agent_run_context);
     let mut finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary> = None;
-    attach_machine_envelope_delivery_from_loop(
+    let attached_machine_envelope = attach_machine_envelope_delivery_from_loop(
         task,
         &mut loop_state,
         &mut finalizer_summary,
         agent_run_context,
     );
+    if attached_machine_envelope
+        && machine_envelope::loop_has_subagent_machine_envelope(&loop_state)
+    {
+        let delivery_messages = loop_state.delivery_messages.clone();
+        let message = loop_state
+            .last_user_visible_respond
+            .clone()
+            .unwrap_or_default();
+        let delivery_consistent =
+            crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
+        let journal = build_loop_journal(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            agent_run_context,
+            finalizer_summary,
+            delivery_consistent,
+            &message,
+            crate::task_journal::TaskJournalFinalStatus::Success,
+        )
+        .await;
+        return Ok(AskReply::non_llm(message)
+            .with_messages(delivery_messages)
+            .with_task_journal(journal));
+    }
     if should_return_missing_file_delivery_reply(&loop_state, agent_run_context) {
         if let Some(reply) = missing_file_delivery_reply_from_loop(
             state,

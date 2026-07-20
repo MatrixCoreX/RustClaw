@@ -261,7 +261,7 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
     );
     let route = crate::IntentOutputContract {
         requires_content_evidence: true,
-        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "README.md".to_string(),
         ..Default::default()
@@ -293,7 +293,10 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
     assert!(!coverage.is_complete(), "coverage: {coverage:?}");
     assert_eq!(
         coverage.missing_evidence,
-        vec!["any_of(candidates|content_excerpt|count|field_value)"]
+        vec![
+            "one_of(path|url)",
+            "any_of(candidates|content_excerpt|count|field_value)"
+        ]
     );
     assert!(!coverage.observed_canonical.contains("content_excerpt"));
 }
