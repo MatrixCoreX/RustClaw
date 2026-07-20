@@ -257,8 +257,6 @@ pub(super) fn structured_scalar_candidate(
         "path_batch_facts" => {
             if route.is_some_and(route_requests_scalar_existence) {
                 system_basic_scalar_existence_candidate(state, value, prefer_english)
-            } else if route.is_some_and(route_requests_file_basename) {
-                system_basic_path_batch_file_basename_candidate(value)
             } else if route.is_some_and(route_requests_scalar_path_only) {
                 system_basic_path_batch_scalar_path_candidate(value)
             } else {

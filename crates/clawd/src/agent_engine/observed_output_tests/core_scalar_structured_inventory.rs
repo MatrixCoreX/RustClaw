@@ -303,6 +303,25 @@ fn document_title_is_not_projected_without_explicit_selector() {
 }
 
 #[test]
+fn basename_projection_requires_explicit_generic_selector() {
+    let result = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "system_basic",
+        Some("path_batch_facts".to_string()),
+        serde_json::json!({"extra": {"basename": "release_checklist.md"}}),
+    );
+    let results = vec![result];
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+
+    assert!(selected_capability_result_scalar_candidate(Some(&route), &results).is_none());
+
+    route.selection.structured_field_selector = Some("basename".to_string());
+    assert_eq!(
+        selected_capability_result_scalar_candidate(Some(&route), &results).as_deref(),
+        Some("release_checklist.md")
+    );
+}
+
+#[test]
 fn database_version_uses_generic_capability_result_selector() {
     let state = test_state_with_registry(
         r#"

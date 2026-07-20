@@ -402,33 +402,6 @@ fn normalize_observed_scalar_path(path: &str) -> String {
     }
 }
 
-pub(super) fn system_basic_path_batch_file_basename_candidate(
-    value: &serde_json::Value,
-) -> Option<String> {
-    if value.get("action").and_then(|v| v.as_str()) != Some("path_batch_facts") {
-        return None;
-    }
-    let facts = value.get("facts")?.as_array()?;
-    if facts.len() != 1 {
-        return None;
-    }
-    let entry = facts.first()?.as_object()?;
-    let exists = entry
-        .get("exists")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    if !exists {
-        return None;
-    }
-    let path = path_batch_fact_preferred_path(entry)?;
-    let basename = std::path::Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::trim)
-        .filter(|name| !name.is_empty())?;
-    Some(basename.to_string())
-}
-
 pub(super) fn route_requires_single_file_delivery(route: &crate::IntentOutputContract) -> bool {
     matches!(route.response_shape, crate::OutputResponseShape::FileToken)
         || matches!(

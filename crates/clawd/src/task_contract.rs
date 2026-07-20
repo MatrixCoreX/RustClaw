@@ -96,7 +96,6 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ContentPresenceCheck
         | OutputSemanticKind::ScalarPathOnly
-        | OutputSemanticKind::FileBasename
         | OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
             TaskOperation::Validate
@@ -232,7 +231,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ScalarCount => {
             fields.insert("count");
         }
-        OutputSemanticKind::ScalarPathOnly | OutputSemanticKind::FileBasename => {
+        OutputSemanticKind::ScalarPathOnly => {
             fields.insert("field_value");
         }
         OutputSemanticKind::ExistenceWithPath | OutputSemanticKind::ExistenceWithPathSummary => {

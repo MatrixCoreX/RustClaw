@@ -472,13 +472,11 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("candidates".to_string());
     }
-    if output_contract.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::ScalarPathOnly,
-        crate::OutputSemanticKind::FileBasename,
-    ]) && (observed_canonical.contains("path")
-        || observed_canonical.contains("content_match")
-        || observed_canonical.contains("candidates")
-        || observed_field_with_prefix(observed_fields, "results["))
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly)
+        && (observed_canonical.contains("path")
+            || observed_canonical.contains("content_match")
+            || observed_canonical.contains("candidates")
+            || observed_field_with_prefix(observed_fields, "results["))
     {
         observed_canonical.insert("field_value".to_string());
     }

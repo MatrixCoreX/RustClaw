@@ -394,17 +394,6 @@ failure_policy = "retry_with_alternatives"
 all_of = ["field_value"]
 negative_evidence = ["exists_false"]
 
-[contracts.file_basename]
-semantic_kind = "file_basename"
-operation = "inspect"
-target_object = "path"
-delivery_shape = "raw"
-allowed_actions = ["fs_basic.stat_paths", "fs_basic.find_entries"]
-preferred_actions = ["fs_basic.stat_paths"]
-required_evidence = ["field_value"]
-final_answer_shape = "scalar"
-failure_policy = "retry_with_alternatives"
-
 [contracts.existence_with_path]
 semantic_kind = "existence_with_path"
 operation = "inspect"

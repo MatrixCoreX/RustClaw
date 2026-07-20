@@ -213,26 +213,10 @@ pub(super) fn route_requests_scalar_path_only(route: &crate::IntentOutputContrac
         )
 }
 
-pub(super) fn route_requests_file_basename(route: &crate::IntentOutputContract) -> bool {
-    route.response_shape == crate::OutputResponseShape::Scalar
-        && super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::FileBasename,
-        )
-}
-
 pub(super) fn route_allows_path_batch_scalar_path_observed_answer(
     route: &crate::IntentOutputContract,
 ) -> bool {
     route_requests_scalar_path_only(route) && !route.requires_content_evidence
-}
-
-pub(super) fn route_allows_path_batch_file_basename_observed_answer(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route_requests_file_basename(route)
-        && !route.requires_content_evidence
-        && !route.delivery_required
 }
 
 pub(super) fn recent_file_path_candidate_for_scalar_path(

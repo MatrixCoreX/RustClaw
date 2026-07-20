@@ -428,10 +428,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                     {
                         path_batch_file_delivery_token_candidate(route, &value)
                     } else if action == Some("path_batch_facts")
-                        && route.is_some_and(route_allows_path_batch_file_basename_observed_answer)
-                    {
-                        system_basic_path_batch_file_basename_candidate(&value)
-                    } else if action == Some("path_batch_facts")
                         && route.is_some_and(|route| {
                             route_allows_path_batch_scalar_path_observed_answer(route)
                                 || route_scalar_has_plain_path_terminal_respond(route, loop_state)

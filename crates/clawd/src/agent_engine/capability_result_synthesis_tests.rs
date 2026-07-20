@@ -242,6 +242,29 @@ fn read_range_title_result_uses_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn path_facts_result_uses_generic_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "system_basic",
+            Some("path_batch_facts".to_string()),
+            json!({
+                "extra": {
+                    "action": "path_batch_facts",
+                    "basename": "release_checklist.md",
+                    "count": 1
+                }
+            }),
+        ));
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
 fn exact_machine_and_artifact_delivery_bypass_language_synthesis() {
     let mut loop_state = LoopState::default();
     let mut result =
