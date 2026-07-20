@@ -128,6 +128,24 @@ fn output_contract_path_selector_must_be_a_single_strict_field() {
 }
 
 #[test]
+fn single_file_delivery_requires_all_machine_fields() {
+    let mut contract = output_contract();
+    contract.delivery_required = true;
+    contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    contract.response_shape = crate::OutputResponseShape::FileToken;
+    assert!(contract.requests_single_file_delivery());
+
+    contract.delivery_required = false;
+    assert!(!contract.requests_single_file_delivery());
+    contract.delivery_required = true;
+    contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    assert!(!contract.requests_single_file_delivery());
+    contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    contract.response_shape = crate::OutputResponseShape::Free;
+    assert!(!contract.requests_single_file_delivery());
+}
+
+#[test]
 fn default_output_contract_is_unclassified() {
     let contract = output_contract();
 

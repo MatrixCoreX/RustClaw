@@ -80,8 +80,7 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary => TaskOperation::Summarize,
-        OutputSemanticKind::GeneratedFileDelivery
-        | OutputSemanticKind::GeneratedFilePathReport
+        OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
         OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
@@ -232,8 +231,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ExecutionFailedStep => {
             fields.insert("command_output");
         }
-        OutputSemanticKind::GeneratedFileDelivery
-        | OutputSemanticKind::GeneratedFilePathReport
+        OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => {
             fields.insert("path");
         }

@@ -80,7 +80,6 @@ pub(crate) enum OutputSemanticKind {
     ContentExcerptWithSummary,
     ScalarCount,
     ExecutionFailedStep,
-    GeneratedFileDelivery,
     GeneratedFilePathReport,
     FilesystemMutationResult,
     ExistenceWithPath,
@@ -94,7 +93,6 @@ impl OutputSemanticKind {
         Self::ContentExcerptWithSummary,
         Self::ScalarCount,
         Self::ExecutionFailedStep,
-        Self::GeneratedFileDelivery,
         Self::GeneratedFilePathReport,
         Self::FilesystemMutationResult,
         Self::ExistenceWithPath,
@@ -108,7 +106,6 @@ impl OutputSemanticKind {
             Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
             Self::ScalarCount => "scalar_count",
             Self::ExecutionFailedStep => "execution_failed_step",
-            Self::GeneratedFileDelivery => "generated_file_delivery",
             Self::GeneratedFilePathReport => "generated_file_path_report",
             Self::FilesystemMutationResult => "filesystem_mutation_result",
             Self::ExistenceWithPath => "existence_with_path",
@@ -192,6 +189,12 @@ impl IntentOutputContract {
 
     pub(crate) fn requests_exact_list(&self) -> bool {
         self.requests_exact_name_list() || self.requests_exact_path_list()
+    }
+
+    pub(crate) fn requests_single_file_delivery(&self) -> bool {
+        self.delivery_required
+            && self.delivery_intent == OutputDeliveryIntent::FileSingle
+            && self.response_shape == OutputResponseShape::FileToken
     }
 }
 

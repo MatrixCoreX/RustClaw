@@ -1,13 +1,13 @@
 use super::*;
 
 #[test]
-fn generated_file_delivery_wrapped_missing_find_name_supplies_checked_path_evidence() {
+fn generic_file_delivery_wrapped_missing_find_name_supplies_checked_path_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-generated-missing-delivery",
         "ask",
         "send definitely_missing_named_file_golden_001.txt",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::GeneratedFileDelivery);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = crate::OutputResponseShape::FileToken;

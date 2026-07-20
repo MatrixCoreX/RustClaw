@@ -485,7 +485,7 @@ fn generic_delivery_allows_structured_missing_file_probes() {
 }
 
 #[test]
-fn generic_delivery_rejects_file_writes() {
+fn generic_delivery_allows_file_writes_before_delivery() {
     let contract = IntentOutputContract {
         semantic_kind: OutputSemanticKind::None,
         delivery_required: true,
@@ -506,7 +506,7 @@ fn generic_delivery_rejects_file_writes() {
     )
     .expect("write policy");
 
-    assert_eq!(policy.decision, ActionPolicyDecision::RejectedNotAllowed);
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "fs_basic.write_text");
     assert_eq!(policy.contract_match, "generic_delivery");
 }

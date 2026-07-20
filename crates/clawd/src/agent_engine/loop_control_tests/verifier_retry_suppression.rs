@@ -1143,7 +1143,7 @@ fn answer_verifier_retry_summary_skips_file_delivery_candidate_disambiguation() 
     let mut route = route_result(OutputResponseShape::FileToken);
     route.delivery_required = true;
     route.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+    route.semantic_kind = OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step(
         "step_1",

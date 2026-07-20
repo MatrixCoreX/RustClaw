@@ -1685,10 +1685,7 @@ fn planner_contract_budget_does_not_depend_on_legacy_route_trace() {
 fn workspace_delivery_contract_selects_multi_step_budget() {
     let policy = base_policy();
     let recipe = ExecutionRecipeRuntimeState::default();
-    let mut route = route_with_contract(
-        OutputSemanticKind::GeneratedFileDelivery,
-        OutputLocatorKind::Filename,
-    );
+    let mut route = route_with_contract(OutputSemanticKind::None, OutputLocatorKind::Filename);
     route.delivery_required = true;
     route.delivery_intent = OutputDeliveryIntent::FileSingle;
     route.response_shape = OutputResponseShape::FileToken;

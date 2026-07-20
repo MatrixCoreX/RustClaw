@@ -555,7 +555,8 @@ fn delivery_path_gap_without_observation_finalizes_as_clarify() {
     let mut route = route_result();
     route.delivery_required = true;
     route.response_shape = crate::OutputResponseShape::FileToken;
-    route.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-delivery-clarify", "ask", "prompt");
