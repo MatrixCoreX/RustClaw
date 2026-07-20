@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use super::*;
@@ -179,10 +179,7 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
                 })
         }
         crate::evidence_policy::FinalAnswerShapeClass::StrictList => route
-            .and_then(|route| {
-                matrix_grouped_name_list_observed_answer(route, loop_state)
-                    .or_else(|| matrix_strict_list_observed_answer(route, loop_state))
-            })
+            .and_then(|route| matrix_strict_list_observed_answer(route, loop_state))
             .or_else(|| {
                 direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
                     Some(state),
@@ -699,165 +696,6 @@ fn matrix_ranked_size_list_observed_answer(
         }
     }
     None
-}
-
-pub(in crate::finalize::loop_reply) fn matrix_grouped_name_list_observed_answer(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !crate::finalize::route_prefers_grouped_name_list_output(route) {
-        return None;
-    }
-    let mut dirs = BTreeMap::<String, String>::new();
-    let mut files = BTreeMap::<String, String>::new();
-    let mut other = BTreeMap::<String, String>::new();
-    for step in &loop_state.executed_step_results {
-        if !step.is_ok()
-            || matches!(
-                step.skill.as_str(),
-                "respond" | "synthesize_answer" | "think"
-            )
-        {
-            continue;
-        }
-        let Some(output) = step
-            .output
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-        else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
-            continue;
-        };
-        if let Some(answer) = ordered_matrix_grouped_name_list_from_value(route, &value) {
-            return Some((answer, matrix_observed_shape_summary(loop_state)));
-        }
-        collect_matrix_grouped_name_items(route, &value, &mut dirs, &mut files, &mut other);
-    }
-    if dirs.is_empty() && files.is_empty() && other.is_empty() {
-        return None;
-    }
-    let mut lines = Vec::new();
-    push_matrix_grouped_name_lines("dirs", dirs, &mut lines);
-    push_matrix_grouped_name_lines("files", files, &mut lines);
-    push_matrix_grouped_name_lines("other", other, &mut lines);
-    Some((lines.join("\n"), matrix_observed_shape_summary(loop_state)))
-}
-
-fn ordered_matrix_grouped_name_list_from_value(
-    route: &crate::IntentOutputContract,
-    value: &serde_json::Value,
-) -> Option<String> {
-    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
-        if let Some(answer) = ordered_matrix_grouped_name_list_from_value(route, extra) {
-            return Some(answer);
-        }
-    }
-    let sort_by = value
-        .get("sort_by")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|sort_by| !sort_by.is_empty())?;
-    if sort_by == "name" && route.selection.list_selector.sort_by.is_none() {
-        return None;
-    }
-    let names_by_kind = value
-        .get("names_by_kind")
-        .and_then(serde_json::Value::as_object)?;
-    let mut lines = Vec::new();
-    push_ordered_matrix_grouped_name_lines(route, "dirs", names_by_kind.get("dirs"), &mut lines);
-    push_ordered_matrix_grouped_name_lines(route, "files", names_by_kind.get("files"), &mut lines);
-    push_ordered_matrix_grouped_name_lines(route, "other", names_by_kind.get("other"), &mut lines);
-    (!lines.is_empty()).then(|| lines.join("\n"))
-}
-
-fn push_ordered_matrix_grouped_name_lines(
-    route: &crate::IntentOutputContract,
-    title: &str,
-    value: Option<&serde_json::Value>,
-    lines: &mut Vec<String>,
-) {
-    let Some(array) = value.and_then(serde_json::Value::as_array) else {
-        return;
-    };
-    let mut seen = BTreeSet::new();
-    let mut items = Vec::new();
-    for item in array {
-        let Some(raw) = item.as_str() else {
-            continue;
-        };
-        let Some(display) = matrix_list_display_item(route, raw) else {
-            continue;
-        };
-        if seen.insert(display.to_ascii_lowercase()) {
-            items.push(display);
-        }
-    }
-    if items.is_empty() {
-        return;
-    }
-    lines.push(format!("{title}:"));
-    lines.extend(items.into_iter().map(|item| format!("- {item}")));
-}
-
-fn collect_matrix_grouped_name_items(
-    route: &crate::IntentOutputContract,
-    value: &serde_json::Value,
-    dirs: &mut BTreeMap<String, String>,
-    files: &mut BTreeMap<String, String>,
-    other: &mut BTreeMap<String, String>,
-) {
-    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
-        collect_matrix_grouped_name_items(route, extra, dirs, files, other);
-    }
-    if let Some(names_by_kind) = value
-        .get("names_by_kind")
-        .and_then(serde_json::Value::as_object)
-    {
-        push_matrix_grouped_name_array(route, names_by_kind.get("dirs"), dirs);
-        push_matrix_grouped_name_array(route, names_by_kind.get("files"), files);
-        push_matrix_grouped_name_array(route, names_by_kind.get("other"), other);
-    }
-}
-
-fn push_matrix_grouped_name_array(
-    route: &crate::IntentOutputContract,
-    value: Option<&serde_json::Value>,
-    items: &mut BTreeMap<String, String>,
-) {
-    let Some(array) = value.and_then(serde_json::Value::as_array) else {
-        return;
-    };
-    for item in array {
-        if let Some(text) = item.as_str() {
-            push_matrix_grouped_name_item(route, text, items);
-        }
-    }
-}
-
-fn push_matrix_grouped_name_item(
-    route: &crate::IntentOutputContract,
-    raw: &str,
-    items: &mut BTreeMap<String, String>,
-) {
-    let Some(display) = matrix_list_display_item(route, raw) else {
-        return;
-    };
-    items.entry(display.to_ascii_lowercase()).or_insert(display);
-}
-
-fn push_matrix_grouped_name_lines(
-    label: &str,
-    items: BTreeMap<String, String>,
-    lines: &mut Vec<String>,
-) {
-    if items.is_empty() {
-        return;
-    }
-    lines.push(format!("{label}:"));
-    lines.extend(items.into_values().map(|item| format!("- {item}")));
 }
 
 fn collect_matrix_strict_list_items(

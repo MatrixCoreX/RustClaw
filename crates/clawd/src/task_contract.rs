@@ -76,7 +76,6 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
-        | OutputSemanticKind::DirectoryEntryGroups
         | OutputSemanticKind::FilePaths => TaskOperation::List,
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
         OutputSemanticKind::ContentExcerptSummary
@@ -226,7 +225,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
-        | OutputSemanticKind::DirectoryEntryGroups
         | OutputSemanticKind::FilePaths => {
             fields.insert("candidates");
         }

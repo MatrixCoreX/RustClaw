@@ -118,7 +118,6 @@ pub(crate) fn intercept_response_payload_for_delivery(
             output_contract.semantic_kind,
             OutputSemanticKind::FileNames
                 | OutputSemanticKind::DirectoryNames
-                | OutputSemanticKind::DirectoryEntryGroups
                 | OutputSemanticKind::FilePaths
         ) && looks_like_delivery_locator_literal(
             directory_lookup_candidate,

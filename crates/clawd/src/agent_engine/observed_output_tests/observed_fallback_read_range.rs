@@ -269,7 +269,7 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
 fn observed_fallback_prompt_uses_compact_template_for_short_listing_and_scalar_contracts() {
     for semantic_kind in [
         OutputSemanticKind::FileNames,
-        OutputSemanticKind::DirectoryEntryGroups,
+        OutputSemanticKind::FilePaths,
         OutputSemanticKind::ExistenceWithPath,
     ] {
         let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);

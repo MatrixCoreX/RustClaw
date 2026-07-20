@@ -271,7 +271,6 @@ fn route_contract_can_publish_ordered_entries(route_result: &crate::IntentOutput
         || route_result.semantic_kind_is_any(&[
             crate::OutputSemanticKind::FileNames,
             crate::OutputSemanticKind::DirectoryNames,
-            crate::OutputSemanticKind::DirectoryEntryGroups,
             crate::OutputSemanticKind::FilePaths,
         ])
         || matches!(

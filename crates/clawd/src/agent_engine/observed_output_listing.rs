@@ -327,7 +327,6 @@ pub(super) fn route_allows_raw_listing_direct_answer(
             &[
                 crate::OutputSemanticKind::FileNames,
                 crate::OutputSemanticKind::DirectoryNames,
-                crate::OutputSemanticKind::DirectoryEntryGroups,
                 crate::OutputSemanticKind::FilePaths,
             ],
         )

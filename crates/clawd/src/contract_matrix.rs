@@ -542,7 +542,6 @@ pub(crate) enum FinalAnswerShape {
     ExcerptPlusSummary,
     FailedStepWithEvidence,
     Free,
-    GroupedNameList,
     LifecycleResult,
     NameList,
     PathList,
@@ -600,7 +599,6 @@ impl FinalAnswerShape {
         Self::ExcerptPlusSummary,
         Self::FailedStepWithEvidence,
         Self::Free,
-        Self::GroupedNameList,
         Self::LifecycleResult,
         Self::NameList,
         Self::PathList,
@@ -618,7 +616,6 @@ impl FinalAnswerShape {
             "excerpt_plus_summary" => Some(Self::ExcerptPlusSummary),
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
             "free" => Some(Self::Free),
-            "grouped_name_list" => Some(Self::GroupedNameList),
             "lifecycle_result" => Some(Self::LifecycleResult),
             "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
@@ -638,7 +635,6 @@ impl FinalAnswerShape {
             Self::ExcerptPlusSummary => "excerpt_plus_summary",
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
             Self::Free => "free",
-            Self::GroupedNameList => "grouped_name_list",
             Self::LifecycleResult => "lifecycle_result",
             Self::NameList => "name_list",
             Self::PathList => "path_list",
@@ -655,9 +651,7 @@ impl FinalAnswerShape {
             Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
             Self::SinglePath => FinalAnswerShapeClass::SinglePath,
             Self::Scalar => FinalAnswerShapeClass::ScalarValue,
-            Self::GroupedNameList | Self::NameList | Self::PathList => {
-                FinalAnswerShapeClass::StrictList
-            }
+            Self::NameList | Self::PathList => FinalAnswerShapeClass::StrictList,
             Self::ExistenceVerdictWithPath | Self::LifecycleResult => {
                 FinalAnswerShapeClass::Verdict
             }

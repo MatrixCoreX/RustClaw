@@ -1,13 +1,11 @@
 #[path = "loop_reply_matrix_shape_list_projection.rs"]
 mod list_projection;
+pub(super) use list_projection::generic_observed_machine_projection_answer;
 #[cfg(test)]
 pub(super) use list_projection::matrix_strict_list_observed_answer;
 use list_projection::{
     file_name_list_prefers_observed_projection, matrix_observed_answer_candidate_for_shape,
     stale_file_token_delivery_bounded_read_answer, stale_file_token_delivery_listing_answer,
-};
-pub(super) use list_projection::{
-    generic_observed_machine_projection_answer, matrix_grouped_name_list_observed_answer,
 };
 
 use tracing::info;
@@ -23,9 +21,8 @@ use super::{
     direct_generated_file_path_report_from_written_path, direct_path_from_active_bound_inventory,
     direct_scalar_observed_answer, direct_scalar_path_candidate_list_from_observed_outputs,
     direct_structured_observed_answer_allowing_implicit_metadata_path_facts,
-    directory_entry_groups_prefers_observed_groups, final_answer_text_from_delivery,
-    inventory_ranked_size_list_answer, latest_bounded_read_range_answer_from_loop,
-    latest_grounded_synthesis_for_mixed_listing_contract, latest_plan_requested_synthesis,
+    final_answer_text_from_delivery, inventory_ranked_size_list_answer,
+    latest_bounded_read_range_answer_from_loop, latest_plan_requested_synthesis,
     log_deterministic_delivery_record,
     successful_content_observation_should_precede_status_summary,
 };
@@ -148,9 +145,6 @@ pub(super) fn current_synthesis_satisfies_evidence_policy_shape(
     let Some(message) = delivery_messages.last() else {
         return false;
     };
-    if directory_entry_groups_prefers_observed_groups(route, loop_state) {
-        return false;
-    }
     if file_name_list_prefers_observed_projection(route, loop_state) {
         return false;
     }
@@ -270,7 +264,6 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
         return true;
     }
     if !current_answer.trim().is_empty()
-        && !directory_entry_groups_prefers_observed_groups(route, loop_state)
         && !file_name_list_prefers_observed_projection(route, loop_state)
         && evidence_policy_candidate_satisfies_final_shape(
             task,
@@ -284,17 +277,6 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     {
         return false;
     }
-    if let Some((answer, summary)) =
-        latest_grounded_synthesis_for_mixed_listing_contract(route, loop_state)
-    {
-        let answer = answer.trim().to_string();
-        if !answer.is_empty() && current_answer.trim() == answer {
-            loop_state.last_user_visible_respond = Some(answer);
-            *finalizer_summary = Some(summary);
-            return true;
-        }
-    }
-
     let Some((candidate, summary)) = matrix_observed_answer_candidate_for_shape(
         state,
         loop_state,

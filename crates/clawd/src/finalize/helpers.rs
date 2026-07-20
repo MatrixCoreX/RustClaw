@@ -59,11 +59,6 @@ pub(crate) fn should_attempt_observed_fallback(
     has_tool_or_skill_output || has_recoverable_failure_context
 }
 
-pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::IntentOutputContract) -> bool {
-    crate::evidence_policy::final_answer_shape_for_output_contract(route)
-        == Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
-}
-
 pub(crate) fn route_matches_single_path_output_contract(
     route: &crate::IntentOutputContract,
 ) -> bool {

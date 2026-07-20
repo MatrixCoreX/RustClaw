@@ -98,57 +98,7 @@ fn exact_contract_keeps_latest_terminal_table_over_short_observed_projection() {
 }
 
 #[test]
-fn exact_contract_replaces_incomplete_directory_groups_synthesis_with_observed_groups() {
-    let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"inventory_dir","counts":{"dirs":2,"files":3,"total":5},"names_by_kind":{"files":["README.md","LICENSE","RustClaw.png"],"dirs":["configs","docs"],"other":[]},"path":"workspace"}"#,
-    ));
-    let incomplete = "文件夹：configs、docs\n文件：README.md";
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "synthesize_answer",
-        incomplete,
-    ));
-    loop_state.last_user_visible_respond = Some(incomplete.to_string());
-    loop_state.last_publishable_synthesis_output = Some(incomplete.to_string());
-    let mut delivery_messages = vec![incomplete.to_string()];
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut finalizer_summary = None;
-
-    prefer_observed_answer_for_exact_contract(
-        &state,
-        "task-directory-groups-incomplete-synthesis",
-        &mut loop_state,
-        Some(&agent_run_context),
-        &mut delivery_messages,
-        &mut finalizer_summary,
-    );
-
-    assert_eq!(
-        delivery_messages,
-        vec!["dirs:\n- configs\n- docs\nfiles:\n- LICENSE\n- README.md\n- RustClaw.png"]
-    );
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some("dirs:\n- configs\n- docs\nfiles:\n- LICENSE\n- README.md\n- RustClaw.png")
-    );
-    assert!(finalizer_summary.is_some());
-}
-
-#[test]
-fn exact_contract_keeps_mixed_directory_content_synthesis_with_read_evidence() {
+fn unclassified_inventory_keeps_model_synthesis_with_read_evidence() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
@@ -173,7 +123,7 @@ fn exact_contract_keeps_mixed_directory_content_synthesis_with_read_evidence() {
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

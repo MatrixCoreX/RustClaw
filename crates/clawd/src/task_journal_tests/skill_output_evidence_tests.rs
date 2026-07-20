@@ -978,7 +978,7 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
         .any(|item| item.as_str() == Some("size_bytes")));
 
     let mut journal = TaskJournal::for_task("task-large-mtime-dir", "ask", "list recent entries");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::DirectoryEntryGroups);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {

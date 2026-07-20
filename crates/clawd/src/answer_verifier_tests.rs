@@ -900,11 +900,11 @@ fn structural_satisfaction_does_not_skip_missing_contract_evidence() {
 }
 
 #[test]
-fn structural_satisfaction_skips_verifier_for_deterministic_finalizer_summary() {
+fn grounded_generic_summary_does_not_skip_verifier_without_exact_contract() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-finalizer-summary-skip", "ask", "list");
@@ -940,7 +940,7 @@ fn structural_satisfaction_skips_verifier_for_deterministic_finalizer_summary() 
         ..Default::default()
     });
 
-    assert!(structural_satisfaction_can_skip_verifier(
+    assert!(!structural_satisfaction_can_skip_verifier(
         &route,
         &journal,
         "dirs:\n- configs\nfiles:\n- README.md"

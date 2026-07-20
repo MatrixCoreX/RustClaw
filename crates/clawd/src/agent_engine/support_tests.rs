@@ -924,7 +924,6 @@ fn seed_loop_state_extracts_registry_capability_contract_boundary_observation() 
         .get("registry_capability_contract_evidence")
         .expect("registry capability evidence");
     assert!(evidence.contains("kb.list_namespaces"));
-    assert!(!evidence.contains("directory_entry_groups"));
     assert_eq!(
         loop_state
             .output_vars

@@ -90,8 +90,7 @@ use execution_status::{
 mod execution_summary;
 use execution_summary::{
     attach_execution_summary_to_delivery, delivery_matches_latest_publishable_synthesis,
-    delivery_messages_include_delivery_token, directory_entry_groups_prefers_observed_groups,
-    execution_summary_arg_is_sensitive, latest_grounded_synthesis_for_mixed_listing_contract,
+    delivery_messages_include_delivery_token, execution_summary_arg_is_sensitive,
     latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, output_text_from_execution_result,
     plan_step_for_execution, raw_command_arg_from_plan_step, truncate_with_ellipsis,
@@ -174,8 +173,8 @@ use matrix_shape::{
     current_synthesis_satisfies_evidence_policy_shape,
     evidence_policy_candidate_satisfies_final_shape,
     finalizer_summary_requires_matrix_observed_replacement,
-    generic_observed_machine_projection_answer, matrix_grouped_name_list_observed_answer,
-    matrix_observed_shape_summary, route_requires_evidence_policy_deterministic_final_answer,
+    generic_observed_machine_projection_answer, matrix_observed_shape_summary,
+    route_requires_evidence_policy_deterministic_final_answer,
     route_requires_observed_output_projection, should_try_observed_output_language_fallback,
     synthetic_task_for_evidence_policy_shape_check,
 };
