@@ -96,6 +96,23 @@ fn schedule_preview_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
+fn package_detection_resolves_without_domain_output_semantic_kind() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "package.detect_manager",
+        json!({}),
+    );
+
+    assert_eq!(record.output_semantic_kind, None);
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected package manager tool action");
+    };
+    assert_eq!(tool, "package_manager");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("detect"));
+}
+
+#[test]
 fn weather_capability_resolves_without_domain_output_semantic_kind() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

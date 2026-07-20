@@ -110,6 +110,56 @@ fn structured_field_selector_projects_scalar_from_any_capability_output() {
 }
 
 #[test]
+fn structured_field_selector_projects_scalar_from_capability_result_extra() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "system_probe"
+        enabled = true
+        kind = "runner"
+        semantic_tags = []
+        "#,
+        &["system_probe"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("manager".to_string());
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "detect",
+        "manager": "apt-get",
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "system_probe",
+        r#"{"extra":{"action":"detect","manager":"apt-get"},"text":"untrusted fallback"}"#,
+    ));
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "system_probe",
+            "step_1",
+            &serde_json::json!({"action": "detect"}),
+            "manager=apt-get",
+            Some(&extra),
+        ));
+
+    assert_eq!(
+        extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &state,
+            Some(&agent_run_context)
+        )
+        .as_deref(),
+        Some("apt-get")
+    );
+}
+
+#[test]
 fn scalar_output_does_not_guess_an_unselected_structured_field() {
     let state = test_state_with_registry(
         r#"

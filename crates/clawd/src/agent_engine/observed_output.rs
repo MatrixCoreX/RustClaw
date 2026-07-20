@@ -103,7 +103,9 @@ use output_entries::{
 
 #[path = "observed_output_direct_scalar.rs"]
 mod output_direct_scalar;
-use output_direct_scalar::{package_manager_summary_candidate, structured_scalar_candidate};
+use output_direct_scalar::{
+    selected_capability_result_scalar_candidate, structured_scalar_candidate,
+};
 
 #[path = "observed_output_direct_answer.rs"]
 mod output_direct_answer;
@@ -218,6 +220,16 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     allow_localized_direct_template: bool,
     prefer_english: bool,
 ) -> Option<String> {
+    if let Some(answer) =
+        selected_capability_result_scalar_candidate(route, &loop_state.capability_results)
+    {
+        return evidence_policy_checked_direct_candidate(
+            route,
+            loop_state,
+            auto_locator_path,
+            answer,
+        );
+    }
     if let Some(path) = recent_file_path_candidate_for_scalar_path(loop_state, route) {
         return evidence_policy_checked_direct_candidate(
             route,
@@ -262,7 +274,6 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         locator_hint.filter(|hint| !hint.trim().is_empty()),
         auto_locator_path,
         prefer_full_path,
-        allow_localized_direct_template,
         prefer_english,
     )
     .or_else(|| {
@@ -823,7 +834,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
             | FinalAnswerShape::GitStateSummary
             | FinalAnswerShape::JudgmentWithExcerptBasis
             | FinalAnswerShape::LogExcerptOrSummary
-            | FinalAnswerShape::ManagerNameWithBasis
             | FinalAnswerShape::PresenceVerdictWithMatch
             | FinalAnswerShape::RawOutputOrShortSummary
             | FinalAnswerShape::RecentArtifactJudgment
@@ -841,7 +851,6 @@ fn observed_answer_fallback_capability_ref_can_use_compact_prompt(
         crate::OutputSemanticKind::DockerImages,
         crate::OutputSemanticKind::DockerLogs,
         crate::OutputSemanticKind::DockerContainerLifecycle,
-        crate::OutputSemanticKind::PackageManagerDetection,
     ])
 }
 

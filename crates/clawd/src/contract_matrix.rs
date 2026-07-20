@@ -573,7 +573,6 @@ pub(crate) enum FinalAnswerShape {
     LifecycleResult,
     ListOrEmptyStatement,
     LogExcerptOrSummary,
-    ManagerNameWithBasis,
     NameList,
     PathList,
     PresenceVerdictWithMatch,
@@ -660,7 +659,6 @@ impl FinalAnswerShape {
         Self::LifecycleResult,
         Self::ListOrEmptyStatement,
         Self::LogExcerptOrSummary,
-        Self::ManagerNameWithBasis,
         Self::NameList,
         Self::PathList,
         Self::PresenceVerdictWithMatch,
@@ -705,7 +703,6 @@ impl FinalAnswerShape {
             "lifecycle_result" => Some(Self::LifecycleResult),
             "list_or_empty_statement" => Some(Self::ListOrEmptyStatement),
             "log_excerpt_or_summary" => Some(Self::LogExcerptOrSummary),
-            "manager_name_with_basis" => Some(Self::ManagerNameWithBasis),
             "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
             "presence_verdict_with_match" => Some(Self::PresenceVerdictWithMatch),
@@ -752,7 +749,6 @@ impl FinalAnswerShape {
             Self::LifecycleResult => "lifecycle_result",
             Self::ListOrEmptyStatement => "list_or_empty_statement",
             Self::LogExcerptOrSummary => "log_excerpt_or_summary",
-            Self::ManagerNameWithBasis => "manager_name_with_basis",
             Self::NameList => "name_list",
             Self::PathList => "path_list",
             Self::PresenceVerdictWithMatch => "presence_verdict_with_match",
@@ -810,7 +806,6 @@ impl FinalAnswerShape {
             | Self::FailedStepWithEvidence
             | Self::GitStateSummary
             | Self::LogExcerptOrSummary
-            | Self::ManagerNameWithBasis
             | Self::ProjectSummaryGroundedInFiles
             | Self::RawOutputOrShortSummary
             | Self::SummaryGroundedInExcerpt

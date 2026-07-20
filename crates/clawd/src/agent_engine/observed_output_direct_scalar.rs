@@ -9,19 +9,8 @@ pub(super) fn structured_scalar_candidate(
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
     prefer_full_path: bool,
-    allow_localized_direct_template: bool,
     prefer_english: bool,
 ) -> Option<String> {
-    if skill == "package_manager" {
-        let response_shape = route.map(|route| route.response_shape);
-        return package_manager_summary_candidate(
-            state,
-            body,
-            response_shape,
-            allow_localized_direct_template,
-            prefer_english,
-        );
-    }
     if skill == "git_basic" {
         return git_basic_scalar_candidate(route, body);
     }
@@ -407,29 +396,43 @@ fn structured_value_at_path<'a>(
         .try_fold(value, |current, segment| current.as_object()?.get(segment))
 }
 
-pub(super) fn package_manager_summary_candidate(
-    _state: Option<&AppState>,
-    body: &str,
-    response_shape: Option<crate::OutputResponseShape>,
-    allow_localized_direct_template: bool,
-    _prefer_english: bool,
+pub(super) fn selected_capability_result_scalar_candidate(
+    route: Option<&crate::IntentOutputContract>,
+    results: &[claw_core::capability_result::CapabilityResultEnvelope],
 ) -> Option<String> {
-    let manager = body
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("package_manager="))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    match response_shape {
-        Some(crate::OutputResponseShape::Scalar) => Some(manager.to_string()),
-        Some(
-            crate::OutputResponseShape::OneSentence
-            | crate::OutputResponseShape::Free
-            | crate::OutputResponseShape::Strict,
-        ) if allow_localized_direct_template => {
-            Some(package_manager_detected_machine_answer(manager))
-        }
-        _ => None,
+    let route = route?;
+    if route.response_shape != crate::OutputResponseShape::Scalar {
+        return None;
     }
+    let fields = route
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .and_then(crate::machine_kv_projection::exact_machine_field_selector)?;
+    let [field] = fields.as_slice() else {
+        return None;
+    };
+    results.iter().rev().find_map(|result| {
+        if result.status != claw_core::capability_result::CapabilityResultStatus::Ok {
+            return None;
+        }
+        selected_result_data_value(&result.data, field).and_then(value_scalar_text)
+    })
+}
+
+fn selected_result_data_value<'a>(
+    data: &'a serde_json::Value,
+    selector: &str,
+) -> Option<&'a serde_json::Value> {
+    structured_value_at_path(data, selector)
+        .or_else(|| {
+            data.get("extra")
+                .and_then(|extra| structured_value_at_path(extra, selector))
+        })
+        .or_else(|| {
+            data.get("output")
+                .and_then(|output| structured_value_at_path(output, selector))
+        })
 }
 
 pub(super) fn git_basic_commit_subject_candidate(body: &str) -> Option<String> {

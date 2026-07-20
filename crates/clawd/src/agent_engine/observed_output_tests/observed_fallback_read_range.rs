@@ -111,7 +111,6 @@ fn observed_fallback_prompt_uses_compact_template_for_structured_semantic_contra
         OutputSemanticKind::SqliteTableListing,
         OutputSemanticKind::DockerPs,
         OutputSemanticKind::DockerLogs,
-        OutputSemanticKind::PackageManagerDetection,
     ] {
         route_result.semantic_kind = semantic_kind;
         let agent_run_context = AgentRunContext {

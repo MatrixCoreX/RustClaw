@@ -594,17 +594,6 @@ required_evidence = ["field_value"]
 final_answer_shape = "schema_version"
 failure_policy = "retry_with_alternatives"
 
-[contracts.package_manager_detection]
-semantic_kind = "package_manager_detection"
-operation = "inspect"
-target_object = "system"
-delivery_shape = "summary"
-allowed_actions = ["package_manager.detect", "run_cmd"]
-preferred_actions = ["package_manager.detect"]
-required_evidence = ["field_value"]
-final_answer_shape = "manager_name_with_basis"
-failure_policy = "retry_with_alternatives"
-
 [contracts.archive_list]
 semantic_kind = "archive_list"
 operation = "list"
