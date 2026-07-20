@@ -679,17 +679,6 @@ required_evidence = ["field_value"]
 final_answer_shape = "schema_version"
 failure_policy = "retry_with_alternatives"
 
-[contracts.rss_news_fetch]
-semantic_kind = "rss_news_fetch"
-operation = "inspect"
-target_object = "web"
-delivery_shape = "summary"
-allowed_actions = ["rss_fetch"]
-preferred_actions = ["rss_fetch"]
-required_evidence = ["field_value"]
-final_answer_shape = "free"
-failure_policy = "retry_with_alternatives"
-
 [contracts.package_manager_detection]
 semantic_kind = "package_manager_detection"
 operation = "inspect"

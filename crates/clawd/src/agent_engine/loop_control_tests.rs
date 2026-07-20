@@ -20,7 +20,6 @@ use super::{
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
     terminal_user_answer_stop_signal, text_has_exact_marker_line,
     try_accept_language_only_output_format_answer_verifier_gap,
-    try_preserve_rss_source_hosts_from_structured_evidence,
     try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_document_heading_answer_verifier_gap,
     try_recover_filesystem_mutation_success_answer_verifier_gap,
@@ -30,7 +29,7 @@ use super::{
     try_recover_local_health_answer_verifier_gap_from_loop_state,
     try_recover_log_analyze_answer_verifier_gap,
     try_recover_machine_kv_summary_output_format_answer_verifier_gap,
-    try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
+    try_recover_recent_artifacts_answer_verifier_gap,
     try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_evidence_table_answer_verifier_gap,
     try_recover_structured_listing_answer_verifier_gap,
@@ -120,10 +119,6 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
         started_at: 0,
         finished_at: 0,
     }
-}
-
-fn sample_rss_news_output() -> &'static str {
-    r#"{"extra":{"action":"latest","category":"general","field_value":{"items":3,"sources_failed":0,"sources_ok":2,"titles":["What a hair loss breakthrough could mean for women like me","Louisiana ICE Facility Mistreated Immigrants, Federal Investigators Say","New NHS drug offers ovarian cancer patients more time and better quality of life"]},"item_count":3,"items":[{"date":"Wed, 03 Jun 2026 23:42:35 GMT","layer":"feed","source":"https://feeds.bbci.co.uk/news/rss.xml","source_host":"feeds.bbci.co.uk","title":"What a hair loss breakthrough could mean for women like me","topic":"other"},{"date":"Wed, 03 Jun 2026 23:40:01 +0000","layer":"feed","source":"https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml","source_host":"rss.nytimes.com","title":"Louisiana ICE Facility Mistreated Immigrants, Federal Investigators Say","topic":"macro_market"},{"date":"Wed, 03 Jun 2026 23:34:59 GMT","layer":"feed","source":"https://feeds.bbci.co.uk/news/rss.xml","source_host":"feeds.bbci.co.uk","title":"New NHS drug offers ovarian cancer patients more time and better quality of life","topic":"other"}],"mode":"category","schema_version":1,"source_count":2,"sources_failed":0,"sources_ok":2},"text":"sources_ok=2 sources_failed=0 items=3"}"#
 }
 
 fn test_task() -> ClaimedTask {
@@ -379,102 +374,6 @@ fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
     assert!(reply.text.contains("64"));
     assert!(reply.text.contains("58"));
     assert!(reply.text.contains("6"));
-    let journal = reply.task_journal.as_ref().expect("journal");
-    assert_eq!(
-        journal.final_status,
-        Some(crate::task_journal::TaskJournalFinalStatus::Success)
-    );
-    assert!(journal.answer_verifier_summary.is_none());
-}
-
-#[test]
-fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
-    let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::RssNewsFetch;
-    route.locator_kind = OutputLocatorKind::None;
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
-    journal.record_output_contract(&route.clone());
-    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["source".to_string()],
-        answer_incomplete_reason: "candidate answer source did not match observed field"
-            .to_string(),
-        should_retry: true,
-        retry_instruction: "use observed source_host fields".to_string(),
-        confidence: 0.88,
-    });
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "rss_fetch",
-            sample_rss_news_output(),
-        ));
-    let mut reply =
-        AskReply::non_llm("BBC; New York Times; incorrect synthesized source labels".to_string())
-            .with_task_journal(journal);
-
-    assert!(try_recover_rss_news_answer_verifier_gap(&mut reply));
-
-    assert!(!reply.should_fail_task);
-    assert_eq!(reply.messages, vec![reply.text.clone()]);
-    assert!(reply.text.contains(
-        "title=New NHS drug offers ovarian cancer patients more time and better quality of life | source_host=feeds.bbci.co.uk"
-    ));
-    assert_eq!(
-        reply.text.matches("source_host=feeds.bbci.co.uk").count(),
-        2
-    );
-    assert!(reply.text.contains("source_host=rss.nytimes.com"));
-    assert!(!reply.text.contains("纽约时报"));
-    let journal = reply.task_journal.as_ref().expect("journal");
-    assert_eq!(
-        journal.final_status,
-        Some(crate::task_journal::TaskJournalFinalStatus::Success)
-    );
-    assert!(journal.answer_verifier_summary.is_none());
-}
-
-#[test]
-fn rss_news_passed_verifier_preserves_observed_source_hosts() {
-    let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::RssNewsFetch;
-    route.locator_kind = OutputLocatorKind::None;
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
-    journal.record_output_contract(&route.clone());
-    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: true,
-        missing_evidence_fields: Vec::new(),
-        answer_incomplete_reason: String::new(),
-        should_retry: false,
-        retry_instruction: String::new(),
-        confidence: 0.85,
-    });
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "rss_fetch",
-            sample_rss_news_output(),
-        ));
-    let mut reply = AskReply::non_llm(
-        "BBC; New York Times; synthesized source labels without source_host tokens".to_string(),
-    )
-    .with_task_journal(journal);
-
-    assert!(try_preserve_rss_source_hosts_from_structured_evidence(
-        &mut reply
-    ));
-
-    assert!(!reply.should_fail_task);
-    assert_eq!(reply.messages, vec![reply.text.clone()]);
-    assert!(reply.text.contains("source_host=feeds.bbci.co.uk"));
-    assert!(reply.text.contains("source_host=rss.nytimes.com"));
-    assert!(reply
-        .text
-        .contains("title=Louisiana ICE Facility Mistreated Immigrants, Federal Investigators Say | source_host=rss.nytimes.com"));
     let journal = reply.task_journal.as_ref().expect("journal");
     assert_eq!(
         journal.final_status,

@@ -30,54 +30,6 @@ pub(super) fn parse_structured_count_finding(output: &str) -> Option<StructuredC
     })
 }
 
-pub(super) fn parse_rss_news_items(output: &str) -> Option<Vec<RssNewsItem>> {
-    let value =
-        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(output)?;
-    let raw_items = value
-        .pointer("/extra/items")
-        .and_then(|value| value.as_array())
-        .or_else(|| value.get("items").and_then(|value| value.as_array()))?;
-    let mut items = Vec::new();
-    for item in raw_items {
-        let Some(object) = item.as_object() else {
-            continue;
-        };
-        let Some(title) = object
-            .get("title")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        let Some(source_host) = object
-            .get("source_host")
-            .or_else(|| object.get("source"))
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        let date = object
-            .get("date")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string);
-        items.push(RssNewsItem {
-            title: title.to_string(),
-            source_host: source_host.to_string(),
-            date,
-        });
-    }
-    if items.is_empty() {
-        None
-    } else {
-        Some(items)
-    }
-}
-
 pub(super) fn parse_structured_search_finding(output: &str) -> Option<StructuredSearchFinding> {
     let value =
         crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(output)?;

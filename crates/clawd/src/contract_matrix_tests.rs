@@ -186,25 +186,6 @@ fn service_status_allows_http_basic_observation() {
 }
 
 #[test]
-fn rss_news_fetch_allows_rss_fetch_without_locator() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::RssNewsFetch,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::None,
-            ..IntentOutputContract::default()
-        }),
-        "rss_fetch",
-        &serde_json::json!({"action":"latest","category":"general","limit":3}),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "rss_fetch.latest");
-    assert_eq!(policy.contract_match, "rss_news_fetch");
-}
-
-#[test]
 fn execution_failed_step_contract_accepts_command_output_evidence() {
     let matrix = load_workspace_matrix();
     let contract = matrix

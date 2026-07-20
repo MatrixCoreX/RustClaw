@@ -124,6 +124,28 @@ fn weather_capability_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
+fn rss_capability_resolves_without_domain_output_semantic_kind() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "rss.latest_news",
+        json!({"category": "general", "limit": 3}),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.output_semantic_kind, None);
+    let Some(AgentAction::CallSkill { skill, args }) = action else {
+        panic!("expected rss_fetch skill action, got {action:?}");
+    };
+    assert_eq!(skill, "rss_fetch");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("latest"));
+    assert_eq!(args.get("limit").and_then(Value::as_i64), Some(3));
+}
+
+#[test]
 fn capability_metadata_binds_only_unclassified_output_contract() {
     let state = state_with_workspace_registry();
     let step = crate::plan_step_from_agent_action(
