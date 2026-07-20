@@ -811,17 +811,6 @@ fn path_list_contract_requires_observed_projection() {
 }
 
 #[test]
-fn table_listing_contract_requires_observed_projection() {
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    route.response_shape = crate::OutputResponseShape::Strict;
-
-    assert!(super::super::route_requires_observed_output_projection(
-        &route
-    ));
-}
-
-#[test]
 fn created_archive_path_contract_requires_observed_projection() {
     let mut route = free_route_result();
     route.semantic_kind = crate::OutputSemanticKind::ArchivePack;
@@ -1360,88 +1349,4 @@ fn matrix_shape_replacement_only_triggers_for_bad_finalizer_summary() {
         super::super::finalizer_summary_requires_matrix_observed_replacement(Some(&bad_summary))
     );
     assert!(!super::super::finalizer_summary_requires_matrix_observed_replacement(None));
-}
-
-#[test]
-fn matrix_shape_guard_replaces_unstructured_table_with_markdown_table() {
-    let state = test_state();
-    let task = claimed_task("task-matrix-shape-guard-table");
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "data/app.sqlite".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "db_basic",
-        r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
-    ));
-    let mut delivery = vec!["数据库里有 orders 和 users 两张表。".to_string()];
-    let mut finalizer_summary = None;
-
-    assert!(
-        super::super::replace_delivery_with_matrix_observed_shape_answer(
-            &state,
-            &task,
-            "列出数据库表，输出表格",
-            &mut loop_state,
-            Some(&ctx),
-            &mut delivery,
-            &mut finalizer_summary,
-        )
-    );
-
-    assert_eq!(delivery, vec!["| name |\n| --- |\n| orders |\n| users |"]);
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some("| name |\n| --- |\n| orders |\n| users |")
-    );
-    assert!(finalizer_summary.is_some());
-}
-
-#[test]
-fn matrix_shape_guard_uses_sqlite_table_listing_contract() {
-    let state = test_state();
-    let task = claimed_task("task-matrix-shape-guard-table-capability-ref");
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "data/app.sqlite".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "db_basic",
-        r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
-    ));
-    let mut delivery = vec!["orders and users".to_string()];
-    let mut finalizer_summary = None;
-
-    assert!(
-        super::super::replace_delivery_with_matrix_observed_shape_answer(
-            &state,
-            &task,
-            "list database tables",
-            &mut loop_state,
-            Some(&ctx),
-            &mut delivery,
-            &mut finalizer_summary,
-        )
-    );
-
-    assert_eq!(delivery, vec!["| name |\n| --- |\n| orders |\n| users |"]);
-    assert!(finalizer_summary.is_some());
 }

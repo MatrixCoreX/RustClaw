@@ -941,9 +941,9 @@ fn seed_loop_state_extracts_contract_repair_candidate_boundary_observation() {
         "schema_version": 1,
         "contract_repair_candidates": [
             {
-                "source": "sqlite_structured_version",
-                "contract_ref": "contract:sqlite_schema_version",
-                "locator_hint": "data/app.sqlite",
+                "source": "structured_capability_result",
+                "contract_ref": "capability:db.inspect_schema",
+                "locator_hint": "data/app.db",
                 "response_shape": "scalar"
             }
         ]
@@ -953,7 +953,7 @@ fn seed_loop_state_extracts_contract_repair_candidate_boundary_observation() {
         serde_json::to_string(&observation).expect("observation json")
     );
     let ctx = AgentRunContext {
-        user_request: Some(format!("inspect sqlite\n{block}")),
+        user_request: Some(format!("inspect database\n{block}")),
         ..AgentRunContext::default()
     };
     let mut loop_state = LoopState::new(4);
@@ -964,9 +964,9 @@ fn seed_loop_state_extracts_contract_repair_candidate_boundary_observation() {
         .output_vars
         .get("contract_repair_candidate_evidence")
         .expect("contract repair candidate evidence");
-    assert!(evidence.contains("sqlite_structured_version"));
-    assert!(evidence.contains("contract:sqlite_schema_version"));
-    assert!(evidence.contains("data/app.sqlite"));
+    assert!(evidence.contains("structured_capability_result"));
+    assert!(evidence.contains("capability:db.inspect_schema"));
+    assert!(evidence.contains("data/app.db"));
 }
 
 #[test]

@@ -277,15 +277,11 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::DirectoryEntryGroups
         | OutputSemanticKind::FilePaths
         | OutputSemanticKind::HiddenEntriesCheck
-        | OutputSemanticKind::SqliteTableListing
-        | OutputSemanticKind::SqliteTableNamesOnly
         | OutputSemanticKind::ArchiveList => {
             fields.insert("candidates");
         }
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::StructuredKeys
-        | OutputSemanticKind::SqliteDatabaseKindJudgment
-        | OutputSemanticKind::SqliteSchemaVersion
         | OutputSemanticKind::RecentScalarEqualityCheck => {
             fields.insert("field_value");
         }

@@ -708,10 +708,7 @@ fn extract_scalar_literal_for_contract(
 fn allows_loose_scalar_token_extraction(kind: crate::OutputSemanticKind) -> bool {
     matches!(
         kind,
-        crate::OutputSemanticKind::ScalarCount
-            | crate::OutputSemanticKind::ScalarPathOnly
-            | crate::OutputSemanticKind::SqliteTableNamesOnly
-            | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+        crate::OutputSemanticKind::ScalarCount | crate::OutputSemanticKind::ScalarPathOnly
     )
 }
 

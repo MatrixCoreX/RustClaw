@@ -101,32 +101,6 @@ fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts(
 }
 
 #[test]
-fn observed_fallback_prompt_uses_compact_template_for_structured_semantic_contracts() {
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::None;
-    route_result.requires_content_evidence = true;
-    route_result.delivery_required = false;
-    route_result.delivery_intent = OutputDeliveryIntent::None;
-    for semantic_kind in [OutputSemanticKind::SqliteTableListing] {
-        route_result.semantic_kind = semantic_kind;
-        let agent_run_context = AgentRunContext {
-            output_contract: Some(route_result.clone()),
-            ..AgentRunContext::default()
-        };
-
-        let path = observed_answer_fallback_prompt_logical_path(
-            Some(&agent_run_context),
-            "field_value=24.0\nstatus=ok",
-        );
-
-        assert_eq!(
-            path, "prompts/observed_answer_fallback_compact_prompt.md",
-            "{semantic_kind:?} should use compact finalizer"
-        );
-    }
-}
-
-#[test]
 fn observed_answer_language_compatibility_rejects_clear_request_language_mismatch() {
     assert!(!observed_answer_language_compatible(
         "当前工作目录是 /home/guagua/rustclaw；进程 clawd 正在监听 8787。",

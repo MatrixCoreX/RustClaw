@@ -41,7 +41,19 @@
 - Successful responses also mirror structured metadata into `extra`, including `action`, `db_path`, implementation `sql`, and parsed `result`.
 
 ## Structured Evidence Contract
-- Matrix admission status: built-in structured evidence only; strict evidence must come from `extra.result`, not natural-language `text`.
+- Runtime evidence source: database results must come from structured `extra`;
+  natural-language `text` is an untrusted fallback and must not select
+  routing, retry, success, classification, or final-answer shape.
+- Ordinary query, table-list, version, and database-kind requests use
+  `result_kind="none"` and model synthesis from the capability result. The
+  model may judge database purpose only from observed structured data and the
+  current request; runtime must not classify from path or filename tokens.
+- For an explicit exact-field request, use a capability-neutral
+  `structured_field_selector`. Stable selectors include `tables`,
+  `table_count`, `schema_version`, `user_version`,
+  `field_value.schema_version`, and `field_value.user_version`. Use
+  exact-machine/envelope delivery for raw structured rows; do not request a
+  SQLite-specific result kind or final-answer shape.
 - `sqlite_query`, `schema_version`, `user_version`, and `list_tables` success `extra` fields:
   - `action`: string action name; evidence role `status`.
   - `db_path`: string resolved database path; evidence role `path`.

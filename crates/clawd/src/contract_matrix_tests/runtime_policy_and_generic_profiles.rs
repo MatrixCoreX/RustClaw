@@ -147,7 +147,6 @@ fn final_answer_shape_classes_are_total_and_runtime_mapped() {
     assert!(classes.contains("scalar_value"));
     assert!(classes.contains("single_path"));
     assert!(classes.contains("strict_list"));
-    assert!(classes.contains("table"));
     assert!(classes.contains("verdict"));
     assert!(classes.contains("grounded_summary"));
     assert!(classes.contains("freeform"));
@@ -166,10 +165,6 @@ fn final_answer_shape_classes_are_total_and_runtime_mapped() {
     );
     assert_eq!(
         FinalAnswerShape::NameList.coarse_response_shape(),
-        OutputResponseShape::Strict
-    );
-    assert_eq!(
-        FinalAnswerShape::TableListing.coarse_response_shape(),
         OutputResponseShape::Strict
     );
     assert_eq!(

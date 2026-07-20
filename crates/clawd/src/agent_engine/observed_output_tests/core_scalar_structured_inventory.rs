@@ -160,6 +160,105 @@ fn structured_field_selector_projects_scalar_from_capability_result_extra() {
 }
 
 #[test]
+fn database_version_uses_generic_capability_result_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "db_basic"
+        enabled = true
+        kind = "runner"
+        semantic_tags = []
+        "#,
+        &["db_basic"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("schema_version".to_string());
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "schema_version",
+        "schema_version": 7,
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "db_basic",
+            "step_1",
+            &serde_json::json!({"action": "schema_version"}),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+
+    assert_eq!(
+        extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &state,
+            Some(&agent_run_context)
+        )
+        .as_deref(),
+        Some("7")
+    );
+}
+
+#[test]
+fn database_table_list_uses_generic_exact_field_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "db_basic"
+        enabled = true
+        kind = "runner"
+        semantic_tags = []
+        "#,
+        &["db_basic"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("tables".to_string());
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "list_tables",
+        "table_count": 2,
+        "tables": ["orders", "users"],
+    });
+    let wrapped = serde_json::json!({
+        "extra": extra,
+        "text": "untrusted fallback",
+    })
+    .to_string();
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_1", "db_basic", &wrapped));
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "db_basic",
+            "step_1",
+            &serde_json::json!({"action": "list_tables"}),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output_i18n(
+            &loop_state,
+            &state,
+            Some(&agent_run_context)
+        )
+        .as_deref(),
+        Some(r#"["orders","users"]"#)
+    );
+}
+
+#[test]
 fn scalar_output_does_not_guess_an_unselected_structured_field() {
     let state = test_state_with_registry(
         r#"

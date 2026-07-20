@@ -433,16 +433,6 @@ fn compact_log_analyze_excerpt(value: &serde_json::Value) -> Option<String> {
     Some(sections.join("\n"))
 }
 
-fn db_basic_observed_candidate(value: &serde_json::Value) -> Option<String> {
-    if let Some(table_names) = db_basic_table_names(value) {
-        if table_names.is_empty() {
-            return Some("db_tables=<empty>".to_string());
-        }
-        return Some(format!("db_tables={}", table_names.join(", ")));
-    }
-    db_basic_scalar_candidate(value).map(|text| format!("db_scalar={text}"))
-}
-
 fn count_inventory_observed_candidate(value: &serde_json::Value) -> Option<String> {
     if value.get("action").and_then(|v| v.as_str()) != Some("count_inventory") {
         return None;
@@ -583,7 +573,6 @@ pub(super) fn structured_observed_body(skill: &str, body: &str) -> Option<String
             }
         }
         "config_basic" => validate_structured_observed_candidate(&value),
-        "db_basic" => db_basic_observed_candidate(&value),
         "service_control" => service_control_summary_candidate(&value),
         "fs_search" | "fs_basic" => {
             if skill == "fs_basic" {

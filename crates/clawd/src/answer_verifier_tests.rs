@@ -6,7 +6,7 @@ use super::{
     local_missing_evidence_verifier_gap_for_answer, observed_scalar_values_from_evidence_map,
     observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
-    observed_strict_list_items_from_evidence_map_for_route, observed_table_cells_from_evidence_map,
+    observed_strict_list_items_from_evidence_map_for_route,
     post_write_content_evidence_missing_before_verifier,
     recent_structured_scalar_values_from_journal, route_contract_marker_is_scalar_path_only,
     should_verify_answer, strict_list_route_allows_observed_subset,

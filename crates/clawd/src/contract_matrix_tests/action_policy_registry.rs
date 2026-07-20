@@ -51,42 +51,6 @@ fn non_bridge_package_actions_remain_structured_contract_inputs() {
 }
 
 #[test]
-fn planner_semantic_contracts_own_registered_actions() {
-    for (semantic_kind, skill, args) in [
-        (
-            OutputSemanticKind::SqliteTableListing,
-            "db_basic",
-            serde_json::json!({"action":"list_tables","db_path":"tmp/app.db"}),
-        ),
-        (
-            OutputSemanticKind::SqliteSchemaVersion,
-            "db_basic",
-            serde_json::json!({"action":"schema_version","db_path":"tmp/app.db"}),
-        ),
-    ] {
-        let policy = action_policy_for_output_contract(
-            Some(&IntentOutputContract {
-                semantic_kind,
-                requires_content_evidence: true,
-                response_shape: OutputResponseShape::OneSentence,
-                locator_kind: OutputLocatorKind::None,
-                ..IntentOutputContract::default()
-            }),
-            skill,
-            &args,
-        );
-
-        let policy = policy.expect("semantic policy decision");
-        assert!(policy.is_allowed(), "{policy:?}");
-        assert_eq!(
-            policy.contract_match,
-            semantic_kind.as_str(),
-            "{semantic_kind:?} should own {skill} policy through the planner contract"
-        );
-    }
-}
-
-#[test]
 fn generic_inline_transform_allows_transform_without_locator() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

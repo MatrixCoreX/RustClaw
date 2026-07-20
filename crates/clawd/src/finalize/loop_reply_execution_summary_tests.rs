@@ -1353,46 +1353,6 @@ fn execution_summary_suppressed_for_existence_with_path_contract() {
 }
 
 #[test]
-fn execution_summary_suppressed_for_sqlite_table_names_contract() {
-    let mut route = free_route_result();
-    route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::SqliteTableNamesOnly;
-    route.locator_hint = "/tmp/test.sqlite".to_string();
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state
-        .round_traces
-        .push(crate::task_journal::TaskJournalRoundTrace {
-            round_no: 1,
-            goal: "list sqlite tables".to_string(),
-            execution_recipe_summary: None,
-            plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
-                step_id: "step_1".to_string(),
-                action_type: "call_skill".to_string(),
-                skill: "run_cmd".to_string(),
-                args: serde_json::json!({
-                    "command": "sqlite3 /tmp/test.sqlite \"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;\""
-                }),
-                depends_on: Vec::new(),
-                why: String::new(),
-            }])),
-            verify_result: None,
-        });
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_1", "run_cmd", "orders\nusers\n"));
-    let mut delivery = vec!["这个 SQLite 数据库里有表：orders、users。".to_string()];
-
-    attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
-
-    assert_eq!(delivery, vec!["这个 SQLite 数据库里有表：orders、users。"]);
-    assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
-}
-
-#[test]
 fn execution_summary_includes_direct_fs_search_structured_observation() {
     let route = free_route_result();
     let ctx = crate::agent_engine::AgentRunContext {
