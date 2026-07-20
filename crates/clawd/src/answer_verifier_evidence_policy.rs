@@ -93,65 +93,6 @@ fn route_contract_marker_is_directory_names(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
 }
 
-pub(super) fn evidence_policy_table_answer_is_grounded_in_successful_observation(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-    candidate_answer: &str,
-) -> bool {
-    if sqlite_empty_table_answer_is_grounded(route, journal, candidate_answer) {
-        return true;
-    }
-    let candidate_cells = markdown_table_data_cells(candidate_answer);
-    if candidate_cells.is_empty() {
-        return false;
-    }
-    let observed_cells = observed_table_cells(route, journal);
-    if observed_cells.is_empty() {
-        return false;
-    }
-    candidate_cells.is_subset(&observed_cells) && observed_cells.is_subset(&candidate_cells)
-}
-
-fn sqlite_empty_table_answer_is_grounded(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-    candidate_answer: &str,
-) -> bool {
-    if !route_contract_marker_is(route, crate::OutputSemanticKind::SqliteTableListing)
-        && !route_contract_marker_is(route, crate::OutputSemanticKind::SqliteTableNamesOnly)
-    {
-        return false;
-    }
-    let machine_fields = candidate_answer
-        .lines()
-        .filter_map(|line| line.trim().split_once('='))
-        .map(|(key, value)| (key.trim(), value.trim()))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    if machine_fields.get("table_count") != Some(&"0")
-        || machine_fields.get("has_tables") != Some(&"false")
-    {
-        return false;
-    }
-    journal.step_results.iter().any(|step| {
-        step.status == crate::executor::StepExecutionStatus::Ok
-            && step.skill == "db_basic"
-            && step
-                .output_excerpt
-                .as_deref()
-                .and_then(|output| serde_json::from_str::<serde_json::Value>(output).ok())
-                .is_some_and(|value| {
-                    value
-                        .get("columns")
-                        .and_then(serde_json::Value::as_array)
-                        .is_some_and(|columns| !columns.is_empty())
-                        && value
-                            .get("rows")
-                            .and_then(serde_json::Value::as_array)
-                            .is_some_and(Vec::is_empty)
-                })
-    })
-}
-
 pub(super) fn evidence_policy_single_path_answer_is_grounded_in_successful_observation(
     route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
@@ -533,6 +474,29 @@ pub(super) fn collect_markdown_table_first_cell_ports(text: &str, ports: &mut BT
     }
 }
 
+fn markdown_table_row_cells(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') {
+        return Vec::new();
+    }
+    trimmed
+        .trim_matches('|')
+        .split('|')
+        .map(str::trim)
+        .filter(|cell| !cell.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn markdown_table_separator_row(cells: &[String]) -> bool {
+    cells.iter().all(|cell| {
+        let value = cell.trim();
+        value.len() >= 3
+            && value.chars().all(|ch| matches!(ch, '-' | ':' | ' ' | '\t'))
+            && value.chars().any(|ch| ch == '-')
+    })
+}
+
 pub(super) fn collect_socket_suffix_ports(text: &str, ports: &mut BTreeSet<u16>) {
     let bytes = text.as_bytes();
     let mut idx = 0;
@@ -870,139 +834,6 @@ pub(super) fn single_path_matches_observed(candidate_path: &str, observed_path: 
                 .is_ok_and(|observed| candidate == observed)
         })
     })
-}
-
-pub(super) fn markdown_table_data_cells(answer: &str) -> BTreeSet<String> {
-    let rows = answer
-        .lines()
-        .map(markdown_table_row_cells)
-        .filter(|cells| !cells.is_empty())
-        .collect::<Vec<_>>();
-    if rows.len() < 3 || !markdown_table_separator_row(&rows[1]) {
-        return BTreeSet::new();
-    }
-    let mut cells = BTreeSet::new();
-    for row in rows.iter().skip(2) {
-        for cell in row {
-            let normalized = normalize_strict_list_item(cell);
-            if !normalized.is_empty() {
-                cells.insert(normalized);
-            }
-        }
-    }
-    cells
-}
-
-pub(super) fn markdown_table_row_cells(line: &str) -> Vec<String> {
-    let trimmed = line.trim();
-    if !trimmed.contains('|') {
-        return Vec::new();
-    }
-    trimmed
-        .trim_matches('|')
-        .split('|')
-        .map(str::trim)
-        .filter(|cell| !cell.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-pub(super) fn markdown_table_separator_row(cells: &[String]) -> bool {
-    cells.iter().all(|cell| {
-        let value = cell.trim();
-        value.len() >= 3
-            && value.chars().all(|ch| matches!(ch, '-' | ':' | ' ' | '\t'))
-            && value.chars().any(|ch| ch == '-')
-    })
-}
-
-pub(super) fn observed_table_cells(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-) -> BTreeSet<String> {
-    let mut cells = observed_table_cells_from_evidence_map_for_route(route, journal);
-    for step in &journal.step_results {
-        if !step_can_supply_verifier_observation_for_route(route, step) {
-            continue;
-        }
-        if !step_can_supply_strict_evidence_for_route(route, step) {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) {
-            collect_observed_table_cells_from_value(&value, &mut cells);
-        } else {
-            collect_observed_table_cells_from_text_lines(output, &mut cells);
-        }
-    }
-    cells
-}
-
-pub(super) fn collect_observed_table_cells_from_text_lines(
-    output: &str,
-    cells: &mut BTreeSet<String>,
-) {
-    for line in output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        let normalized = normalize_strict_list_item(line);
-        if !normalized.is_empty() {
-            cells.insert(normalized);
-        }
-    }
-}
-
-pub(super) fn collect_observed_table_cells_from_value(
-    value: &serde_json::Value,
-    cells: &mut BTreeSet<String>,
-) {
-    if let Some(rows) = value.get("rows").and_then(|value| value.as_array()) {
-        collect_observed_table_cells_from_rows(rows, cells);
-    }
-    if let Some(rows) = value
-        .pointer("/result/rows")
-        .and_then(|value| value.as_array())
-    {
-        collect_observed_table_cells_from_rows(rows, cells);
-    }
-}
-
-pub(super) fn collect_observed_table_cells_from_rows(
-    rows: &[serde_json::Value],
-    cells: &mut BTreeSet<String>,
-) {
-    for row in rows {
-        match row {
-            serde_json::Value::Object(map) => {
-                for value in map.values() {
-                    push_observed_table_cell(value, cells);
-                }
-            }
-            serde_json::Value::Array(values) => {
-                for value in values {
-                    push_observed_table_cell(value, cells);
-                }
-            }
-            value => push_observed_table_cell(value, cells),
-        }
-    }
-}
-
-pub(super) fn push_observed_table_cell(value: &serde_json::Value, cells: &mut BTreeSet<String>) {
-    let text = match value {
-        serde_json::Value::String(value) => value.trim().to_string(),
-        serde_json::Value::Number(value) => value.to_string(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        _ => String::new(),
-    };
-    let normalized = normalize_strict_list_item(&text);
-    if !normalized.is_empty() {
-        cells.insert(normalized);
-    }
 }
 
 pub(super) fn strict_list_answer_items(answer: &str) -> Vec<String> {

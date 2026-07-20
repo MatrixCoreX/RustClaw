@@ -74,10 +74,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
     "config_validation": f"验证 {FIXTURE_CONFIG} 是否是可读配置，并简短说明结果。",
     "config_risk_assessment": "检查 configs/config.toml 的风险配置项，简短说明是否有明显高风险设置。",
-    "sqlite_table_listing": f"列出 {FIXTURE_DB} 里的表，并简短说明。",
-    "sqlite_table_names_only": f"只输出 {FIXTURE_DB} 里的表名列表。",
-    "sqlite_database_kind_judgment": f"判断 {FIXTURE_DB} 更像业务库还是测试库，并给出依据。",
-    "sqlite_schema_version": f"读取 {FIXTURE_DB} 的 schema 版本，简短告诉我结果。",
     "archive_list": f"列出 {FIXTURE_ARCHIVE} 里的成员列表。",
     "archive_read": f"读取 {FIXTURE_ARCHIVE} 里的 notes.txt 内容片段，并简短总结。",
     "archive_pack": f"把 {FIXTURE_DOCS_DIR} 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。",
@@ -117,10 +113,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
     "config_validation": f"Validate whether {FIXTURE_CONFIG} is a readable config file, and briefly explain the result.",
     "config_risk_assessment": "Check the risk-related settings in configs/config.toml and briefly say whether there is any obvious high-risk setting.",
-    "sqlite_table_listing": f"List the tables in {FIXTURE_DB} and briefly explain the result.",
-    "sqlite_table_names_only": f"Output only the table-name list in {FIXTURE_DB}.",
-    "sqlite_database_kind_judgment": f"Judge whether {FIXTURE_DB} looks more like a business database or a test database, and include the evidence.",
-    "sqlite_schema_version": f"Read the schema version from {FIXTURE_DB} and briefly tell me the result.",
     "archive_list": f"List the members inside {FIXTURE_ARCHIVE}.",
     "archive_read": f"Read a content excerpt from notes.txt inside {FIXTURE_ARCHIVE}, then summarize it briefly.",
     "archive_pack": f"Pack {FIXTURE_DOCS_DIR} into tmp/contract_matrix_docs_bundle.zip and tell me the generated path.",
@@ -138,7 +130,6 @@ JA_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "scalar_path_only": f"{FIXTURE_PACKAGE} のパスだけを出力してください。説明は不要です。",
     "file_names": f"{FIXTURE_DOCS_DIR} のファイル名を列挙し、ファイル名リストだけを出力してください。",
     "structured_keys": f"{FIXTURE_CONFIG} のトップレベルキーを読み取り、キー名リストだけを出力してください。",
-    "sqlite_table_names_only": f"{FIXTURE_DB} にあるテーブル名だけをリストで出力してください。",
     "generated_file_delivery": "tmp/contract_matrix_generated_note.txt に RustClaw contract matrix test という内容のテキストファイルを作成し、そのファイルパスを送ってください。",
     "git_repository_state": "このリポジトリに未コミットの変更があるか確認し、一文で答えてください。",
 }
@@ -149,7 +140,6 @@ KO_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "scalar_path_only": f"{FIXTURE_PACKAGE} 경로만 출력하세요. 설명은 하지 마세요.",
     "file_names": f"{FIXTURE_DOCS_DIR} 디렉터리의 파일명을 나열하고 파일명 목록만 출력하세요.",
     "structured_keys": f"{FIXTURE_CONFIG} 의 최상위 키를 읽고 키 이름 목록만 출력하세요.",
-    "sqlite_table_names_only": f"{FIXTURE_DB} 안의 테이블 이름만 목록으로 출력하세요.",
     "generated_file_delivery": "tmp/contract_matrix_generated_note.txt 파일을 만들고 내용은 RustClaw contract matrix test 로 넣은 뒤, 생성된 파일 경로를 보내세요.",
     "git_repository_state": "이 저장소에 커밋되지 않은 변경 사항이 있는지 확인하고 한 문장으로 답하세요.",
 }
@@ -160,7 +150,6 @@ FR_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "scalar_path_only": f"Affiche uniquement le chemin {FIXTURE_PACKAGE}. N'ajoute aucune explication.",
     "file_names": f"Liste les noms de fichiers dans {FIXTURE_DOCS_DIR}. Affiche uniquement la liste des noms.",
     "structured_keys": f"Lis les clés de premier niveau dans {FIXTURE_CONFIG}. Affiche uniquement la liste des clés.",
-    "sqlite_table_names_only": f"Affiche uniquement la liste des tables dans {FIXTURE_DB}.",
     "generated_file_delivery": "Crée le fichier tmp/contract_matrix_generated_note.txt avec le contenu RustClaw contract matrix test, puis envoie-moi le chemin du fichier.",
     "git_repository_state": "Vérifie si ce dépôt contient des modifications non validées et réponds en une phrase.",
 }
@@ -180,7 +169,6 @@ STRICT_NATIVE_PROMPT_CONTRACTS = frozenset(
         "scalar_path_only",
         "file_names",
         "structured_keys",
-        "sqlite_table_names_only",
         "generated_file_delivery",
         "git_repository_state",
     }
@@ -417,8 +405,6 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
         )
     elif contract_id == "quantity_comparison":
         lines.append("selector_answer_style=larger_with_sizes")
-    elif contract_id == "sqlite_database_kind_judgment":
-        lines.append("selector_database_kind=test")
     return lines
 
 

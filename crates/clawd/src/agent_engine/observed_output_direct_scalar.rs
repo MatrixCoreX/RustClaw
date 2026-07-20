@@ -59,33 +59,6 @@ pub(super) fn structured_scalar_candidate(
     if let Some(answer) = selected_structured_scalar_candidate(route, &value) {
         return Some(answer);
     }
-    if skill == "db_basic" {
-        if let Some(route) = route {
-            if super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::ScalarCount,
-            ) {
-                return db_basic_count_candidate(&value);
-            }
-            if super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::SqliteTableNamesOnly,
-            ) {
-                return db_basic_table_names(&value).map(|names| names.join("\n"));
-            }
-            if super::output_route_policy::route_contract_marker_is_any(
-                route,
-                &[
-                    crate::OutputSemanticKind::SqliteTableListing,
-                    crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
-                ],
-            ) {
-                return None;
-            }
-            return db_basic_scalar_candidate(&value);
-        }
-        return db_basic_scalar_candidate(&value);
-    }
     if skill == "service_control" {
         let response_shape = route.map(|route| route.response_shape);
         let service_status_route = route.is_some_and(|route| {
@@ -417,6 +390,39 @@ pub(super) fn selected_capability_result_scalar_candidate(
             return None;
         }
         selected_result_data_value(&result.data, field).and_then(value_scalar_text)
+    })
+}
+
+pub(super) fn selected_capability_result_exact_candidate(
+    route: Option<&crate::IntentOutputContract>,
+    results: &[claw_core::capability_result::CapabilityResultEnvelope],
+) -> Option<String> {
+    let route = route?;
+    if route.response_shape != crate::OutputResponseShape::Strict {
+        return None;
+    }
+    let fields = route
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .and_then(crate::machine_kv_projection::exact_machine_field_selector)?;
+    let [field] = fields.as_slice() else {
+        return None;
+    };
+    results.iter().rev().find_map(|result| {
+        if result.status != claw_core::capability_result::CapabilityResultStatus::Ok {
+            return None;
+        }
+        selected_result_data_value(&result.data, field).and_then(exact_result_value_text)
+    })
+}
+
+fn exact_result_value_text(value: &serde_json::Value) -> Option<String> {
+    value_scalar_text(value).or_else(|| match value {
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            serde_json::to_string(value).ok()
+        }
+        _ => None,
     })
 }
 

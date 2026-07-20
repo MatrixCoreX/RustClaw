@@ -842,25 +842,6 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
         "- README.md\n- Cargo.toml"
     ));
 
-    let mut table_route = route_with_mode();
-    table_route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    table_route.output_contract.requires_content_evidence = true;
-    table_route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    let mut table_journal =
-        crate::task_journal::TaskJournal::for_task("task-synth-table", "ask", "list tables");
-    table_journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_respond",
-            "respond",
-            json!({"rows": [{"name": "orders"}, {"name": "users"}]}).to_string(),
-        ));
-    assert!(!structurally_satisfies_answer_contract(
-        &table_route,
-        &table_journal,
-        "| name |\n| --- |\n| orders |\n| users |"
-    ));
-
     let mut path_route = route_with_mode();
     path_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     path_route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
@@ -895,68 +876,6 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
         &scalar_route,
         &scalar_journal,
         "3"
-    ));
-}
-
-#[test]
-fn matrix_table_shape_uses_observed_evidence_map_cells() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-matrix-table-evidence",
-        "ask",
-        "list tables",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "db_basic",
-            json!({
-                "columns": ["name"],
-                "rows": [
-                    {"name": "orders"},
-                    {"name": "users"}
-                ]
-            })
-            .to_string(),
-        ));
-
-    let cells = observed_table_cells_from_evidence_map(&journal);
-    assert!(cells.contains("orders"));
-    assert!(cells.contains("users"));
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "| name |\n| --- |\n| orders |\n| users |"
-    ));
-}
-
-#[test]
-fn matrix_table_shape_uses_run_cmd_results_as_table_cells() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-matrix-table-run-cmd",
-        "ask",
-        "list tables",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "run_cmd",
-            "orders\nservice_logs\nusers\n",
-        ));
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "| name |\n| --- |\n| orders |\n| service_logs |\n| users |"
     ));
 }
 

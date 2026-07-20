@@ -146,6 +146,47 @@ fn docker_capabilities_resolve_without_domain_output_semantic_kinds() {
 }
 
 #[test]
+fn database_capabilities_resolve_without_domain_output_semantic_kinds() {
+    let state = state_with_workspace_registry();
+    for (capability, expected_action, args) in [
+        (
+            "database.query",
+            "sqlite_query",
+            json!({"db_path": "data/app.db", "sql": "SELECT 1"}),
+        ),
+        (
+            "database.list_tables",
+            "list_tables",
+            json!({"db_path": "data/app.db"}),
+        ),
+        (
+            "database.schema_version",
+            "schema_version",
+            json!({"db_path": "data/app.db"}),
+        ),
+        (
+            "database.user_version",
+            "user_version",
+            json!({"db_path": "data/app.db"}),
+        ),
+    ] {
+        let (action, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, args);
+
+        assert_eq!(record.output_semantic_kind, None, "{capability}");
+        let Some(AgentAction::CallTool { tool, args }) = action else {
+            panic!("expected database tool action for {capability}");
+        };
+        assert_eq!(tool, "db_basic", "{capability}");
+        assert_eq!(
+            args.get("action").and_then(Value::as_str),
+            Some(expected_action),
+            "{capability}"
+        );
+    }
+}
+
+#[test]
 fn weather_capability_resolves_without_domain_output_semantic_kind() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

@@ -50,33 +50,6 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
     assert!(!reply.should_fail_task);
 }
 
-#[test]
-fn schema_version_contract_uses_observed_scalar() {
-    let state = test_state();
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::SqliteSchemaVersion;
-    route.response_shape = crate::OutputResponseShape::Scalar;
-    route.requires_content_evidence = true;
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "db_basic",
-        r#"{"action":"schema_version","schema_version":7}"#,
-    ));
-
-    let (answer, summary) =
-        direct_scalar_observed_answer(Some(&state), &loop_state, Some(&agent_run_context))
-            .expect("schema_version shape should project observed scalar");
-
-    assert_eq!(answer, "7");
-    assert!(summary.contract_ok);
-}
-
 #[tokio::test]
 async fn finalize_loop_reply_replaces_scalar_machine_assignment_with_observed_value() {
     let state = test_state();

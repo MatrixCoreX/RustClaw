@@ -527,8 +527,6 @@ fn output_contract_prefers_listing_followup(route_result: &crate::IntentOutputCo
         crate::OutputSemanticKind::DirectoryNames,
         crate::OutputSemanticKind::DirectoryEntryGroups,
         crate::OutputSemanticKind::FilePaths,
-        crate::OutputSemanticKind::SqliteTableListing,
-        crate::OutputSemanticKind::SqliteTableNamesOnly,
     ]) || matches!(
         route_result.delivery_intent,
         crate::OutputDeliveryIntent::DirectoryLookup

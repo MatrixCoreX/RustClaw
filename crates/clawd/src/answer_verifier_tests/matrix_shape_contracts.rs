@@ -201,58 +201,6 @@ fn matrix_strict_list_shape_rejects_unobserved_items() {
 }
 
 #[test]
-fn matrix_table_shape_requires_markdown_table_answer() {
-    let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    route.output_contract.locator_hint = "data/app.sqlite".to_string();
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-matrix-table", "ask", "list tables");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "db_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "columns": ["name"],
-                    "rows": [
-                        {"name": "orders"},
-                        {"name": "users"}
-                    ]
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "| name |\n| --- |\n| orders |\n| users |"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "orders, users"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "| name |\n| --- |\n| orders |"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "| name |\n| --- |\n| orders |\n| payments |"
-    ));
-}
-
-#[test]
 fn matrix_single_path_shape_requires_plain_grounded_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;

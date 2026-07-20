@@ -14,6 +14,16 @@ pub(super) fn extract_answer_from_observed_output_impl(
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
+    if let Some(answer) =
+        selected_capability_result_exact_candidate(route, &loop_state.capability_results)
+    {
+        return evidence_policy_checked_direct_candidate(
+            route,
+            loop_state,
+            auto_locator_path,
+            answer,
+        );
+    }
     let request_language_hint = current_turn_request_text(route, agent_run_context)
         .map(observed_request_language_hint)
         .unwrap_or("config_default");
@@ -125,19 +135,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                 answer,
             );
         }
-        if let Some(answer) = db_basic_database_kind_judgment_from_loop_state_candidate(
-            route,
-            loop_state,
-            current_turn_request_text(Some(route), agent_run_context),
-            prefers_english_free_text,
-        ) {
-            return evidence_policy_checked_direct_candidate(
-                Some(route),
-                loop_state,
-                auto_locator_path,
-                answer,
-            );
-        }
         if let Some(answer) = directory_purpose_summary_find_ext_answer_candidate(route, loop_state)
             .and_then(|answer| {
                 evidence_policy_checked_direct_candidate(
@@ -178,59 +175,46 @@ pub(super) fn extract_answer_from_observed_output_impl(
             let observed_output =
                 extract_latest_generic_successful_output_with_state(state, loop_state)?;
             if observed_output.skill == "run_cmd" {
-                route
-                    .and_then(|route| {
-                        run_cmd_sqlite_direct_answer_candidate(
-                            route,
-                            &observed_output.body,
-                            current_turn_request_text(Some(route), agent_run_context),
-                            prefers_english_free_text,
-                        )
-                    })
-                    .or_else(|| {
-                        (!existence_with_path_should_use_llm_synthesis)
-                            .then(|| {
-                                run_cmd_presence_with_path_candidate(
-                                    state,
-                                    &observed_output.body,
-                                    locator_hint,
-                                    auto_locator_path,
-                                    prefers_english_presence_answer,
-                                )
-                            })
-                            .flatten()
-                    })
-                    .or_else(|| {
-                        (allow_raw_listing_direct_answer
-                            && !existence_with_path_should_use_llm_synthesis)
-                            .then(|| {
-                                route
-                                    .and_then(|route| {
-                                        run_cmd_contract_listing_text_candidate(
-                                            route,
-                                            &observed_output.body,
-                                        )
-                                    })
-                                    .or_else(|| {
-                                        run_cmd_listing_text_candidate(
-                                            &observed_output.body,
-                                            auto_locator_path,
-                                        )
-                                    })
-                            })
-                            .flatten()
-                    })
-                    .or_else(|| {
-                        route
-                            .filter(|route| {
-                                route_allows_strict_plain_observation_passthrough(route)
-                            })
-                            .and_then(|_| {
-                                strict_plain_observation_passthrough_candidate(
-                                    &observed_output.body,
-                                )
-                            })
-                    })
+                {
+                    (!existence_with_path_should_use_llm_synthesis)
+                        .then(|| {
+                            run_cmd_presence_with_path_candidate(
+                                state,
+                                &observed_output.body,
+                                locator_hint,
+                                auto_locator_path,
+                                prefers_english_presence_answer,
+                            )
+                        })
+                        .flatten()
+                }
+                .or_else(|| {
+                    (allow_raw_listing_direct_answer
+                        && !existence_with_path_should_use_llm_synthesis)
+                        .then(|| {
+                            route
+                                .and_then(|route| {
+                                    run_cmd_contract_listing_text_candidate(
+                                        route,
+                                        &observed_output.body,
+                                    )
+                                })
+                                .or_else(|| {
+                                    run_cmd_listing_text_candidate(
+                                        &observed_output.body,
+                                        auto_locator_path,
+                                    )
+                                })
+                        })
+                        .flatten()
+                })
+                .or_else(|| {
+                    route
+                        .filter(|route| route_allows_strict_plain_observation_passthrough(route))
+                        .and_then(|_| {
+                            strict_plain_observation_passthrough_candidate(&observed_output.body)
+                        })
+                })
             } else {
                 None
             }
@@ -327,22 +311,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             )
                         })
                     }),
-                "db_basic" => route.and_then(|route| {
-                    db_basic_database_kind_judgment_candidate(
-                        route,
-                        &observed_output.body,
-                        current_turn_request_text(Some(route), agent_run_context),
-                        prefers_english_free_text,
-                    )
-                    .or_else(|| {
-                        db_basic_tables_summary_candidate(
-                            state,
-                            route,
-                            &observed_output.body,
-                            prefers_english_free_text,
-                        )
-                    })
-                }),
                 "transform" => transform_skill_formatted_output_candidate(&observed_output.body),
                 "archive_basic" => {
                     if let Some(answer) = archive_unpack_direct_answer_candidate(

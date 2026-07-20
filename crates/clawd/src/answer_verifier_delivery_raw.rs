@@ -733,7 +733,6 @@ pub(super) fn route_requires_strict_extractor_eligibility(route: &AnswerContract
                 shape.class(),
                 crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
                     | crate::evidence_policy::FinalAnswerShapeClass::StrictList
-                    | crate::evidence_policy::FinalAnswerShapeClass::Table
                     | crate::evidence_policy::FinalAnswerShapeClass::SinglePath
                     | crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
             )
@@ -839,42 +838,6 @@ pub(super) fn observed_strict_list_items_from_evidence_map_for_route(
         }
     }
     items
-}
-
-#[cfg(test)]
-pub(super) fn observed_table_cells_from_evidence_map(
-    journal: &crate::task_journal::TaskJournal,
-) -> BTreeSet<String> {
-    let mut cells = BTreeSet::new();
-    for item in successful_observed_evidence_items(journal) {
-        if observed_evidence_item_supports_table_cell(&item) {
-            if let Some(excerpt) = observed_evidence_excerpt(&item) {
-                let normalized = normalize_strict_list_item(&excerpt);
-                if !normalized.is_empty() {
-                    cells.insert(normalized);
-                }
-            }
-        }
-    }
-    cells
-}
-
-pub(super) fn observed_table_cells_from_evidence_map_for_route(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-) -> BTreeSet<String> {
-    let mut cells = BTreeSet::new();
-    for item in successful_observed_evidence_items_for_route(route, journal) {
-        if observed_evidence_item_supports_table_cell(&item) {
-            if let Some(excerpt) = observed_evidence_excerpt(&item) {
-                let normalized = normalize_strict_list_item(&excerpt);
-                if !normalized.is_empty() {
-                    cells.insert(normalized);
-                }
-            }
-        }
-    }
-    cells
 }
 
 pub(super) fn push_observed_evidence_excerpt(
@@ -1012,20 +975,6 @@ pub(super) fn observed_evidence_item_supports_strict_list(item: &serde_json::Val
     ]
     .iter()
     .any(|prefix| array_item_field_matches(&normalized, prefix))
-}
-
-pub(super) fn observed_evidence_item_supports_table_cell(item: &serde_json::Value) -> bool {
-    if !matches!(
-        observed_evidence_kind(item),
-        Some("string" | "number" | "bool" | "text")
-    ) {
-        return false;
-    }
-    let Some(field) = observed_evidence_field(item) else {
-        return false;
-    };
-    let normalized = field.to_ascii_lowercase();
-    normalized.contains("rows[") || array_item_field_matches(&normalized, "results")
 }
 
 pub(super) fn observed_evidence_field_leaf(field: &str) -> String {

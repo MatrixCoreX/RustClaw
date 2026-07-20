@@ -557,7 +557,6 @@ pub(crate) enum FinalAnswerShape {
     ArchiveMemberList,
     ComparisonVerdict,
     CreatedArchivePath,
-    DatabaseKindJudgment,
     DeliveryTokenOrPath,
     ExistenceSummaryWithPath,
     ExistenceVerdictWithPath,
@@ -579,15 +578,12 @@ pub(crate) enum FinalAnswerShape {
     RiskAssessment,
     Scalar,
     ScalarEqualityVerdict,
-    SchemaVersion,
     SingleCommitSubject,
     SinglePath,
     StatusWithSource,
     SummaryGroundedInExcerpt,
     SummaryGroundedInListing,
     SummaryWithEvidence,
-    TableListing,
-    TableNameList,
     UnpackDestinationSummary,
     ValidationVerdict,
 }
@@ -600,7 +596,6 @@ pub(crate) enum FinalAnswerShapeClass {
     ScalarValue,
     SinglePath,
     StrictList,
-    Table,
     Verdict,
 }
 
@@ -613,7 +608,6 @@ impl FinalAnswerShapeClass {
             Self::ScalarValue => "scalar_value",
             Self::SinglePath => "single_path",
             Self::StrictList => "strict_list",
-            Self::Table => "table",
             Self::Verdict => "verdict",
         }
     }
@@ -622,7 +616,7 @@ impl FinalAnswerShapeClass {
         match self {
             Self::DeliveryArtifact => OutputResponseShape::FileToken,
             Self::ScalarValue | Self::SinglePath => OutputResponseShape::Scalar,
-            Self::StrictList | Self::Table => OutputResponseShape::Strict,
+            Self::StrictList => OutputResponseShape::Strict,
             Self::Verdict => OutputResponseShape::OneSentence,
             Self::Freeform | Self::GroundedSummary => OutputResponseShape::Free,
         }
@@ -640,7 +634,6 @@ impl FinalAnswerShape {
         Self::ArchiveMemberList,
         Self::ComparisonVerdict,
         Self::CreatedArchivePath,
-        Self::DatabaseKindJudgment,
         Self::DeliveryTokenOrPath,
         Self::ExistenceSummaryWithPath,
         Self::ExistenceVerdictWithPath,
@@ -662,15 +655,12 @@ impl FinalAnswerShape {
         Self::RiskAssessment,
         Self::Scalar,
         Self::ScalarEqualityVerdict,
-        Self::SchemaVersion,
         Self::SingleCommitSubject,
         Self::SinglePath,
         Self::StatusWithSource,
         Self::SummaryGroundedInExcerpt,
         Self::SummaryGroundedInListing,
         Self::SummaryWithEvidence,
-        Self::TableListing,
-        Self::TableNameList,
         Self::UnpackDestinationSummary,
         Self::ValidationVerdict,
     ];
@@ -681,7 +671,6 @@ impl FinalAnswerShape {
             "archive_member_list" => Some(Self::ArchiveMemberList),
             "comparison_verdict" => Some(Self::ComparisonVerdict),
             "created_archive_path" => Some(Self::CreatedArchivePath),
-            "database_kind_judgment" => Some(Self::DatabaseKindJudgment),
             "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
             "existence_summary_with_path" => Some(Self::ExistenceSummaryWithPath),
             "existence_verdict_with_path" => Some(Self::ExistenceVerdictWithPath),
@@ -703,15 +692,12 @@ impl FinalAnswerShape {
             "risk_assessment" => Some(Self::RiskAssessment),
             "scalar" => Some(Self::Scalar),
             "scalar_equality_verdict" => Some(Self::ScalarEqualityVerdict),
-            "schema_version" => Some(Self::SchemaVersion),
             "single_commit_subject" => Some(Self::SingleCommitSubject),
             "single_path" => Some(Self::SinglePath),
             "status_with_source" => Some(Self::StatusWithSource),
             "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
             "summary_grounded_in_listing" => Some(Self::SummaryGroundedInListing),
             "summary_with_evidence" => Some(Self::SummaryWithEvidence),
-            "table_listing" => Some(Self::TableListing),
-            "table_name_list" => Some(Self::TableNameList),
             "unpack_destination_summary" => Some(Self::UnpackDestinationSummary),
             "validation_verdict" => Some(Self::ValidationVerdict),
             _ => None,
@@ -724,7 +710,6 @@ impl FinalAnswerShape {
             Self::ArchiveMemberList => "archive_member_list",
             Self::ComparisonVerdict => "comparison_verdict",
             Self::CreatedArchivePath => "created_archive_path",
-            Self::DatabaseKindJudgment => "database_kind_judgment",
             Self::DeliveryTokenOrPath => "delivery_token_or_path",
             Self::ExistenceSummaryWithPath => "existence_summary_with_path",
             Self::ExistenceVerdictWithPath => "existence_verdict_with_path",
@@ -746,15 +731,12 @@ impl FinalAnswerShape {
             Self::RiskAssessment => "risk_assessment",
             Self::Scalar => "scalar",
             Self::ScalarEqualityVerdict => "scalar_equality_verdict",
-            Self::SchemaVersion => "schema_version",
             Self::SingleCommitSubject => "single_commit_subject",
             Self::SinglePath => "single_path",
             Self::StatusWithSource => "status_with_source",
             Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
             Self::SummaryGroundedInListing => "summary_grounded_in_listing",
             Self::SummaryWithEvidence => "summary_with_evidence",
-            Self::TableListing => "table_listing",
-            Self::TableNameList => "table_name_list",
             Self::UnpackDestinationSummary => "unpack_destination_summary",
             Self::ValidationVerdict => "validation_verdict",
         }
@@ -764,19 +746,14 @@ impl FinalAnswerShape {
         match self {
             Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
             Self::CreatedArchivePath | Self::SinglePath => FinalAnswerShapeClass::SinglePath,
-            Self::Scalar | Self::SchemaVersion | Self::SingleCommitSubject => {
-                FinalAnswerShapeClass::ScalarValue
-            }
+            Self::Scalar | Self::SingleCommitSubject => FinalAnswerShapeClass::ScalarValue,
             Self::ArchiveMemberList
             | Self::GroupedNameList
             | Self::KeyListOrKeySummary
             | Self::ListOrEmptyStatement
             | Self::NameList
-            | Self::PathList
-            | Self::TableNameList => FinalAnswerShapeClass::StrictList,
-            Self::TableListing => FinalAnswerShapeClass::Table,
+            | Self::PathList => FinalAnswerShapeClass::StrictList,
             Self::ComparisonVerdict
-            | Self::DatabaseKindJudgment
             | Self::ExistenceVerdictWithPath
             | Self::JudgmentWithExcerptBasis
             | Self::LifecycleResult

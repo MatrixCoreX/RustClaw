@@ -193,43 +193,6 @@ fn config_mutation_apply_validated_flag_counts_as_valid_evidence() {
 }
 
 #[test]
-fn sqlite_database_kind_uses_db_structure_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-sqlite-kind", "ask", "判断 sqlite 数据库类型");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: "data/test_contract.sqlite".to_string(),
-        ..Default::default()
-    };
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "db_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "columns": ["name"],
-                "rows": [
-                    {"name": "orders"},
-                    {"name": "service_logs"},
-                    {"name": "users"}
-                ]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
 fn quantity_comparison_size_bytes_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-quantity-comparison", "ask", "比较两个文件大小");
     let route = crate::IntentOutputContract {

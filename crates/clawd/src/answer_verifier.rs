@@ -264,13 +264,6 @@ pub(crate) fn structurally_satisfies_answer_contract(
                 candidate_answer,
             );
         }
-        if shape.class() == crate::evidence_policy::FinalAnswerShapeClass::Table {
-            return evidence_policy_table_answer_is_grounded_in_successful_observation(
-                route_result,
-                journal,
-                candidate_answer,
-            );
-        }
         if shape.class() == crate::evidence_policy::FinalAnswerShapeClass::SinglePath {
             return evidence_policy_single_path_answer_is_grounded_in_successful_observation(
                 route_result,

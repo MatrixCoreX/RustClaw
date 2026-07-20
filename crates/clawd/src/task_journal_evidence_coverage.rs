@@ -532,21 +532,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("content_excerpt".to_string());
     }
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::SqliteDatabaseKindJudgment)
-        && (observed_canonical.contains("candidates")
-            || observed_fields.contains("rows")
-            || observed_fields.contains("columns"))
-    {
-        observed_canonical.insert("field_value".to_string());
-    }
-    if output_contract.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::SqliteTableListing,
-        crate::OutputSemanticKind::SqliteTableNamesOnly,
-    ]) && observed_fields.contains("rows")
-        && observed_fields.contains("columns")
-    {
-        observed_canonical.insert("candidates".to_string());
-    }
 }
 
 pub(super) fn observed_field_with_prefix(observed_fields: &BTreeSet<String>, prefix: &str) -> bool {

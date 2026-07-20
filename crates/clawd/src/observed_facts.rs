@@ -270,8 +270,6 @@ fn route_contract_can_publish_ordered_entries(route_result: &crate::IntentOutput
             crate::OutputSemanticKind::DirectoryNames,
             crate::OutputSemanticKind::DirectoryEntryGroups,
             crate::OutputSemanticKind::FilePaths,
-            crate::OutputSemanticKind::SqliteTableListing,
-            crate::OutputSemanticKind::SqliteTableNamesOnly,
         ])
         || matches!(
             route_result.delivery_intent,

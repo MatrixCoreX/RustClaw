@@ -217,15 +217,6 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
                     agent_run_context,
                 )
             }),
-        crate::evidence_policy::FinalAnswerShapeClass::Table => route
-            .and_then(|route| matrix_table_observed_answer(route, loop_state))
-            .or_else(|| {
-                direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
-                    Some(state),
-                    loop_state,
-                    agent_run_context,
-                )
-            }),
         crate::evidence_policy::FinalAnswerShapeClass::Freeform
         | crate::evidence_policy::FinalAnswerShapeClass::GroundedSummary
         | crate::evidence_policy::FinalAnswerShapeClass::Verdict => None,
@@ -600,7 +591,6 @@ fn route_supports_matrix_strict_list_observed_answer(route: &crate::IntentOutput
                 | crate::OutputSemanticKind::HiddenEntriesCheck
                 | crate::OutputSemanticKind::FilePaths
                 | crate::OutputSemanticKind::StructuredKeys
-                | crate::OutputSemanticKind::SqliteTableNamesOnly
         )
 }
 

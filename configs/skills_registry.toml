@@ -588,7 +588,7 @@ planner_kind = "tool"
 group = "system"
 aliases = ["database", "sqlite_tool"]
 description = "Run read-only SQLite queries and confirmed SQLite mutations through structured database actions."
-semantic_tags = ["sqlite_query", "sqlite_table_listing", "sqlite_table_names_only", "sqlite_database_kind_judgment", "sqlite_schema_version", "sqlite_user_version"]
+semantic_tags = ["sqlite_query", "sqlite_catalog", "sqlite_version"]
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
@@ -612,18 +612,18 @@ planner_capabilities = [
   { name = "db.sqlite_query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "sqlite.query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "sqlite.sqlite_query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "database.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "table_listing" },
-  { name = "database.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "table_listing" },
-  { name = "db.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "table_listing" },
-  { name = "db.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "table_listing" },
-  { name = "sqlite.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "table_listing" },
-  { name = "sqlite.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "table_listing" },
-  { name = "database.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "schema_version" },
-  { name = "db.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "schema_version" },
-  { name = "sqlite.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "schema_version" },
-  { name = "database.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "user_version" },
-  { name = "db.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "user_version" },
-  { name = "sqlite.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "user_version" },
+  { name = "database.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "database.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "database.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "database.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "database.execute", action = "sqlite_execute", effect = "mutate", required = ["sql", "confirm"], optional = ["db_path", "path"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string" }, db_path = { type = "string" }, path = { type = "string" }, query = { type = "string" }, table = { type = "string" }, limit = { type = "integer" } } }

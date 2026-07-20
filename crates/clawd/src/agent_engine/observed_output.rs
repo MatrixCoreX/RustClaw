@@ -104,7 +104,8 @@ use output_entries::{
 #[path = "observed_output_direct_scalar.rs"]
 mod output_direct_scalar;
 use output_direct_scalar::{
-    selected_capability_result_scalar_candidate, structured_scalar_candidate,
+    selected_capability_result_exact_candidate, selected_capability_result_scalar_candidate,
+    structured_scalar_candidate,
 };
 
 #[path = "observed_output_direct_answer.rs"]
@@ -164,15 +165,6 @@ pub(crate) use output_route_policy::{
     route_disallows_direct_observation_passthrough,
     route_quantity_comparison_requires_model_language_synthesis,
     route_requires_synthesized_delivery,
-};
-
-#[path = "observed_output_sqlite.rs"]
-mod output_sqlite;
-use output_sqlite::{
-    db_basic_count_candidate, db_basic_database_kind_judgment_candidate,
-    db_basic_database_kind_judgment_from_loop_state_candidate, db_basic_scalar_candidate,
-    db_basic_table_names, db_basic_tables_summary_candidate,
-    run_cmd_sqlite_direct_answer_candidate,
 };
 
 #[path = "observed_output_process_service.rs"]
@@ -820,14 +812,12 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
         FinalAnswerShapeClass::StrictList
             | FinalAnswerShapeClass::ScalarValue
             | FinalAnswerShapeClass::SinglePath
-            | FinalAnswerShapeClass::Table
     ) {
         return true;
     }
     matches!(
         shape,
         FinalAnswerShape::ComparisonVerdict
-            | FinalAnswerShape::DatabaseKindJudgment
             | FinalAnswerShape::ExistenceSummaryWithPath
             | FinalAnswerShape::ExistenceVerdictWithPath
             | FinalAnswerShape::GitStateSummary

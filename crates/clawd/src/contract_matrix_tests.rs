@@ -147,13 +147,6 @@ fn archive_list_allows_compound_readonly_archive_and_db_observations() {
             "archive_basic.read",
             vec!["content_excerpt"],
         ),
-        (
-            OutputSemanticKind::SqliteTableListing,
-            "db_basic",
-            serde_json::json!({"action":"list_tables","db_path":"data/test_contract.sqlite"}),
-            "db_basic.list_tables",
-            vec!["candidates"],
-        ),
     ] {
         let output_contract = IntentOutputContract {
             semantic_kind,

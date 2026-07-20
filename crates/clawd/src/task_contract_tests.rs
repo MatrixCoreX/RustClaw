@@ -139,13 +139,6 @@ fn planner_semantic_matrix_drives_evidence_contract() {
             vec!["field_value"],
         ),
         (
-            OutputSemanticKind::SqliteTableListing,
-            TaskTargetObject::Db,
-            TaskOperation::List,
-            TaskDeliveryShape::List,
-            vec!["candidates"],
-        ),
-        (
             OutputSemanticKind::ArchivePack,
             TaskTargetObject::Path,
             TaskOperation::Write,

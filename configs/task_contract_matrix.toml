@@ -550,50 +550,6 @@ required_evidence = ["candidates", "count"]
 final_answer_shape = "risk_assessment"
 failure_policy = "retry_with_alternatives"
 
-[contracts.sqlite_table_listing]
-semantic_kind = "sqlite_table_listing"
-operation = "list"
-target_object = "db"
-delivery_shape = "list"
-allowed_actions = ["db_basic", "run_cmd"]
-preferred_actions = ["db_basic"]
-required_evidence = ["candidates"]
-final_answer_shape = "table_listing"
-failure_policy = "retry_with_alternatives"
-
-[contracts.sqlite_table_names_only]
-semantic_kind = "sqlite_table_names_only"
-operation = "list"
-target_object = "db"
-delivery_shape = "list"
-allowed_actions = ["db_basic", "run_cmd"]
-preferred_actions = ["db_basic"]
-required_evidence = ["candidates"]
-final_answer_shape = "table_name_list"
-failure_policy = "retry_with_alternatives"
-
-[contracts.sqlite_database_kind_judgment]
-semantic_kind = "sqlite_database_kind_judgment"
-operation = "inspect"
-target_object = "db"
-delivery_shape = "summary"
-allowed_actions = ["db_basic", "run_cmd"]
-preferred_actions = ["db_basic"]
-required_evidence = ["field_value"]
-final_answer_shape = "database_kind_judgment"
-failure_policy = "retry_with_alternatives"
-
-[contracts.sqlite_schema_version]
-semantic_kind = "sqlite_schema_version"
-operation = "inspect"
-target_object = "db"
-delivery_shape = "raw"
-allowed_actions = ["db_basic", "run_cmd"]
-preferred_actions = ["db_basic"]
-required_evidence = ["field_value"]
-final_answer_shape = "schema_version"
-failure_policy = "retry_with_alternatives"
-
 [contracts.archive_list]
 semantic_kind = "archive_list"
 operation = "list"
