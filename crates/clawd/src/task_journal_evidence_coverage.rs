@@ -464,17 +464,8 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("command_output".to_string());
     }
-    if output_contract.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::FileNames,
-        crate::OutputSemanticKind::FilePaths,
-    ]) && observed_canonical.contains("content_match")
-        && observed_canonical.contains("path")
-    {
-        observed_canonical.insert("candidates".to_string());
-    }
     if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly)
         && (observed_canonical.contains("path")
-            || observed_canonical.contains("content_match")
             || observed_canonical.contains("candidates")
             || observed_field_with_prefix(observed_fields, "results["))
     {
@@ -482,7 +473,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
     }
     if output_contract.semantic_kind_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         && (observed_canonical.contains("content_excerpt")
-            || observed_canonical.contains("content_match")
             || observed_fields.contains("excerpt")
             || observed_fields.contains("text_excerpt"))
     {
@@ -608,7 +598,6 @@ pub(super) fn step_error_supplies_negative_contract_evidence(
         return false;
     };
     if !output_contract.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::ContentPresenceCheck,
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
         crate::OutputSemanticKind::ExcerptKindJudgment,
@@ -714,6 +703,7 @@ pub(super) fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<S
                 "files",
                 "entries",
                 "results",
+                "matches",
                 "name_results",
                 "facts",
                 "rows",
@@ -739,17 +729,6 @@ pub(super) fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<S
                 "recent_notable_lines",
                 "tail_lines",
                 "tail_excerpt",
-            ][..],
-        ),
-        (
-            "content_match",
-            &[
-                "content_match",
-                "match",
-                "matches",
-                "grep_matches",
-                "lines",
-                "results",
             ][..],
         ),
         (

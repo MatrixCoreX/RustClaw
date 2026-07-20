@@ -245,20 +245,6 @@ required_evidence = ["content_excerpt"]
 final_answer_shape = "excerpt_plus_summary"
 failure_policy = "retry_with_alternatives"
 
-[contracts.content_presence_check]
-semantic_kind = "content_presence_check"
-operation = "inspect"
-target_object = "path"
-delivery_shape = "summary"
-allowed_actions = ["fs_basic.grep_text", "fs_basic.read_text_range", "doc_parse", "task_control.list", "task_control.list_with_first_detail", "task_control.get"]
-preferred_actions = ["fs_basic.grep_text", "task_control.list_with_first_detail"]
-required_evidence = ["content_match", "content_excerpt", "field_value"]
-final_answer_shape = "presence_verdict_with_match"
-failure_policy = "retry_with_alternatives"
-
-[contracts.content_presence_check.evidence_expression]
-any_of = ["content_match", "content_excerpt", "field_value"]
-
 [contracts.excerpt_kind_judgment]
 semantic_kind = "excerpt_kind_judgment"
 operation = "summarize"

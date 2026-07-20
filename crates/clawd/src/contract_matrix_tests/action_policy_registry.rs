@@ -734,34 +734,6 @@ fn service_status_allows_task_control_list_observation() {
 }
 
 #[test]
-fn content_presence_allows_task_control_lifecycle_field_observation() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ContentPresenceCheck,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::None,
-            ..IntentOutputContract::default()
-        }),
-        "task_control",
-        &serde_json::json!({
-            "action": "list_with_first_detail",
-        }),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "task_control.list_with_first_detail");
-    assert_eq!(policy.contract_match, "content_presence_check");
-    assert!(policy
-        .required_evidence
-        .contains(&"field_value".to_string()));
-    assert!(policy
-        .evidence_expression
-        .any_of
-        .contains(&"field_value".to_string()));
-}
-
-#[test]
 fn command_output_summary_allows_task_control_get_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -899,11 +871,6 @@ fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
             "existence_with_path",
             OutputSemanticKind::ExistenceWithPath,
             "fs_basic.stat_paths",
-        ),
-        (
-            "content_presence_check",
-            OutputSemanticKind::ContentPresenceCheck,
-            "fs_basic.grep_text",
         ),
     ];
 
@@ -1048,12 +1015,6 @@ fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
             "fs_search",
             json!({"action":"find_ext", "root":"scripts", "ext":"sh"}),
             "fs_basic.find_entries",
-        ),
-        (
-            OutputSemanticKind::ContentPresenceCheck,
-            "fs_search",
-            json!({"action":"grep_text", "root":".", "query":"FirstLayerDecision"}),
-            "fs_basic.grep_text",
         ),
         (
             OutputSemanticKind::FilePaths,
@@ -1312,7 +1273,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 93);
+    let cases = generated_contract_cases(&matrix, 90);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

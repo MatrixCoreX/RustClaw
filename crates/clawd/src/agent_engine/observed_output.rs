@@ -61,12 +61,11 @@ use output_system_inventory::{
 #[path = "observed_output_fs_search.rs"]
 mod output_fs_search;
 use output_fs_search::{
-    absolutize_fs_search_answer_paths, fs_search_content_presence_direct_answer_candidate,
-    fs_search_contract_listing_candidate, fs_search_direct_answer_candidate,
-    fs_search_find_ext_results, fs_search_find_name_observed_candidate,
-    fs_search_find_name_results, fs_search_grep_text_observed_candidate,
-    fs_search_route_filtered_listing_candidate, fs_search_scalar_candidate,
-    normalized_find_name_pattern, preferred_fs_search_exact_match,
+    absolutize_fs_search_answer_paths, fs_search_contract_listing_candidate,
+    fs_search_direct_answer_candidate, fs_search_find_ext_results,
+    fs_search_find_name_observed_candidate, fs_search_find_name_results,
+    fs_search_grep_text_observed_candidate, fs_search_route_filtered_listing_candidate,
+    fs_search_scalar_candidate, normalized_find_name_pattern, preferred_fs_search_exact_match,
 };
 
 #[path = "observed_output_path_facts.rs"]
@@ -109,7 +108,6 @@ pub(crate) use output_direct_answer::{
 mod output_read_range;
 use output_read_range::{
     compose_content_excerpt_with_summary_answer, content_excerpt_summary_direct_answer_candidate,
-    doc_parse_content_presence_direct_answer_candidate,
     normalize_read_range_excerpt_for_direct_answer, read_range_observed_candidate,
     read_range_preserve_blank_lines,
 };
@@ -796,7 +794,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
         FinalAnswerShape::ComparisonVerdict
             | FinalAnswerShape::ExistenceVerdictWithPath
             | FinalAnswerShape::JudgmentWithExcerptBasis
-            | FinalAnswerShape::PresenceVerdictWithMatch
             | FinalAnswerShape::RawOutputOrShortSummary
             | FinalAnswerShape::RecentArtifactJudgment
             | FinalAnswerShape::ScalarEqualityVerdict

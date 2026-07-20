@@ -243,7 +243,6 @@ pub(crate) enum EvidenceToken {
     Candidates,
     CommandOutput,
     ContentExcerpt,
-    ContentMatch,
     Count,
     DirectoryStructure,
     Exists,
@@ -262,7 +261,6 @@ impl EvidenceToken {
         Self::Candidates,
         Self::CommandOutput,
         Self::ContentExcerpt,
-        Self::ContentMatch,
         Self::Count,
         Self::DirectoryStructure,
         Self::Exists,
@@ -280,7 +278,6 @@ impl EvidenceToken {
             "candidates" => Some(Self::Candidates),
             "command_output" => Some(Self::CommandOutput),
             "content_excerpt" => Some(Self::ContentExcerpt),
-            "content_match" => Some(Self::ContentMatch),
             "count" => Some(Self::Count),
             "directory_structure" => Some(Self::DirectoryStructure),
             "exists" => Some(Self::Exists),
@@ -301,7 +298,6 @@ impl EvidenceToken {
             Self::Candidates => "candidates",
             Self::CommandOutput => "command_output",
             Self::ContentExcerpt => "content_excerpt",
-            Self::ContentMatch => "content_match",
             Self::Count => "count",
             Self::DirectoryStructure => "directory_structure",
             Self::Exists => "exists",
@@ -565,7 +561,6 @@ pub(crate) enum FinalAnswerShape {
     ListOrEmptyStatement,
     NameList,
     PathList,
-    PresenceVerdictWithMatch,
     ProjectSummaryGroundedInFiles,
     RawOutputOrShortSummary,
     RecentArtifactJudgment,
@@ -634,7 +629,6 @@ impl FinalAnswerShape {
         Self::ListOrEmptyStatement,
         Self::NameList,
         Self::PathList,
-        Self::PresenceVerdictWithMatch,
         Self::ProjectSummaryGroundedInFiles,
         Self::RawOutputOrShortSummary,
         Self::RecentArtifactJudgment,
@@ -663,7 +657,6 @@ impl FinalAnswerShape {
             "list_or_empty_statement" => Some(Self::ListOrEmptyStatement),
             "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
-            "presence_verdict_with_match" => Some(Self::PresenceVerdictWithMatch),
             "project_summary_grounded_in_files" => Some(Self::ProjectSummaryGroundedInFiles),
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
             "recent_artifact_judgment" => Some(Self::RecentArtifactJudgment),
@@ -694,7 +687,6 @@ impl FinalAnswerShape {
             Self::ListOrEmptyStatement => "list_or_empty_statement",
             Self::NameList => "name_list",
             Self::PathList => "path_list",
-            Self::PresenceVerdictWithMatch => "presence_verdict_with_match",
             Self::ProjectSummaryGroundedInFiles => "project_summary_grounded_in_files",
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
             Self::RecentArtifactJudgment => "recent_artifact_judgment",
@@ -723,7 +715,6 @@ impl FinalAnswerShape {
             | Self::ExistenceVerdictWithPath
             | Self::JudgmentWithExcerptBasis
             | Self::LifecycleResult
-            | Self::PresenceVerdictWithMatch
             | Self::RecentArtifactJudgment
             | Self::RiskAssessment
             | Self::ScalarEqualityVerdict

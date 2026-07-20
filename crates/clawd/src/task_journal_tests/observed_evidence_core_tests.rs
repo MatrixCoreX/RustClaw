@@ -1170,7 +1170,6 @@ fn file_names_content_search_paths_satisfy_candidate_evidence() {
 
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage.observed_canonical.contains("path"));
     assert!(coverage
         .observed_extractors
@@ -1208,7 +1207,6 @@ fn file_paths_content_search_paths_satisfy_candidate_evidence() {
 
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage.observed_canonical.contains("path"));
     assert!(coverage
         .observed_extractors
@@ -1251,7 +1249,6 @@ fn raw_command_output_grep_text_satisfies_command_output_evidence() {
 
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("command_output"));
-    assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage
         .observed_extractors
         .contains("fs_basic.grep_text.structured_json_v1"));

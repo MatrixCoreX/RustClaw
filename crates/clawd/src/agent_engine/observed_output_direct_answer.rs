@@ -261,29 +261,15 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             prefer_full_path,
                         )
                     }),
-                "doc_parse" => route
-                    .and_then(|route| {
-                        doc_parse_content_presence_direct_answer_candidate(
-                            state,
-                            route,
-                            &observed_output.body,
-                            current_turn_request_text(Some(route), agent_run_context),
-                            auto_locator_path.or(locator_hint),
-                            prefers_english_free_text,
-                        )
-                    })
-                    .or_else(|| {
-                        content_excerpt_summary_direct_answer_candidate(
-                            route,
-                            &observed_output.body,
-                        )
+                "doc_parse" => {
+                    content_excerpt_summary_direct_answer_candidate(route, &observed_output.body)
                         .filter(|candidate| {
                             !direct_free_text_conflicts_with_request_language(
                                 candidate,
                                 request_language_hint,
                             )
                         })
-                    }),
+                }
                 "transform" => transform_skill_formatted_output_candidate(&observed_output.body),
                 "log_analyze" => None,
                 "system_basic" | "config_basic" | "fs_basic" => {
@@ -567,12 +553,7 @@ pub(super) fn fs_search_output_direct_answer_candidate(
     }
     route
         .and_then(|route| {
-            fs_search_content_presence_direct_answer_candidate(state, route, value, prefer_english)
-        })
-        .or_else(|| {
-            route.and_then(|route| {
-                fs_search_route_filtered_listing_candidate(route, value, allow_multi_result_list)
-            })
+            fs_search_route_filtered_listing_candidate(route, value, allow_multi_result_list)
         })
         .or_else(|| route.and_then(|route| fs_search_contract_listing_candidate(route, value)))
         .or_else(|| {

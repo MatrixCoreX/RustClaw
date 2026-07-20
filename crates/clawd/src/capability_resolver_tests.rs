@@ -160,6 +160,33 @@ fn config_read_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
+fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.grep_text",
+        json!({
+            "root": "docs",
+            "query": "release",
+            "max_results": 8,
+        }),
+    );
+
+    assert_eq!(record.output_semantic_kind, None);
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected filesystem tool action");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("grep_text")
+    );
+    assert_eq!(args.get("root").and_then(Value::as_str), Some("docs"));
+    assert_eq!(args.get("query").and_then(Value::as_str), Some("release"));
+    assert_eq!(args.get("max_results").and_then(Value::as_u64), Some(8));
+}
+
+#[test]
 fn docker_capabilities_resolve_without_domain_output_semantic_kinds() {
     let state = state_with_workspace_registry();
     for (capability, expected_action, args) in [

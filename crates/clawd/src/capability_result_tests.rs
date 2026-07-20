@@ -121,6 +121,60 @@ fn path_facts_result_preserves_single_basename_field() {
 }
 
 #[test]
+fn grep_results_preserve_positive_and_zero_match_evidence() {
+    for (step_id, extra, expected_count) in [
+        (
+            "step_positive",
+            json!({
+                "action": "grep_text",
+                "root": "docs",
+                "query": "release",
+                "match_count": 1,
+                "matches": [{
+                    "path": "docs/release_checklist.md",
+                    "line": 1,
+                    "text": "# Release Checklist"
+                }]
+            }),
+            1,
+        ),
+        (
+            "step_zero",
+            json!({
+                "action": "grep_text",
+                "root": "docs",
+                "query": "missing-token",
+                "match_count": 0,
+                "matches": []
+            }),
+            0,
+        ),
+    ] {
+        let envelope = super::successful_execution_envelope(
+            "fs_basic",
+            step_id,
+            &json!({"action": "grep_text"}),
+            "untrusted fallback",
+            Some(&extra),
+        );
+
+        assert_eq!(envelope.data.pointer("/extra/query"), extra.get("query"));
+        assert_eq!(
+            envelope.data.pointer("/extra/match_count"),
+            Some(&json!(expected_count))
+        );
+        assert_eq!(
+            envelope.data.pointer("/extra/matches"),
+            extra.get("matches")
+        );
+        assert_eq!(
+            envelope.delivery.intent,
+            CapabilityDeliveryIntent::ModelSynthesis
+        );
+    }
+}
+
+#[test]
 fn rss_result_preserves_items_and_sources_for_generic_synthesis() {
     let output = json!({
         "text": "machine fallback",
