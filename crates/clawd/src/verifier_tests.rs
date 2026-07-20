@@ -1268,11 +1268,12 @@ fn observe_mode_no_longer_records_semantic_matrix_preferred_action_hint() {
 }
 
 #[test]
-fn generated_file_path_report_repairs_plan_with_missing_write_step() {
+fn exact_scalar_path_does_not_insert_domain_write_repair() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
+    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
     route.response_shape = crate::OutputResponseShape::Scalar;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
     route.locator_hint = "pwd_line_abs.txt".to_string();
     let result = verify_plan(
@@ -1306,39 +1307,14 @@ fn generated_file_path_report_repairs_plan_with_missing_write_step() {
     );
 
     assert!(result.approved, "issues: {:?}", result.issues);
-    assert_eq!(result.approved_steps.len(), 3);
-    let write_step = &result.approved_steps[1];
-    assert_eq!(write_step.action_type, "call_tool");
-    assert_eq!(write_step.skill, "fs_basic");
-    assert_eq!(
-        write_step
-            .args
-            .get("action")
-            .and_then(|value| value.as_str()),
-        Some("write_text")
-    );
-    assert_eq!(
-        write_step
-            .args
-            .get("content")
-            .and_then(|value| value.as_str()),
-        Some("{{last_output}}")
-    );
+    assert_eq!(result.approved_steps.len(), 2);
     assert!(
-        write_step.args.get("text").is_none(),
-        "generated_file_path_report repair must use the canonical fs_basic.write_text content arg"
+        !result.approved_steps.iter().any(|step| {
+            step.skill == "fs_basic"
+                && step.args.get("action").and_then(|value| value.as_str()) == Some("write_text")
+        }),
+        "runtime must not invent a domain write step for a generic machine contract"
     );
-    let path = write_step
-        .args
-        .get("path")
-        .and_then(|value| value.as_str())
-        .expect("repaired write path");
-    assert!(path.ends_with("pwd_line_abs.txt"), "path={path}");
-    assert!(std::path::Path::new(path).is_absolute(), "path={path}");
-    assert!(!result
-        .issues
-        .iter()
-        .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg)));
 }
 
 #[test]

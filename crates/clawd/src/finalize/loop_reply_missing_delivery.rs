@@ -7,7 +7,7 @@ use super::{
     deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
     deterministic_observed_execution_status_summary,
     deterministic_structured_container_summary_answer, direct_db_basic_observed_answer,
-    direct_generated_file_path_report_from_dry_run_payload, output_text_from_execution_result,
+    direct_exact_scalar_path_from_dry_run_payload, output_text_from_execution_result,
     planned_delivery_identifies_failed_observed_step, preferred_route_clarify_question,
     route_prefers_language_rendered_execution_failed_step, route_resolved_intent,
     route_structured_clarify_context,
@@ -354,7 +354,7 @@ async fn missing_delivery_after_observation_message(
         return answer;
     }
     if let Some((answer, _summary)) =
-        direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
+        direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context)
     {
         return answer;
     }
@@ -449,9 +449,7 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
         .or_else(|| {
             direct_db_basic_observed_answer(state, user_text, loop_state, agent_run_context)
         })
-        .or_else(|| {
-            direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
-        })
+        .or_else(|| direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context))
         .or_else(|| {
             deterministic_matrix_observed_shape_answer(
                 state,

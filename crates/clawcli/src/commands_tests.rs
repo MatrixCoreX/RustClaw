@@ -164,7 +164,7 @@ fn task_report_json_exposes_stable_machine_fields() {
                     },
                     "trace": {
                         "contract_matrix": {
-                            "final_answer_shape": "generated_file_path_report"
+                            "final_answer_shape": "single_path"
                         },
                         "evidence_coverage": {
                             "missing_evidence": []
@@ -311,10 +311,7 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
     assert_eq!(report["outcome"]["state"], "done");
     assert_eq!(report["outcome"]["message_key"], "clawd.task.done");
-    assert_eq!(
-        report["outcome"]["final_answer_shape"],
-        "generated_file_path_report"
-    );
+    assert_eq!(report["outcome"]["final_answer_shape"], "single_path");
     assert_eq!(report["outcome"]["done_conditions"][0], "tests_pass");
     assert_eq!(report["outcome"]["constraints"][0], "scope=workspace");
     assert_eq!(report["outcome"]["constraints"][1], "writes_allowed=true");

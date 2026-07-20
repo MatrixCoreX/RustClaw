@@ -6,12 +6,11 @@
 //! prompt context, not ordinary semantic routing authority.
 
 pub(crate) use crate::contract_matrix::{
-    action_matches_policy_tokens, action_policy_for_output_contract,
-    action_trace_for_output_contract, compact_prompt_line_for_output_contract,
-    final_answer_shape_for_output_contract, fnv1a_hex, required_evidence_for_output_contract,
-    runtime_contract_snapshot_for_output_contract, trace_snapshot_for_output_contract,
-    ActionPolicyDecision, ActionRef, EvidenceExpression, FailureAttribution, FinalAnswerShape,
-    FinalAnswerShapeClass,
+    action_policy_for_output_contract, action_trace_for_output_contract,
+    compact_prompt_line_for_output_contract, final_answer_shape_for_output_contract, fnv1a_hex,
+    required_evidence_for_output_contract, runtime_contract_snapshot_for_output_contract,
+    trace_snapshot_for_output_contract, ActionPolicyDecision, ActionRef, EvidenceExpression,
+    FailureAttribution, FinalAnswerShape, FinalAnswerShapeClass,
 };
 
 pub(crate) use crate::task_contract::{

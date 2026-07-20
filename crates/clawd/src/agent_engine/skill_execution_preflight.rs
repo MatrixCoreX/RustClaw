@@ -279,7 +279,7 @@ fn generated_media_path_run_cmd_policy_error(
         return None;
     }
     let output_contract = loop_state.output_contract.as_ref()?;
-    if !output_contract.semantic_kind_is(crate::OutputSemanticKind::GeneratedFilePathReport)
+    if !output_contract.requests_exact_scalar_path()
         || !crate::media_artifact_paths::is_media_artifact_path(&output_contract.locator_hint)
     {
         return None;
@@ -306,7 +306,7 @@ fn generated_media_path_run_cmd_policy_error(
             ).as_token(),
             "action": "run_cmd",
             "original_action_ref": "run_cmd",
-            "contract_match": crate::OutputSemanticKind::GeneratedFilePathReport.as_str(),
+            "contract_match": "exact_scalar_path_selector",
             "preferred_actions": preferred_actions,
             "target_path": output_contract.locator_hint,
             "final_answer_shape": "single_path",

@@ -80,7 +80,6 @@ pub(crate) enum OutputSemanticKind {
     ContentExcerptWithSummary,
     ScalarCount,
     ExecutionFailedStep,
-    GeneratedFilePathReport,
     FilesystemMutationResult,
     ExistenceWithPath,
 }
@@ -93,7 +92,6 @@ impl OutputSemanticKind {
         Self::ContentExcerptWithSummary,
         Self::ScalarCount,
         Self::ExecutionFailedStep,
-        Self::GeneratedFilePathReport,
         Self::FilesystemMutationResult,
         Self::ExistenceWithPath,
     ];
@@ -106,7 +104,6 @@ impl OutputSemanticKind {
             Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
             Self::ScalarCount => "scalar_count",
             Self::ExecutionFailedStep => "execution_failed_step",
-            Self::GeneratedFilePathReport => "generated_file_path_report",
             Self::FilesystemMutationResult => "filesystem_mutation_result",
             Self::ExistenceWithPath => "existence_with_path",
         }
@@ -185,6 +182,10 @@ impl IntentOutputContract {
 
     pub(crate) fn requests_exact_path_list(&self) -> bool {
         crate::machine_kv_projection::output_contract_requests_exact_list_path(self)
+    }
+
+    pub(crate) fn requests_exact_scalar_path(&self) -> bool {
+        crate::machine_kv_projection::output_contract_requests_exact_scalar_path(self)
     }
 
     pub(crate) fn requests_exact_list(&self) -> bool {

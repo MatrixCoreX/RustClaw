@@ -133,7 +133,7 @@ async fn observed_execution_without_delivery_reply_omits_raw_summary() {
 }
 
 #[tokio::test]
-async fn observed_execution_without_delivery_uses_structured_dry_run_projection() {
+async fn observed_execution_without_delivery_uses_exact_scalar_path_projection() {
     let state = test_state();
     let task = claimed_task("task-missing-delivery-dry-run-projection");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -145,8 +145,9 @@ async fn observed_execution_without_delivery_uses_structured_dry_run_projection(
     ));
     let mut route = free_route_result();
     route.delivery_required = false;
-    route.requires_content_evidence = false;
-    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.selection.structured_field_selector = Some("path".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -165,30 +166,9 @@ async fn observed_execution_without_delivery_uses_structured_dry_run_projection(
     .expect("observed execution reply");
 
     assert!(!reply.should_fail_task, "reply: {}", reply.text);
-    assert!(reply.text.contains("dry_run=true"), "reply: {}", reply.text);
-    assert!(
-        reply.text.contains("provider=minimax"),
-        "reply: {}",
-        reply.text
-    );
-    assert!(
-        reply.text.contains("model=speech-2.8-turbo"),
-        "reply: {}",
-        reply.text
-    );
-    assert!(
-        reply
-            .text
-            .contains("output_path=/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"),
-        "reply: {}",
-        reply.text
-    );
-    assert!(
-        reply.text.contains(
-            r#"planned_outputs=[{"path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","type":"audio_file"}]"#
-        ),
-        "reply: {}",
-        reply.text
+    assert_eq!(
+        reply.text,
+        "/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"
     );
 }
 

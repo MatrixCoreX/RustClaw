@@ -7,13 +7,14 @@ use super::{
     current_synthesis_satisfies_evidence_policy_shape, delivery_is_raw_read_observation,
     delivery_is_single_line_text, delivery_matches_latest_publishable_synthesis,
     delivery_message_is_json_object, deterministic_matrix_observed_shape_answer,
+    direct_exact_scalar_path_from_dry_run_payload, direct_exact_scalar_path_from_written_path,
     direct_raw_command_output_projection, direct_scalar_observed_answer,
     direct_structured_observed_answer, evidence_policy_candidate_satisfies_final_shape,
     latest_publishable_respond_step_output, latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, latest_successful_observation_body,
     log_deterministic_delivery_record, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, output_contract_requests_exact_delivery,
-    planned_delivery_is_publishable_model_language_answer,
+    looks_like_structured_machine_output, matrix_observed_shape_summary,
+    output_contract_requests_exact_delivery, planned_delivery_is_publishable_model_language_answer,
     publishable_summary_has_multi_source_observation,
     raw_command_output_needs_structural_projection, route_allows_model_language_final_answer,
     route_expects_synthesis_over_raw_observation, route_requires_file_token,
@@ -63,6 +64,73 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         route_allows_prior_step_error_observed_replacement(route);
     if has_prior_step_error && !allow_prior_step_error_replacement {
         return;
+    }
+    if route.requests_exact_scalar_path() {
+        let synthesis_candidate = || {
+            let synthesis = loop_state
+                .last_publishable_synthesis_output
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())?;
+            if !latest_publishable_synthesis_step_matches(loop_state) {
+                return None;
+            }
+            let task = synthetic_task_for_evidence_policy_shape_check(task_id);
+            evidence_policy_candidate_satisfies_final_shape(
+                &task,
+                "",
+                loop_state,
+                agent_run_context,
+                finalizer_summary.clone(),
+                route,
+                synthesis,
+            )
+            .then(|| {
+                (
+                    synthesis.to_string(),
+                    matrix_observed_shape_summary(loop_state),
+                )
+            })
+        };
+        if let Some((answer, summary)) =
+            direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context)
+                .or_else(|| {
+                    direct_exact_scalar_path_from_written_path(loop_state, agent_run_context)
+                })
+                .or_else(synthesis_candidate)
+        {
+            if delivery_messages
+                .last()
+                .is_some_and(|message| message.trim() == answer.trim())
+            {
+                loop_state.last_user_visible_respond = Some(answer);
+                *finalizer_summary = Some(summary);
+                return;
+            }
+            info!(
+                "delivery exact_scalar_path_from_observed task_id={} previous={} observed={}",
+                task_id,
+                crate::truncate_for_log(
+                    delivery_messages
+                        .last()
+                        .map(String::as_str)
+                        .unwrap_or_default()
+                ),
+                crate::truncate_for_log(&answer)
+            );
+            log_deterministic_delivery_record(
+                task_id,
+                "exact_scalar_path_from_observed",
+                "replaced",
+                agent_run_context,
+                loop_state.executed_step_results.len(),
+            );
+            delivery_messages.clear();
+            delivery_messages.push(answer.clone());
+            loop_state.last_user_visible_respond = Some(answer);
+            *finalizer_summary = Some(summary);
+            return;
+        }
     }
     if !route.requests_exact_list()
         && route_expects_synthesis_over_raw_observation(route)
@@ -197,7 +265,8 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         *finalizer_summary = Some(summary);
         return;
     }
-    if raw_command_output_needs_structural_projection(route, loop_state)
+    if !route.requests_exact_scalar_path()
+        && raw_command_output_needs_structural_projection(route, loop_state)
         && delivery_messages.last().is_some_and(|message| {
             let message = message.trim();
             !message.is_empty()
@@ -331,65 +400,6 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
             loop_state.executed_step_results.len(),
         );
         return;
-    }
-    if route.semantic_kind_is(crate::OutputSemanticKind::GeneratedFilePathReport)
-        && latest_publishable_synthesis_step_matches(loop_state)
-    {
-        if let Some(synthesis) = loop_state
-            .last_publishable_synthesis_output
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-        {
-            let current = delivery_messages.last().map(|message| message.trim());
-            if current != Some(synthesis) {
-                let synthetic_task = synthetic_task_for_evidence_policy_shape_check(task_id);
-                let summary = crate::task_journal::TaskJournalFinalizerSummary {
-                    stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                    disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                    contract_ok: true,
-                    completion_ok: Some(true),
-                    grounded_ok: Some(true),
-                    format_ok: Some(true),
-                    needs_clarify: Some(false),
-                    used_evidence_ids_count: loop_state.executed_step_results.len(),
-                    ..Default::default()
-                };
-                if evidence_policy_candidate_satisfies_final_shape(
-                    &synthetic_task,
-                    "",
-                    loop_state,
-                    agent_run_context,
-                    Some(summary.clone()),
-                    route,
-                    synthesis,
-                ) {
-                    info!(
-                        "delivery exact_contract_use_generated_file_path_synthesis task_id={} previous={} synthesis={}",
-                        task_id,
-                        crate::truncate_for_log(
-                            delivery_messages
-                                .last()
-                                .map(String::as_str)
-                                .unwrap_or_default()
-                        ),
-                        crate::truncate_for_log(synthesis)
-                    );
-                    log_deterministic_delivery_record(
-                        task_id,
-                        "exact_contract_use_generated_file_path_synthesis",
-                        "replaced",
-                        agent_run_context,
-                        loop_state.executed_step_results.len(),
-                    );
-                    delivery_messages.clear();
-                    delivery_messages.push(synthesis.to_string());
-                    loop_state.last_user_visible_respond = Some(synthesis.to_string());
-                    *finalizer_summary = Some(summary);
-                    return;
-                }
-            }
-        }
     }
     let synthetic_task = synthetic_task_for_evidence_policy_shape_check(task_id);
     let Some((answer, summary)) = deterministic_matrix_observed_shape_answer(

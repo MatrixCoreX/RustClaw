@@ -351,12 +351,12 @@ fn scalar_raw_command_keeps_written_file_path_synthesis() {
 }
 
 #[test]
-fn generated_file_path_report_keeps_plain_written_path_synthesis() {
+fn exact_scalar_path_keeps_plain_written_path_synthesis() {
     let state = test_state();
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
     route.delivery_intent = crate::OutputDeliveryIntent::None;
     route.locator_kind = crate::OutputLocatorKind::Filename;
@@ -400,16 +400,18 @@ fn generated_file_path_report_keeps_plain_written_path_synthesis() {
 
     assert_eq!(delivery_messages, vec![answer]);
     assert!(!delivery_messages[0].starts_with("FILE:"));
-    assert!(finalizer_summary.is_none());
+    assert!(finalizer_summary
+        .as_ref()
+        .is_some_and(|summary| summary.contract_ok));
 }
 
 #[test]
-fn generated_file_path_report_replaces_write_status_with_written_path() {
+fn exact_scalar_path_replaces_write_status_with_written_path() {
     let state = test_state();
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
     route.delivery_intent = crate::OutputDeliveryIntent::None;
     route.locator_kind = crate::OutputLocatorKind::Filename;
@@ -467,12 +469,12 @@ fn generated_file_path_report_replaces_write_status_with_written_path() {
 }
 
 #[test]
-fn generated_file_path_report_projects_media_dry_run_payload() {
+fn exact_scalar_path_projects_only_media_dry_run_path() {
     let state = test_state();
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
     route.delivery_intent = crate::OutputDeliveryIntent::None;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
@@ -488,41 +490,17 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
         r#"{"text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","duration":10,"resolution":"768P","model_kind":"dry_run","adapter_kind":"media_job_poll","output_path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png","planned_outputs":[{"type":"image_file","path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]}}"#,
     ));
 
-    let (answer, summary) = direct_generated_file_path_report_from_dry_run_payload(
-        &loop_state,
-        Some(&agent_run_context),
-    )
-    .expect("dry_run payload should project generated file path report");
+    let (answer, summary) =
+        direct_exact_scalar_path_from_dry_run_payload(&loop_state, Some(&agent_run_context))
+            .expect("dry_run payload should project the exact observed path");
 
-    assert!(answer.contains("dry_run=true"), "answer: {answer}");
-    assert!(answer.contains("provider=minimax"), "answer: {answer}");
-    assert!(answer.contains("model=image-01"), "answer: {answer}");
-    assert!(answer.contains("duration=10"), "answer: {answer}");
-    assert!(answer.contains("resolution=768P"), "answer: {answer}");
-    assert!(
-        answer.contains("adapter_kind=media_job_poll"),
-        "answer: {answer}"
-    );
-    assert!(
-        answer.contains(
-            "output_path=/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"
-        ),
-        "answer: {answer}"
-    );
-    assert!(
-        answer.contains(
-            r#"planned_outputs=[{"path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png","type":"image_file"}]"#
-        ),
-        "answer: {answer}"
-    );
-    assert!(
-        answer.contains("pending_async_job_contract=")
-            && answer.contains(r#""kind":"media_job_poll""#),
-        "answer: {answer}"
+    assert_eq!(
+        answer,
+        "/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"
     );
     assert!(summary.contract_ok);
 
-    let task = claimed_task("task-generated-file-path-report-dry-run-payload");
+    let task = claimed_task("task-exact-scalar-path-dry-run-payload");
     let (matrix_answer, matrix_summary) = super::deterministic_matrix_observed_shape_answer(
         &state,
         &task,
@@ -534,39 +512,6 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
     assert_eq!(matrix_answer, answer);
     assert!(matrix_summary.contract_ok);
 
-    let mut delivery_route = free_route_result();
-    delivery_route.requires_content_evidence = true;
-    delivery_route.response_shape = OutputResponseShape::FileToken;
-    delivery_route.delivery_required = true;
-    delivery_route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    delivery_route.locator_kind = crate::OutputLocatorKind::Path;
-    delivery_route.locator_hint = "document/media_dry_run/image_status_card.png".to_string();
-    let delivery_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(delivery_route.clone()),
-        ..Default::default()
-    };
-
-    let (delivery_answer, delivery_summary) =
-        direct_generated_file_path_report_from_dry_run_payload(
-            &loop_state,
-            Some(&delivery_context),
-        )
-        .expect("delivery dry_run payload should project planned output instead of FILE token");
-    assert_eq!(delivery_answer, answer);
-    assert!(delivery_summary.contract_ok);
-
-    let (matrix_delivery_answer, matrix_delivery_summary) =
-        super::deterministic_matrix_observed_shape_answer(
-            &state,
-            &task,
-            "media dry run delivery contract",
-            &loop_state,
-            Some(&delivery_context),
-        )
-        .expect("delivery matrix path should project dry_run payload");
-    assert_eq!(matrix_delivery_answer, answer);
-    assert!(matrix_delivery_summary.contract_ok);
-
     let mut free_route = free_route_result();
     free_route.requires_content_evidence = false;
     free_route.response_shape = OutputResponseShape::Free;
@@ -576,11 +521,9 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
         output_contract: Some(free_route.clone()),
         ..Default::default()
     };
-    let (free_answer, free_summary) =
-        direct_generated_file_path_report_from_dry_run_payload(&loop_state, Some(&free_context))
-            .expect("free dry_run payload should project planned output");
-    assert_eq!(free_answer, answer);
-    assert!(free_summary.contract_ok);
+    assert!(
+        direct_exact_scalar_path_from_dry_run_payload(&loop_state, Some(&free_context)).is_none()
+    );
 
     let mut scalar_route = free_route_result();
     scalar_route.requires_content_evidence = true;
@@ -591,11 +534,9 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
         output_contract: Some(scalar_route.clone()),
         ..Default::default()
     };
-    let (scalar_answer, scalar_summary) =
-        direct_generated_file_path_report_from_dry_run_payload(&loop_state, Some(&scalar_context))
-            .expect("generic scalar dry_run payload should project planned output");
-    assert_eq!(scalar_answer, answer);
-    assert!(scalar_summary.contract_ok);
+    assert!(
+        direct_exact_scalar_path_from_dry_run_payload(&loop_state, Some(&scalar_context)).is_none()
+    );
 
     let mut audio_loop_state = crate::agent_engine::LoopState::new(3);
     audio_loop_state.executed_step_results.push(ok_step_result(
@@ -603,33 +544,12 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
         "audio_synthesize",
         r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"}],"outputs":[],"response_format":"mp3","voice":"male-qn-qingse"}}"#,
     ));
-    let (audio_answer, audio_summary) = direct_generated_file_path_report_from_dry_run_payload(
-        &audio_loop_state,
-        Some(&free_context),
-    )
-    .expect("audio dry_run payload should project planned output");
-    assert!(
-        audio_answer.contains("dry_run=true"),
-        "answer: {audio_answer}"
-    );
-    assert!(
-        audio_answer.contains("provider=minimax"),
-        "answer: {audio_answer}"
-    );
-    assert!(
-        audio_answer.contains("model=speech-2.8-turbo"),
-        "answer: {audio_answer}"
-    );
-    assert!(
-        audio_answer
-            .contains("output_path=/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"),
-        "answer: {audio_answer}"
-    );
-    assert!(
-        audio_answer.contains(
-            r#"planned_outputs=[{"path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","type":"audio_file"}]"#
-        ),
-        "answer: {audio_answer}"
+    let (audio_answer, audio_summary) =
+        direct_exact_scalar_path_from_dry_run_payload(&audio_loop_state, Some(&agent_run_context))
+            .expect("audio dry_run payload should project planned output");
+    assert_eq!(
+        audio_answer,
+        "/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"
     );
     assert!(audio_summary.contract_ok);
 
@@ -639,46 +559,23 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
         "music_generate",
         r#"{"text":"MUSIC_GENERATE_DRY_RUN","extra":{"adapter_kind":"media_job_poll","dry_run":true,"provider":"minimax","model":"music-2.6","model_kind":"minimax_native","output_path":"/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3"}],"pending_async_job_contract":{"job_id":"provider:music_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:music_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"music_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[],"request":{"audio_setting":{"format":"mp3"},"output_format":"hex"}}}"#,
     ));
-    let (music_answer, music_summary) = direct_generated_file_path_report_from_dry_run_payload(
-        &music_loop_state,
-        Some(&free_context),
-    )
-    .expect("music dry_run payload should project planned output");
-    assert!(
-        music_answer.contains("dry_run=true"),
-        "answer: {music_answer}"
+    let (music_answer, music_summary) =
+        direct_exact_scalar_path_from_dry_run_payload(&music_loop_state, Some(&agent_run_context))
+            .expect("music dry_run payload should project planned output");
+    assert_eq!(
+        music_answer,
+        "/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3"
     );
-    assert!(
-        music_answer.contains("provider=minimax"),
-        "answer: {music_answer}"
-    );
-    assert!(
-        music_answer.contains("model=music-2.6"),
-        "answer: {music_answer}"
-    );
-    assert!(
-        music_answer
-            .contains("output_path=/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3"),
-        "answer: {music_answer}"
-    );
-    assert!(
-        music_answer.contains(
-            r#"planned_outputs=[{"path":"/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3","type":"audio_file"}]"#
-        ),
-        "answer: {music_answer}"
-    );
-    assert!(music_answer.contains("pending_async_job_contract="));
-    assert!(!music_answer.contains("output_format=hex"));
     assert!(music_summary.contract_ok);
 }
 
 #[test]
-fn generated_file_path_report_prefers_latest_path_synthesis_over_run_cmd_status() {
+fn exact_scalar_path_prefers_latest_path_synthesis_over_run_cmd_status() {
     let state = test_state();
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
     route.delivery_intent = crate::OutputDeliveryIntent::None;
     route.locator_kind = crate::OutputLocatorKind::Filename;

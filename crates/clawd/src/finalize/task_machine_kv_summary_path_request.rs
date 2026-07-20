@@ -240,37 +240,3 @@ pub(super) fn text_has_compare_paths_existence_fields(text: &str) -> bool {
     }
     has_same_path && has_left_exists && has_right_exists
 }
-
-pub(super) fn route_preserves_generated_file_machine_report(
-    route_result: &crate::IntentOutputContract,
-    answer_text: &str,
-    answer_messages: &[String],
-) -> bool {
-    let contract = route_result.clone();
-    if contract.delivery_required
-        || !route_result.semantic_kind_is(crate::OutputSemanticKind::GeneratedFilePathReport)
-    {
-        return false;
-    }
-    std::iter::once(answer_text)
-        .chain(answer_messages.iter().map(String::as_str))
-        .any(generated_file_machine_report_has_multi_field_payload)
-}
-
-fn generated_file_machine_report_has_multi_field_payload(text: &str) -> bool {
-    let text = text.trim();
-    if text.is_empty() {
-        return false;
-    }
-    let has_output_path = text.contains("output_path=");
-    let has_planned_outputs = text.contains("planned_outputs=");
-    let has_async_poll_result =
-        text.contains("async_poll_adapter_result:") || text.contains("async_poll_adapter_result=");
-    let has_async_cancel_result = text.contains("async_cancel_adapter_result:")
-        || text.contains("async_cancel_adapter_result=");
-    let has_task_status = (text.contains("task_id:") || text.contains("task_id="))
-        && (text.contains("job_id:") || text.contains("job_id="))
-        && (text.contains("status:") || text.contains("status="));
-    (has_output_path && has_planned_outputs)
-        || ((has_async_poll_result || has_async_cancel_result) && has_task_status)
-}

@@ -21,11 +21,14 @@ fn generic_file_delivery_allows_parent_directory_creation() {
 }
 
 #[test]
-fn generated_file_path_report_allows_command_then_write_and_returns_single_path_shape() {
+fn exact_scalar_path_allows_command_then_write_and_returns_single_path_shape() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::GeneratedFilePathReport,
         requires_content_evidence: true,
         response_shape: OutputResponseShape::Scalar,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("path".to_string()),
+            ..Default::default()
+        },
         locator_kind: OutputLocatorKind::Filename,
         locator_hint: "pwd_line_abs.txt".to_string(),
         ..IntentOutputContract::default()
@@ -35,7 +38,7 @@ fn generated_file_path_report_allows_command_then_write_and_returns_single_path_
             .expect("run policy decision");
     assert!(run_policy.is_allowed(), "{run_policy:?}");
     assert_eq!(run_policy.action_key, "run_cmd");
-    assert_eq!(run_policy.contract_match, "generated_file_path_report");
+    assert_eq!(run_policy.contract_match, "generic_exact_scalar_path");
     assert_eq!(run_policy.final_answer_shape, "single_path");
 
     let write_policy = action_policy_for_output_contract(
@@ -46,17 +49,20 @@ fn generated_file_path_report_allows_command_then_write_and_returns_single_path_
     .expect("write policy decision");
     assert!(write_policy.is_allowed(), "{write_policy:?}");
     assert_eq!(write_policy.action_key, "fs_basic.write_text");
-    assert_eq!(write_policy.contract_match, "generated_file_path_report");
+    assert_eq!(write_policy.contract_match, "generic_exact_scalar_path");
     assert_eq!(write_policy.final_answer_shape, "single_path");
 }
 
 #[test]
-fn generated_file_path_report_allows_image_generation_path_output() {
+fn exact_scalar_path_allows_image_generation_path_output() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFilePathReport,
             requires_content_evidence: true,
             response_shape: OutputResponseShape::Scalar,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("path".to_string()),
+                ..Default::default()
+            },
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "document/skill_generate_smoke.png".to_string(),
             ..IntentOutputContract::default()
@@ -71,17 +77,20 @@ fn generated_file_path_report_allows_image_generation_path_output() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "image_generate");
-    assert_eq!(policy.contract_match, "generated_file_path_report");
+    assert_eq!(policy.contract_match, "generic_exact_scalar_path");
     assert_eq!(policy.final_answer_shape, "single_path");
 }
 
 #[test]
-fn generated_file_path_report_allows_audio_synthesis_path_output() {
+fn exact_scalar_path_allows_audio_synthesis_path_output() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFilePathReport,
             requires_content_evidence: true,
             response_shape: OutputResponseShape::Scalar,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("resolved_path".to_string()),
+                ..Default::default()
+            },
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "document/skill_audio_smoke.mp3".to_string(),
             ..IntentOutputContract::default()
@@ -96,8 +105,24 @@ fn generated_file_path_report_allows_audio_synthesis_path_output() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "audio_synthesize");
-    assert_eq!(policy.contract_match, "generated_file_path_report");
+    assert_eq!(policy.contract_match, "generic_exact_scalar_path");
     assert_eq!(policy.final_answer_shape, "single_path");
+}
+
+#[test]
+fn exact_scalar_path_profile_rejects_multi_field_selector() {
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("path resolved_path".to_string()),
+            ..Default::default()
+        },
+        ..IntentOutputContract::default()
+    };
+    assert!(
+        action_policy_for_output_contract(Some(&contract), "run_cmd", &serde_json::json!({}))
+            .is_none()
+    );
 }
 
 #[test]

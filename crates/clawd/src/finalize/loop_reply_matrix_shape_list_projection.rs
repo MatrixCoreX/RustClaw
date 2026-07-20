@@ -42,7 +42,7 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
     let route = agent_run_context.and_then(|ctx| ctx.output_contract());
     match shape_class {
         crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact => {
-            direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
+            direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context)
                 .or_else(|| {
                     direct_file_token_from_observed_auto_locator_filename(
                         loop_state,
@@ -63,16 +63,10 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
         crate::evidence_policy::FinalAnswerShapeClass::ScalarValue => {
             direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
                 .or_else(|| {
-                    direct_generated_file_path_report_from_dry_run_payload(
-                        loop_state,
-                        agent_run_context,
-                    )
+                    direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context)
                 })
                 .or_else(|| {
-                    direct_generated_file_path_report_from_written_path(
-                        loop_state,
-                        agent_run_context,
-                    )
+                    direct_exact_scalar_path_from_written_path(loop_state, agent_run_context)
                 })
                 .or_else(|| {
                     direct_scalar_path_candidate_list_from_observed_outputs(
@@ -82,12 +76,9 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
                 })
         }
         crate::evidence_policy::FinalAnswerShapeClass::SinglePath => {
-            direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
+            direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context)
                 .or_else(|| {
-                    direct_generated_file_path_report_from_written_path(
-                        loop_state,
-                        agent_run_context,
-                    )
+                    direct_exact_scalar_path_from_written_path(loop_state, agent_run_context)
                 })
                 .or_else(|| {
                     direct_scalar_path_candidate_list_from_observed_outputs(

@@ -575,10 +575,9 @@ fn should_verify_answer_skips_permission_denied_terminal_finalizer() {
 }
 
 #[test]
-fn should_verify_answer_skips_grounded_structured_machine_projection() {
+fn should_verify_answer_skips_grounded_generic_machine_projection() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     let mut journal =

@@ -158,7 +158,7 @@ test("builds completed task outcome from machine task_outcome fields", () => {
         },
         trace: {
           contract_matrix: {
-            final_answer_shape: "generated_file_path_report",
+            final_answer_shape: "single_path",
           },
           event_stream: [
             {
@@ -183,7 +183,7 @@ test("builds completed task outcome from machine task_outcome fields", () => {
   assert.equal(view.title, "Completed from machine state");
   assert.equal(view.tone, "ok");
   assert.equal(view.nextStep, "Review the result.");
-  assert.equal(view.finalShape, "generated_file_path_report");
+  assert.equal(view.finalShape, "single_path");
   assert.deepEqual(view.doneConditions, ["tests_pass"]);
   assert.ok(view.constraints.includes("scope=workspace"));
   assert.ok(view.constraints.includes("writes_allowed=true"));

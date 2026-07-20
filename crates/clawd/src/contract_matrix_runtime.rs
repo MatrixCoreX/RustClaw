@@ -442,6 +442,7 @@ pub(crate) fn action_policy_for_output_contract(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn action_matches_policy_tokens(action_key: &str, policies: &[String]) -> bool {
     let Some(action) = ActionRef::parse(action_key) else {
         return false;
