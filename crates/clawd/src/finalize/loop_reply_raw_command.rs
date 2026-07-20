@@ -1048,7 +1048,6 @@ pub(super) fn output_contract_requests_exact_delivery(route: &crate::IntentOutpu
         crate::OutputSemanticKind::DirectoryNames,
         crate::OutputSemanticKind::DirectoryEntryGroups,
         crate::OutputSemanticKind::FilePaths,
-        crate::OutputSemanticKind::StructuredKeys,
     ]) || (route.semantic_kind_is(crate::OutputSemanticKind::CommandOutputSummary)
         && route.response_shape == crate::OutputResponseShape::Strict)
 }

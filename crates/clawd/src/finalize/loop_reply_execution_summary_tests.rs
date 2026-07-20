@@ -353,42 +353,6 @@ fn execution_summary_drops_existing_summary_for_scalar_delivery_contract() {
 }
 
 #[test]
-fn execution_summary_drops_existing_summary_when_structured_keys_delivery_matches_scalar_observation(
-) {
-    let mut route = free_route_result();
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "config_basic",
-        r#"{"action":"structured_keys","path":"package.json","keys":["scripts.lint"]}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "config_basic",
-        r#"{"action":"extract_field","exists":true,"field_path":"scripts.lint","value":"echo lint","value_text":"echo lint","value_type":"string"}"#,
-    ));
-    let mut delivery = vec![
-        "**Execution**\n1. Called tool `config_basic` with action `structured_keys`.".to_string(),
-        "**Execution**\n2. Called tool `config_basic` with action `extract_field`.".to_string(),
-        "echo lint".to_string(),
-    ];
-
-    attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
-
-    assert_eq!(delivery, vec!["echo lint"]);
-    assert!(!delivery
-        .iter()
-        .any(|message| crate::finalize::is_execution_summary_message(message)));
-}
-
-#[test]
 fn execution_summary_drops_existing_summary_for_config_guard_delivery() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Free;

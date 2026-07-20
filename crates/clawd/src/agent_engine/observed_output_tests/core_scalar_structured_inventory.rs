@@ -1240,14 +1240,14 @@ fn direct_answer_reads_config_basic_read_fields_values() {
 }
 
 #[test]
-fn direct_scalar_reads_structured_keys_value_list() {
+fn structured_keys_without_explicit_selector_defers_to_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
             r#"{"action":"structured_keys","exists":true,"container_type":"object","count":3,"keys":["app","features","paths"],"field_path":""}"#,
         ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route_result.locator_kind = OutputLocatorKind::Path;
     route_result.locator_hint =
         "scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string();
@@ -1256,36 +1256,8 @@ fn direct_scalar_reads_structured_keys_value_list() {
         ..AgentRunContext::default()
     };
 
-    assert_eq!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("app\nfeatures\npaths")
-    );
-}
-
-#[test]
-fn direct_answer_does_not_treat_root_level_as_missing_key() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "config_basic",
-            r#"{"action":"structured_keys","exists":true,"container_type":"object","count":3,"keys":["app","features","paths"],"field_path":""}"#,
-        ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::StructuredKeys;
-    route_result.locator_kind = OutputLocatorKind::Path;
-    route_result.locator_hint = "app_config.toml".to_string();
-    let agent_run_context = AgentRunContext {
-            output_contract: Some(route_result.clone()),
-            original_user_request: Some(
-                "List root-level keys in scripts/nl_tests/fixtures/device_local/configs/app_config.toml only."
-                    .to_string(),
-            ),
-            ..AgentRunContext::default()
-        };
-
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("app\nfeatures\npaths")
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
     );
 }
 

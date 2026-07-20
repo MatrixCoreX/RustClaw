@@ -186,7 +186,6 @@ const OBSERVED_ANSWER_FALLBACK_COMPACT_PROMPT_LOGICAL_PATH: &str =
 fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     state: Option<&AppState>,
     route: Option<&crate::IntentOutputContract>,
-    request_text: Option<&str>,
     loop_state: &LoopState,
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
@@ -242,7 +241,6 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     let answer = structured_scalar_candidate(
         state,
         route,
-        request_text,
         &observed_output.skill,
         &observed_output.body,
         locator_hint.filter(|hint| !hint.trim().is_empty()),
@@ -549,7 +547,6 @@ pub(crate) fn extract_direct_scalar_from_generic_output_with_locator_hint(
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         None,
         None,
-        None,
         loop_state,
         locator_hint,
         auto_locator_path,
@@ -624,7 +621,6 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         None,
         route,
-        current_turn_request_text(route, agent_run_context),
         loop_state,
         locator_hint,
         auto_locator_path,
@@ -701,7 +697,6 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         Some(state),
         route,
-        current_turn_request_text(route, agent_run_context),
         loop_state,
         locator_hint,
         auto_locator_path,

@@ -706,7 +706,7 @@ fn planner_semantic_kinds_directly_match_their_contracts() {
 }
 
 #[test]
-fn final_shape_honors_scalar_hidden_entries_and_structured_key_verdicts() {
+fn final_shape_honors_scalar_hidden_entries() {
     assert_eq!(
         final_answer_shape_for_output_contract(&IntentOutputContract {
             response_shape: OutputResponseShape::Scalar,
@@ -714,14 +714,6 @@ fn final_shape_honors_scalar_hidden_entries_and_structured_key_verdicts() {
             ..IntentOutputContract::default()
         }),
         Some(FinalAnswerShape::Scalar)
-    );
-    assert_eq!(
-        final_answer_shape_for_output_contract(&IntentOutputContract {
-            response_shape: OutputResponseShape::Free,
-            semantic_kind: OutputSemanticKind::StructuredKeys,
-            ..IntentOutputContract::default()
-        }),
-        Some(FinalAnswerShape::ValidationVerdict)
     );
 }
 

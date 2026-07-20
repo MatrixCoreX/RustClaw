@@ -409,14 +409,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             prefers_english_free_text,
                             allow_localized_direct_template,
                         )
-                    } else if action == Some("structured_keys") {
-                        structured_keys_direct_answer_candidate(
-                            state,
-                            &value,
-                            current_turn_request_text(route, agent_run_context),
-                            response_shape,
-                            prefers_english_free_text,
-                        )
                     } else if action == Some("validate_structured") {
                         validate_structured_direct_answer_candidate(
                             state,
@@ -515,7 +507,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                 structured_scalar_candidate(
                     state,
                     route,
-                    current_turn_request_text(route, agent_run_context),
                     &observed_output.skill,
                     &observed_output.body,
                     locator_hint,

@@ -301,9 +301,6 @@ pub(crate) fn structurally_satisfies_answer_contract(
     ) {
         return true;
     }
-    if structured_keys_answer_is_grounded_in_observation(route_result, journal, candidate_answer) {
-        return true;
-    }
     scalar_answer_is_grounded_in_successful_observation(route_result, journal, candidate_answer)
 }
 

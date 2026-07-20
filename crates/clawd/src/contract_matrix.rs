@@ -562,7 +562,6 @@ pub(crate) enum FinalAnswerShape {
     Free,
     GroupedNameList,
     JudgmentWithExcerptBasis,
-    KeyListOrKeySummary,
     LifecycleResult,
     ListOrEmptyStatement,
     NameList,
@@ -633,7 +632,6 @@ impl FinalAnswerShape {
         Self::Free,
         Self::GroupedNameList,
         Self::JudgmentWithExcerptBasis,
-        Self::KeyListOrKeySummary,
         Self::LifecycleResult,
         Self::ListOrEmptyStatement,
         Self::NameList,
@@ -664,7 +662,6 @@ impl FinalAnswerShape {
             "free" => Some(Self::Free),
             "grouped_name_list" => Some(Self::GroupedNameList),
             "judgment_with_excerpt_basis" => Some(Self::JudgmentWithExcerptBasis),
-            "key_list_or_key_summary" => Some(Self::KeyListOrKeySummary),
             "lifecycle_result" => Some(Self::LifecycleResult),
             "list_or_empty_statement" => Some(Self::ListOrEmptyStatement),
             "name_list" => Some(Self::NameList),
@@ -697,7 +694,6 @@ impl FinalAnswerShape {
             Self::Free => "free",
             Self::GroupedNameList => "grouped_name_list",
             Self::JudgmentWithExcerptBasis => "judgment_with_excerpt_basis",
-            Self::KeyListOrKeySummary => "key_list_or_key_summary",
             Self::LifecycleResult => "lifecycle_result",
             Self::ListOrEmptyStatement => "list_or_empty_statement",
             Self::NameList => "name_list",
@@ -724,7 +720,6 @@ impl FinalAnswerShape {
             Self::SinglePath => FinalAnswerShapeClass::SinglePath,
             Self::Scalar => FinalAnswerShapeClass::ScalarValue,
             Self::GroupedNameList
-            | Self::KeyListOrKeySummary
             | Self::ListOrEmptyStatement
             | Self::NameList
             | Self::PathList => FinalAnswerShapeClass::StrictList,

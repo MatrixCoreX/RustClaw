@@ -117,9 +117,14 @@ fn selected_package_manager_field_uses_structured_evidence() {
 }
 
 #[test]
-fn structured_keys_array_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-structured-keys", "ask", "列出配置键");
-    let route = route_for_semantic(crate::OutputSemanticKind::StructuredKeys);
+fn selected_keys_array_counts_as_generic_selector_evidence() {
+    let mut journal = TaskJournal::for_task("task-selected-keys", "ask", "config keys");
+    let mut route = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        ..Default::default()
+    };
+    route.selection.structured_field_selector = Some("keys".to_string());
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -141,7 +146,7 @@ fn structured_keys_array_counts_as_field_value_evidence() {
 
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
+    assert!(coverage.observed_canonical.contains("keys"));
 }
 
 #[test]

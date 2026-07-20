@@ -113,6 +113,26 @@ fn package_detection_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
+fn config_key_listing_resolves_without_domain_output_semantic_kind() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "config.list_keys",
+        json!({"path": "configs/config.toml"}),
+    );
+
+    assert_eq!(record.output_semantic_kind, None);
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected config tool action");
+    };
+    assert_eq!(tool, "config_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("list_keys")
+    );
+}
+
+#[test]
 fn docker_capabilities_resolve_without_domain_output_semantic_kinds() {
     let state = state_with_workspace_registry();
     for (capability, expected_action, args) in [

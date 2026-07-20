@@ -390,61 +390,6 @@ pub(super) fn path_fact_candidates(fact: &serde_json::Value) -> Vec<String> {
     paths
 }
 
-pub(super) fn structured_keys_answer_is_grounded_in_observation(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-    candidate_answer: &str,
-) -> bool {
-    if !route.output_contract.requires_content_evidence && journal.step_results.is_empty() {
-        return false;
-    }
-    let candidate_tokens = key_answer_tokens(candidate_answer);
-    if candidate_tokens.is_empty() {
-        return false;
-    }
-    journal.step_results.iter().any(|step| {
-        step_can_supply_verifier_observation_for_route(route, step)
-            && step.output_excerpt.as_deref().is_some_and(|output| {
-                structured_keys_from_output(output).is_some_and(|keys| {
-                    !keys.is_empty()
-                        && keys.iter().all(|key| {
-                            normalized_key_answer_units(key).into_iter().all(|unit| {
-                                candidate_tokens
-                                    .iter()
-                                    .any(|token| token.eq_ignore_ascii_case(&unit))
-                            })
-                        })
-                })
-            })
-    })
-}
-
-pub(super) fn structured_keys_from_output(output: &str) -> Option<Vec<String>> {
-    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
-    if value.get("action").and_then(|item| item.as_str()) != Some("structured_keys")
-        || !value
-            .get("exists")
-            .and_then(|item| item.as_bool())
-            .unwrap_or(false)
-    {
-        return None;
-    }
-    let values = value
-        .get("keys")
-        .or_else(|| value.get("identity_values"))
-        .and_then(|item| item.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str())
-                .map(str::trim)
-                .filter(|item| !item.is_empty())
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })?;
-    Some(values)
-}
-
 pub(super) fn execution_failed_step_answer_is_grounded_in_failed_observation(
     route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
@@ -551,38 +496,6 @@ pub(super) fn push_machine_token(value: &str, tokens: &mut BTreeSet<String>) {
     {
         tokens.insert(value.to_ascii_lowercase());
     }
-}
-
-pub(super) fn normalized_key_answer_units(key: &str) -> Vec<String> {
-    let tokens = key_answer_tokens(key);
-    if tokens.len() == 1 {
-        tokens
-    } else {
-        let trimmed = key.trim();
-        if trimmed.is_empty() {
-            Vec::new()
-        } else {
-            vec![trimmed.to_ascii_lowercase()]
-        }
-    }
-}
-
-pub(super) fn key_answer_tokens(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    for ch in text.chars() {
-        if ch.is_alphanumeric() || matches!(ch, '_' | '-' | '.') {
-            current.push(ch.to_ascii_lowercase());
-        } else if !current.is_empty() {
-            tokens.push(std::mem::take(&mut current));
-        }
-    }
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    tokens.sort();
-    tokens.dedup();
-    tokens
 }
 
 pub(super) fn scalar_answer_is_grounded_in_successful_observation(

@@ -3,7 +3,6 @@ use super::*;
 pub(super) fn structured_scalar_candidate(
     state: Option<&AppState>,
     route: Option<&crate::IntentOutputContract>,
-    request_text: Option<&str>,
     skill: &str,
     body: &str,
     locator_hint: Option<&str>,
@@ -274,13 +273,6 @@ pub(super) fn structured_scalar_candidate(
         "count_inventory" => count_inventory_direct_answer_candidate(
             state,
             value,
-            route.map(|route| route.response_shape),
-            prefer_english,
-        ),
-        "structured_keys" => structured_keys_direct_answer_candidate(
-            state,
-            value,
-            request_text,
             route.map(|route| route.response_shape),
             prefer_english,
         ),

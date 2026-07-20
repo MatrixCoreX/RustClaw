@@ -162,11 +162,6 @@ fn final_answer_shape_override_for_output_contract(
     {
         return Some(FinalAnswerShape::Scalar);
     }
-    if output_contract.semantic_kind_is(OutputSemanticKind::StructuredKeys)
-        && output_contract.response_shape != OutputResponseShape::Strict
-    {
-        return Some(FinalAnswerShape::ValidationVerdict);
-    }
     None
 }
 

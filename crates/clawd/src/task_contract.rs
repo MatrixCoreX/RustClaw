@@ -50,7 +50,7 @@ pub(crate) fn target_object_for_output_contract(
     match semantic_kind {
         OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
         OutputSemanticKind::FilesystemMutationResult => return TaskTargetObject::Path,
-        OutputSemanticKind::StructuredKeys | OutputSemanticKind::ConfigFieldRead => {
+        OutputSemanticKind::ConfigFieldRead => {
             return TaskTargetObject::ConfigKey;
         }
         OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
@@ -102,7 +102,6 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::FileBasename
         | OutputSemanticKind::ExistenceWithPath
-        | OutputSemanticKind::StructuredKeys
         | OutputSemanticKind::ConfigFieldRead => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
             TaskOperation::Validate
@@ -275,9 +274,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::HiddenEntriesCheck => {
             fields.insert("candidates");
         }
-        OutputSemanticKind::ServiceStatus
-        | OutputSemanticKind::StructuredKeys
-        | OutputSemanticKind::RecentScalarEqualityCheck => {
+        OutputSemanticKind::ServiceStatus | OutputSemanticKind::RecentScalarEqualityCheck => {
             fields.insert("field_value");
         }
         OutputSemanticKind::ExecutionFailedStep => {
