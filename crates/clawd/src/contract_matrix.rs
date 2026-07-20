@@ -560,7 +560,6 @@ pub(crate) enum FinalAnswerShape {
     ListOrEmptyStatement,
     NameList,
     PathList,
-    ProjectSummaryGroundedInFiles,
     RawOutputOrShortSummary,
     RecentArtifactJudgment,
     RiskAssessment,
@@ -627,7 +626,6 @@ impl FinalAnswerShape {
         Self::ListOrEmptyStatement,
         Self::NameList,
         Self::PathList,
-        Self::ProjectSummaryGroundedInFiles,
         Self::RawOutputOrShortSummary,
         Self::RecentArtifactJudgment,
         Self::RiskAssessment,
@@ -654,7 +652,6 @@ impl FinalAnswerShape {
             "list_or_empty_statement" => Some(Self::ListOrEmptyStatement),
             "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
-            "project_summary_grounded_in_files" => Some(Self::ProjectSummaryGroundedInFiles),
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
             "recent_artifact_judgment" => Some(Self::RecentArtifactJudgment),
             "risk_assessment" => Some(Self::RiskAssessment),
@@ -683,7 +680,6 @@ impl FinalAnswerShape {
             Self::ListOrEmptyStatement => "list_or_empty_statement",
             Self::NameList => "name_list",
             Self::PathList => "path_list",
-            Self::ProjectSummaryGroundedInFiles => "project_summary_grounded_in_files",
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
             Self::RecentArtifactJudgment => "recent_artifact_judgment",
             Self::RiskAssessment => "risk_assessment",
@@ -717,7 +713,6 @@ impl FinalAnswerShape {
             | Self::ValidationVerdict => FinalAnswerShapeClass::Verdict,
             Self::ExcerptPlusSummary
             | Self::FailedStepWithEvidence
-            | Self::ProjectSummaryGroundedInFiles
             | Self::RawOutputOrShortSummary
             | Self::SummaryGroundedInExcerpt
             | Self::SummaryGroundedInListing

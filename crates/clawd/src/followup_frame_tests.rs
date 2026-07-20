@@ -266,7 +266,7 @@ fn bound_target_accepts_extra_machine_payload() {
 }
 
 #[test]
-fn workspace_project_summary_evidence_path_does_not_persist_followup_target() {
+fn generic_workspace_evidence_path_does_not_persist_followup_target() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
         claim_attempt: 0,
@@ -299,7 +299,7 @@ fn workspace_project_summary_evidence_path_does_not_persist_followup_target() {
         response_shape: crate::OutputResponseShape::Free,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
-        semantic_kind: crate::OutputSemanticKind::WorkspaceProjectSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         ..IntentOutputContract::default()
     };
 

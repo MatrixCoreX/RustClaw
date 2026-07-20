@@ -212,13 +212,6 @@ pub(crate) fn structurally_satisfies_answer_contract(
     ) {
         return true;
     }
-    if workspace_project_summary_answer_is_grounded_in_successful_observation(
-        route_result,
-        journal,
-        candidate_answer,
-    ) {
-        return true;
-    }
     if service_status_port_answer_is_grounded_in_successful_observation(
         route_result,
         journal,

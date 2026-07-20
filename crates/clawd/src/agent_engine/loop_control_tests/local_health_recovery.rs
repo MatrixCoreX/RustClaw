@@ -67,7 +67,7 @@ fn local_health_verifier_gap_recovers_with_machine_fields() {
 #[test]
 fn local_health_verifier_gap_recovers_from_loop_state_raw_outputs() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.requires_content_evidence = true;
 

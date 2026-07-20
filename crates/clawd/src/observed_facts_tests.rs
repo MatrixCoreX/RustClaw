@@ -255,7 +255,7 @@ fn ignores_plain_scalar_answer_as_bound_target_without_path_contract() {
 }
 
 #[test]
-fn workspace_project_summary_does_not_bind_evidence_file_path() {
+fn generic_workspace_evidence_does_not_bind_evidence_file_path() {
     let mut journal = crate::task_journal::TaskJournal::new("workspace_summary");
     journal
         .step_results
@@ -278,7 +278,6 @@ fn workspace_project_summary_does_not_bind_evidence_file_path() {
     let mut route = dummy_route_result();
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
 
     let facts = derive_observed_facts_from_ask_outcome(
         "RustClaw release note draft.",

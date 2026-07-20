@@ -12,9 +12,9 @@ mod structured_read_scalar_gap;
 use compacted_machine_ref_gap::local_compacted_machine_ref_answer_verifier_gap;
 pub(crate) use compound_listing_gap::local_compound_listing_answer_verifier_gap;
 pub(super) use compound_listing_gap::{
-    journal_has_content_excerpt_observation, latest_observed_directory_structure_names,
-    observed_content_excerpt_path_names, observed_inventory_names_for_contract,
-    observed_name_is_mentioned, observed_names_all_mentioned, requested_listing_name_limit,
+    journal_has_content_excerpt_observation, observed_content_excerpt_path_names,
+    observed_inventory_names_for_contract, observed_name_is_mentioned,
+    observed_names_all_mentioned, requested_listing_name_limit,
     structured_json_values_from_step_output,
 };
 pub(super) use prompt_evidence_blocks::{
@@ -235,9 +235,6 @@ pub(super) fn structural_satisfaction_can_skip_verifier(
     ) {
         return true;
     }
-    if workspace_project_summary_requires_model_verifier(route_result) {
-        return false;
-    }
     if confirmed_missing_file_delivery_can_skip_answer_verifier(
         route_result,
         journal,
@@ -255,16 +252,6 @@ pub(super) fn structural_satisfaction_can_skip_verifier(
         .is_none()
         && (finalizer_summary_can_skip_answer_verifier(route_result, journal)
             || structurally_satisfies_answer_contract(route_result, journal, candidate_answer))
-}
-
-pub(super) fn workspace_project_summary_requires_model_verifier(
-    route_result: &AnswerContract,
-) -> bool {
-    if !route_result.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
-        return false;
-    }
-    crate::evidence_policy::final_answer_shape_for_output_contract(&route_result.output_contract)
-        .is_some_and(|shape| shape.allows_model_language())
 }
 
 pub(super) fn finalizer_summary_can_skip_answer_verifier(

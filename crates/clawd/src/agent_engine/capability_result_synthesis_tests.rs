@@ -345,6 +345,54 @@ fn compound_path_existence_and_content_use_generic_synthesis() {
 }
 
 #[test]
+fn workspace_inventory_and_read_excerpt_use_generic_synthesis() {
+    let mut loop_state = LoopState::default();
+    loop_state.capability_results.extend([
+        CapabilityResultEnvelope::ok(
+            "fs_basic",
+            Some("list_dir".to_string()),
+            json!({
+                "extra": {
+                    "action": "list_dir",
+                    "path": ".",
+                    "entries": [
+                        {"name": "crates", "kind": "dir"},
+                        {"name": "UI", "kind": "dir"},
+                        {"name": "README.md", "kind": "file"}
+                    ]
+                }
+            }),
+        ),
+        CapabilityResultEnvelope::ok(
+            "fs_basic",
+            Some("read_text_range".to_string()),
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "README.md",
+                    "excerpt": "1|# RustClaw\n2|A local agent runtime."
+                }
+            }),
+        ),
+    ]);
+    let route = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        ..Default::default()
+    };
+    let context = AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&context)
+    ));
+}
+
+#[test]
 fn grep_results_use_generic_synthesis_without_domain_contract() {
     let mut loop_state = LoopState::default();
     loop_state

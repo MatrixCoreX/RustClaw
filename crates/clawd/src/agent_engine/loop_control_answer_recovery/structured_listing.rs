@@ -83,9 +83,6 @@ fn route_allows_structured_listing_recovery(
     ) {
         return true;
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
-        return true;
-    }
     observed_structured_listing_findings(reply)
         .into_iter()
         .any(|finding| finding.total_len() > 0)
