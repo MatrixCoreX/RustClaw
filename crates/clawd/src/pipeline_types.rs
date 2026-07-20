@@ -79,7 +79,6 @@ pub(crate) enum OutputSemanticKind {
     ContentExcerptSummary,
     ContentExcerptWithSummary,
     ScalarCount,
-    ExecutionFailedStep,
     ExistenceWithPath,
 }
 
@@ -90,7 +89,6 @@ impl OutputSemanticKind {
         Self::ContentExcerptSummary,
         Self::ContentExcerptWithSummary,
         Self::ScalarCount,
-        Self::ExecutionFailedStep,
         Self::ExistenceWithPath,
     ];
 
@@ -101,7 +99,6 @@ impl OutputSemanticKind {
             Self::ContentExcerptSummary => "content_excerpt_summary",
             Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
             Self::ScalarCount => "scalar_count",
-            Self::ExecutionFailedStep => "execution_failed_step",
             Self::ExistenceWithPath => "existence_with_path",
         }
     }

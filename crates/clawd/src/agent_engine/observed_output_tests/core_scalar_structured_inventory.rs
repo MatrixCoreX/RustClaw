@@ -1081,102 +1081,6 @@ fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> Inten
 }
 
 #[test]
-fn execution_failed_step_guard_prefers_failed_machine_fields_over_success_stdout() {
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
-    route.locator_kind = OutputLocatorKind::None;
-    route.locator_hint.clear();
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-    let mut loop_state = LoopState::new(3);
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "run_cmd", "RC_RENDER_KO_OK\n"));
-    loop_state.executed_step_results.push(error_step(
-        "step_2",
-        "run_cmd",
-        &crate::skills::structured_skill_error_from_parts(
-            "run_cmd",
-            "nonzero_exit",
-            "Command failed with exit code 127",
-            Some("linux"),
-            Some(serde_json::json!({
-                "command": "definitely_missing_command_rustclaw_render_ko_0605",
-                "exit_category": "command_not_found",
-                "exit_classification_source": "exit_code",
-                "exit_code": 127,
-                "stderr": "bash: line 1: definitely_missing_command_rustclaw_render_ko_0605: command not found\n",
-                "stdout": serde_json::Value::Null,
-            })),
-        ),
-    ));
-    loop_state.executed_step_results.push(error_step(
-        "step_4",
-        "run_cmd",
-        &crate::skills::structured_skill_error_from_parts(
-            "run_cmd",
-            "nonzero_exit",
-            "Command failed with exit code 127",
-            Some("linux"),
-            Some(serde_json::json!({
-                "command": "definitely_missing_command_rustclaw_render_ko_0605",
-                "exit_category": "command_not_found",
-                "exit_classification_source": "exit_code",
-                "exit_code": 127,
-                "stderr": "bash: line 1: definitely_missing_command_rustclaw_render_ko_0605: command not found\n",
-                "stdout": serde_json::Value::Null,
-            })),
-        ),
-    ));
-
-    let guard = execution_failed_step_guard_entry(&loop_state, ctx.output_contract()).unwrap();
-
-    assert!(route_disallows_direct_observation_passthrough(&route));
-    assert!(guard.contains("final_answer_shape=failed_step_with_evidence"));
-    assert!(guard.contains("successful_step_outputs_are_not_final_answer=true"));
-    assert!(guard.contains("success_step.1.output_is_not_answer=RC_RENDER_KO_OK"));
-    assert!(guard.contains("failed_step.1.step_id=step_2"));
-    assert!(guard.contains("failed_step.1.skill=run_cmd"));
-    assert!(
-        guard.contains("failed_step.1.command=definitely_missing_command_rustclaw_render_ko_0605"),
-        "guard: {guard}"
-    );
-    assert!(guard.contains("failed_step.1.exit_category=command_not_found"));
-    assert!(guard.contains("failed_step.1.exit_code=127"));
-    assert!(!guard.contains("step_4"), "guard: {guard}");
-}
-
-#[test]
-fn execution_failed_step_guard_skips_contract_policy_gap_errors() {
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
-    route.locator_kind = OutputLocatorKind::None;
-    route.locator_hint.clear();
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-    let mut loop_state = LoopState::new(3);
-    loop_state.executed_step_results.push(error_step(
-        "step_1",
-        "make_dir",
-        r#"__RC_SKILL_ERROR__:{"error_kind":"contract_action_rejected","error_text":"planned tool step was not allowed for this request","extra":{"failure_attribution":"contract_gap"},"skill":"make_dir"}"#,
-    ));
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_2", "run_cmd", "note.txt alpha beta removed\n"));
-
-    let guard = execution_failed_step_guard_entry(&loop_state, ctx.output_contract());
-
-    assert!(
-        guard.is_none(),
-        "contract policy gaps are loop recovery signals, not final failed-step evidence: {guard:?}"
-    );
-}
-
-#[test]
 fn scalar_path_observed_route_rejects_content_evidence_contract() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
     route.selection.structured_field_selector = Some("path".to_string());
@@ -1216,14 +1120,6 @@ fn observed_output_route_policy_uses_direct_output_contract() {
     assert!(route_allows_raw_listing_direct_answer(Some(
         &file_names_route
     )));
-
-    let mut failed_step_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    failed_step_route.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
-    failed_step_route.locator_kind = OutputLocatorKind::None;
-    failed_step_route.locator_hint.clear();
-    assert!(route_disallows_direct_observation_passthrough(
-        &failed_step_route
-    ));
 
 }
 

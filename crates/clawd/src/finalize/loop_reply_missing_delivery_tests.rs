@@ -219,15 +219,7 @@ async fn observed_execution_without_delivery_does_not_reuse_route_fixed_question
 }
 
 #[test]
-fn language_rendered_failed_step_message_counts_as_publishable_completion() {
-    let mut route = free_route_result();
-    route.response_shape = OutputResponseShape::Strict;
-    route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
+fn structured_failure_message_is_grounded_in_failed_step() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -268,8 +260,11 @@ fn language_rendered_failed_step_message_counts_as_publishable_completion() {
     let message =
         "step_2: definitely_missing_command_rustclaw_render_zh_0605 failed with exit code 127";
 
-    let summary = language_rendered_failed_step_finalizer_summary(Some(&ctx), &loop_state, message)
-        .expect("language-rendered failed-step answer should be publishable");
+    assert!(planned_delivery_identifies_failed_observed_step(
+        message,
+        &loop_state
+    ));
+    let summary = deterministic_observed_execution_status_summary(&loop_state);
 
     assert_eq!(
         summary.disposition,

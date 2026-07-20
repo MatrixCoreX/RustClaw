@@ -522,12 +522,11 @@ pub(super) fn step_can_supply_contract_evidence(
             step_error_supplies_negative_contract_evidence(step, output_contract)
                 || step.skill == "run_cmd"
                     && output_contract.is_some_and(|contract| {
-                        contract.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep)
-                            || crate::evidence_policy::required_evidence_fields_for_output_contract(
-                                contract,
-                            )
-                            .iter()
-                            .any(|field| field == "command_output")
+                        crate::evidence_policy::required_evidence_fields_for_output_contract(
+                            contract,
+                        )
+                        .iter()
+                        .any(|field| field == "command_output")
                     })
         }
     }

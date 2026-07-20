@@ -60,18 +60,6 @@ pub(super) fn synthesize_route_allows_direct_fallback(
     ) || route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
 }
 
-pub(super) fn synthesize_route_prefers_model_language_failure_answer(
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    agent_run_context
-        .and_then(|context| context.output_contract())
-        .is_some_and(|route| {
-            route.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep)
-                && route.requires_content_evidence
-                && !route.delivery_required
-        })
-}
-
 fn output_has_count_inventory_total(output: &str) -> bool {
     let output = crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
         output.trim(),

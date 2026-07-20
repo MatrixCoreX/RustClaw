@@ -1468,66 +1468,6 @@ fn resume_failure_unbound_path_lookup_does_not_reclassify_delivery() {
 }
 
 #[test]
-fn resume_failure_execution_failed_step_is_success_answer_with_remaining_actions() {
-    let mut route = crate::IntentOutputContract::default();
-    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
-    let resume_ctx = json!({
-        "failed_step": {
-            "action": "skill(run_cmd)",
-            "error": "command failed with exit code 1; stderr: cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)",
-            "structured_error": {
-                "skill": "run_cmd",
-                "error_kind": "nonzero_exit",
-                "error_text": "Command failed with exit code 1\nstderr:\ncat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)",
-                "platform": "linux",
-                "extra": {
-                    "command": "cat /definitely_missing_rustclaw_contract_case",
-                    "exit_code": 1,
-                    "stderr": "cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)\n"
-                }
-            }
-        },
-        "remaining_actions": [
-            {"type": "call_skill", "skill": "log_analyze"},
-            {"type": "synthesize_answer"}
-        ]
-    });
-
-    let answer = super::resume_failure_execution_failed_step_answer(&route, &resume_ctx, false)
-        .expect("execution-failed-step answer");
-
-    let payload: serde_json::Value = serde_json::from_str(&answer).unwrap();
-    assert_eq!(
-        payload
-            .pointer("/message_key")
-            .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.execution.failed_step")
-    );
-    assert_eq!(
-        payload
-            .pointer("/reason_code")
-            .and_then(serde_json::Value::as_str),
-        Some("execution_failed_step")
-    );
-    assert_eq!(
-        payload
-            .pointer("/command")
-            .and_then(serde_json::Value::as_str),
-        Some("cat /definitely_missing_rustclaw_contract_case")
-    );
-    assert_eq!(
-        payload
-            .pointer("/exit_code")
-            .and_then(serde_json::Value::as_i64),
-        Some(1)
-    );
-    assert!(payload
-        .pointer("/detail")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|detail| detail.contains("No such file or directory")));
-}
-
-#[test]
 fn resume_context_execution_summary_uses_failed_step() {
     let resume_ctx = json!({
         "failed_step": {

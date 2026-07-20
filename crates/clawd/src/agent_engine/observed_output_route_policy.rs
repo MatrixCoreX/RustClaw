@@ -150,9 +150,6 @@ pub(crate) fn route_disallows_direct_observation_passthrough(
     if false || !route.requires_content_evidence || route.delivery_required {
         return false;
     }
-    if route_contract_marker_is(route, crate::OutputSemanticKind::ExecutionFailedStep) {
-        return true;
-    }
     if route_contract_marker_is(route, crate::OutputSemanticKind::RawCommandOutput)
         && route.response_shape == crate::OutputResponseShape::Strict
         && route.locator_kind == crate::OutputLocatorKind::None

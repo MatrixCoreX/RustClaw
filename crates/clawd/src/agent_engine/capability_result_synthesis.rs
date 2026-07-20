@@ -43,7 +43,11 @@ pub(super) fn eligible_for_capability_result_synthesis(
     if loop_state.capability_results.is_empty()
         || loop_state.capability_results.iter().any(|result| {
             result.delivery.intent != CapabilityDeliveryIntent::ModelSynthesis
-                || !matches!(result.status, CapabilityResultStatus::Ok)
+                || !matches!(
+                    result.status,
+                    CapabilityResultStatus::Ok | CapabilityResultStatus::Error
+                )
+                || result.continuation.is_some()
         })
     {
         return false;

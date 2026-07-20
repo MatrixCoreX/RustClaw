@@ -50,7 +50,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
     "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
     "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
-    "execution_failed_step": "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
 }
@@ -65,7 +64,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "raw_command_output": "Run pwd and briefly tell me what the command printed.",
     "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
     "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
-    "execution_failed_step": "Run this read-only check that should fail: cat /definitely_missing_rustclaw_contract_case. Then explain the failure reason.",
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
 }
@@ -485,12 +483,8 @@ def planned_action_equivalents(case: dict[str, Any]) -> list[str]:
     action_ref = str(case.get("action_ref") or "")
     if not action_ref:
         return []
-    contract_id = str(case.get("contract_id") or "")
     action = normalize_token(action_ref).replace("-", "_")
-    equivalents: dict[tuple[str, str], list[str]] = {
-        ("execution_failed_step", "log_analyze"): ["log_analyze", "run_cmd"],
-    }
-    return equivalents.get((contract_id, action), [action])
+    return [action]
 
 
 def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any]:

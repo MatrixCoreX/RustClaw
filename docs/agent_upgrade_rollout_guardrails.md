@@ -186,7 +186,11 @@ Rollback procedure:
 - Memory alias acknowledgements and runtime approval-wait status direct responses now emit `message_key` + `reason_code` machine payloads (`clawd.msg.memory.alias_*`, `clawd.msg.runtime.approval_wait_status`) instead of fixed zh/en prose. Keep renderer/i18n responsible for final user-language prose.
 - Policy-block default delivery and normalized skill errors now emit `clawd.msg.policy.<reason_code>` + `reason_code` + `observed_facts` machine payloads. Policy boundary prose remains only contract guidance for synthesis, not deterministic user-facing fallback text.
 - Ask runtime failure default delivery now emits `clawd.msg.ask_runtime_failure` + `ask_runtime_failure` machine payload. The fallback contract still carries user-request context and safety boundaries for synthesis.
-- Resume `ExecutionFailedStep` deterministic answers now emit `clawd.msg.execution.failed_step` + `execution_failed_step` with action/command/exit_code/detail machine fields instead of zh/en formatted failure prose.
+- Ordinary execution failures no longer use a dedicated failed-step semantic
+  route or deterministic domain renderer. The agent synthesizes the reply from
+  structured step/capability errors and journal evidence; the resume boundary
+  retains only keyed `message_key` / `reason_code` machine fallbacks for model
+  unavailability.
 - Direct config edit deterministic fallbacks now emit `clawd.msg.config_edit.*` + `config_edit_*` machine payloads with path/field/value/valid/risk fields instead of zh/en success, plan, validation, guard, or read-back prose.
 - The historical pre-loop self-extension response path and its locale templates are deleted. Explicit reusable-skill work now enters through the normal planner/resolver/verifier path via `extension_manager`.
 - Agent resume step failure defaults now emit `clawd.msg.execution.step_failed` / `clawd.msg.execution.step_error_missing` machine payloads instead of zh/en "step could not be completed" prose.

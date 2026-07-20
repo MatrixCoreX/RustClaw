@@ -20,7 +20,12 @@ pub(super) async fn finalize_capability_synthesis(
         || loop_state.capability_results.iter().any(|result| {
             result.delivery.intent
                 != claw_core::capability_result::CapabilityDeliveryIntent::ModelSynthesis
-                || result.status != claw_core::capability_result::CapabilityResultStatus::Ok
+                || !matches!(
+                    result.status,
+                    claw_core::capability_result::CapabilityResultStatus::Ok
+                        | claw_core::capability_result::CapabilityResultStatus::Error
+                )
+                || result.continuation.is_some()
         })
     {
         return None;

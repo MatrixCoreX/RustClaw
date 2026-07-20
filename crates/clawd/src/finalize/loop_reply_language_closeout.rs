@@ -481,17 +481,6 @@ pub(super) fn route_allows_model_language_final_answer(
         .is_some_and(|shape| shape.allows_model_language())
 }
 
-pub(super) fn route_prefers_language_rendered_execution_failed_step(
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    agent_run_context
-        .and_then(|ctx| ctx.output_contract())
-        .is_some_and(|route| {
-            route.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep)
-                && route_allows_model_language_final_answer(route)
-        })
-}
-
 pub(crate) fn planned_delivery_is_publishable_model_language_answer(delivery: &str) -> bool {
     let delivery = delivery.trim();
     !delivery.is_empty()

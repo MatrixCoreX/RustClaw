@@ -675,16 +675,8 @@ if isinstance(visible_json, dict) and {
     print("runtime_structured_json_visible")
     raise SystemExit(0)
 
-if "execution_failed_step" in tagset:
+if "structured_failure" in tagset:
     trace = journal.get("trace") or {}
-    contract = (
-        (trace.get("runtime_contract_snapshot") or {}).get("contract")
-        or trace.get("contract_matrix")
-        or {}
-    )
-    if str(contract.get("semantic_kind") or "").strip() != "execution_failed_step":
-        print("execution_failed_step_contract_missing")
-        raise SystemExit(0)
     step_results = trace.get("step_results") or []
     failed_steps = [
         item for item in step_results
@@ -693,7 +685,7 @@ if "execution_failed_step" in tagset:
         not in {"respond", "think", "synthesize_answer"}
     ]
     if not failed_steps:
-        print("execution_failed_step_without_failed_evidence")
+        print("structured_failure_without_failed_evidence")
         raise SystemExit(0)
     ok_outputs = []
     for item in step_results:
@@ -707,7 +699,7 @@ if "execution_failed_step" in tagset:
         if output:
             ok_outputs.append(output)
     if final_visible and final_visible in ok_outputs:
-        print("execution_failed_step_final_is_success_output")
+        print("structured_failure_final_is_success_output")
         raise SystemExit(0)
 
 if "scalar" in tagset and "allow_multiline_scalar" not in tagset:

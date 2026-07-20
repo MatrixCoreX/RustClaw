@@ -6,9 +6,9 @@ use super::super::LoopState;
 use super::{
     answer_is_direct_observation_passthrough, compound_listing_content_delivery_guard_entry,
     cross_turn_observed_output_entries, dir_compare_direct_answer_candidate,
-    execution_failed_step_guard_entry, extract_answer_from_finalizer_envelope_text,
-    extract_direct_answer_from_generic_output, extract_direct_answer_from_generic_output_i18n,
-    extract_direct_scalar_from_generic_output, extract_direct_scalar_from_generic_output_i18n,
+    extract_answer_from_finalizer_envelope_text, extract_direct_answer_from_generic_output,
+    extract_direct_answer_from_generic_output_i18n, extract_direct_scalar_from_generic_output,
+    extract_direct_scalar_from_generic_output_i18n,
     extract_direct_scalar_from_generic_output_with_locator_hint,
     extract_field_direct_answer_candidate, freeform_observed_answer_fallback,
     has_observed_answer_candidates, inventory_dir_direct_answer_candidate,

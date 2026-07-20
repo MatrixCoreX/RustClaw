@@ -3,14 +3,13 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
-    strip_internal_execution_args, strip_unsupported_planner_metadata_args,
-    synthesize_answer_allows_direct_fallback, synthesize_bounded_read_range_direct_answer,
+    classify_skill_failure_recovery, strip_internal_execution_args,
+    strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
+    synthesize_bounded_read_range_direct_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
-    synthesize_route_prefers_model_language_failure_answer,
     unresolved_file_token_delivery_artifact,
 };
 use crate::agent_engine::{AgentRunContext, LoopState};
@@ -31,8 +30,6 @@ mod read_range_synthesis_fallback;
 mod respond_template_guard;
 #[path = "dispatch_support_tests/scalar_config_fallback.rs"]
 mod scalar_config_fallback;
-#[path = "dispatch_support_tests/status_answer.rs"]
-mod status_answer;
 #[path = "dispatch_support_tests/synthesize_failure_replan.rs"]
 mod synthesize_failure_replan;
 #[path = "dispatch_support_tests/text_protocol_boundary.rs"]
@@ -925,165 +922,6 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
 }
 
 #[test]
-fn deterministic_status_answer_uses_observed_step_status_before_llm() {
-    let state = test_state_with_registry();
-    let task = crate::ClaimedTask {
-        claim_attempt: 0,
-        task_id: "task-1".to_string(),
-        user_id: 1,
-        chat_id: 1,
-        user_key: None,
-        channel: "test".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: String::new(),
-    };
-    let mut loop_state = LoopState::new(2);
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "list_dir", "alpha.log\n"));
-    loop_state.executed_step_results.push(StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "run_cmd".to_string(),
-        status: StepExecutionStatus::Error,
-        output: None,
-        error: Some("Command failed with exit code 127".to_string()),
-        started_at: 0,
-        finished_at: 0,
-    });
-
-    let answer = deterministic_observed_execution_status_answer(
-        &state,
-        &task,
-        "先列目录，再执行缺失命令，总结成功和失败。",
-        &loop_state,
-        None,
-    )
-    .expect("deterministic status answer");
-
-    let payload = serde_json::from_str::<serde_json::Value>(&answer).expect("machine payload");
-    assert_eq!(
-        payload["message_key"],
-        "clawd.msg.execution.step_status_summary"
-    );
-    assert_eq!(payload["reason_code"], "observed_execution_status");
-    assert_eq!(payload["succeeded_count"], 1);
-    assert_eq!(payload["failed_count"], 1);
-    assert_eq!(payload["steps"][0]["skill"], "list_dir");
-    assert_eq!(payload["steps"][0]["status"], "ok");
-    assert_eq!(payload["steps"][1]["skill"], "run_cmd");
-    assert_eq!(payload["steps"][1]["status"], "error");
-    assert_eq!(
-        payload["steps"][1]["error_excerpt"],
-        "Command failed with exit code 127"
-    );
-}
-
-#[test]
-fn deterministic_status_answer_defers_after_recovery_success() {
-    let state = test_state_with_registry();
-    let task = crate::ClaimedTask {
-        claim_attempt: 0,
-        task_id: "task-recovered".to_string(),
-        user_id: 1,
-        chat_id: 1,
-        user_key: None,
-        channel: "test".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: String::new(),
-    };
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "system_basic".to_string(),
-        status: StepExecutionStatus::Error,
-        output: None,
-        error: Some("unknown action: grep_text".to_string()),
-        started_at: 0,
-        finished_at: 0,
-    });
-    loop_state.executed_step_results.push(ok_step(
-        "step_2",
-        "fs_search",
-        r#"{"count":1,"match_count":2}"#,
-    ));
-
-    assert!(deterministic_observed_execution_status_answer(
-        &state,
-        &task,
-        "检查文件里是否包含目标分支",
-        &loop_state,
-        None,
-    )
-    .is_none());
-}
-
-#[test]
-fn deterministic_status_answer_uses_structured_run_cmd_stderr() {
-    let state = test_state_with_registry();
-    let task = crate::ClaimedTask {
-        claim_attempt: 0,
-        task_id: "task-structured-run-cmd".to_string(),
-        user_id: 1,
-        chat_id: 1,
-        user_key: None,
-        channel: "test".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: String::new(),
-    };
-    let err = format!(
-        "__RC_SKILL_ERROR__:{}",
-        serde_json::json!({
-            "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
-            "error_text": "Command failed with exit code 7",
-            "platform": "linux",
-            "extra": {
-                "exit_code": 7,
-                "stderr": "problem",
-                "output_truncated": false
-            }
-        })
-    );
-    let mut loop_state = LoopState::new(2);
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "run_cmd", "READY\n"));
-    loop_state.executed_step_results.push(StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "run_cmd".to_string(),
-        status: StepExecutionStatus::Error,
-        output: None,
-        error: Some(err),
-        started_at: 0,
-        finished_at: 0,
-    });
-
-    let answer = deterministic_observed_execution_status_answer(
-        &state,
-        &task,
-        "执行两个命令，总结成功和失败，并说明错误输出。",
-        &loop_state,
-        None,
-    )
-    .expect("deterministic status answer");
-
-    let payload = serde_json::from_str::<serde_json::Value>(&answer).expect("machine payload");
-    assert_eq!(payload["steps"][1]["error_kind"], "nonzero_exit");
-    assert_eq!(
-        payload["steps"][1]["error_excerpt"],
-        "Command failed with exit code 7"
-    );
-    assert_eq!(payload["steps"][1]["error_extra"]["stderr"], "problem");
-    assert_eq!(payload["steps"][1]["error_extra"]["exit_code"], 7);
-}
-
-#[test]
 fn synthesize_answer_direct_fallback_only_for_single_last_output() {
     assert!(synthesize_answer_allows_direct_fallback(&[]));
     assert!(synthesize_answer_allows_direct_fallback(&[
@@ -1303,9 +1141,6 @@ fn unclassified_strict_evidence_contract_defers_direct_fallback_to_synthesis() {
         ..AgentRunContext::default()
     };
 
-    assert!(!synthesize_route_prefers_model_language_failure_answer(
-        Some(&ctx)
-    ));
     assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
     assert!(synthesize_evidence_policy_direct_observed_fallback_answer(
         &state,
@@ -1335,30 +1170,6 @@ fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
     };
 
     assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
-}
-
-#[test]
-fn synthesize_route_blocks_direct_fallback_for_failed_step_language_contract() {
-    let route = crate::IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: crate::OutputResponseShape::Strict,
-        requires_content_evidence: true,
-        delivery_required: false,
-        locator_kind: crate::OutputLocatorKind::None,
-        delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
-        locator_hint: String::new(),
-        selection: crate::OutputSelectionContract::default(),
-    };
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert!(synthesize_route_prefers_model_language_failure_answer(
-        Some(&ctx)
-    ));
-    assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
 }
 
 #[test]

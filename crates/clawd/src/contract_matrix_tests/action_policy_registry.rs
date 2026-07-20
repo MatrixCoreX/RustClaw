@@ -608,7 +608,9 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 33);
+    // Each current semantic contract and generic profile contributes an
+    // evidence-shape, allowed-action, and rejected-action path.
+    let cases = generated_contract_cases(&matrix, 30);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

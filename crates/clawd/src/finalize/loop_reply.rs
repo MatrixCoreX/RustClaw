@@ -74,14 +74,12 @@ use structured_observation::{
 
 #[path = "loop_reply_execution_status.rs"]
 mod execution_status;
+#[cfg(test)]
+use execution_status::planned_delivery_identifies_failed_observed_step;
 use execution_status::{
-    attach_deterministic_execution_failed_step_answer,
     attach_deterministic_observed_execution_status_answer, delivery_is_content_answer_candidate,
-    deterministic_execution_failed_step_answer, deterministic_missing_observed_target_answer,
-    deterministic_observed_execution_status_answer,
+    deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
     deterministic_observed_execution_status_summary,
-    planned_delivery_identifies_failed_observed_step,
-    replace_delivery_with_deterministic_execution_failed_step_answer,
     replace_delivery_with_deterministic_observed_execution_status_answer,
     successful_content_observation_should_precede_status_summary,
 };
@@ -260,7 +258,7 @@ use language_closeout::{
     execution_recipe_budget_exhausted_message, execution_recipe_missing_success_marker_message,
     final_reply_language_hint, missing_requested_success_marker,
     prefer_english_for_agent_contextual_user_text, route_allows_model_language_final_answer,
-    route_prefers_language_rendered_execution_failed_step, route_resolved_intent,
+    route_resolved_intent,
 };
 
 #[path = "loop_reply_local_code_projection.rs"]
@@ -281,7 +279,6 @@ use missing_delivery::{
 };
 #[cfg(test)]
 use missing_delivery::{
-    language_rendered_failed_step_finalizer_summary,
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
     pre_execution_confirmation_checkpoint_seed, promote_observed_language_delivery_summary,
@@ -298,13 +295,11 @@ use route_helpers::{
 
 #[path = "loop_reply_content_evidence_failure.rs"]
 mod content_evidence_failure;
+use content_evidence_failure::content_evidence_step_failure_reply_from_loop;
 #[cfg(test)]
 use content_evidence_failure::{
     content_evidence_failure_suppresses_execution_summary, content_evidence_missing_target_answer,
     content_evidence_step_failure_answer,
-};
-use content_evidence_failure::{
-    content_evidence_step_failure_reply_from_loop, structured_extra_string,
 };
 
 #[path = "loop_reply_synthesis_preference.rs"]
@@ -645,23 +640,10 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.delivery_messages.is_empty() {
-        attach_deterministic_execution_failed_step_answer(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
+        if !successful_content_observation_should_precede_status_summary(
             agent_run_context,
-            &mut finalizer_summary,
-        );
-    }
-
-    if loop_state.delivery_messages.is_empty() {
-        if !route_prefers_language_rendered_execution_failed_step(agent_run_context)
-            && !successful_content_observation_should_precede_status_summary(
-                agent_run_context,
-                &loop_state,
-            )
-        {
+            &loop_state,
+        ) {
             attach_deterministic_observed_execution_status_answer(
                 state,
                 task,
@@ -807,15 +789,13 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.delivery_messages.is_empty() {
-        if !route_prefers_language_rendered_execution_failed_step(agent_run_context) {
-            attach_deterministic_observed_execution_status_answer(
-                state,
-                task,
-                user_text,
-                &mut loop_state,
-                &mut finalizer_summary,
-            );
-        }
+        attach_deterministic_observed_execution_status_answer(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            &mut finalizer_summary,
+        );
     }
 
     if loop_state.delivery_messages.is_empty() {
@@ -941,29 +921,11 @@ pub(crate) async fn finalize_loop_reply(
     } else {
         false
     };
-    let replaced_failed_step = if !replaced_grounded_answer
-        && !replaced_deterministic_fallback
-        && !replaced_direct_scalar
-        && !replaced_direct_structured
-        && !replaced_contract_answer
-    {
-        replace_delivery_with_deterministic_execution_failed_step_answer(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
-            agent_run_context,
-            &mut finalizer_summary,
-        )
-    } else {
-        false
-    };
     let replaced_matrix_observed_shape = if !replaced_grounded_answer
         && !replaced_deterministic_fallback
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
-        && !replaced_failed_step
         && finalizer_summary_requires_matrix_observed_replacement(finalizer_summary.as_ref())
     {
         let mut delivery_messages = std::mem::take(&mut loop_state.delivery_messages);
@@ -986,14 +948,12 @@ pub(crate) async fn finalize_loop_reply(
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
-        && !replaced_failed_step
         && !replaced_matrix_observed_shape
         && !delivery_is_content_answer_candidate(
             agent_run_context,
             &loop_state,
             &loop_state.delivery_messages,
         )
-        && !route_prefers_language_rendered_execution_failed_step(agent_run_context)
         && !successful_content_observation_should_precede_status_summary(
             agent_run_context,
             &loop_state,

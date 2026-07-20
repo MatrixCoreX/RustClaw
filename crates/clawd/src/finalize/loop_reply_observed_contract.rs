@@ -223,7 +223,6 @@ fn latest_terminal_scalar_respond_answer_from_loop_contract(
         || matches!(
             route.semantic_kind,
             crate::OutputSemanticKind::RawCommandOutput
-                | crate::OutputSemanticKind::ExecutionFailedStep
         )
     {
         return None;

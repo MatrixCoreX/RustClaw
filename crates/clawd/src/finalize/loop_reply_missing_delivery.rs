@@ -3,14 +3,12 @@ use crate::finalize::build_from_loop_state as build_loop_journal;
 use crate::{AppState, AskReply, ClaimedTask};
 
 use super::{
-    deterministic_execution_failed_step_answer, deterministic_matrix_observed_shape_answer,
-    deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
+    deterministic_matrix_observed_shape_answer, deterministic_missing_observed_target_answer,
+    deterministic_observed_execution_status_answer,
     deterministic_observed_execution_status_summary,
     deterministic_structured_container_summary_answer, direct_db_basic_observed_answer,
     direct_exact_scalar_path_from_dry_run_payload, output_text_from_execution_result,
-    planned_delivery_identifies_failed_observed_step, preferred_route_clarify_question,
-    route_prefers_language_rendered_execution_failed_step, route_resolved_intent,
-    route_structured_clarify_context,
+    preferred_route_clarify_question, route_resolved_intent, route_structured_clarify_context,
 };
 
 pub(super) fn pre_execution_confirmation_checkpoint_seed(
@@ -321,24 +319,10 @@ async fn missing_delivery_after_observation_message(
     clarify_reason: &str,
     observed_contract_evidence_complete: bool,
 ) -> String {
-    let prefer_language_rendered_failed_step =
-        route_prefers_language_rendered_execution_failed_step(agent_run_context);
-    if !prefer_language_rendered_failed_step {
-        if let Some(answer) = deterministic_execution_failed_step_answer(
-            state,
-            user_text,
-            loop_state,
-            agent_run_context,
-        ) {
-            return answer;
-        }
-    }
-    if !prefer_language_rendered_failed_step {
-        if let Some(answer) =
-            deterministic_observed_execution_status_answer(state, user_text, loop_state)
-        {
-            return answer;
-        }
+    if let Some(answer) =
+        deterministic_observed_execution_status_answer(state, user_text, loop_state)
+    {
+        return answer;
     }
     if let Some(answer) = deterministic_structured_container_summary_answer(
         state,
@@ -420,54 +404,42 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
     clarify_reason: &str,
 ) -> Option<AskReply> {
     let status_summary = || deterministic_observed_execution_status_summary(loop_state);
-    let prefer_language_rendered_failed_step =
-        route_prefers_language_rendered_execution_failed_step(agent_run_context);
-    let deterministic_failed_step_answer = if prefer_language_rendered_failed_step {
-        None
-    } else {
-        deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
+    let deterministic_answer =
+        deterministic_observed_execution_status_answer(state, user_text, loop_state)
             .map(|answer| (answer, status_summary()))
-    };
-    let deterministic_answer = deterministic_failed_step_answer
-        .or_else(|| {
-            (!prefer_language_rendered_failed_step)
-                .then(|| {
-                    deterministic_observed_execution_status_answer(state, user_text, loop_state)
-                        .map(|answer| (answer, status_summary()))
-                })
-                .flatten()
-        })
-        .or_else(|| {
-            deterministic_structured_container_summary_answer(
-                state,
-                user_text,
-                loop_state,
-                agent_run_context,
-            )
-            .map(|answer| (answer, status_summary()))
-        })
-        .or_else(|| {
-            direct_db_basic_observed_answer(state, user_text, loop_state, agent_run_context)
-        })
-        .or_else(|| direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context))
-        .or_else(|| {
-            deterministic_matrix_observed_shape_answer(
-                state,
-                task,
-                user_text,
-                loop_state,
-                agent_run_context,
-            )
-        })
-        .or_else(|| {
-            deterministic_missing_observed_target_answer(
-                state,
-                user_text,
-                loop_state,
-                agent_run_context,
-            )
-            .map(|answer| (answer, status_summary()))
-        });
+            .or_else(|| {
+                deterministic_structured_container_summary_answer(
+                    state,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
+                .map(|answer| (answer, status_summary()))
+            })
+            .or_else(|| {
+                direct_db_basic_observed_answer(state, user_text, loop_state, agent_run_context)
+            })
+            .or_else(|| {
+                direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context)
+            })
+            .or_else(|| {
+                deterministic_matrix_observed_shape_answer(
+                    state,
+                    task,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
+            })
+            .or_else(|| {
+                deterministic_missing_observed_target_answer(
+                    state,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
+                .map(|answer| (answer, status_summary()))
+            });
     let has_deterministic_answer = deterministic_answer.is_some();
     if !has_deterministic_answer
         && finalizer_summary
@@ -542,16 +514,11 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
     let has_deterministic_answer = deterministic_answer.is_some();
-    let language_rendered_failed_step_summary =
-        language_rendered_failed_step_finalizer_summary(agent_run_context, loop_state, &message);
-    let has_language_rendered_failed_step_answer = language_rendered_failed_step_summary.is_some();
-    let mut finalizer_summary = finalizer_summary
-        .or_else(|| {
-            deterministic_answer
-                .as_ref()
-                .map(|(_, summary)| summary.clone())
-        })
-        .or(language_rendered_failed_step_summary);
+    let mut finalizer_summary = finalizer_summary.or_else(|| {
+        deterministic_answer
+            .as_ref()
+            .map(|(_, summary)| summary.clone())
+    });
     let has_observed_language_answer = observed_delivery_has_complete_contract_evidence(
         task,
         user_text,
@@ -567,9 +534,7 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
         ));
     }
     let (final_status, should_fail_task) = observed_execution_without_publishable_delivery_outcome(
-        has_deterministic_answer
-            || has_language_rendered_failed_step_answer
-            || has_observed_language_answer,
+        has_deterministic_answer || has_observed_language_answer,
         finalizer_summary.as_ref(),
     );
     let journal = build_loop_journal(
@@ -641,16 +606,6 @@ pub(super) fn observed_synthesis_unavailable_reply(
         .with_messages(delivery_messages)
         .with_task_journal(journal)
         .with_failure(message)
-}
-
-pub(super) fn language_rendered_failed_step_finalizer_summary(
-    agent_run_context: Option<&AgentRunContext>,
-    loop_state: &crate::agent_engine::LoopState,
-    message: &str,
-) -> Option<crate::task_journal::TaskJournalFinalizerSummary> {
-    (route_prefers_language_rendered_execution_failed_step(agent_run_context)
-        && planned_delivery_identifies_failed_observed_step(message, loop_state))
-    .then(|| deterministic_observed_execution_status_summary(loop_state))
 }
 
 pub(super) fn observed_delivery_has_complete_contract_evidence(

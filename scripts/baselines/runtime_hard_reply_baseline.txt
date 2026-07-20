@@ -135,11 +135,9 @@ crates/clawd/src/agent_engine/loop_control_post_write_evidence_guard.rs	collect 
 crates/clawd/src/agent_engine/observed_output.rs	LLM 过保守错判为不可发	// 保留"LLM 过保守错判为不可发"的救回链路。
 crates/clawd/src/agent_engine/observed_output.rs	observed answer fallback LLM failed: {err}	.map_err(|err| format!("observed answer fallback LLM failed: {err}"))?;
 crates/clawd/src/agent_engine/observed_output.rs	observed answer fallback prompt missing: {err}	return Err(format!("observed answer fallback prompt missing: {err}"));
-crates/clawd/src/agent_engine/observed_output_entries.rs	### execution_failed_step_guard\n{}	(failed_count > 0).then(|| format!("### execution_failed_step_guard\\n{}", lines.join("\\n")))
 crates/clawd/src/agent_engine/observed_output_entries.rs	### prior_turn_execution_context\n{}	"### prior_turn_execution_context\\n{}",
 crates/clawd/src/agent_engine/observed_output_entries.rs	### prior_turn_observed_output\n{}	"### prior_turn_observed_output\\n{}",
 crates/clawd/src/agent_engine/observed_output_entries.rs	Most recent generated output:\n	const MARKER: &str = "Most recent generated output:\\n";
-crates/clawd/src/agent_engine/observed_output_entries.rs	{}:command:{command}:kind:{}:exit:{exit_code:?}	"{}:command:{command}:kind:{}:exit:{exit_code:?}",
 crates/clawd/src/agent_engine/observed_output_process_service.rs	no matching processes for filter:	.find_map(|line| line.strip_prefix("no matching processes for filter:"))
 crates/clawd/src/agent_engine/observed_output_success.rs	# Test Workspace\nThis directory is reserved.	"# Test Workspace\\nThis directory is reserved.",
 crates/clawd/src/agent_engine/observed_output_success.rs	# Test Workspace\nThis directory is reserved.	Some("# Test Workspace\\nThis directory is reserved.")
@@ -1008,7 +1006,6 @@ crates/clawd/src/verifier.rs	unresolved runtime capability before execution	why:
 crates/clawd/src/verifier.rs	unresolved template placeholder in executable step args	why: "unresolved template placeholder in executable step args".to_string(),
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`	"skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`"
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` relative creation target anchored to `{anchored}`	"skill `{normalized_skill}` relative creation target anchored to `{anchored}`"
-crates/clawd/src/verifier_creation_targets.rs	unbounded unique step id search	unreachable!("unbounded unique step id search")
 crates/clawd/src/virtual_tools.rs	unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config	"unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config",
 crates/clawd/src/virtual_tools.rs	{tool} args must be a JSON object	.ok_or_else(|| format!("{tool} args must be a JSON object"))
 crates/clawd/src/visible_text.rs	valid JSON escaped CSI regex	Regex::new(r"\\\\u001[bB]\\[[0-?]*[ -/]*[@-~]").expect("valid JSON escaped CSI regex")

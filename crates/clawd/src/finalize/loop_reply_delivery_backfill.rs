@@ -14,7 +14,7 @@ use super::{
     looks_like_raw_command_snapshot, looks_like_structured_machine_output,
     message_is_non_answer_separator, planned_delivery_is_publishable_model_language_answer,
     raw_command_output_needs_structural_projection, route_allows_latest_tail_read_range_delivery,
-    route_prefers_language_rendered_execution_failed_step, structured_json_values_from_output,
+    structured_json_values_from_output,
 };
 
 fn contractual_last_respond_delivery_value(
@@ -354,31 +354,6 @@ pub(super) fn backfill_delivery_from_last_outputs(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) {
-    let prefer_language_rendered_failed_step =
-        route_prefers_language_rendered_execution_failed_step(agent_run_context);
-    if loop_state.delivery_messages.is_empty() && prefer_language_rendered_failed_step {
-        if let Some(answer) = loop_state
-            .last_user_visible_respond
-            .as_deref()
-            .map(str::trim)
-            .filter(|answer| {
-                planned_delivery_is_publishable_model_language_answer(answer)
-                    && !candidate_matches_successful_external_observation(loop_state, answer)
-            })
-            .map(ToString::to_string)
-        {
-            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-            log_deterministic_delivery_record(
-                &task.task_id,
-                "final_result_use_failed_step_last_respond",
-                "backfilled",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-        }
-        return;
-    }
-
     if loop_state.delivery_messages.is_empty() {
         if backfill_latest_tail_read_range_delivery(task, loop_state, agent_run_context) {
             return;
