@@ -187,7 +187,6 @@ pub(super) fn test_policy() -> AgentLoopGuardPolicy {
         repeat_action_limit: 4,
         no_progress_limit: 1,
         multi_round_enabled: true,
-        answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         fast_read: Default::default(),

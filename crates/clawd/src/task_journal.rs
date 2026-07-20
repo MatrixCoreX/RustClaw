@@ -524,11 +524,7 @@ pub(crate) struct TaskJournalAnswerVerifierSummary {
 
 impl TaskJournalAnswerVerifierSummary {
     pub(crate) fn high_confidence_retry_gap(&self) -> bool {
-        !self.pass
-            && (self.confidence >= 0.55
-                || (self.should_retry
-                    && (!self.answer_incomplete_reason.trim().is_empty()
-                        || !self.missing_evidence_fields.is_empty())))
+        !self.pass && self.should_retry && self.confidence >= 0.55
     }
 
     pub(crate) fn required_evidence_failure_payload_text(&self) -> String {

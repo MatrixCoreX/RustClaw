@@ -528,7 +528,7 @@ mod tests {
         );
         assert_eq!(
             value.get("next_recovery_kind").and_then(Value::as_str),
-            Some("replan")
+            Some("synthesize_answer")
         );
         assert_eq!(
             value

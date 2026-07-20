@@ -1,24 +1,18 @@
 use super::super::loop_control_post_write_evidence_guard::{
     enforce_code_mutation_validation_success_guard, enforce_post_write_content_evidence_guard,
-    post_write_content_evidence_readback_actions,
 };
 use super::{
-    answer_contract, answer_verifier_gap_fields_are_observed,
-    answer_verifier_gap_requests_observed_content_rewrite,
-    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary,
-    commit_answer_verifier_retry_answer, commit_local_code_strict_json_projection_after_readback,
-    ok_step, post_write_content_evidence_readback_recovery_policy,
+    answer_contract, answer_verifier_retry_summary, commit_answer_verifier_retry_answer, ok_step,
+    post_write_content_evidence_readback_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
     retry_verifier_accepts_rewritten_answer, route_result,
-    suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
-    suppress_answer_verifier_retry_if_structurally_satisfied,
-    suppress_answer_verifier_retry_if_user_locator_disambiguation, test_policy, test_task,
+    suppress_answer_verifier_retry_if_structurally_satisfied, test_policy,
 };
 use crate::{
-    agent_engine::LoopState, executor::StepExecutionStatus, AgentAction, AskReply,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    agent_engine::LoopState, executor::StepExecutionStatus, AskReply, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape,
 };
 use serde_json::json;
 
@@ -34,123 +28,6 @@ fn local_code_context_with_required_fields(
             attachment_processing_required: false,
         }),
         ..Default::default()
-    }
-}
-
-#[test]
-fn answer_only_rewrite_requires_each_missing_machine_field_to_be_observed() {
-    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["count".to_string()],
-        answer_incomplete_reason: "required machine field is absent".to_string(),
-        should_retry: true,
-        retry_instruction: "collect the missing field".to_string(),
-        confidence: 0.95,
-    };
-    let mut coverage = crate::task_journal::TaskJournalEvidenceCoverage::default();
-    coverage
-        .observed_fields
-        .insert("extra.metadata.sections_count".to_string());
-
-    assert!(!answer_verifier_gap_fields_are_observed(
-        &verifier, &coverage
-    ));
-
-    coverage.observed_fields.insert("extra.count".to_string());
-    assert!(answer_verifier_gap_fields_are_observed(
-        &verifier, &coverage
-    ));
-}
-
-#[test]
-fn answer_only_rewrite_allows_presentation_only_output_format_gap() {
-    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["output_format".to_string()],
-        answer_incomplete_reason: "visible shape is incomplete".to_string(),
-        should_retry: true,
-        retry_instruction: "render the observed fields".to_string(),
-        confidence: 0.95,
-    };
-
-    assert!(answer_verifier_gap_fields_are_observed(
-        &verifier,
-        &crate::task_journal::TaskJournalEvidenceCoverage::default()
-    ));
-}
-
-#[test]
-fn output_format_machine_payload_gap_detects_structured_or_field_projection_reply() {
-    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["output_format".to_string()],
-        answer_incomplete_reason: "visible answer shape mismatch".to_string(),
-        should_retry: true,
-        retry_instruction: "render observed machine evidence".to_string(),
-        confidence: 0.9,
-    };
-
-    assert!(answer_verifier_output_format_machine_payload_gap(
-        &verifier,
-        r#"{"status":"ok","candidates":["tools.allow_sudo=true"]}"#
-    ));
-    assert!(answer_verifier_output_format_machine_payload_gap(
-        &verifier,
-        r#"{"schema_version":1,"status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
-    ));
-    assert!(answer_verifier_output_format_machine_payload_gap(
-        &verifier,
-        "target=telegramd service_name=telegramd post_state=telegramd=running verified=true"
-    ));
-    assert!(!answer_verifier_output_format_machine_payload_gap(
-        &verifier,
-        "configs/config.toml has one observed risk."
-    ));
-}
-
-#[test]
-fn output_format_machine_payload_gap_rejects_unresolved_field_value_gap() {
-    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["output_format".to_string(), "field_value".to_string()],
-        answer_incomplete_reason: "visible answer has shape and value gaps".to_string(),
-        should_retry: true,
-        retry_instruction: "collect the missing field value before rewriting".to_string(),
-        confidence: 0.95,
-    };
-
-    assert!(!answer_verifier_output_format_machine_payload_gap(
-        &verifier,
-        r#"{"status":"ok","field_value":null}"#
-    ));
-    assert!(!answer_verifier_gap_requests_observed_content_rewrite(
-        &verifier
-    ));
-}
-
-#[test]
-fn content_evidence_gap_does_not_use_answer_only_rewrite() {
-    for field in [
-        "content_excerpt",
-        "field_value",
-        "any_of(command_output|content_excerpt|field_value)",
-        "any_of(command_output|content_excerpt|count|field_value)",
-    ] {
-        let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
-            pass: false,
-            missing_evidence_fields: vec![field.to_string()],
-            answer_incomplete_reason: "candidate needs additional observed content evidence"
-                .to_string(),
-            should_retry: true,
-            retry_instruction: "collect bounded file or command evidence before finalizing"
-                .to_string(),
-            confidence: 0.95,
-        };
-
-        assert!(
-            !answer_verifier_gap_requests_observed_content_rewrite(&verifier),
-            "{field} must trigger planner recovery, not answer-only rewrite"
-        );
     }
 }
 
@@ -193,74 +70,6 @@ fn post_write_guard_requires_content_evidence_after_code_write_and_validation() 
     assert!(!summary.pass);
     assert_eq!(summary.missing_evidence_fields, vec!["content_excerpt"]);
     assert!(summary.should_retry);
-}
-
-#[test]
-fn post_write_gap_builds_deterministic_readback_actions_from_journal_paths() {
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-post-write-readback-actions",
-        "ask",
-        "prompt",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "fs_basic",
-            r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"},"text":"written 98 bytes to /workspace/calc_core.py"}"#,
-        ));
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_2",
-            "fs_basic",
-            r#"{"extra":{"action":"write_text","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py"},"text":"written 571 bytes to /workspace/test_calc_core.py"}"#,
-        ));
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_3",
-            "run_cmd",
-            "Ran 4 tests in 0.000s\nOK",
-        ));
-    let mut reply = AskReply::non_llm(
-        r#"{"changed_files":["calc_core.py","test_calc_core.py"],"test_status":"OK"}"#.to_string(),
-    )
-    .with_task_journal(journal);
-
-    assert!(enforce_post_write_content_evidence_guard(&mut reply));
-    let actions = post_write_content_evidence_readback_actions(&reply, 8);
-    assert_eq!(actions.len(), 2);
-
-    let paths = actions
-        .iter()
-        .map(|action| match action {
-            AgentAction::CallTool { tool, args } => {
-                assert_eq!(tool, "fs_basic");
-                assert_eq!(
-                    args.get("action").and_then(|value| value.as_str()),
-                    Some("read_text_range")
-                );
-                assert_eq!(
-                    args.get("mode").and_then(|value| value.as_str()),
-                    Some("head")
-                );
-                assert_eq!(args.get("n").and_then(|value| value.as_u64()), Some(120));
-                args.get("path")
-                    .and_then(|value| value.as_str())
-                    .expect("readback path")
-                    .to_string()
-            }
-            other => panic!("unexpected action: {other:?}"),
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        paths,
-        vec![
-            "/workspace/calc_core.py".to_string(),
-            "/workspace/test_calc_core.py".to_string()
-        ]
-    );
 }
 
 #[test]
@@ -347,67 +156,6 @@ fn code_mutation_unresolved_test_status_creates_retry_gap() {
 }
 
 #[test]
-fn post_write_gap_reads_paths_from_compacted_long_write_outputs() {
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-post-write-compacted-long-path",
-        "ask",
-        "prompt",
-    );
-    let calc_path =
-        "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new/calc_core.py";
-    let test_path =
-        "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new/test_calc_core.py";
-    for (step_id, path, bytes) in [
-        ("step_1", calc_path, 98usize),
-        ("step_2", test_path, 571usize),
-    ] {
-        journal.push_step_result(&crate::executor::StepExecutionResult {
-            step_id: step_id.to_string(),
-            skill: "fs_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some(
-                serde_json::json!({
-                    "extra": {
-                        "action": "write_text",
-                        "path": path,
-                        "resolved_path": path,
-                        "effective_path": path,
-                        "content_bytes": bytes
-                    },
-                    "text": format!("written {bytes} bytes to {path}")
-                })
-                .to_string(),
-            ),
-            error: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    }
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_3",
-            "run_cmd",
-            "Ran 4 tests in 0.000s\nOK",
-        ));
-    let mut reply = AskReply::non_llm(
-        r#"{"changed_files":["calc_core.py","test_calc_core.py"],"test_status":"OK"}"#.to_string(),
-    )
-    .with_task_journal(journal);
-
-    assert!(enforce_post_write_content_evidence_guard(&mut reply));
-    let actions = post_write_content_evidence_readback_actions(&reply, 8);
-    let paths = actions
-        .iter()
-        .filter_map(|action| match action {
-            AgentAction::CallTool { args, .. } => args.get("path").and_then(|value| value.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(paths, vec![calc_path, test_path]);
-}
-
-#[test]
 fn post_write_readback_recovery_reserves_bounded_tool_budget_after_cap() {
     let policy = test_policy();
     let mut capped_state = LoopState::new(policy.max_rounds);
@@ -473,86 +221,6 @@ fn post_write_guard_overrides_output_format_gap_when_content_evidence_missing() 
     assert!(summary
         .answer_incomplete_reason
         .starts_with("post_write_content_evidence_required"));
-
-    let actions = post_write_content_evidence_readback_actions(&reply, 8);
-    assert_eq!(actions.len(), 2);
-}
-
-#[test]
-fn post_write_readback_projection_replaces_stale_terminal_json() {
-    let stale_answer = r#"{"changed_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed","functions":["add","sub","test_add_positive","test_sub_positive"]}"#;
-    let mut loop_state = LoopState::new(2);
-    loop_state.output_vars.insert(
-        "agent_loop.latest_run_cmd_command".to_string(),
-        "python3 test_calc_core.py".to_string(),
-    );
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_publishable".to_string(),
-        "true".to_string(),
-    );
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_output".to_string(),
-        stale_answer.to_string(),
-    );
-    loop_state.delivery_messages.push(stale_answer.to_string());
-    loop_state.last_user_visible_respond = Some(stale_answer.to_string());
-    loop_state.last_publishable_synthesis_output = Some(stale_answer.to_string());
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_2",
-        "fs_basic",
-        r#"{"extra":{"action":"write_text","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py"}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_3",
-        "run_cmd",
-        "Ran 3 tests in 0.000s\nOK\n",
-    ));
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_4", "synthesize_answer", stale_answer));
-    loop_state.executed_step_results.push(ok_step(
-        "step_5",
-        "fs_basic",
-        r#"{"extra":{"action":"read_text_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|def sub(a, b):\n4|    return a - b\n5|def mul(a, b):\n6|    return a * b"}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_6",
-        "fs_basic",
-        r#"{"extra":{"action":"read_text_range","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py","excerpt":"1|from calc_core import add, sub, mul\n2|def test_mul(self):\n3|    pass"}}"#,
-    ));
-    let context = local_code_context_with_required_fields(json!([
-        "changed_files",
-        "test_command",
-        "test_status",
-        "functions"
-    ]));
-
-    assert!(commit_local_code_strict_json_projection_after_readback(
-        &test_task(),
-        "最后只输出 JSON，包含 changed_files、test_command、test_status、functions。",
-        &mut loop_state,
-        Some(&context),
-    ));
-    let final_answer = loop_state
-        .delivery_messages
-        .last()
-        .expect("fresh delivery")
-        .as_str();
-    let value: serde_json::Value = serde_json::from_str(final_answer).expect("json");
-    assert_eq!(value["functions"], serde_json::json!(["add", "sub", "mul"]));
-    assert_ne!(final_answer, stale_answer);
-    assert_eq!(
-        loop_state
-            .output_vars
-            .get("agent_loop.strict_json_projection_output")
-            .map(String::as_str),
-        Some(final_answer)
-    );
 }
 
 #[test]
@@ -1107,23 +775,7 @@ fn answer_verifier_retry_summary_allows_preterminal_should_fail_reply() {
 }
 
 #[test]
-fn answer_verifier_retry_summary_uses_high_confidence_gap_even_without_flag() {
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: Vec::new(),
-        answer_incomplete_reason: "candidate contradicts observed evidence".to_string(),
-        should_retry: false,
-        retry_instruction: String::new(),
-        confidence: 0.95,
-    });
-    let reply = AskReply::non_llm("wrong answer".to_string()).with_task_journal(journal);
-
-    assert!(answer_verifier_retry_summary(&reply, None).is_some());
-}
-
-#[test]
-fn answer_verifier_retry_summary_respects_explicit_retry_flag() {
+fn answer_verifier_retry_summary_rejects_low_confidence_retry_flag() {
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -1135,155 +787,7 @@ fn answer_verifier_retry_summary_respects_explicit_retry_flag() {
     });
     let reply = AskReply::non_llm("single candidate".to_string()).with_task_journal(journal);
 
-    assert!(answer_verifier_retry_summary(&reply, None).is_some());
-}
-
-#[test]
-fn answer_verifier_retry_summary_skips_file_delivery_candidate_disambiguation() {
-    let mut route = route_result(OutputResponseShape::FileToken);
-    route.delivery_required = true;
-    route.delivery_intent = OutputDeliveryIntent::FileSingle;
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.push_step_result(&ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"find_name","count":3,"results":["docs/a.md","docs/b.md","docs/c.md"],"root":""},"text":"{}"}"#,
-    ));
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["path".to_string()],
-        answer_incomplete_reason: "single file path not selected".to_string(),
-        should_retry: true,
-        retry_instruction: "wait for user locator selection".to_string(),
-        confidence: 0.88,
-    });
-    let mut reply = AskReply::non_llm("multiple candidates".to_string()).with_task_journal(journal);
-
-    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
-    assert!(
-        suppress_answer_verifier_retry_if_user_locator_disambiguation(
-            &mut reply,
-            Some(&answer_contract(&route))
-        )
-    );
-    assert!(reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-        .is_none());
-}
-
-#[test]
-fn answer_verifier_retry_summary_skips_confirmed_missing_file_delivery() {
-    let mut route = route_result(OutputResponseShape::FileToken);
-    route.delivery_required = true;
-    route.delivery_intent = OutputDeliveryIntent::FileSingle;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-missing-file-delivery", "ask", "prompt");
-    journal.push_step_result(&ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"find_name","count":0,"results":[],"root":"/workspace","pattern":"definitely_missing_named_file_rustclaw_001.txt"},"text":"{}"}"#,
-    ));
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["path".to_string(), "content_excerpt".to_string()],
-        answer_incomplete_reason: "file delivery target is confirmed missing".to_string(),
-        should_retry: true,
-        retry_instruction: "repeat missing file search".to_string(),
-        confidence: 0.95,
-    });
-    let mut reply = AskReply::non_llm(
-        "没找到 definitely_missing_named_file_rustclaw_001.txt 这个文件。".to_string(),
-    )
-    .with_task_journal(journal);
-
-    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
-    assert!(
-        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
-            &mut reply,
-            Some(&answer_contract(&route))
-        )
-    );
-    assert!(reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-        .is_none());
-}
-
-#[test]
-fn confirmed_missing_file_delivery_suppresses_retry_without_legacy_delivery_intent() {
-    let mut route = route_result(OutputResponseShape::FileToken);
-    route.delivery_required = true;
-    route.delivery_intent = OutputDeliveryIntent::None;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-missing-file-delivery-no-intent",
-        "ask",
-        "prompt",
-    );
-    journal.push_step_result(&ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"find_name","count":0,"exact":false,"patterns":["definitely_missing_named_file_golden_001.txt"],"results":[],"root":""},"text":"{\"action\":\"find_name\",\"count\":0,\"exact\":false,\"patterns\":[\"definitely_missing_named_file_golden_001.txt\"],\"results\":[],\"root\":\"\"}"}"#,
-    ));
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["path".to_string()],
-        answer_incomplete_reason: "file delivery target is confirmed missing".to_string(),
-        should_retry: true,
-        retry_instruction: "repeat missing file search".to_string(),
-        confidence: 0.9,
-    });
-    let mut reply = AskReply::non_llm("definitely_missing_named_file_golden_001.txt".to_string())
-        .with_task_journal(journal);
-
-    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
-    assert!(
-        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
-            &mut reply,
-            Some(&answer_contract(&route))
-        )
-    );
-    assert!(reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-        .is_none());
-}
-
-#[test]
-fn confirmed_missing_file_delivery_does_not_suppress_success_token_claim() {
-    let mut route = route_result(OutputResponseShape::FileToken);
-    route.delivery_required = true;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-missing-file-delivery-token-claim",
-        "ask",
-        "prompt",
-    );
-    journal.push_step_result(&ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"find_name","count":0,"results":[],"root":""},"text":"{}"}"#,
-    ));
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["path".to_string()],
-        answer_incomplete_reason: "file delivery target is confirmed missing".to_string(),
-        should_retry: true,
-        retry_instruction: "repeat missing file search".to_string(),
-        confidence: 0.9,
-    });
-    let mut reply = AskReply::non_llm("FILE:/tmp/definitely_missing_named_file.txt".to_string())
-        .with_task_journal(journal);
-
-    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_some());
-    assert!(
-        !suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
-            &mut reply,
-            Some(&answer_contract(&route))
-        )
-    );
+    assert!(answer_verifier_retry_summary(&reply, None).is_none());
 }
 
 #[test]
@@ -1576,68 +1080,6 @@ fn terminal_model_answer_does_not_replace_single_machine_projection_with_observe
         Some(&answer_contract(&route))
     ));
     assert_eq!(reply.text, observed_projection);
-}
-
-#[test]
-fn permission_denied_content_access_suppresses_missing_evidence_retry() {
-    let mut route = route_result(OutputResponseShape::Strict);
-    route.configure_exact_command_output();
-    route.requires_content_evidence = true;
-    route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "/etc/shadow".to_string();
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-permission-denied", "ask", "prompt");
-    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: StepExecutionStatus::Error,
-        output_excerpt: None,
-        error_excerpt: Some(format!(
-            "__RC_SKILL_ERROR__:{}",
-            serde_json::json!({
-                "skill": "system_basic",
-                "error_kind": "permission_denied",
-                "error_text": "read_file failed for /etc/shadow: Permission denied (os error 13)",
-                "extra": {
-                    "operation": "read_file",
-                    "path": "/etc/shadow"
-                }
-            })
-        )),
-        started_at: 0,
-        finished_at: 0,
-    });
-    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
-        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-        contract_ok: true,
-        completion_ok: Some(true),
-        grounded_ok: Some(true),
-        format_ok: Some(true),
-        needs_clarify: Some(false),
-        used_evidence_ids_count: 1,
-        ..Default::default()
-    });
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["any_of(command_output|content_excerpt|field_value)".to_string()],
-        answer_incomplete_reason:
-            "missing required execution evidence: any_of(command_output|content_excerpt|field_value)"
-                .to_string(),
-        should_retry: true,
-        retry_instruction: "collect content evidence".to_string(),
-        confidence: 0.95,
-    });
-    let mut reply =
-        AskReply::non_llm("已尝试访问 `/etc/shadow`，但执行失败：Permission denied。".to_string())
-            .with_task_journal(journal);
-
-    assert!(suppress_answer_verifier_retry_if_structurally_satisfied(
-        &mut reply,
-        Some(&answer_contract(&route))
-    ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
-    assert!(!reply.should_fail_task);
 }
 
 #[test]

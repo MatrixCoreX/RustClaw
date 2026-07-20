@@ -794,24 +794,6 @@ fn valid_machine_value_continuation(value: &str) -> bool {
             .any(|ch| ch.is_ascii_digit() || matches!(ch, '_' | '-' | '.' | '/' | ':' | '@'))
 }
 
-pub(crate) fn observed_machine_text_fragments_from_journal(
-    journal: &crate::task_journal::TaskJournal,
-) -> Vec<String> {
-    let mut values = Vec::new();
-    for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        collect_machine_text_fragments_from_output(output, &mut values);
-    }
-    values.sort();
-    values.dedup();
-    values
-}
-
 pub(crate) fn collect_machine_text_fragments_from_output(output: &str, values: &mut Vec<String>) {
     let trimmed = output.trim();
     if trimmed.is_empty() {

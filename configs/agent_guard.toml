@@ -84,10 +84,6 @@ recoverable_failure_extra_rounds = 1
 # 建议修改/Recommended change: true 开启，false 降级单轮.
 # 风险/Risk: 关闭会回到单轮模式，复杂任务可能需要用户再次触发.
 multi_round_enabled = true
-# 用途/Purpose: Answer Verifier 发现答案缺证据/格式不满足时，最多允许自动补救重规划的次数.
-# 建议修改/Recommended change: 建议 1~2；0 表示只记录 verifier 缺口但不自动重试.
-# 风险/Risk: 过高会增加模型调用成本；仍受 max_rounds/no-progress/repeat guard 限制.
-answer_verifier_retry_limit = 2
 # 用途/Purpose: Answer Verifier required-evidence 强制阻断范围；替代全局 bool.
 # 终态值/Final token: all.
 # 建议修改/Recommended change: 保持 all；非 all 的历史值会被 runtime 归一化为 all。

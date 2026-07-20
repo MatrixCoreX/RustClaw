@@ -238,25 +238,6 @@ pub(super) fn journal_has_code_write_followed_by_failed_validation(
         .any(|(_, step)| validation_step_failed(step))
 }
 
-pub(super) fn post_write_content_evidence_readback_actions(
-    reply: &AskReply,
-    max_paths: usize,
-) -> Vec<AgentAction> {
-    if max_paths == 0 || !reply_has_post_write_content_evidence_gap(reply) {
-        return Vec::new();
-    }
-    reply
-        .task_journal
-        .as_ref()
-        .map(|journal| post_write_step_action_records(&journal.step_results))
-        .map(|records| missing_post_write_content_evidence_paths_from_records(&records))
-        .unwrap_or_default()
-        .into_iter()
-        .take(max_paths)
-        .map(post_write_readback_action)
-        .collect()
-}
-
 pub(super) fn commit_local_code_strict_json_projection_after_readback(
     task: &ClaimedTask,
     user_text: &str,
@@ -290,79 +271,6 @@ pub(super) fn commit_local_code_strict_json_projection_after_readback(
         answer,
     );
     true
-}
-
-pub(super) async fn try_run_post_write_content_evidence_readback_recovery(
-    state: &AppState,
-    task: &ClaimedTask,
-    goal: &str,
-    user_text: &str,
-    policy: &AgentLoopGuardPolicy,
-    loop_state: &mut LoopState,
-    reply: &AskReply,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Result<bool, String> {
-    if loop_state
-        .output_vars
-        .contains_key("agent_loop.post_write_readback_recovery_used")
-    {
-        return Ok(false);
-    }
-    let max_readbacks = policy.max_steps.max(1).min(8);
-    let actions = post_write_content_evidence_readback_actions(reply, max_readbacks);
-    if actions.is_empty() {
-        return Ok(false);
-    }
-    let recovery_policy =
-        post_write_content_evidence_readback_recovery_policy(policy, loop_state, actions.len());
-
-    loop_state.has_recoverable_failure_context = true;
-    loop_state.delivery_messages.clear();
-    loop_state.last_user_visible_respond = None;
-    loop_state.last_publishable_synthesis_output = None;
-    loop_state.last_stop_signal = Some("post_write_content_evidence_readback".to_string());
-    loop_state.output_vars.insert(
-        "agent_loop.post_write_readback_recovery_used".to_string(),
-        "true".to_string(),
-    );
-    loop_state.output_vars.insert(
-        "agent_loop.post_write_readback_recovery_budget_reserved".to_string(),
-        actions.len().to_string(),
-    );
-    attempt_ledger::record_attempt_with_retry_instruction(
-        loop_state,
-        "answer_verifier",
-        &format!("deterministic_readback_actions={}", actions.len()),
-        crate::executor::StepExecutionStatus::Error,
-        "post_write_content_evidence_required",
-        Some("answer_incomplete"),
-        "post_write_content_evidence_required",
-        Some("collect_bounded_post_write_content_evidence"),
-    );
-
-    let outcome = execute_actions_once(
-        state,
-        task,
-        goal,
-        user_text,
-        &actions,
-        loop_state,
-        &recovery_policy,
-        agent_run_context,
-    )
-    .await?;
-    commit_local_code_strict_json_projection_after_readback(
-        task,
-        user_text,
-        loop_state,
-        agent_run_context,
-    );
-    loop_state.last_stop_signal = Some(
-        outcome
-            .stop_signal
-            .unwrap_or_else(|| "post_write_content_evidence_readback_collected".to_string()),
-    );
-    Ok(outcome.executed_actions > 0)
 }
 
 pub(super) async fn try_run_post_write_validation_reserve_recovery(
@@ -630,32 +538,6 @@ pub(super) fn post_write_content_evidence_readback_recovery_policy(
     );
     recovery_policy.max_steps = recovery_policy.max_steps.max(action_count.max(1));
     recovery_policy
-}
-
-fn reply_has_post_write_content_evidence_gap(reply: &AskReply) -> bool {
-    reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-        .is_some_and(|summary| {
-            !summary.pass
-                && summary.should_retry
-                && summary
-                    .answer_incomplete_reason
-                    .starts_with("post_write_content_evidence_required")
-        })
-}
-
-fn post_write_readback_action(path: String) -> AgentAction {
-    AgentAction::CallTool {
-        tool: "fs_basic".to_string(),
-        args: serde_json::json!({
-            "action": "read_text_range",
-            "path": path,
-            "mode": "head",
-            "n": 120,
-        }),
-    }
 }
 
 fn latest_plan_trace_actions(loop_state: &LoopState) -> Vec<AgentAction> {

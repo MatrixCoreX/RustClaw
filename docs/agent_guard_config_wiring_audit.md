@@ -1,6 +1,6 @@
 # Agent Guard Config Wiring Audit
 
-Last updated: 2026-07-18
+Last updated: 2026-07-20
 
 This document originally supported the June 2026 agent-loop migration plan and
 is now maintained as supporting documentation for the active post-migration
@@ -35,7 +35,7 @@ wiring and intended ownership.
 | `agent.loop_guard.max_rounds` | Parsed and applied to `LoopState.max_rounds`. | Wired behavior. | Boundary Layer budget guard. | Keep task-class profile overrides; avoid removing config. |
 | `agent.loop_guard.recoverable_failure_extra_rounds` | Parsed and used by recoverable failure loop extension. | Wired behavior. | Loop budget/repair guard. | Keep; observe LLM cost in canaries. |
 | `agent.loop_guard.multi_round_enabled` | Parsed and logged/used by loop planning path. | Wired behavior. | Loop coordinator. | Keep as emergency rollback toward single-round behavior. |
-| `agent.loop_guard.answer_verifier_retry_limit` | Parsed and used for verifier retry loops. | Wired behavior. | Answer Verifier repair budget. | Keep; canary cost and verifier block rate. |
+| `agent.loop_guard.answer_verifier_retry_limit` | Physically removed. Final-answer recovery permits exactly one bounded synthesis retry selected by structured verifier fields. | Removed legacy key. | Answer Verifier evidence boundary. | Do not restore a configurable retry count or generated-prose repair loop. |
 | `agent.loop_guard.repeat_action_limit` | Parsed and used in repeat guard. | Wired behavior. | Loop repeat guard. | Keep. |
 | `agent.loop_guard.no_progress_limit` | Parsed and used in no-progress stop logic. | Wired behavior. | Loop progress guard. | Keep task-class overrides. |
 | `agent.loop_guard.max_tool_calls` | Parsed and used in execution loop tool-call guard. | Wired behavior. | Boundary Layer budget guard. | Keep. |

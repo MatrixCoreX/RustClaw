@@ -67,7 +67,7 @@ use compare_paths_metadata::replace_final_delivery_with_compare_paths_required_m
 #[path = "loop_reply_structured_observation.rs"]
 mod structured_observation;
 use structured_observation::{
-    deterministic_structured_container_summary_answer, direct_db_basic_observed_answer,
+    deterministic_structured_container_summary_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
     message_is_non_answer_separator,
 };
@@ -520,23 +520,6 @@ pub(crate) async fn finalize_loop_reply(
             log_deterministic_delivery_record(
                 &task.task_id,
                 "fallback_from_observed_scalar",
-                "attached",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-        }
-    }
-
-    if loop_state.delivery_messages.is_empty() {
-        if let Some((answer, summary)) =
-            direct_db_basic_observed_answer(state, user_text, &loop_state, agent_run_context)
-        {
-            finalizer_summary = Some(summary);
-            loop_state.last_user_visible_respond = Some(answer.clone());
-            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-            log_deterministic_delivery_record(
-                &task.task_id,
-                "fallback_from_db_basic_observed",
                 "attached",
                 agent_run_context,
                 loop_state.executed_step_results.len(),

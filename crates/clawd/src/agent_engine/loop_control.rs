@@ -5,25 +5,16 @@ use tracing::{info, warn};
 
 use super::support::publish_agent_loop_checkpoint_progress;
 use super::{
-    append_progress_hint, attempt_ledger, encode_progress_i18n, ensure_task_running,
-    execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
-    verifier_confirmation_gate_requires_checkpoint, AgentLoopGuardPolicy, AgentRunContext,
-    LoopState, RoundOutcome,
+    attempt_ledger, ensure_task_running, execute_actions_once, load_agent_loop_guard_policy,
+    prepare_round_actions, push_round_trace, verifier_confirmation_gate_requires_checkpoint,
+    AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, AskReply, ClaimedTask, IntentOutputContract};
 
 #[path = "loop_control_answer_recovery.rs"]
 mod loop_control_answer_recovery;
-#[path = "loop_control_answer_recovery_parse.rs"]
-mod loop_control_answer_recovery_parse;
-#[path = "loop_control_answer_recovery_text.rs"]
-mod loop_control_answer_recovery_text;
 #[path = "loop_control_finalization_gate.rs"]
 mod loop_control_finalization_gate;
-#[path = "loop_control_local_health_recovery.rs"]
-mod loop_control_local_health_recovery;
-#[path = "loop_control_machine_status_gap.rs"]
-mod loop_control_machine_status_gap;
 #[path = "loop_control_observe_round.rs"]
 mod loop_control_observe_round;
 #[path = "loop_control_plan_verifier_recovery.rs"]
@@ -36,11 +27,7 @@ mod loop_control_structured_clarify;
 mod loop_control_verifier_retry_commit;
 
 use loop_control_answer_recovery::*;
-use loop_control_answer_recovery_parse::*;
-use loop_control_answer_recovery_text::*;
 use loop_control_finalization_gate::*;
-use loop_control_local_health_recovery::*;
-use loop_control_machine_status_gap::*;
 pub(in crate::agent_engine) use loop_control_observe_round::observation_round_needs_planner;
 use loop_control_observe_round::{
     observe_only_round_should_continue, read_observe_round_should_continue,
@@ -104,6 +91,53 @@ fn commit_answer_verifier_retry_answer(reply: &mut AskReply, retried_answer: Str
     reply.error_text = None;
     reply.is_llm_reply = true;
     true
+}
+
+async fn try_bounded_answer_verifier_synthesis_retry(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    route: &crate::answer_verifier::AnswerContract,
+    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(journal_snapshot) = reply.task_journal.clone() else {
+        return false;
+    };
+    let verifier_out = answer_verifier_summary_to_out(verifier);
+    let Some(retried_answer) = crate::finalize::retry_loop_answer_after_verifier(
+        state,
+        task,
+        user_text,
+        &route.output_contract,
+        &journal_snapshot,
+        &reply.text,
+        &verifier_out,
+    )
+    .await
+    else {
+        return false;
+    };
+    let retry_verifier = crate::answer_verifier::verify_answer_observe_only(
+        state,
+        task,
+        user_text,
+        route,
+        &journal_snapshot,
+        &retried_answer,
+    )
+    .await;
+    if let Some(retry_verifier) = retry_verifier {
+        if !retry_verifier_accepts_rewritten_answer(&retry_verifier, &retried_answer) {
+            if let Some(journal) = reply.task_journal.as_mut() {
+                journal.record_answer_verifier_summary(retry_verifier);
+            }
+            return false;
+        }
+    } else if !retry_rewritten_answer_is_publishable(&retried_answer) {
+        return false;
+    }
+    commit_answer_verifier_retry_answer(reply, retried_answer)
 }
 
 async fn record_session_start_hooks(
@@ -1021,7 +1055,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         policy.repeat_action_limit
     );
     let mut round = 1usize;
-    let mut answer_verifier_retry_count = 0usize;
     let loop_started_at = Instant::now();
     let worker_task_timeout_seconds = crate::worker::task_budget::task_execution_timeout_seconds(
         state.worker.worker_task_timeout_seconds,
@@ -1143,227 +1176,22 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         enforce_code_mutation_validation_success_guard(&mut reply);
         let route_result = answer_contract.as_ref();
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
-        suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, route_result);
-        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, route_result);
         if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
-            if answer_verifier_output_format_machine_payload_gap(&verifier, &reply.text) {
-                if let (Some(route), Some(journal_snapshot)) =
-                    (route_result, reply.task_journal.clone())
-                {
-                    let verifier_out = answer_verifier_summary_to_out(&verifier);
-                    if let Some(retried_answer) = crate::finalize::retry_loop_answer_after_verifier(
-                        state,
-                        task,
-                        user_text,
-                        &journal_snapshot,
-                        &reply.text,
-                        &verifier_out,
-                    )
-                    .await
-                    {
-                        let retry_verifier = crate::answer_verifier::verify_answer_observe_only(
-                            state,
-                            task,
-                            user_text,
-                            route,
-                            &journal_snapshot,
-                            &retried_answer,
-                        )
-                        .await;
-                        if let Some(retry_verifier) = retry_verifier {
-                            if retry_verifier_accepts_rewritten_answer(
-                                &retry_verifier,
-                                &retried_answer,
-                            ) {
-                                if commit_answer_verifier_retry_answer(&mut reply, retried_answer) {
-                                    info!(
-                                        "answer_verifier_machine_payload_rewritten_to_visible_answer"
-                                    );
-                                    return Ok(reply);
-                                }
-                            }
-                            if let Some(journal) = reply.task_journal.as_mut() {
-                                journal.record_answer_verifier_summary(retry_verifier);
-                            }
-                        } else if retry_rewritten_answer_is_publishable(&retried_answer) {
-                            if commit_answer_verifier_retry_answer(&mut reply, retried_answer) {
-                                info!(
-                                    "answer_verifier_machine_payload_rewritten_to_visible_answer"
-                                );
-                                return Ok(reply);
-                            }
-                        } else {
-                            info!(
-                                "answer_verifier_retry_rewritten_answer_unpublishable_unresolved_machine_fields"
-                            );
-                        }
-                    }
-                }
-            }
-            if try_recover_structured_listing_answer_verifier_gap(route_result, &mut reply) {
-                return Ok(reply);
-            }
-            if try_recover_local_health_answer_verifier_gap_from_loop_state(
-                route_result,
-                &pre_finalize_loop_state,
-                &mut reply,
-            ) {
-                return Ok(reply);
-            }
-            if try_recover_machine_kv_summary_output_format_answer_verifier_gap(
-                route_result,
-                &mut reply,
-            ) {
-                return Ok(reply);
-            }
-            if answer_verifier_gap_requests_observed_content_rewrite(&verifier)
-                && try_rewrite_answer_verifier_gap_with_observed_evidence(
-                    state,
-                    task,
-                    user_text,
-                    route_result,
-                    &verifier,
-                    &mut reply,
+            if let Some(route) = route_result {
+                if try_bounded_answer_verifier_synthesis_retry(
+                    state, task, user_text, route, &verifier, &mut reply,
                 )
                 .await
-            {
-                return Ok(reply);
-            }
-            let mut deterministic_recovery_loop_state = pre_finalize_loop_state.clone();
-            if try_run_post_write_validation_reserve_recovery(
-                state,
-                task,
-                goal,
-                user_text,
-                &policy,
-                &mut deterministic_recovery_loop_state,
-                &reply,
-                agent_run_context,
-            )
-            .await?
-            {
-                loop_state = deterministic_recovery_loop_state;
-                round = loop_state.max_rounds + 1;
-                continue;
-            }
-            if answer_verifier_retry_budget_available(&policy, answer_verifier_retry_count) {
-                loop_state = pre_finalize_loop_state.clone();
-                if try_run_post_write_content_evidence_readback_recovery(
-                    state,
-                    task,
-                    goal,
-                    user_text,
-                    &policy,
-                    &mut loop_state,
-                    &reply,
-                    agent_run_context,
-                )
-                .await?
                 {
-                    round = loop_state.max_rounds + 1;
-                    continue;
+                    info!("answer_verifier_bounded_synthesis_retry_succeeded");
+                    return Ok(reply);
                 }
-            }
-            if answer_verifier_retry_budget_available(&policy, answer_verifier_retry_count) {
-                loop_state = pre_finalize_loop_state;
-                answer_verifier_retry_count += 1;
-                loop_state.has_recoverable_failure_context = true;
-                loop_state.delivery_messages.clear();
-                loop_state.last_user_visible_respond = None;
-                loop_state.last_publishable_synthesis_output = None;
-                loop_state.last_stop_signal = Some("answer_verifier_retry".to_string());
-                attempt_ledger::record_attempt_with_retry_instruction(
-                    &mut loop_state,
-                    "answer_verifier",
-                    &format!(
-                        "missing_evidence_fields={}",
-                        verifier.missing_evidence_fields.join(",")
-                    ),
-                    crate::executor::StepExecutionStatus::Error,
-                    &reply.text,
-                    Some("answer_incomplete"),
-                    &verifier.answer_incomplete_reason,
-                    Some(&verifier.retry_instruction),
-                );
-                append_progress_hint(
-                    state,
-                    task,
-                    &mut loop_state.progress_messages,
-                    encode_progress_i18n("telegram.progress.answer_incomplete_retry", &[]),
-                );
-                if loop_state.round_no >= loop_state.max_rounds {
-                    loop_state.max_rounds += 1;
-                }
-                round = loop_state.round_no + 1;
-                info!(
-                    "loop_round_extend task_id={} round={} reason=answer_verifier_retry new_max_rounds={}",
-                    task.task_id, loop_state.round_no, loop_state.max_rounds
-                );
-                continue;
             }
             warn!(
-                "answer_verifier_retry_exhausted task_id={} retry_count={} limit={} reason={}",
-                task.task_id,
-                answer_verifier_retry_count,
-                policy.answer_verifier_retry_limit,
-                crate::truncate_for_log(&verifier.answer_incomplete_reason)
+                task_id = %task.task_id,
+                missing_evidence_fields = ?verifier.missing_evidence_fields,
+                "answer_verifier_bounded_synthesis_retry_exhausted"
             );
-            if try_recover_structured_listing_answer_verifier_gap(route_result, &mut reply) {
-                return Ok(reply);
-            }
-            if try_recover_latest_synthesis_answer_verifier_gap(route_result, &mut reply) {
-                return Ok(reply);
-            }
-            if try_recover_log_analyze_answer_verifier_gap(user_text, &mut reply) {
-                return Ok(reply);
-            }
-            if try_recover_structured_search_answer_verifier_gap(
-                route_result,
-                user_text,
-                &mut reply,
-            ) {
-                return Ok(reply);
-            }
-            if try_recover_structured_scalar_output_format_answer_verifier_gap(
-                route_result,
-                &mut reply,
-            ) {
-                return Ok(reply);
-            }
-            if try_recover_machine_kv_summary_output_format_answer_verifier_gap(
-                route_result,
-                &mut reply,
-            ) {
-                return Ok(reply);
-            }
-            if try_rewrite_answer_verifier_gap_with_observed_evidence(
-                state,
-                task,
-                user_text,
-                route_result,
-                &verifier,
-                &mut reply,
-            )
-            .await
-            {
-                return Ok(reply);
-            }
-            if try_recover_structured_evidence_table_answer_verifier_gap(route_result, &mut reply) {
-                return Ok(reply);
-            }
-            if try_recover_local_health_answer_verifier_gap(route_result, &mut reply) {
-                return Ok(reply);
-            }
-            if try_recover_generic_path_content_read_range_answer_verifier_gap(
-                route_result,
-                &mut reply,
-            ) {
-                return Ok(reply);
-            }
-            if try_accept_language_only_output_format_answer_verifier_gap(route_result, &mut reply)
-            {
-                return Ok(reply);
-            }
             mark_reply_failed_after_answer_verifier_exhausted(user_text, &mut reply, &verifier);
         }
         return Ok(reply);

@@ -177,7 +177,7 @@ fn attempt_ledger_records_verifier_retry_instruction() {
         value
             .pointer("/0/repair_signal/repair_envelope/next_recovery_kind")
             .and_then(serde_json::Value::as_str),
-        Some("replan")
+        Some("synthesize_answer")
     );
     assert_eq!(
         value
