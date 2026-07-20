@@ -238,6 +238,26 @@ fn sse_disconnect_before_done_is_retryable_machine_condition() {
 }
 
 #[test]
+fn sse_terminal_finish_reason_allows_eof_without_done_marker() {
+    let mut decoder = SseDecoder::default();
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    for frame in decoder
+        .push(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"complete\"},\"finish_reason\":\"stop\"}]}\n\n",
+        )
+        .expect("decode terminal frame")
+    {
+        accumulator.apply(frame, None).expect("apply terminal frame");
+    }
+    accumulator.complete_terminal_eof();
+
+    let output = accumulator.finish(None).expect("terminal finish accepted");
+
+    assert_eq!(output.turn.text, "complete");
+    assert_eq!(output.turn.finish_reason, ModelFinishReason::Stop);
+}
+
+#[test]
 fn hidden_reasoning_delta_is_not_collected_or_emitted() {
     let mut decoder = SseDecoder::default();
     let mut accumulator = OpenAiStreamAccumulator::default();
@@ -255,4 +275,99 @@ fn hidden_reasoning_delta_is_not_collected_or_emitted() {
     assert_eq!(output.turn.text, "public");
     assert!(output.turn.reasoning_metadata.is_empty());
     assert!(!output.raw_response.contains("private"));
+}
+
+#[test]
+fn minimax_ndjson_stream_completes_on_terminal_finish_reason() {
+    let chunks = [
+        format!(
+            "{}\n",
+            json!({
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call-1",
+                            "function": {
+                                "name": "call_capability",
+                                "arguments": "{\"capability\":\"fs_basic.read_text_range\","
+                            }
+                        }]
+                    }
+                }]
+            })
+        ),
+        format!(
+            "{}\n",
+            json!({
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "function": {
+                                "arguments": "\"args\":{\"path\":\"README.md\"}}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            })
+        ),
+    ];
+    let mut decoder = SseDecoder::default();
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    for chunk in chunks {
+        for frame in decoder.push(chunk.as_bytes()).expect("decode NDJSON") {
+            accumulator.apply(frame, None).expect("apply NDJSON");
+        }
+    }
+    for frame in decoder.finish().expect("flush NDJSON") {
+        accumulator.apply(frame, None).expect("apply tail");
+    }
+    accumulator.complete_terminal_eof();
+
+    let output = accumulator.finish(None).expect("finish MiniMax stream");
+
+    assert_eq!(output.turn.tool_calls.len(), 1);
+    assert_eq!(
+        output.turn.tool_calls[0].arguments["capability"],
+        "fs_basic.read_text_range"
+    );
+    assert_eq!(output.turn.finish_reason, ModelFinishReason::ToolCalls);
+}
+
+#[test]
+fn minimax_ndjson_without_finish_reason_remains_disconnected() {
+    let mut decoder = SseDecoder::default();
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    for frame in decoder
+        .push(b"{\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n")
+        .expect("decode NDJSON")
+    {
+        accumulator.apply(frame, None).expect("apply NDJSON");
+    }
+    accumulator.complete_terminal_eof();
+
+    assert_eq!(
+        accumulator
+            .finish(None)
+            .expect_err("unterminated NDJSON rejected"),
+        "model_turn_stream_disconnected"
+    );
+}
+
+#[test]
+fn stream_raw_response_removes_minimax_think_content_across_frames() {
+    let frames = vec![
+        json!({"choices": [{"delta": {"content": "<think>private"}}]}),
+        json!({"choices": [{"delta": {"content": " reasoning</think>public"}}]}),
+        json!({"choices": [{"delta": {"content": " answer"}, "finish_reason": "stop"}]}),
+    ];
+
+    let raw =
+        provider_safe_stream_raw_response(&frames, "<think>private reasoning</think>public answer");
+
+    assert!(!raw.contains("private"));
+    assert!(!raw.contains("<think>"));
+    assert!(raw.contains("public answer"));
 }

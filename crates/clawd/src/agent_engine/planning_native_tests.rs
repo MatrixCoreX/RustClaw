@@ -1,4 +1,4 @@
-use claw_core::model_turn::{ModelFinishReason, ModelToolCall};
+use claw_core::model_turn::{ModelContentPart, ModelFinishReason, ModelRole, ModelToolCall};
 
 use super::*;
 
@@ -72,5 +72,26 @@ fn native_tool_rejects_unknown_protocol_name_and_invalid_args() {
     assert_eq!(
         actions_from_native_turn(&invalid).expect_err("invalid args rejected"),
         "native_plan_args_not_object"
+    );
+}
+
+#[test]
+fn native_request_separates_system_protocol_from_user_turn() {
+    let request = native_planner_request("protocol", "current turn");
+
+    assert_eq!(request.messages.len(), 2);
+    assert_eq!(request.messages[0].role, ModelRole::System);
+    assert_eq!(request.messages[1].role, ModelRole::User);
+    assert_eq!(
+        request.messages[0].content,
+        vec![ModelContentPart::Text {
+            text: "protocol".to_string()
+        }]
+    );
+    assert_eq!(
+        request.messages[1].content,
+        vec![ModelContentPart::Text {
+            text: "current turn".to_string()
+        }]
     );
 }

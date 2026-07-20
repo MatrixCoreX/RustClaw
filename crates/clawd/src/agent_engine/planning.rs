@@ -21,6 +21,7 @@ use super::{
 use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult};
 
 const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_protocol.md";
+const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
 
 /// Planner-visible tool and skill inventory for one loop round.
 ///
@@ -197,13 +198,77 @@ pub(super) async fn plan_round_actions(
         NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH,
     )
     .map_err(|error| error.to_string())?;
-    let native_prompt = format!("{prompt_text}\n\n{}", native_protocol.template);
-    let native_request = native_planner_request(&native_prompt);
+    let native_turn_context = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+        state,
+        NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH,
+    )
+    .map_err(|error| error.to_string())?;
+    let native_system_prompt = crate::render_prompt_template(
+        &native_protocol.template,
+        &[
+            ("__TOOL_SPEC__", &tool_spec_template),
+            ("__SKILL_PLAYBOOKS__", skill_playbooks),
+            (
+                "__CONFIG_RESPONSE_LANGUAGE__",
+                &state.policy.command_intent.default_locale,
+            ),
+            ("__AGENT_RUNTIME_IDENTITY__", &agent_runtime_identity),
+            ("__RUNTIME_OS__", &runtime_os),
+            ("__RUNTIME_SHELL__", &runtime_shell),
+            ("__WORKSPACE_ROOT__", &workspace_root),
+        ],
+    );
+    let native_history = if loop_state.round_no > 1 {
+        build_loop_history_compact(loop_state)
+    } else {
+        String::new()
+    };
+    let native_last_output = loop_state
+        .last_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(crate::truncate_for_log)
+        .or_else(|| loop_state.delivery_messages.last().cloned())
+        .unwrap_or_default();
+    let native_user_prompt = crate::render_prompt_template(
+        &native_turn_context.template,
+        &[
+            ("__USER_REQUEST__", &user_request_for_prompt),
+            ("__GOAL__", goal),
+            ("__TURN_ANALYSIS__", &turn_analysis),
+            ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
+            ("__ROUND__", &loop_state.round_no.to_string()),
+            ("__HISTORY_COMPACT__", &native_history),
+            ("__ATTEMPT_LEDGER__", &attempt_ledger),
+            ("__LAST_ROUND_OUTPUT__", &native_last_output),
+            ("__RECENT_ASSISTANT_REPLIES__", &recent_assistant_replies),
+        ],
+    );
+    crate::log_prompt_render_with_version(
+        state,
+        &task.task_id,
+        "native_action_protocol",
+        &native_protocol.source,
+        native_protocol.version.as_deref(),
+        Some(loop_state.round_no),
+    );
+    crate::log_prompt_render_with_version(
+        state,
+        &task.task_id,
+        "native_turn_context",
+        &native_turn_context.source,
+        native_turn_context.version.as_deref(),
+        Some(loop_state.round_no),
+    );
+    let native_prompt = format!("{native_system_prompt}\n\n{native_user_prompt}");
+    let native_prompt_source = format!("{}+{}", native_protocol.source, native_turn_context.source);
+    let native_request = native_planner_request(&native_system_prompt, &native_user_prompt);
     if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback(
         state,
         task,
         &native_prompt,
-        &prompt_source,
+        &native_prompt_source,
         &native_request,
     )
     .await?
@@ -289,9 +354,12 @@ pub(super) async fn plan_round_actions(
     Ok(plan_result)
 }
 
-fn native_planner_request(prompt: &str) -> ModelTurnRequest {
+fn native_planner_request(system_prompt: &str, user_prompt: &str) -> ModelTurnRequest {
     ModelTurnRequest {
-        messages: vec![ModelMessage::text(ModelRole::User, prompt)],
+        messages: vec![
+            ModelMessage::text(ModelRole::System, system_prompt),
+            ModelMessage::text(ModelRole::User, user_prompt),
+        ],
         tools: vec![ModelToolDefinition {
             name: "call_capability".to_string(),
             description: "Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.".to_string(),

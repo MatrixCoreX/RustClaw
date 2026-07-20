@@ -9,6 +9,11 @@ base = []
 overlay = ["prompts/layers/overlays/native_action_protocol.md"]
 
 [[prompts]]
+logical_path = "prompts/native_turn_context.md"
+base = []
+overlay = ["prompts/layers/overlays/native_turn_context.md"]
+
+[[prompts]]
 logical_path = "prompts/single_plan_execution_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",
