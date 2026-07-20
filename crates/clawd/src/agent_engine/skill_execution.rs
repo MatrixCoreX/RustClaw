@@ -1127,6 +1127,22 @@ pub(super) async fn execute_prepared_skill_action(
     } else {
         crate::execution_recipe::ValidationObservation::Passed
     };
+    let capability_result = match step_execution.output.as_deref() {
+        Some(output) => crate::capability_result::successful_execution_envelope(
+            normalized_skill,
+            &step_execution.step_id,
+            classification_args,
+            output,
+            structured_extra.as_ref(),
+        ),
+        None => crate::capability_result::failed_execution_envelope(
+            normalized_skill,
+            &step_execution.step_id,
+            classification_args,
+            step_execution.error.as_deref().unwrap_or_default(),
+        ),
+    };
+    loop_state.capability_results.push(capability_result);
     match step_execution.output.as_ref() {
         Some(out) => {
             let mut outcome = handle_skill_step_success(

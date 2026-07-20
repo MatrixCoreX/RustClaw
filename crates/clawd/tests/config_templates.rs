@@ -227,6 +227,7 @@ fn strict_json_overlay_prompts_are_classified_in_schema_inventory() {
     let observed = strict_json_overlay_prompt_files();
 
     let schema_backed: BTreeSet<String> = [
+        "capability_result_synthesis_prompt.md",
         "image_reference_resolver_prompt.md",
         "image_vision_action_compare.md",
         "image_vision_action_describe.md",

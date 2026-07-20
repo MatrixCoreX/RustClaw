@@ -838,8 +838,34 @@ pub(super) async fn handle_synthesize_answer_action(
         step_in_round,
         crate::truncate_for_log(&refs_summary)
     );
+    let capability_synthesis =
+        match super::capability_result_synthesis::synthesize_from_capability_results(
+            state,
+            task,
+            user_text,
+            loop_state,
+            agent_run_context,
+        )
+        .await
+        {
+            Ok(synthesis) => synthesis,
+            Err(error_code) => {
+                tracing::warn!(
+                    "capability_result_synthesis_unavailable task_id={} error_code={}",
+                    task.task_id,
+                    error_code
+                );
+                None
+            }
+        };
+    let capability_synthesis_answer = capability_synthesis
+        .as_ref()
+        .map(|synthesis| synthesis.answer.clone());
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
+            if let Some(answer) = capability_synthesis_answer {
+                return Ok(answer);
+            }
             if let Some(route) = agent_run_context.and_then(|context| context.output_contract())
             {
                 if let Some(answer) =
@@ -1026,6 +1052,17 @@ pub(super) async fn handle_synthesize_answer_action(
     {
         Some(answer) => {
             let answer = answer.to_string();
+            if let Some(synthesis) = capability_synthesis.as_ref() {
+                loop_state.last_capability_synthesis_output = Some(answer.clone());
+                loop_state.output_vars.insert(
+                    "agent_loop.capability_synthesis_confidence".to_string(),
+                    synthesis.confidence.to_string(),
+                );
+                loop_state.output_vars.insert(
+                    "agent_loop.capability_synthesis_evidence_count".to_string(),
+                    synthesis.evidence_count.to_string(),
+                );
+            }
             if strict_json_projection_answer_satisfies_request(
                 user_text,
                 &answer,
