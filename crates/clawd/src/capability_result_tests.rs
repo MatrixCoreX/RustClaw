@@ -99,6 +99,37 @@ fn read_range_result_preserves_explicit_title_field() {
 }
 
 #[test]
+fn read_range_result_preserves_excerpt_for_generic_judgment_synthesis() {
+    let extra = json!({
+        "action": "read_range",
+        "path": "docs/release_checklist.md",
+        "mode": "head",
+        "requested_n": 20,
+        "excerpt": "1|# Release Checklist\n2|Verify config loading.",
+        "start_line": 1,
+        "end_line": 2,
+        "total_lines": 8
+    });
+    let envelope = super::successful_execution_envelope(
+        "fs_basic",
+        "step_1",
+        &json!({"action": "read_text_range"}),
+        "untrusted fallback",
+        Some(&extra),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/excerpt"),
+        extra.get("excerpt")
+    );
+    assert_eq!(envelope.data.pointer("/extra/path"), extra.get("path"));
+    assert_eq!(
+        envelope.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+}
+
+#[test]
 fn path_facts_result_preserves_single_basename_field() {
     let extra = json!({
         "action": "path_batch_facts",

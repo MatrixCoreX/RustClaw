@@ -9,7 +9,6 @@ pub(crate) fn local_compound_listing_answer_verifier_gap(
     if !contract.requires_content_evidence
         || contract.delivery_required
         || !route_result.output_contract_marker_is_any(&[
-            crate::OutputSemanticKind::ExcerptKindJudgment,
             crate::OutputSemanticKind::ContentExcerptSummary,
             crate::OutputSemanticKind::ContentExcerptWithSummary,
             crate::OutputSemanticKind::DirectoryPurposeSummary,

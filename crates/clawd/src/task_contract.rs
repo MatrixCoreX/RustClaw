@@ -86,8 +86,7 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::ContentExcerptWithSummary
         | OutputSemanticKind::DirectoryPurposeSummary
         | OutputSemanticKind::WorkspaceProjectSummary
-        | OutputSemanticKind::RecentArtifactsJudgment
-        | OutputSemanticKind::ExcerptKindJudgment => TaskOperation::Summarize,
+        | OutputSemanticKind::RecentArtifactsJudgment => TaskOperation::Summarize,
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
@@ -238,8 +237,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
             fields.insert("path");
         }
         OutputSemanticKind::ContentExcerptSummary
-        | OutputSemanticKind::ContentExcerptWithSummary
-        | OutputSemanticKind::ExcerptKindJudgment => {
+        | OutputSemanticKind::ContentExcerptWithSummary => {
             fields.insert("content_excerpt");
         }
         OutputSemanticKind::WorkspaceProjectSummary => {

@@ -245,20 +245,6 @@ required_evidence = ["content_excerpt"]
 final_answer_shape = "excerpt_plus_summary"
 failure_policy = "retry_with_alternatives"
 
-[contracts.excerpt_kind_judgment]
-semantic_kind = "excerpt_kind_judgment"
-operation = "summarize"
-target_object = "path"
-delivery_shape = "summary"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries", "fs_basic.stat_paths", "fs_basic.read_text_range", "doc_parse", "archive_basic.read", "config_basic.read_field", "config_basic.read_fields"]
-preferred_actions = ["fs_basic.read_text_range"]
-required_evidence = ["content_excerpt"]
-final_answer_shape = "judgment_with_excerpt_basis"
-failure_policy = "retry_with_alternatives"
-
-[contracts.excerpt_kind_judgment.evidence_expression]
-any_of = ["content_excerpt", "candidates", "count", "field_value"]
-
 [contracts.recent_artifacts_judgment]
 semantic_kind = "recent_artifacts_judgment"
 operation = "summarize"

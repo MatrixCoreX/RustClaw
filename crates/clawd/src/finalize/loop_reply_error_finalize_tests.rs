@@ -119,7 +119,7 @@ async fn finalize_loop_reply_sanitizes_contract_rejection_error() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.locator_hint = "docs/release_checklist.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -128,10 +128,10 @@ async fn finalize_loop_reply_sanitizes_contract_rejection_error() {
     let structured_error = serde_json::json!({
         "skill": "system_basic",
         "error_kind": "contract_action_rejected",
-        "error_text": "action `system_basic.inventory_dir` is rejected by contract `excerpt_kind_judgment`",
+        "error_text": "action `system_basic.inventory_dir` is rejected by contract `content_excerpt_summary`",
         "extra": {
             "action": "system_basic.inventory_dir",
-            "contract_match": "excerpt_kind_judgment"
+            "contract_match": "content_excerpt_summary"
         }
     });
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -154,6 +154,6 @@ async fn finalize_loop_reply_sanitizes_contract_rejection_error() {
 
     assert!(reply.text.contains("contract_action_rejected"));
     assert!(!reply.text.contains("__RC_SKILL_ERROR__"));
-    assert!(!reply.text.contains("excerpt_kind_judgment"));
+    assert!(!reply.text.contains("content_excerpt_summary"));
     assert!(!reply.text.contains("system_basic.inventory_dir"));
 }

@@ -469,7 +469,7 @@ async fn finalize_loop_reply_prefers_latest_synthesis_for_compound_observations(
         .push(ok_step_result("step_4", "respond", partial_table));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -563,7 +563,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_respond_synthesis_over_titl
         .push(ok_step_result("step_2", "respond", synthesis));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     route.delivery_required = false;
     let ctx = crate::agent_engine::AgentRunContext {

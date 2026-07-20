@@ -328,65 +328,6 @@ fn one_sentence_content_excerpt_tail_read_selects_observed_log_line() {
 }
 
 #[test]
-fn one_sentence_excerpt_kind_tail_read_selects_observed_log_line() {
-    let state = test_state();
-    let task = claimed_task("task-tail-excerpt-kind");
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
-    route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "logs/clawd.run.log".to_string();
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
-    loop_state
-        .delivery_messages
-        .push("unsupported synthesis".to_string());
-    loop_state.last_user_visible_respond = Some("unsupported synthesis".to_string());
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"read_range","mode":"tail","requested_n":3,"excerpt":"20|2026-06-25T09:11:01Z INFO task_call: executor_step_start step=1\n21|2026-06-25T09:11:02Z INFO task_call: verifier_result approved=true issue_count=0\n22|2026-06-25T09:11:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=stale_round"}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "synthesize_answer",
-        "unsupported synthesis",
-    ));
-    let mut finalizer_summary = None;
-
-    assert!(replace_delivery_with_latest_tail_read_range_answer(
-        &state,
-        &task,
-        "select one line",
-        &mut loop_state,
-        Some(&agent_run_context),
-        &mut finalizer_summary,
-    ));
-
-    let answer = loop_state
-        .last_user_visible_respond
-        .as_deref()
-        .unwrap_or("");
-    assert_eq!(
-        answer,
-        "2026-06-25T09:11:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=stale_round"
-    );
-    assert!(!answer.contains("unsupported synthesis"));
-    assert_eq!(
-        loop_state.delivery_messages.last().map(String::as_str),
-        Some(answer)
-    );
-    assert_eq!(
-        finalizer_summary.and_then(|summary| summary.disposition),
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
-}
-
-#[test]
 fn tail_read_range_observed_answer_allows_malformed_none_semantic_fs_basic() {
     let state = test_state();
     let task = claimed_task("task-tail-none");

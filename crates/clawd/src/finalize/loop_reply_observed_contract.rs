@@ -214,7 +214,6 @@ fn route_allows_publishable_summary_over_observed_projection(
     route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
-        crate::OutputSemanticKind::ExcerptKindJudgment,
         crate::OutputSemanticKind::WorkspaceProjectSummary,
     ]) && shape_allows_publishable_summary
 }

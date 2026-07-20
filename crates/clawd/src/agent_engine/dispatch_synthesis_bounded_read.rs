@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::agent_engine::{AgentRunContext, LoopState};
-use crate::{OutputLocatorKind, OutputResponseShape, OutputSemanticKind};
+use crate::{OutputLocatorKind, OutputResponseShape};
 
 pub(super) fn synthesize_bounded_read_range_direct_answer(
     loop_state: &LoopState,
@@ -33,14 +33,8 @@ fn route_allows_bounded_read_range_direct_answer(route: &crate::IntentOutputCont
                 | OutputLocatorKind::Filename
                 | OutputLocatorKind::CurrentWorkspace
         )
+        && !contract.requires_content_evidence
         && route.semantic_kind_is_unclassified()
-        && !route.semantic_kind_is_any(&[
-            OutputSemanticKind::ContentExcerptSummary,
-            OutputSemanticKind::ContentExcerptWithSummary,
-            OutputSemanticKind::ExcerptKindJudgment,
-            OutputSemanticKind::RawCommandOutput,
-            OutputSemanticKind::CommandOutputSummary,
-        ])
 }
 
 fn bounded_read_range_answer_from_output(output: &str) -> Option<String> {
