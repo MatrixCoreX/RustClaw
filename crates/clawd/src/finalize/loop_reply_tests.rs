@@ -42,7 +42,6 @@ use super::{
     prefer_latest_synthesis_for_compound_observation_delivery,
     prefer_observed_answer_for_exact_contract, preferred_route_clarify_question,
     preserve_compound_content_summary_with_file_token, priority_last_respond_for_final_delivery,
-    promote_observed_language_delivery_summary,
     replace_delivery_with_deterministic_observed_execution_status_answer,
     replace_delivery_with_latest_tail_read_range_answer,
     replace_delivery_with_requested_machine_kv_summary,

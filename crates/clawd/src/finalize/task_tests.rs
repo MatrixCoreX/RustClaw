@@ -7,8 +7,8 @@ use super::{
     apply_requested_machine_kv_summary_to_final_answer, ask_runtime_failure_default_text,
     ask_runtime_failure_machine_payload, assistant_memory_source_text,
     compose_answer_verifier_failure_user_message, delivery_path_gap_should_finalize_as_clarify,
-    deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
-    deterministic_raw_tail_read_failure_recovery, deterministic_tree_summary_rows_failure_recovery,
+    deterministic_filtered_log_entry_recovery, deterministic_raw_tail_read_failure_recovery,
+    deterministic_tree_summary_rows_failure_recovery,
     drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
     finalize_ask_checkpointed, finalize_ask_result, journal_has_checkpointed_nonterminal_lifecycle,
     journal_has_missing_file_search_evidence, machine_payload_observed_facts,
@@ -295,7 +295,7 @@ fn requested_machine_kv_summary_final_guard_preserves_colon_field_values() {
     let prompt = "Return text_excerpt and detected_format.";
     let mut route = route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptWithSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-colon-fields", "ask", prompt);
     journal
@@ -393,7 +393,7 @@ fn requested_machine_kv_summary_final_guard_preserves_content_evidence_synthesis
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "README.md".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-content-evidence-final", "ask", prompt);
@@ -1013,76 +1013,6 @@ fn tree_summary_rows_failure_recovery_returns_machine_fields() {
     assert_eq!(
         recovered,
         "name=device_local file_count=2 truncated=false\nname=docs file_count=2 truncated=false"
-    );
-}
-
-#[test]
-fn content_tail_read_failure_recovery_selects_observed_log_line() {
-    let state = crate::AppState::test_default_with_fixture_provider();
-    let task = crate::ClaimedTask {
-        claim_attempt: 0,
-        task_id: "task-content-tail-recovery".to_string(),
-        user_id: 1,
-        chat_id: 1,
-        user_key: None,
-        channel: "test".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    };
-    let mut route = route_result();
-    route.response_shape = crate::OutputResponseShape::Free;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "/workspace/logs/clawd.run.log".to_string();
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-content-tail-recovery", "ask", "prompt");
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["content_excerpt".to_string()],
-        answer_incomplete_reason: "candidate omitted observed values".to_string(),
-        should_retry: true,
-        retry_instruction: "rewrite from observed step outputs".to_string(),
-        confidence: 0.9,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "action": "read_range",
-                    "mode": "tail",
-                    "requested_n": 3,
-                    "path": "/workspace/logs/clawd.run.log",
-                    "resolved_path": "/workspace/logs/clawd.run.log",
-                    "excerpt": "10|2026-06-25T09:12:01Z INFO task_call: executor_step_start step=1\n11|2026-06-25T09:12:02Z INFO task_call: verifier_result approved=true issue_count=0\n12|2026-06-25T09:12:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=content_excerpt"
-                },
-                "text": "{}"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let recovered = deterministic_content_tail_read_failure_recovery(
-        &state,
-        &task,
-        "read tail lines",
-        &route,
-        &journal,
-    )
-    .expect("content tail read should recover from observed evidence");
-
-    assert_eq!(
-        recovered,
-        "2026-06-25T09:12:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=content_excerpt"
     );
 }
 

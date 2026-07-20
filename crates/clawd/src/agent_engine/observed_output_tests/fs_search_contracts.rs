@@ -696,7 +696,7 @@ fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -715,7 +715,7 @@ fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
         parsed
             .get("final_answer_shape")
             .and_then(serde_json::Value::as_str),
-        Some("summary_grounded_in_excerpt")
+        Some("summary_with_evidence")
     );
     assert_eq!(
         parsed
@@ -821,7 +821,7 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -853,15 +853,17 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("requested_format=preserve"));
     route_result.exact_sentence_count = None;
-    route_result.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route_result.semantic_kind = OutputSemanticKind::None;
 
     route_result.response_shape = OutputResponseShape::Scalar;
+    route_result.selection.structured_field_selector = Some("value".to_string());
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=scalar"));
     assert!(observed_response_style_hint(Some(&agent_run_context)).contains("bare_value=true"));
 
     route_result.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route_result.selection.structured_field_selector = None;
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=existence_with_path"));
@@ -876,7 +878,7 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("aggregate_only=explicit_request_only"));
 
-    route_result.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.response_shape = OutputResponseShape::Free;
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
@@ -907,18 +909,18 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
 }
 
 #[test]
-fn chat_wrapped_free_unclassified_contract_allows_finalizer_passthrough() {
+fn chat_wrapped_free_content_contract_requires_model_synthesis() {
     let route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    assert!(!route_requires_synthesized_delivery(&route));
+    assert!(route_requires_synthesized_delivery(&route));
 
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
     let contract = observed_contract_json(Some(&agent_run_context));
-    assert!(contract.contains(r#""direct_observation_passthrough_allowed":true"#));
+    assert!(contract.contains(r#""direct_observation_passthrough_allowed":false"#));
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("style_policy=compact_direct"));
+        .contains("style_policy=evidence_synthesis"));
 }
 
 #[test]

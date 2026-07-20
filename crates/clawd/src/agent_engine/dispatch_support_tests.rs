@@ -1082,7 +1082,7 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
 }
 
 #[test]
-fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model() {
+fn generic_content_synthesis_defers_multiline_excerpt_to_model() {
     let state = test_state_with_registry();
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -1097,7 +1097,7 @@ fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model()
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/model_io.log".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1152,7 +1152,7 @@ fn unclassified_strict_evidence_contract_defers_direct_fallback_to_synthesis() {
 }
 
 #[test]
-fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
+fn synthesize_route_blocks_direct_fallback_for_plain_content_read() {
     let route = crate::IntentOutputContract {
         exact_sentence_count: None,
         response_shape: crate::OutputResponseShape::Free,
@@ -1169,11 +1169,11 @@ fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
         ..AgentRunContext::default()
     };
 
-    assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
+    assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
 }
 
 #[test]
-fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
+fn synthesize_route_blocks_direct_fallback_for_grounded_listing() {
     let route = crate::IntentOutputContract {
         exact_sentence_count: None,
         response_shape: crate::OutputResponseShape::Free,
@@ -1190,11 +1190,11 @@ fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
         ..AgentRunContext::default()
     };
 
-    assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
+    assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
 }
 
 #[test]
-fn synthesize_route_allows_observed_fallback_for_unclassified_delivery() {
+fn synthesize_route_blocks_observed_fallback_for_workspace_content() {
     let route = crate::IntentOutputContract {
         exact_sentence_count: None,
         response_shape: crate::OutputResponseShape::Free,
@@ -1211,7 +1211,7 @@ fn synthesize_route_allows_observed_fallback_for_unclassified_delivery() {
         ..AgentRunContext::default()
     };
 
-    assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
+    assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
 }
 
 #[test]

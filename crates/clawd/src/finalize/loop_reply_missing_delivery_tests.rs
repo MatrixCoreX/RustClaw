@@ -276,16 +276,16 @@ fn structured_failure_message_is_grounded_in_failed_step() {
 }
 
 #[test]
-fn observed_language_delivery_with_complete_contract_evidence_counts_as_publishable() {
+fn generic_content_observed_language_is_not_runtime_publishable() {
     let task = claimed_task("task-observed-language-evidence-complete");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "log_analyze",
-        r#"{"action":"analyze_log","keyword_counts":{},"level_counts":{},"path":"/tmp/app.log","total_lines":42}"#,
+        r#"{"extra":{"action":"analyze","field_value":{"keyword_counts":{},"level_counts":{},"total_lines":42},"path":"/tmp/app.log","total_lines":42},"text":"status=observed"}"#,
     ));
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::OneSentence;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "/tmp/app.log".to_string();
@@ -305,7 +305,7 @@ fn observed_language_delivery_with_complete_contract_evidence_counts_as_publisha
         ..Default::default()
     };
 
-    assert!(observed_delivery_has_complete_contract_evidence(
+    assert!(!observed_delivery_has_complete_contract_evidence(
         &task,
         "summarize the observed log analysis",
         &loop_state,
@@ -313,22 +313,6 @@ fn observed_language_delivery_with_complete_contract_evidence_counts_as_publisha
         Some(&summary),
         "no notable log findings"
     ));
-
-    let promoted = promote_observed_language_delivery_summary(Some(summary), &loop_state);
-    assert_eq!(
-        promoted.disposition,
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
-    assert_eq!(promoted.contract_ok, true);
-    assert_eq!(promoted.completion_ok, Some(true));
-    assert_eq!(promoted.grounded_ok, Some(true));
-    assert_eq!(promoted.format_ok, Some(true));
-    assert_eq!(promoted.needs_clarify, Some(false));
-
-    let (status, should_fail) =
-        observed_execution_without_publishable_delivery_outcome(true, Some(&promoted));
-    assert_eq!(status, crate::task_journal::TaskJournalFinalStatus::Success);
-    assert!(!should_fail);
 }
 
 #[test]
@@ -419,7 +403,7 @@ async fn observed_execution_without_delivery_uses_language_synthesis_for_config_
     ));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

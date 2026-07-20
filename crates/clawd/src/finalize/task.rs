@@ -72,8 +72,7 @@ use task_machine_kv_summary::recover_requested_machine_kv_summary_final_answer;
 use task_memory::assistant_memory_source_text;
 use task_memory::{insert_ask_memory_pair, insert_unfinished_goal_memory};
 use task_observed_failure_recovery::{
-    deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
-    deterministic_raw_tail_read_failure_recovery,
+    deterministic_filtered_log_entry_recovery, deterministic_raw_tail_read_failure_recovery,
 };
 use task_payload_helpers::{
     answer_verifier_forces_task_failure, answer_verifier_should_force_task_failure,
@@ -817,26 +816,6 @@ pub(crate) async fn finalize_ask_result(
                 answer_messages.push(answer_text.clone());
                 journal.record_final_answer(&answer_text);
                 mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
-            }
-            if let Some(recovered_answer) = deterministic_content_tail_read_failure_recovery(
-                state,
-                task,
-                prompt,
-                route_result,
-                &journal,
-            ) {
-                failure_reply = false;
-                semantic_clarify = false;
-                answer_text = recovered_answer;
-                answer_messages.clear();
-                answer_messages.push(answer_text.clone());
-                journal.record_final_answer(&answer_text);
-                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
-                info!(
-                    "finalize_content_tail_read_failure_recovered task_id={} answer={}",
-                    task.task_id,
-                    crate::truncate_for_log(&answer_text)
-                );
             }
             let mut recovered_structured_machine_rows = false;
             if let Some(recovered_answer) =

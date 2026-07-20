@@ -249,6 +249,7 @@ pub(crate) enum EvidenceToken {
     FieldValue,
     Kind,
     Path,
+    Url,
 }
 
 impl EvidenceToken {
@@ -264,6 +265,7 @@ impl EvidenceToken {
         Self::FieldValue,
         Self::Kind,
         Self::Path,
+        Self::Url,
     ];
 
     pub(crate) fn parse(raw: &str) -> Option<Self> {
@@ -278,6 +280,7 @@ impl EvidenceToken {
             "field_value" => Some(Self::FieldValue),
             "kind" => Some(Self::Kind),
             "path" => Some(Self::Path),
+            "url" => Some(Self::Url),
             _ => None,
         }
     }
@@ -295,6 +298,7 @@ impl EvidenceToken {
             Self::FieldValue => "field_value",
             Self::Kind => "kind",
             Self::Path => "path",
+            Self::Url => "url",
         }
     }
 }
@@ -556,14 +560,12 @@ pub(crate) enum FinalAnswerShape {
     DeliveryTokenOrPath,
     ExactList,
     ExistenceVerdictWithPath,
-    ExcerptPlusSummary,
     FailedStepWithEvidence,
     Free,
     LifecycleResult,
     RawOutputOrShortSummary,
     Scalar,
     SinglePath,
-    SummaryGroundedInExcerpt,
     SummaryWithEvidence,
 }
 
@@ -612,14 +614,12 @@ impl FinalAnswerShape {
         Self::DeliveryTokenOrPath,
         Self::ExactList,
         Self::ExistenceVerdictWithPath,
-        Self::ExcerptPlusSummary,
         Self::FailedStepWithEvidence,
         Self::Free,
         Self::LifecycleResult,
         Self::RawOutputOrShortSummary,
         Self::Scalar,
         Self::SinglePath,
-        Self::SummaryGroundedInExcerpt,
         Self::SummaryWithEvidence,
     ];
 
@@ -628,14 +628,12 @@ impl FinalAnswerShape {
             "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
             "exact_list" => Some(Self::ExactList),
             "existence_verdict_with_path" => Some(Self::ExistenceVerdictWithPath),
-            "excerpt_plus_summary" => Some(Self::ExcerptPlusSummary),
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
             "free" => Some(Self::Free),
             "lifecycle_result" => Some(Self::LifecycleResult),
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
             "scalar" => Some(Self::Scalar),
             "single_path" => Some(Self::SinglePath),
-            "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
             "summary_with_evidence" => Some(Self::SummaryWithEvidence),
             _ => None,
         }
@@ -646,14 +644,12 @@ impl FinalAnswerShape {
             Self::DeliveryTokenOrPath => "delivery_token_or_path",
             Self::ExactList => "exact_list",
             Self::ExistenceVerdictWithPath => "existence_verdict_with_path",
-            Self::ExcerptPlusSummary => "excerpt_plus_summary",
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
             Self::Free => "free",
             Self::LifecycleResult => "lifecycle_result",
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
             Self::Scalar => "scalar",
             Self::SinglePath => "single_path",
-            Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
             Self::SummaryWithEvidence => "summary_with_evidence",
         }
     }
@@ -667,10 +663,8 @@ impl FinalAnswerShape {
             Self::ExistenceVerdictWithPath | Self::LifecycleResult => {
                 FinalAnswerShapeClass::Verdict
             }
-            Self::ExcerptPlusSummary
-            | Self::FailedStepWithEvidence
+            Self::FailedStepWithEvidence
             | Self::RawOutputOrShortSummary
-            | Self::SummaryGroundedInExcerpt
             | Self::SummaryWithEvidence => FinalAnswerShapeClass::GroundedSummary,
             Self::Free => FinalAnswerShapeClass::Freeform,
         }

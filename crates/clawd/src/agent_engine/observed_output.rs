@@ -103,13 +103,12 @@ pub(crate) use output_direct_answer::{
 
 #[path = "observed_output_read_range.rs"]
 mod output_read_range;
-use output_read_range::{
-    compose_content_excerpt_with_summary_answer, content_excerpt_summary_direct_answer_candidate,
-    normalize_read_range_excerpt_for_direct_answer, read_range_observed_candidate,
-    read_range_preserve_blank_lines,
-};
 pub(crate) use output_read_range::{
     normalize_read_range_excerpt, tail_read_range_direct_answer_candidate,
+};
+use output_read_range::{
+    normalize_read_range_excerpt_for_direct_answer, read_range_observed_candidate,
+    read_range_preserve_blank_lines,
 };
 
 #[path = "observed_output_structured_scalar.rs"]
@@ -883,18 +882,6 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             task.task_id,
             request_language_hint,
             crate::truncate_for_log(&answer)
-        );
-    }
-    if !answer.is_empty() {
-        let prefer_english = crate::fallback::fallback_prefers_english_for_language_hint(
-            state,
-            &request_language_hint,
-        );
-        answer = compose_content_excerpt_with_summary_answer(
-            &answer,
-            loop_state,
-            prefer_english,
-            agent_run_context,
         );
     }
     // §3.4 finalize-tier: 这里属于 observed_answer_fallback 兜底路径（finalize 层

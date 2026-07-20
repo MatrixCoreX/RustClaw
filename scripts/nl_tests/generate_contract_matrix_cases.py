@@ -48,10 +48,8 @@ PROBE_ACTIONS = [
 NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "不用执行任何操作，直接用一句话解释 RustClaw 是一个什么样的本地助手。",
     "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
-    "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
     "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
-    "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
 }
 
 NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -62,10 +60,8 @@ NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
 EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "Do not run any operation. In one sentence, explain what kind of local assistant RustClaw is.",
     "raw_command_output": "Run pwd and briefly tell me what the command printed.",
-    "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
     "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
-    "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
 }
 
 EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -433,7 +429,7 @@ def live_nl_action_preference_applicable(case: dict[str, Any]) -> bool:
     Contract actions may be conditionally valid for a subtype of the target
     object. For example, `archive_basic.read` is a valid way to provide a
     content excerpt when the target is an archive member, but the default live
-    prompt for `content_excerpt_summary` targets a plain markdown file. For
+    prompt for a generic path-content profile targets a plain markdown file. For
     live replay we keep the contract/evidence coverage but avoid forcing an
     action whose argument contract cannot be satisfied by that prompt.
     """
@@ -500,11 +496,8 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
                 case.get("final_answer_shape", ""),
             ]
         elif contract_id == "generic_path_content":
-            row["contract_match_any"] = ["generic_path_content", "content_excerpt_summary"]
-            row["contract_final_answer_shape_any"] = [
-                "summary_with_evidence",
-                "summary_grounded_in_excerpt",
-            ]
+            row["contract_match_any"] = ["generic_path_content"]
+            row["contract_final_answer_shape_any"] = ["summary_with_evidence"]
         else:
             row["contract_match"] = case["contract_id"]
             row["contract_final_answer_shape"] = case.get("final_answer_shape", "")

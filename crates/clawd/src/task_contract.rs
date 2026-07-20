@@ -73,8 +73,6 @@ pub(crate) fn operation_for_output_contract(
     match semantic_kind {
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
-        OutputSemanticKind::ContentExcerptSummary
-        | OutputSemanticKind::ContentExcerptWithSummary => TaskOperation::Summarize,
         OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
     }
@@ -215,10 +213,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
             fields.insert("exists");
             fields.insert("kind");
             fields.insert("path");
-        }
-        OutputSemanticKind::ContentExcerptSummary
-        | OutputSemanticKind::ContentExcerptWithSummary => {
-            fields.insert("content_excerpt");
         }
         _ => {}
     }

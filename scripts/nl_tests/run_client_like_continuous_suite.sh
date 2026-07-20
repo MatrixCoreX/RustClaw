@@ -733,8 +733,8 @@ if (
 language_render_tags = {
     "bound_path_summary",
     "chat",
-    "content_excerpt_summary",
-    "content_excerpt_with_summary",
+    "content_grounded_summary",
+    "content_grounded_excerpt_and_summary",
     "summary",
     "workspace_project_summary",
 }

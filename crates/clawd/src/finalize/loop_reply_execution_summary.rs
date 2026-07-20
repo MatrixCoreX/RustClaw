@@ -537,10 +537,7 @@ fn delivery_matches_synthesized_content_answer(
     ) {
         return false;
     }
-    if !matches!(
-        route.semantic_kind,
-        crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
-    ) {
+    if !matches!(route.semantic_kind, crate::OutputSemanticKind::None) {
         return false;
     }
     let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {

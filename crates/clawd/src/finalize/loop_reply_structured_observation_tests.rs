@@ -350,7 +350,7 @@ fn direct_structured_observed_answer_uses_dirs_only_inventory_despite_synthesis_
 }
 
 #[test]
-fn direct_structured_observed_answer_keeps_passthrough_without_synthesis_plan() {
+fn direct_structured_observed_answer_defers_generic_content_to_synthesis() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -366,10 +366,7 @@ fn direct_structured_observed_answer_keeps_passthrough_without_synthesis_plan() 
         ..Default::default()
     };
 
-    let (answer, _) = direct_structured_observed_answer(None, &loop_state, Some(&ctx))
-        .expect("direct passthrough without synthesis plan");
-
-    assert_eq!(answer, "[app]\nname = \"fixture\"");
+    assert!(direct_structured_observed_answer(None, &loop_state, Some(&ctx)).is_none());
 }
 
 #[test]

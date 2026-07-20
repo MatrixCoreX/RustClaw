@@ -197,7 +197,7 @@ fn scalar_count_json_value_counts_as_count_evidence() {
 #[test]
 fn log_analyze_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-log-summary", "ask", "总结日志异常");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ContentExcerptSummary);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "logs".to_string();

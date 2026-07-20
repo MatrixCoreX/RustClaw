@@ -895,7 +895,7 @@ fn loop_contract_observed_answer_requires_contract_evidence_completeness() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result();
     contract.response_shape = crate::OutputResponseShape::Scalar;
-    contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    contract.semantic_kind = crate::OutputSemanticKind::None;
     loop_state.output_contract = Some(contract);
     loop_state
         .executed_step_results
@@ -1111,6 +1111,7 @@ fn scalar_contract_replaces_multi_line_read_fields_delivery_with_unique_observed
     let mut route = scalar_route_result();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/repo/package.json".to_string();
+    route.selection.structured_field_selector = Some("results[1].value".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

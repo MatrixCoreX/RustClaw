@@ -562,7 +562,7 @@ fn requested_machine_kv_summary_preserves_colon_field_value_delivery() {
     loop_state.last_user_visible_respond = Some(answer.to_string());
     let mut delivery_messages = vec![answer.to_string()];
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Free;
     route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {

@@ -417,7 +417,7 @@ fn execution_summary_drops_existing_summary_for_strict_synthesized_delivery() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -515,7 +515,7 @@ fn execution_summary_suppressed_for_scalar_content_synthesis() {
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -927,7 +927,7 @@ fn execution_summary_suppressed_for_strict_content_excerpt_contract() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -996,7 +996,7 @@ fn execution_summary_sanitizes_log_excerpt_secrets_and_ansi() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1039,7 +1039,7 @@ fn execution_summary_skips_for_exact_sentence_count_contract() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.exact_sentence_count = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

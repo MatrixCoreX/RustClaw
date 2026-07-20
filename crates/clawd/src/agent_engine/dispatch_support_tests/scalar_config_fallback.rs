@@ -18,7 +18,10 @@ fn synthesize_direct_fallback_allows_wrapped_empty_config_scalar_for_path_contra
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "Cargo.toml".to_string(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("value".to_string()),
+            ..Default::default()
+        },
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),

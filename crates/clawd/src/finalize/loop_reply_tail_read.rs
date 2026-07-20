@@ -58,11 +58,7 @@ pub(super) fn route_allows_latest_tail_read_range_delivery(
     }
     !contract.delivery_required
         && contract.requires_content_evidence
-        && (route.semantic_kind_is_unclassified()
-            || route.semantic_kind_is_any(&[
-                crate::OutputSemanticKind::ContentExcerptSummary,
-                crate::OutputSemanticKind::RawCommandOutput,
-            ]))
+        && route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
 }
 
 pub(super) fn latest_tail_read_range_observed_answer(
@@ -79,12 +75,7 @@ pub(super) fn latest_tail_read_range_observed_answer(
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let prefer_english =
         crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
-    let answer = if route_prefers_deterministic_tail_line(Some(route)) {
-        latest_tail_read_range_selected_line_from_loop(loop_state, prefer_english)
-            .or_else(|| latest_bounded_read_range_answer_from_loop(loop_state, prefer_english))?
-    } else {
-        latest_bounded_read_range_answer_from_loop(loop_state, prefer_english)?
-    };
+    let answer = latest_bounded_read_range_answer_from_loop(loop_state, prefer_english)?;
     if answer.trim().is_empty() {
         return None;
     }
@@ -601,105 +592,6 @@ fn flat_bounded_read_range_answer_from_value(
         .filter(|answer| !answer.is_empty())
 }
 
-fn normalized_tail_read_range_lines_from_value(
-    value: &serde_json::Value,
-    prefer_english: bool,
-) -> Option<Vec<String>> {
-    if let Some(lines) = flat_normalized_tail_read_range_lines_from_value(value, prefer_english) {
-        return Some(lines);
-    }
-    value
-        .get("extra")
-        .and_then(|extra| normalized_tail_read_range_lines_from_value(extra, prefer_english))
-}
-
-fn flat_normalized_tail_read_range_lines_from_value(
-    value: &serde_json::Value,
-    _prefer_english: bool,
-) -> Option<Vec<String>> {
-    if !flat_value_is_tail_read_range(value) {
-        return None;
-    }
-    let excerpt = value.get("excerpt").and_then(|value| value.as_str())?;
-    let lines = crate::agent_engine::observed_output::normalize_read_range_excerpt(excerpt)?
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    (!lines.is_empty()).then_some(lines)
-}
-
-pub(crate) fn selected_tail_read_range_line_from_step_output(
-    output: &str,
-    prefer_english: bool,
-) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
-    let lines = normalized_tail_read_range_lines_from_value(&value, prefer_english)?;
-    select_tail_read_range_line(&lines)
-}
-
-fn tail_line_attention_score(line: &str) -> u8 {
-    let upper = line.to_ascii_uppercase();
-    if upper.contains(" ERROR ") || upper.contains(" ERROR:") || upper.contains("LEVEL=ERROR") {
-        return 100;
-    }
-    if upper.contains(" WARN ") || upper.contains(" WARN:") || upper.contains("LEVEL=WARN") {
-        return 90;
-    }
-    if line.contains("answer_verifier_observed_gap") {
-        return 86;
-    }
-    if line.contains("verifier_result") {
-        return 84;
-    }
-    if line.contains("loop_round_extend") || line.contains("synthesize_answer_failed") {
-        return 78;
-    }
-    if line.contains("task_call:") {
-        return 60;
-    }
-    10
-}
-
-fn line_contains_internal_redaction(line: &str) -> bool {
-    line.contains("[INTERNAL_CONTEXT_REDACTED]")
-}
-
-fn select_tail_read_range_line(lines: &[String]) -> Option<String> {
-    lines
-        .iter()
-        .filter(|line| !line_contains_internal_redaction(line))
-        .enumerate()
-        .max_by_key(|(idx, line)| (tail_line_attention_score(line), *idx))
-        .map(|(_, line)| line.trim().to_string())
-        .or_else(|| {
-            lines
-                .iter()
-                .enumerate()
-                .max_by_key(|(idx, line)| (tail_line_attention_score(line), *idx))
-                .map(|(_, line)| line.trim().to_string())
-        })
-        .filter(|line| !line.is_empty())
-}
-
-pub(super) fn latest_tail_read_range_selected_line_from_loop(
-    loop_state: &LoopState,
-    prefer_english: bool,
-) -> Option<String> {
-    loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .find_map(|step| {
-            if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
-                return None;
-            }
-            let output = step.output.as_deref()?.trim();
-            selected_tail_read_range_line_from_step_output(output, prefer_english)
-        })
-}
-
 pub(super) fn current_user_visible_delivery_text(loop_state: &LoopState) -> Option<&str> {
     loop_state
         .delivery_messages
@@ -747,7 +639,6 @@ fn route_prefers_publishable_summary_over_tail_read(
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
         || route_requires_raw_tail_read_passthrough(Some(route))
-        || route_prefers_deterministic_tail_line(Some(route))
         || !matches!(
             crate::evidence_policy::final_answer_shape_for_output_contract(route),
             Some(crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence)
@@ -838,9 +729,6 @@ fn latest_tail_read_range_should_preserve_current_delivery(
     if route_requires_raw_tail_read_passthrough(route) {
         return false;
     }
-    if route_prefers_deterministic_tail_line(route) {
-        return false;
-    }
     if latest_tail_replacement_was_synthesized_after_tail(loop_state, current_delivery) {
         return true;
     }
@@ -853,9 +741,7 @@ fn latest_tail_read_range_should_preserve_current_delivery(
     if current_delivery_is_latest_registered_output(loop_state, current_delivery) {
         return true;
     }
-    route
-        .map(|route| route.semantic_kind_is(crate::OutputSemanticKind::ContentExcerptSummary))
-        .unwrap_or(false)
+    false
 }
 
 fn finalizer_summary_rejects_current_delivery(
@@ -870,22 +756,6 @@ fn finalizer_summary_rejects_current_delivery(
         || summary.completion_ok == Some(false)
         || summary.grounded_ok == Some(false)
         || summary.format_ok == Some(false)
-}
-
-fn semantic_kind_prefers_deterministic_tail_line(kind: crate::OutputSemanticKind) -> bool {
-    matches!(kind, crate::OutputSemanticKind::ContentExcerptSummary)
-}
-
-fn route_prefers_deterministic_tail_line(route: Option<&crate::IntentOutputContract>) -> bool {
-    route
-        .map(|route| {
-            let contract = route.clone();
-            contract.response_shape == crate::OutputResponseShape::OneSentence
-                && semantic_kind_prefers_deterministic_tail_line(route.semantic_kind)
-                && contract.requires_content_evidence
-                && !contract.delivery_required
-        })
-        .unwrap_or(false)
 }
 
 pub(super) fn route_requires_raw_tail_read_passthrough(

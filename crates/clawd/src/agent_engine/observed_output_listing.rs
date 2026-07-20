@@ -189,10 +189,7 @@ pub(super) fn route_allows_scalar_read_range_direct_answer(
         && (super::output_route_policy::route_is_unclassified_contract(route)
             || super::output_route_policy::route_contract_marker_is_any(
                 route,
-                &[
-                    crate::OutputSemanticKind::ContentExcerptSummary,
-                    crate::OutputSemanticKind::RawCommandOutput,
-                ],
+                &[crate::OutputSemanticKind::RawCommandOutput],
             ))
 }
 

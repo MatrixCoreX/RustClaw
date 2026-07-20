@@ -61,7 +61,7 @@ async fn finalize_loop_reply_promotes_machine_json_last_respond_to_delivery() {
     let state = test_state();
     let task = claimed_task("task-machine-envelope-last-respond");
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

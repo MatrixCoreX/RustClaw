@@ -375,7 +375,6 @@ pub(super) fn synthesize_direct_fallback_would_passthrough_multiline_read_range(
         return false;
     }
     let semantic_blocks_direct_passthrough = route.semantic_kind_is_unclassified()
-        || route.semantic_kind.is_content_excerpt_summary()
         || (route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
             && latest_round_plan_requests_synthesis(loop_state));
     if !semantic_blocks_direct_passthrough {

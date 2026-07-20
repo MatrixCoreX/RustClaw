@@ -189,7 +189,7 @@ RustClaw keeps natural-language understanding on the LLM side and deterministic 
 
 Runtime code should consume stable contracts such as:
 
-- evidence-policy answer-shape fields, for example `final_answer_shape = "content_excerpt_summary"` and `final_answer_shape_class = "grounded_summary"`
+- evidence-policy answer-shape fields, for example `final_answer_shape = "summary_with_evidence"` and `final_answer_shape_class = "grounded_summary"`
 - planner-owned capability refs, for example `capability_ref = "package.detect_manager"` or `call_capability("package.detect_manager")`
 - action names, for example `read_field`, `validate_config`, or `transform_data`
 - registry metadata and `planner_capabilities`

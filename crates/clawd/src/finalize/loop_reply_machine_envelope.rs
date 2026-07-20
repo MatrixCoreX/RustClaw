@@ -17,6 +17,26 @@ pub(super) fn attach_machine_envelope_delivery_from_loop(
     mark_machine_envelope_loop_complete(task, loop_state, finalizer_summary, agent_run_context)
 }
 
+pub(super) fn loop_has_machine_envelope(loop_state: &LoopState) -> bool {
+    latest_machine_envelope_message(loop_state).is_some()
+}
+
+pub(super) fn loop_has_subagent_machine_envelope(loop_state: &LoopState) -> bool {
+    loop_state
+        .delivery_messages
+        .iter()
+        .any(|message| subagent_machine_envelope_payload(message).is_some())
+        || loop_state
+            .last_user_visible_respond
+            .as_deref()
+            .is_some_and(|message| subagent_machine_envelope_payload(message).is_some())
+        || loop_state
+            .executed_step_results
+            .iter()
+            .filter_map(|step| step.output.as_deref())
+            .any(|message| subagent_machine_envelope_payload(message).is_some())
+}
+
 pub(super) fn mark_machine_envelope_delivery_complete(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
@@ -144,4 +164,13 @@ fn machine_envelope_payload(message: &str) -> Option<serde_json::Value> {
         return None;
     }
     Some(payload)
+}
+
+fn subagent_machine_envelope_payload(message: &str) -> Option<serde_json::Value> {
+    let payload = machine_envelope_payload(message)?;
+    payload
+        .get("owner_layer")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|owner| owner.starts_with("subagent_"))
+        .then_some(payload)
 }

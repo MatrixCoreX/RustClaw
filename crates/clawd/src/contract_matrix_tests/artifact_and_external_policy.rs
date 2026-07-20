@@ -282,10 +282,10 @@ fn generic_file_delivery_allows_image_edit_file_output() {
 }
 
 #[test]
-fn content_excerpt_summary_allows_log_analyze_for_log_paths() {
+fn generic_path_content_allows_log_analyze_for_log_paths() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "logs".to_string(),
@@ -298,14 +298,14 @@ fn content_excerpt_summary_allows_log_analyze_for_log_paths() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "log_analyze.analyze");
-    assert_eq!(policy.contract_match, "content_excerpt_summary");
+    assert_eq!(policy.contract_match, "generic_path_content");
 }
 
 #[test]
-fn content_excerpt_summary_allows_inline_transform_evidence() {
+fn generic_path_content_allows_inline_transform_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "docs/service_notes.md".to_string(),
@@ -324,16 +324,17 @@ fn content_excerpt_summary_allows_inline_transform_evidence() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "transform.transform_data");
-    assert_eq!(policy.contract_match, "content_excerpt_summary");
+    assert_eq!(policy.contract_match, "generic_path_content");
 }
 
 #[test]
-fn content_excerpt_summary_allows_health_check_field_evidence() {
+fn generic_path_content_allows_health_check_field_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::None,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "runtime".to_string(),
             response_shape: OutputResponseShape::OneSentence,
             ..IntentOutputContract::default()
         }),
@@ -344,11 +345,11 @@ fn content_excerpt_summary_allows_health_check_field_evidence() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "health_check");
-    assert_eq!(policy.contract_match, "content_excerpt_summary");
+    assert_eq!(policy.contract_match, "generic_path_content");
 }
 
 #[test]
-fn content_excerpt_summary_allows_structured_field_evidence() {
+fn generic_path_content_allows_structured_field_evidence() {
     for (action, expected_action_key) in [
         (
             serde_json::json!({
@@ -369,7 +370,7 @@ fn content_excerpt_summary_allows_structured_field_evidence() {
     ] {
         let policy = action_policy_for_output_contract(
             Some(&IntentOutputContract {
-                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                semantic_kind: OutputSemanticKind::None,
                 requires_content_evidence: true,
                 locator_kind: OutputLocatorKind::Path,
                 locator_hint: "package.json".to_string(),
@@ -383,14 +384,14 @@ fn content_excerpt_summary_allows_structured_field_evidence() {
 
         assert!(policy.is_allowed(), "{policy:?}");
         assert_eq!(policy.action_key, expected_action_key);
-        assert_eq!(policy.contract_match, "content_excerpt_summary");
+        assert_eq!(policy.contract_match, "generic_path_content");
     }
 }
 
 #[test]
-fn content_excerpt_summary_allows_supplemental_directory_inventory() {
+fn generic_path_content_allows_supplemental_directory_inventory() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::Path,
         locator_hint: "UI/package.json".to_string(),
@@ -406,7 +407,7 @@ fn content_excerpt_summary_allows_supplemental_directory_inventory() {
     .expect("list policy");
     assert!(list_policy.is_allowed(), "{list_policy:?}");
     assert_eq!(list_policy.action_key, "fs_basic.list_dir");
-    assert_eq!(list_policy.contract_match, "content_excerpt_summary");
+    assert_eq!(list_policy.contract_match, "generic_path_content");
 
     let find_policy = action_policy_for_output_contract(
         Some(&contract),
@@ -416,7 +417,7 @@ fn content_excerpt_summary_allows_supplemental_directory_inventory() {
     .expect("find policy");
     assert!(find_policy.is_allowed(), "{find_policy:?}");
     assert_eq!(find_policy.action_key, "fs_basic.find_entries");
-    assert_eq!(find_policy.contract_match, "content_excerpt_summary");
+    assert_eq!(find_policy.contract_match, "generic_path_content");
 
     let count_policy = action_policy_for_output_contract(
         Some(&contract),
@@ -426,5 +427,5 @@ fn content_excerpt_summary_allows_supplemental_directory_inventory() {
     .expect("count policy");
     assert!(count_policy.is_allowed(), "{count_policy:?}");
     assert_eq!(count_policy.action_key, "fs_basic.count_entries");
-    assert_eq!(count_policy.contract_match, "content_excerpt_summary");
+    assert_eq!(count_policy.contract_match, "generic_path_content");
 }

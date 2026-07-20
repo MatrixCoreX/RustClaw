@@ -76,8 +76,6 @@ pub(crate) enum OutputSemanticKind {
     #[default]
     None,
     RawCommandOutput,
-    ContentExcerptSummary,
-    ContentExcerptWithSummary,
     ScalarCount,
     ExistenceWithPath,
 }
@@ -86,8 +84,6 @@ impl OutputSemanticKind {
     pub(crate) const ALL: &'static [Self] = &[
         Self::None,
         Self::RawCommandOutput,
-        Self::ContentExcerptSummary,
-        Self::ContentExcerptWithSummary,
         Self::ScalarCount,
         Self::ExistenceWithPath,
     ];
@@ -96,18 +92,9 @@ impl OutputSemanticKind {
         match self {
             Self::None => "none",
             Self::RawCommandOutput => "raw_command_output",
-            Self::ContentExcerptSummary => "content_excerpt_summary",
-            Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
             Self::ScalarCount => "scalar_count",
             Self::ExistenceWithPath => "existence_with_path",
         }
-    }
-
-    pub(crate) fn is_content_excerpt_summary(self) -> bool {
-        matches!(
-            self,
-            Self::ContentExcerptSummary | Self::ContentExcerptWithSummary
-        )
     }
 }
 

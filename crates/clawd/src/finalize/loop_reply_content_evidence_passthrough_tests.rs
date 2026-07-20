@@ -18,7 +18,7 @@ fn content_evidence_contractual_terminal_answer_is_kept_before_meta_classifier()
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "release_checklist.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -181,7 +181,7 @@ fn content_evidence_contractual_terminal_answer_requires_observation() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

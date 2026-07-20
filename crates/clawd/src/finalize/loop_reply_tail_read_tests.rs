@@ -3,13 +3,13 @@ use super::*;
 use crate::finalize::loop_reply::enforce_delivery_output_contract;
 
 #[test]
-fn tail_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt() {
+fn generic_content_tail_read_does_not_replace_failed_synthesis() {
     let state = test_state();
     let task = claimed_task("task-tail");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd_manual.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -42,7 +42,7 @@ fn tail_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt
     ));
     let mut finalizer_summary = None;
 
-    assert!(replace_delivery_with_latest_tail_read_range_answer(
+    assert!(!replace_delivery_with_latest_tail_read_range_answer(
         &state,
         &task,
         "看最后一个最后 2 行",
@@ -53,17 +53,9 @@ fn tail_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt
 
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some("last alpha\nlast beta")
+        Some("由于日志输出被截断，无法查看最后2行内容。")
     );
-    assert_eq!(loop_state.delivery_messages, vec!["last alpha\nlast beta"]);
-    assert!(loop_state
-        .delivery_messages
-        .iter()
-        .all(|message| !crate::finalize::is_execution_summary_message(message)));
-    assert_eq!(
-        finalizer_summary.and_then(|summary| summary.disposition),
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
+    assert!(finalizer_summary.is_none());
 }
 
 #[test]
@@ -150,7 +142,7 @@ fn bounded_head_read_range_observed_answer_replaces_failed_synthesis_for_content
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/device_local/README.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -267,13 +259,13 @@ fn bounded_head_read_range_recovery_allows_unclassified_failed_free_route() {
 }
 
 #[test]
-fn one_sentence_content_excerpt_tail_read_selects_observed_log_line() {
+fn generic_one_sentence_content_keeps_model_synthesis_authority() {
     let state = test_state();
     let task = claimed_task("task-tail-one-sentence");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd.run.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -298,7 +290,7 @@ fn one_sentence_content_excerpt_tail_read_selects_observed_log_line() {
     ));
     let mut finalizer_summary = None;
 
-    assert!(replace_delivery_with_latest_tail_read_range_answer(
+    assert!(!replace_delivery_with_latest_tail_read_range_answer(
         &state,
         &task,
         "挑最值得注意的一行",
@@ -311,24 +303,16 @@ fn one_sentence_content_excerpt_tail_read_selects_observed_log_line() {
         .last_user_visible_respond
         .as_deref()
         .unwrap_or("");
-    assert_eq!(
-        answer,
-        "2026-06-25T09:10:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=unsupported_claims"
-    );
-    assert!(!answer.contains("MEMORY_USE_POLICY"));
-    assert!(!answer.contains("unsupported synthesis"));
+    assert_eq!(answer, "unsupported synthesis");
     assert_eq!(
         loop_state.delivery_messages.last().map(String::as_str),
         Some(answer)
     );
-    assert_eq!(
-        finalizer_summary.and_then(|summary| summary.disposition),
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
+    assert!(finalizer_summary.is_none());
 }
 
 #[test]
-fn tail_read_range_observed_answer_allows_malformed_none_semantic_fs_basic() {
+fn tail_read_range_rejects_unclassified_content_contract() {
     let state = test_state();
     let task = claimed_task("task-tail-none");
     let mut route = free_route_result();
@@ -354,7 +338,7 @@ fn tail_read_range_observed_answer_allows_malformed_none_semantic_fs_basic() {
     ));
     let mut finalizer_summary = None;
 
-    assert!(replace_delivery_with_latest_tail_read_range_answer(
+    assert!(!replace_delivery_with_latest_tail_read_range_answer(
         &state,
         &task,
         "看看最后 2 行",
@@ -367,9 +351,7 @@ fn tail_read_range_observed_answer_allows_malformed_none_semantic_fs_basic() {
         .last_user_visible_respond
         .as_deref()
         .unwrap_or("");
-    assert!(answer.contains("task-1"));
-    assert!(answer.contains("task-2"));
-    assert!(!answer.contains("已有执行结果"));
+    assert_eq!(answer, "已有执行结果，但我没能整理成可靠结论。");
 }
 
 #[test]
@@ -412,7 +394,7 @@ fn tail_read_range_observed_answer_ignores_json_hidden_in_visible_text() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd-dev.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -600,7 +582,7 @@ async fn enforce_contract_keeps_strict_raw_tail_read_with_error_like_log_text() 
 }
 
 #[test]
-fn tail_read_range_replaces_machine_evidence_projection() {
+fn generic_content_tail_read_keeps_machine_projection_for_model_synthesis() {
     let state = test_state();
     let task = claimed_task("task-tail-machine-projection");
     let mut route = free_route_result();
@@ -628,7 +610,7 @@ fn tail_read_range_replaces_machine_evidence_projection() {
     let mut finalizer_summary = None;
 
     assert!(looks_like_structured_machine_output(machine_projection));
-    assert!(replace_delivery_with_latest_tail_read_range_answer(
+    assert!(!replace_delivery_with_latest_tail_read_range_answer(
         &state,
         &task,
         "看最近 2 行",
@@ -639,13 +621,13 @@ fn tail_read_range_replaces_machine_evidence_projection() {
 
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some("fresh alpha\nfresh beta")
+        Some(machine_projection)
     );
     assert_eq!(
         loop_state.delivery_messages.last().map(String::as_str),
-        Some("fresh alpha\nfresh beta")
+        Some(machine_projection)
     );
-    assert!(finalizer_summary.is_some());
+    assert!(finalizer_summary.is_none());
 }
 
 #[tokio::test]
@@ -686,13 +668,13 @@ async fn content_evidence_failure_defers_when_latest_tail_read_range_available()
 }
 
 #[test]
-fn tail_read_range_observed_answer_selects_line_for_one_sentence_summary() {
+fn generic_one_sentence_tail_read_does_not_select_a_line_in_runtime() {
     let state = test_state();
     let task = claimed_task("task-tail-summary");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -705,7 +687,7 @@ fn tail_read_range_observed_answer_selects_line_for_one_sentence_summary() {
     ));
     let mut finalizer_summary = None;
 
-    assert!(replace_delivery_with_latest_tail_read_range_answer(
+    assert!(!replace_delivery_with_latest_tail_read_range_answer(
         &state,
         &task,
         "一句话总结最后两行",
@@ -713,7 +695,7 @@ fn tail_read_range_observed_answer_selects_line_for_one_sentence_summary() {
         Some(&agent_run_context),
         &mut finalizer_summary,
     ));
-    assert_eq!(loop_state.last_user_visible_respond.as_deref(), Some("b"));
+    assert!(loop_state.last_user_visible_respond.is_none());
 }
 
 #[test]
@@ -723,7 +705,7 @@ fn tail_read_range_observed_answer_preserves_existing_content_summary() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd.run.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -765,13 +747,13 @@ fn tail_read_range_observed_answer_preserves_existing_content_summary() {
 }
 
 #[test]
-fn tail_read_range_observed_answer_replaces_older_summary_when_tail_synthesized_after_read() {
+fn generic_tail_read_does_not_replace_model_summary() {
     let state = test_state();
     let task = claimed_task("task-tail-after-summary");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/model_io.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -810,7 +792,7 @@ fn tail_read_range_observed_answer_replaces_older_summary_when_tail_synthesized_
     ));
     let mut finalizer_summary = None;
 
-    assert!(replace_delivery_with_latest_tail_read_range_answer(
+    assert!(!replace_delivery_with_latest_tail_read_range_answer(
         &state,
         &task,
         "看下最近 2 行",
@@ -820,16 +802,13 @@ fn tail_read_range_observed_answer_replaces_older_summary_when_tail_synthesized_
     ));
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some(raw_tail_answer)
+        Some("model_io.log 里 error、failed、timeout 各出现 1 次。")
     );
     assert_eq!(
         loop_state.delivery_messages.last().map(String::as_str),
-        Some(raw_tail_answer)
+        Some("model_io.log 里 error、failed、timeout 各出现 1 次。")
     );
-    assert_eq!(
-        finalizer_summary.and_then(|summary| summary.disposition),
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
+    assert!(finalizer_summary.is_none());
 }
 
 #[test]
@@ -878,7 +857,7 @@ fn tail_read_range_observed_answer_preserves_latest_registered_respond() {
 }
 
 #[test]
-fn tail_read_range_restores_publishable_summary_when_current_delivery_is_path_projection() {
+fn generic_tail_read_does_not_reconstruct_model_summary_from_step_history() {
     let state = test_state();
     let task = claimed_task("task-tail-restore-summary-from-path");
     let mut route = free_route_result();
@@ -917,7 +896,7 @@ fn tail_read_range_restores_publishable_summary_when_current_delivery_is_path_pr
     ));
     let mut finalizer_summary = None;
 
-    assert!(replace_delivery_with_latest_tail_read_range_answer(
+    assert!(!replace_delivery_with_latest_tail_read_range_answer(
         &state,
         &task,
         "read the latest log tail and provide the requested takeaway",
@@ -927,16 +906,13 @@ fn tail_read_range_restores_publishable_summary_when_current_delivery_is_path_pr
     ));
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some(summary)
+        Some("clawd.run.log")
     );
     assert_eq!(
         loop_state.delivery_messages.last().map(String::as_str),
-        Some(summary)
+        Some("clawd.run.log")
     );
-    assert_eq!(
-        finalizer_summary.and_then(|summary| summary.disposition),
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
+    assert!(finalizer_summary.is_none());
 }
 
 #[test]

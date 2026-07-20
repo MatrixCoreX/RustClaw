@@ -9,7 +9,7 @@ async fn finalize_loop_reply_keeps_clarify_machine_envelope_internal_by_default(
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -172,7 +172,7 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         turn_analysis: Some(crate::turn_context::TurnAnalysis {

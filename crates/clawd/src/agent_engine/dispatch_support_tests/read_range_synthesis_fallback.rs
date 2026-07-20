@@ -61,7 +61,7 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
 }
 
 #[test]
-fn synthesize_direct_fallback_blocks_multiline_read_range_for_scalar_extraction() {
+fn synthesize_direct_fallback_allows_explicit_scalar_extraction() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -77,7 +77,10 @@ fn synthesize_direct_fallback_blocks_multiline_read_range_for_scalar_extraction(
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/service_notes.md".to_string(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("value".to_string()),
+            ..Default::default()
+        },
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -105,7 +108,7 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/service_notes.md".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -166,7 +169,7 @@ fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/service_notes.md".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };

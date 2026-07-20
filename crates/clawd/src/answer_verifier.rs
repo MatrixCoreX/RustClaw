@@ -22,11 +22,9 @@ mod answer_verifier_scalar;
 
 use answer_verifier_delivery_raw::*;
 use answer_verifier_evidence_policy::*;
-use answer_verifier_runtime::*;
 #[cfg(test)]
-pub(crate) use answer_verifier_runtime::{
-    local_compound_listing_answer_verifier_gap, local_missing_evidence_verifier_gap,
-};
+pub(crate) use answer_verifier_runtime::local_missing_evidence_verifier_gap;
+use answer_verifier_runtime::*;
 pub(crate) use answer_verifier_runtime::{
     post_write_content_evidence_missing_before_verifier, verify_answer_observe_only,
 };
@@ -54,13 +52,6 @@ impl AnswerContract {
         semantic_kind: crate::OutputSemanticKind,
     ) -> bool {
         self.output_contract.semantic_kind_is(semantic_kind)
-    }
-
-    pub(crate) fn output_contract_marker_is_any(
-        &self,
-        semantic_kinds: &[crate::OutputSemanticKind],
-    ) -> bool {
-        self.output_contract.semantic_kind_is_any(semantic_kinds)
     }
 
     pub(crate) fn output_contract_is_unclassified(&self) -> bool {
