@@ -1,4 +1,5 @@
 pub mod capability_adapter;
+pub mod capability_result;
 pub mod channel_chunk;
 pub mod channel_commands;
 pub mod channel_i18n;

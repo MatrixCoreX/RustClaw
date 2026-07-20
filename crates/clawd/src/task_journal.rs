@@ -624,6 +624,7 @@ pub(crate) struct TaskJournal {
     pub(crate) verify_result: Option<TaskJournalVerifySummary>,
     pub(crate) rounds: Vec<TaskJournalRoundTrace>,
     pub(crate) step_results: Vec<TaskJournalStepTrace>,
+    pub(crate) capability_results: Vec<claw_core::capability_result::CapabilityResultEnvelope>,
     pub(crate) task_observations: Vec<Value>,
     pub(crate) finalizer_summary: Option<TaskJournalFinalizerSummary>,
     pub(crate) answer_verifier_summary: Option<TaskJournalAnswerVerifierSummary>,
@@ -946,6 +947,9 @@ impl TaskJournal {
         if self.step_results.is_empty() {
             self.step_results = other.step_results.clone();
         }
+        if self.capability_results.is_empty() {
+            self.capability_results = other.capability_results.clone();
+        }
         if self.task_observations.is_empty() {
             self.task_observations = other.task_observations.clone();
         }
@@ -1151,6 +1155,7 @@ impl TaskJournal {
                 let requested = next_requested_capability(&mut requested, step);
                 step_trace_json(step, requested.as_ref(), self.output_contract.as_ref())
             }).collect::<Vec<_>>(),
+            "capability_results": self.capability_results,
             "task_observations": self.task_observations.clone(),
             "event_stream": task_event_stream_json(self),
             "finalizer_summary": self

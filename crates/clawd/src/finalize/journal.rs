@@ -209,6 +209,7 @@ pub(crate) fn build_from_loop_state(
     for step in &loop_state.executed_step_results {
         journal.push_step_result(step);
     }
+    journal.capability_results = loop_state.capability_results.clone();
     for observation in &loop_state.task_observations {
         journal.push_task_observation(observation.clone());
     }

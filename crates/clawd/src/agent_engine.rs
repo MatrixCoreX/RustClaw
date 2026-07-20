@@ -7,6 +7,7 @@ use tracing::{debug, info};
 mod arg_resolver;
 mod async_start_checkpoint;
 mod attempt_ledger;
+mod capability_result_synthesis;
 #[allow(dead_code)]
 mod context_compaction;
 mod dispatch_support;
@@ -287,9 +288,15 @@ pub(crate) struct LoopState {
     pub(crate) last_user_visible_respond: Option<String>,
     /// Last publishable runtime synthesis output. Prefer this over generic finalization when no explicit respond was emitted.
     pub(crate) last_publishable_synthesis_output: Option<String>,
+    /// Set only when the provider synthesized from `capability_results`.
+    /// Finalization treats this as authoritative ordinary-language delivery.
+    pub(crate) last_capability_synthesis_output: Option<String>,
     /// A tool/skill returned a structured user-input request. Finalize as clarify and do not
     /// treat the answer as incomplete execution output.
     pub(crate) pending_user_input_required: bool,
+    /// Provider-independent machine results. Ordinary final language must be
+    /// synthesized from these envelopes instead of domain-specific Rust renderers.
+    pub(crate) capability_results: Vec<claw_core::capability_result::CapabilityResultEnvelope>,
     pub(crate) executed_step_results: Vec<crate::executor::StepExecutionResult>,
     pub(crate) round_traces: Vec<crate::task_journal::TaskJournalRoundTrace>,
     pub(crate) rollout_attribution: Vec<crate::task_journal::TaskJournalRolloutAttribution>,

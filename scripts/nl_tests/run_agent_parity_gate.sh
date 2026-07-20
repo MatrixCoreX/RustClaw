@@ -427,6 +427,8 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_agent_hook_runtime_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_context_compaction_runtime_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_context_compaction_runtime_contracts.py"
+  python3 "${ROOT_DIR}/scripts/check_finalizer_architecture.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_finalizer_architecture.py"
 } > "${OUT_DIR}/maintainability_skill_contracts.txt"
 
 echo "AGENT_PARITY_GATE_STEP agent_parity_gate_inventory_contracts"

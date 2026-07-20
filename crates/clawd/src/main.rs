@@ -32,6 +32,7 @@ mod async_job_contract;
 mod bootstrap;
 mod capability_map;
 mod capability_resolver;
+mod capability_result;
 mod channel_send;
 mod child_task_contract;
 mod clarify_state;

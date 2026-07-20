@@ -23,6 +23,10 @@ use capability_result_renderers::{
     replace_config_edit_machine_marker_final_answer, run_service_status_observed_fields_renderer,
 };
 
+#[path = "loop_reply_capability_synthesis.rs"]
+mod capability_synthesis;
+use capability_synthesis::finalize_capability_synthesis;
+
 #[path = "loop_reply_artifact_renderers.rs"]
 mod artifact_renderers;
 use artifact_renderers::normalize_file_token_delivery_from_observed_paths;
@@ -516,6 +520,13 @@ pub(crate) async fn finalize_loop_reply(
             .with_messages(delivery_messages)
             .with_task_journal(journal)
             .with_failure(message));
+    }
+
+    if let Some(reply) =
+        finalize_capability_synthesis(state, task, user_text, &mut loop_state, agent_run_context)
+            .await
+    {
+        return Ok(reply);
     }
 
     let requires_content_evidence = route_requires_content_evidence(agent_run_context);

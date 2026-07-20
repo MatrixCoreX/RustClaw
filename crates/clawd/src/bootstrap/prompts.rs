@@ -64,6 +64,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "observed_answer_fallback (finalize.observed)",
     ),
     (
+        "prompts/capability_result_synthesis_prompt.md",
+        "capability_result_synthesis (agent loop)",
+    ),
+    (
         "prompts/observed_answer_fallback_compact_prompt.md",
         "observed_answer_fallback_compact (finalize.observed)",
     ),
