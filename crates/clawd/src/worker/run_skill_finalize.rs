@@ -382,6 +382,7 @@ fn direct_run_skill_async_checkpoint_payload(
     task: &crate::ClaimedTask,
     skill_name: &str,
     clean_text: &str,
+    capability_results: &[claw_core::capability_result::CapabilityResultEnvelope],
     job: &AsyncJobRef,
     poll_adapter: Option<&Value>,
     now_ts: i64,
@@ -419,6 +420,7 @@ fn direct_run_skill_async_checkpoint_payload(
             "has_error": false,
             "async_job_id": job.job_id,
         })],
+        capability_results: capability_results.to_vec(),
         evidence_refs: vec!["run_skill".to_string()],
         artifact_refs: Vec::new(),
         completed_side_effect_refs: vec![format!(
@@ -476,6 +478,7 @@ fn direct_run_skill_pending_async_checkpoint_result(
         task,
         skill_name,
         clean_text,
+        &journal.capability_results,
         &job,
         poll_adapter.as_ref(),
         crate::now_ts_u64() as i64,
@@ -510,12 +513,22 @@ async fn finalize_run_skill_success(
     journal.record_used_evidence_ids_count(0);
     journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
     record_direct_run_skill_verification(&mut journal, verification);
-    journal.push_step_result(&build_run_skill_step_result(
+    let step_result = build_run_skill_step_result(
         skill_name,
         crate::executor::StepExecutionStatus::Ok,
         Some(clean_text.clone()),
         None,
-    ));
+    );
+    let args = payload.get("args").cloned().unwrap_or_else(|| json!({}));
+    journal
+        .capability_results
+        .push(crate::capability_result::envelope_for_step_execution(
+            skill_name,
+            &args,
+            &step_result,
+            outcome.extra.as_ref(),
+        ));
+    journal.push_step_result(&step_result);
     let capability_contract = run_skill_capability_contract(state, payload, skill_name);
     let machine_payload = run_skill_success_machine_payload();
     let external_skill_admission = external_skill_admission_trace(state, skill_name);
@@ -680,12 +693,22 @@ async fn finalize_run_skill_failure(
     journal.record_used_evidence_ids_count(0);
     journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
     record_direct_run_skill_verification(&mut journal, verification);
-    journal.push_step_result(&build_run_skill_step_result(
+    let step_result = build_run_skill_step_result(
         skill_name,
         crate::executor::StepExecutionStatus::Error,
         None,
         Some(err_text.to_string()),
-    ));
+    );
+    let args = payload.get("args").cloned().unwrap_or_else(|| json!({}));
+    journal
+        .capability_results
+        .push(crate::capability_result::envelope_for_step_execution(
+            skill_name,
+            &args,
+            &step_result,
+            None,
+        ));
+    journal.push_step_result(&step_result);
     let capability_contract = run_skill_capability_contract(state, payload, skill_name);
     let machine_payload = run_skill_failure_machine_payload(err_text);
     let external_skill_admission = external_skill_admission_trace(state, skill_name);
@@ -866,6 +889,7 @@ pub(super) async fn finalize_run_skill_confirmation_required(
                 "targets": approval_request.get("targets").cloned().unwrap_or_else(|| json!([])),
             })),
             observations: Vec::new(),
+            capability_results: Vec::new(),
             evidence_refs: Vec::new(),
             artifact_refs: Vec::new(),
             completed_side_effect_refs: Vec::new(),

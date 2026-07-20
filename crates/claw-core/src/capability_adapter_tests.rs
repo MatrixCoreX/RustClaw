@@ -1,7 +1,4 @@
-use super::{
-    skill_background_job_capable, skill_uses_external_api, CapabilityAdapterKind,
-    CapabilityAdapterStatus,
-};
+use super::{skill_background_job_capable, skill_uses_external_api, CapabilityAdapterKind};
 use crate::skill_registry::{SkillRegistryEntry, SkillsRegistry};
 
 fn registry_entry_from(toml: &str, name: &str) -> SkillRegistryEntry {
@@ -33,7 +30,6 @@ fn adapter_kind_uses_closed_machine_tokens() {
         Some(CapabilityAdapterKind::McpTool)
     );
     assert_eq!(CapabilityAdapterKind::from_token("unknown_tool"), None);
-    assert_eq!(CapabilityAdapterStatus::Pending.as_token(), "pending");
 }
 
 #[test]

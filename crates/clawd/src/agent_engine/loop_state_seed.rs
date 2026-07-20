@@ -35,9 +35,12 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
             .or_insert(1);
     }
 
-    if !checkpoint.observations.is_empty() {
+    if !checkpoint.observations.is_empty() || !checkpoint.capability_results.is_empty() {
         loop_state.has_tool_or_skill_output = true;
     }
+    loop_state
+        .capability_results
+        .extend(checkpoint.capability_results.iter().cloned());
     let changed_files = checkpoint
         .artifact_refs
         .iter()

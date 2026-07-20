@@ -154,6 +154,7 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
         &record,
         "skill:run_cmd:async_start",
         "run_cmd",
+        &serde_json::json!({"action": "async_start"}),
         1,
         1,
     )
@@ -164,6 +165,11 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
         Some("async_job_checkpoint_waiting")
     );
     assert!(!outcome.continue_in_round);
+    assert_eq!(loop_state.capability_results.len(), 1);
+    assert_eq!(
+        loop_state.capability_results[0].action.as_deref(),
+        Some("async_start")
+    );
     assert_eq!(
         loop_state
             .task_checkpoint

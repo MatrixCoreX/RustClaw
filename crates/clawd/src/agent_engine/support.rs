@@ -706,6 +706,7 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
         last_successful_step,
         pending_action: None,
         observations: checkpoint_step_observations(loop_state),
+        capability_results: loop_state.capability_results.clone(),
         evidence_refs,
         artifact_refs: checkpoint_artifact_refs(loop_state),
         completed_side_effect_refs: completed_side_effect_refs(loop_state),
@@ -828,6 +829,7 @@ fn build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
             .map(|step| step.step_id.clone()),
         pending_action: Some(pending_action),
         observations: checkpoint_step_observations(loop_state),
+        capability_results: loop_state.capability_results.clone(),
         evidence_refs: loop_state
             .executed_step_results
             .iter()
@@ -1061,6 +1063,7 @@ pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(
             .map(|step| step.step_id.clone()),
         pending_action: Some(pending_action),
         observations: checkpoint_step_observations(loop_state),
+        capability_results: loop_state.capability_results.clone(),
         evidence_refs: loop_state
             .executed_step_results
             .iter()

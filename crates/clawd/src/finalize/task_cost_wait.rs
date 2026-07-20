@@ -51,6 +51,7 @@ pub(super) fn record_cost_wait_checkpoint(
             "blocker_kind": "cost_policy",
             "policy_status": policy_status,
         })],
+        capability_results: journal.capability_results.clone(),
         evidence_refs: Vec::new(),
         artifact_refs: Vec::new(),
         completed_side_effect_refs: Vec::new(),

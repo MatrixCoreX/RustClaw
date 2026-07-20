@@ -750,6 +750,7 @@ pub(super) async fn execute_prepared_skill_action(
                 loop_state,
                 global_step,
                 step_in_round,
+                &exec_args,
                 action_trace_kind,
                 step_error_signal,
             );
@@ -798,6 +799,7 @@ pub(super) async fn execute_prepared_skill_action(
             loop_state,
             global_step,
             step_in_round,
+            &exec_args,
             action_trace_kind,
             stop_signal.as_deref(),
         );
@@ -1016,6 +1018,7 @@ pub(super) async fn execute_prepared_skill_action(
                 &record,
                 fingerprint,
                 normalized_skill,
+                classification_args,
                 global_step,
                 step_in_round,
             );
@@ -1119,21 +1122,12 @@ pub(super) async fn execute_prepared_skill_action(
     } else {
         crate::execution_recipe::ValidationObservation::Passed
     };
-    let capability_result = match step_execution.output.as_deref() {
-        Some(output) => crate::capability_result::successful_execution_envelope(
-            normalized_skill,
-            &step_execution.step_id,
-            classification_args,
-            output,
-            structured_extra.as_ref(),
-        ),
-        None => crate::capability_result::failed_execution_envelope(
-            normalized_skill,
-            &step_execution.step_id,
-            classification_args,
-            step_execution.error.as_deref().unwrap_or_default(),
-        ),
-    };
+    let capability_result = crate::capability_result::envelope_for_step_execution(
+        normalized_skill,
+        classification_args,
+        &step_execution,
+        structured_extra.as_ref(),
+    );
     loop_state.capability_results.push(capability_result);
     match step_execution.output.as_ref() {
         Some(out) => {

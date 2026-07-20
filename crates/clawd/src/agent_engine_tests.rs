@@ -429,6 +429,7 @@ fn loop_state_checkpoint_seed_restores_machine_resume_state() {
         last_successful_step: Some("step_4".to_string()),
         pending_action: None,
         observations: vec![json!({"step_id": "step_4", "status": "ok"})],
+        capability_results: Vec::new(),
         evidence_refs: vec!["step_4".to_string()],
         artifact_refs: Vec::new(),
         completed_side_effect_refs: vec![
@@ -529,6 +530,7 @@ fn loop_state_agent_run_seed_combines_resume_checkpoint_and_context() {
         last_successful_step: Some("step_2".to_string()),
         pending_action: None,
         observations: Vec::new(),
+        capability_results: Vec::new(),
         evidence_refs: Vec::new(),
         artifact_refs: Vec::new(),
         completed_side_effect_refs: vec!["external_call:job-42".to_string()],

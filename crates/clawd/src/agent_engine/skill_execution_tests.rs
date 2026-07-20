@@ -6,12 +6,12 @@ use std::sync::{Arc, RwLock};
 use super::{
     admitted_extra_field_exists, build_auto_sudo_retry_args,
     contains_unresolved_runtime_template_arg, evidence_policy_action_policy_error,
-    handle_skill_step_failure, handle_skill_step_success, merge_isolation_artifact_refs,
-    preflight_failure_metadata, preflight_permission_decision, record_subagent_step_execution,
-    skill_extra_requests_user_input, structured_extra_evidence_output,
-    structured_observation_path_argument_error, try_auto_sudo_retry_after_permission_denied,
-    unresolved_runtime_template_argument_error, validate_skill_output_contract,
-    AgentLoopGuardPolicy, LoopState,
+    handle_preflight_argument_failure, handle_skill_step_failure, handle_skill_step_success,
+    merge_isolation_artifact_refs, preflight_failure_metadata, preflight_permission_decision,
+    record_subagent_step_execution, skill_extra_requests_user_input,
+    structured_extra_evidence_output, structured_observation_path_argument_error,
+    try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
+    validate_skill_output_contract, AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -219,7 +219,15 @@ fn subagent_step_execution_promotes_runtime_observation_to_step_output() {
         "round_no": 2
     }));
 
-    record_subagent_step_execution(&task, &mut loop_state, 7, 3, "call_tool", None);
+    record_subagent_step_execution(
+        &task,
+        &mut loop_state,
+        7,
+        3,
+        &serde_json::json!({"role": "researcher"}),
+        "call_tool",
+        None,
+    );
 
     assert_eq!(loop_state.executed_step_results.len(), 1);
     let step = &loop_state.executed_step_results[0];
@@ -249,6 +257,14 @@ fn subagent_step_execution_promotes_runtime_observation_to_step_output() {
     );
     assert!(loop_state.has_tool_or_skill_output);
     assert_eq!(loop_state.last_output.as_deref(), Some(output));
+    assert_eq!(loop_state.capability_results.len(), 1);
+    let result = &loop_state.capability_results[0];
+    assert_eq!(result.capability, "subagent");
+    assert_eq!(
+        result.status,
+        claw_core::capability_result::CapabilityResultStatus::Ok
+    );
+    assert_eq!(result.data["output"]["owner_layer"], "subagent_runtime");
 }
 
 #[test]
@@ -276,6 +292,38 @@ fn unresolved_runtime_template_arg_is_detected_structurally() {
         !parsed.error_text.contains("{{"),
         "user-facing error text must not leak unresolved templates"
     );
+}
+
+#[test]
+fn preflight_failure_records_generic_capability_result() {
+    let state = test_state();
+    let task = test_task();
+    let mut loop_state = LoopState::new(2);
+    let args = serde_json::json!({"action": "stat_paths", "paths": "{{s1.paths}}"});
+    let err = unresolved_runtime_template_argument_error("fs_basic", &args, &args)
+        .expect("structured preflight error");
+
+    handle_preflight_argument_failure(
+        &state,
+        &task,
+        &mut loop_state,
+        1,
+        1,
+        "fs_basic",
+        &args,
+        &err,
+        "call_capability",
+    );
+
+    assert_eq!(loop_state.capability_results.len(), 1);
+    let result = &loop_state.capability_results[0];
+    assert_eq!(result.capability, "fs_basic");
+    assert_eq!(result.action.as_deref(), Some("stat_paths"));
+    assert_eq!(
+        result.status,
+        claw_core::capability_result::CapabilityResultStatus::Error
+    );
+    assert!(result.error.is_some());
 }
 
 #[test]
