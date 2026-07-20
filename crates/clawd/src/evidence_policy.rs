@@ -22,6 +22,17 @@ pub(crate) use crate::task_contract::{
 pub(crate) fn evidence_expression_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> Option<EvidenceExpression> {
+    if let Some(fields) = output_contract
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+    {
+        return Some(EvidenceExpression {
+            all_of: fields,
+            ..EvidenceExpression::default()
+        });
+    }
     crate::contract_matrix::bundled_contract_matrix()
         .and_then(|matrix| matrix.match_output_contract(output_contract))
         .map(|matched| matched.evidence_expression())

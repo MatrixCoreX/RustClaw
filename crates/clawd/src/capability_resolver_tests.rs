@@ -84,7 +84,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
 }
 
 #[test]
-fn resolver_exposes_capability_output_semantic_kind() {
+fn schedule_preview_resolves_without_domain_output_semantic_kind() {
     let state = state_with_workspace_registry();
     let (_, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -92,10 +92,7 @@ fn resolver_exposes_capability_output_semantic_kind() {
         json!({"text": "language-neutral schedule input"}),
     );
 
-    assert_eq!(
-        record.output_semantic_kind.as_deref(),
-        Some("schedule_preview")
-    );
+    assert_eq!(record.output_semantic_kind, None);
 }
 
 #[test]
@@ -213,69 +210,6 @@ fn web_search_capability_resolves_without_domain_output_semantic_kind() {
     assert_eq!(
         args.get("query").and_then(Value::as_str),
         Some("rust async")
-    );
-}
-
-#[test]
-fn capability_metadata_binds_only_unclassified_output_contract() {
-    let state = state_with_workspace_registry();
-    let step = crate::plan_step_from_agent_action(
-        &AgentAction::CallCapability {
-            capability: "schedule.preview".to_string(),
-            args: json!({"text": "language-neutral schedule input"}),
-        },
-        "step_1".to_string(),
-        Vec::new(),
-        "preview schedule".to_string(),
-    );
-    let mut plan_result = crate::PlanResult {
-        goal: "preview schedule".to_string(),
-        missing_slots: Vec::new(),
-        needs_confirmation: false,
-        output_contract: Some(crate::IntentOutputContract::default()),
-        steps: vec![step],
-        planner_notes: String::new(),
-        plan_kind: crate::PlanKind::Single,
-        raw_plan_text: "{}".to_string(),
-    };
-
-    let inferred = bind_unclassified_output_contract_from_capabilities(&state, &plan_result)
-        .expect("schedule preview should bind an output contract");
-    assert_eq!(
-        inferred.semantic_kind,
-        crate::OutputSemanticKind::SchedulePreview
-    );
-
-    plan_result.steps = vec![crate::plan_step_from_agent_action(
-        &AgentAction::CallSkill {
-            skill: "schedule".to_string(),
-            args: json!({
-                "action": "preview",
-                "text": "language-neutral schedule input"
-            }),
-        },
-        "step_1".to_string(),
-        Vec::new(),
-        "resolved schedule preview".to_string(),
-    )];
-    let inferred_from_resolved =
-        bind_unclassified_output_contract_from_capabilities(&state, &plan_result)
-            .expect("resolved schedule preview should bind the same output contract");
-    assert_eq!(
-        inferred_from_resolved.semantic_kind,
-        crate::OutputSemanticKind::SchedulePreview
-    );
-
-    plan_result
-        .output_contract
-        .as_mut()
-        .expect("planner contract")
-        .semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    let explicit = bind_unclassified_output_contract_from_capabilities(&state, &plan_result)
-        .expect("explicit planner contract should remain present");
-    assert_eq!(
-        explicit.semantic_kind,
-        crate::OutputSemanticKind::QuantityComparison
     );
 }
 

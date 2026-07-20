@@ -1,8 +1,7 @@
 use super::*;
 
-fn schedule_preview_route() -> crate::IntentOutputContract {
+fn structured_selector_route() -> crate::IntentOutputContract {
     crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::SchedulePreview,
         response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
         selection: crate::pipeline_types::OutputSelectionContract {
@@ -13,7 +12,7 @@ fn schedule_preview_route() -> crate::IntentOutputContract {
     }
 }
 
-fn push_schedule_preview_step(journal: &mut TaskJournal, text: &str) {
+fn push_structured_preview_step(journal: &mut TaskJournal, text: &str) {
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "schedule".to_string(),
@@ -35,11 +34,11 @@ fn push_schedule_preview_step(journal: &mut TaskJournal, text: &str) {
 }
 
 #[test]
-fn schedule_preview_requires_all_machine_fields_from_observation() {
-    let route = schedule_preview_route();
-    let mut journal = TaskJournal::for_task("task-schedule-preview", "ask", "preview schedule");
+fn structured_selector_requires_all_machine_fields_from_observation() {
+    let route = structured_selector_route();
+    let mut journal = TaskJournal::for_task("task-structured-selector", "ask", "preview");
     journal.record_output_contract(&route);
-    push_schedule_preview_step(
+    push_structured_preview_step(
         &mut journal,
         "datetime=2026-07-19T09:00:00\ntimezone=Asia/Shanghai\ntitle=Tier 2 review",
     );
@@ -55,11 +54,11 @@ fn schedule_preview_requires_all_machine_fields_from_observation() {
 }
 
 #[test]
-fn schedule_preview_rejects_partial_machine_evidence() {
-    let route = schedule_preview_route();
-    let mut journal = TaskJournal::for_task("task-schedule-preview-partial", "ask", "preview");
+fn structured_selector_rejects_partial_machine_evidence() {
+    let route = structured_selector_route();
+    let mut journal = TaskJournal::for_task("task-structured-selector-partial", "ask", "preview");
     journal.record_output_contract(&route);
-    push_schedule_preview_step(&mut journal, "timezone=Asia/Shanghai\ntitle=Tier 2 review");
+    push_structured_preview_step(&mut journal, "timezone=Asia/Shanghai\ntitle=Tier 2 review");
 
     let coverage = evidence_coverage_for_output_contract(&route, &journal);
     assert!(!coverage.is_complete());

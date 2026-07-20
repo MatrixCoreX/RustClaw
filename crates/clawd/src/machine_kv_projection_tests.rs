@@ -1,7 +1,8 @@
 use super::{
     collect_machine_text_fragments_from_output,
-    collect_requested_machine_kv_surfaces_from_state_patch, parse_machine_kv_units,
-    requested_machine_kv_summary_from_observations, structured_json_satisfies_field_selector,
+    collect_requested_machine_kv_surfaces_from_state_patch, exact_machine_field_selector,
+    parse_machine_kv_units, requested_machine_kv_summary_from_observations,
+    structured_json_satisfies_field_selector,
 };
 
 #[test]
@@ -921,4 +922,22 @@ fn structured_selector_does_not_use_visible_text_fallback() {
         output,
     ));
     assert!(!structured_json_satisfies_field_selector("text", output));
+}
+
+#[test]
+fn exact_machine_selector_is_bounded_and_domain_neutral() {
+    assert_eq!(
+        exact_machine_field_selector("datetime, timezone;title"),
+        Some(vec![
+            "datetime".to_string(),
+            "timezone".to_string(),
+            "title".to_string()
+        ])
+    );
+    assert_eq!(
+        exact_machine_field_selector("quote.price_usd,quote.price_usd"),
+        Some(vec!["quote.price_usd".to_string()])
+    );
+    assert!(exact_machine_field_selector("text").is_none());
+    assert!(exact_machine_field_selector("items.*").is_none());
 }

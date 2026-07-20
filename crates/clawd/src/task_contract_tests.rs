@@ -89,6 +89,32 @@ fn unclassified_contract_uses_machine_output_fields_only() {
 }
 
 #[test]
+fn structured_selector_owns_required_evidence_without_domain_semantics() {
+    let mut output_contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    output_contract.selection.structured_field_selector =
+        Some("datetime,timezone,title".to_string());
+
+    assert_eq!(
+        operation_for_output_contract(&output_contract),
+        TaskOperation::Inspect
+    );
+    assert_eq!(
+        required_evidence_fields_for_output_contract(&output_contract),
+        vec!["datetime", "timezone", "title"]
+    );
+    let expression =
+        crate::evidence_policy::evidence_expression_for_output_contract(&output_contract)
+            .expect("selector evidence expression");
+    assert_eq!(expression.all_of, vec!["datetime", "timezone", "title"]);
+    assert!(expression.one_of.is_empty());
+    assert!(expression.any_of.is_empty());
+}
+
+#[test]
 fn planner_semantic_matrix_drives_evidence_contract() {
     for (semantic_kind, target, operation, delivery_shape, evidence) in [
         (

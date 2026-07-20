@@ -141,7 +141,7 @@ fn first_round_uses_only_budgeted_compact_index() {
         "schedule_line={schedule_line}"
     );
     assert!(
-        schedule_line.contains("output_semantic_kind=schedule_preview"),
+        !schedule_line.contains("output_semantic_kind="),
         "schedule_line={schedule_line}"
     );
 }

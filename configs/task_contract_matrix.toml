@@ -248,17 +248,6 @@ failure_policy = "retry_with_alternatives"
 [contracts.document_heading.evidence_expression]
 all_of = ["content_excerpt", "path"]
 
-[contracts.schedule_preview]
-semantic_kind = "schedule_preview"
-operation = "inspect"
-target_object = "system"
-delivery_shape = "summary"
-allowed_actions = ["schedule.preview"]
-preferred_actions = ["schedule.preview"]
-required_evidence = ["datetime", "timezone", "title"]
-final_answer_shape = "summary_with_evidence"
-failure_policy = "retry_with_alternatives"
-
 [contracts.content_excerpt_with_summary]
 semantic_kind = "content_excerpt_with_summary"
 operation = "summarize"

@@ -10,10 +10,10 @@ use super::{
 #[path = "task_journal_tests/observed_evidence_core_tests.rs"]
 mod observed_evidence_core;
 
-#[path = "task_journal_tests/schedule_preview_evidence.rs"]
-mod schedule_preview_evidence;
 #[path = "task_journal_tests/skill_output_evidence_tests.rs"]
 mod skill_output_evidence;
+#[path = "task_journal_tests/structured_selector_evidence.rs"]
+mod structured_selector_evidence;
 
 #[path = "task_journal_tests/system_basic_info_text_boundary.rs"]
 mod system_basic_info_text_boundary;
