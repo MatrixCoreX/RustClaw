@@ -39,9 +39,9 @@ use super::{
     latest_delivery_preserves_observed_quantity_size_facts,
     latest_file_delivery_observation_is_missing,
     latest_path_batch_facts_has_implicit_metadata_fields, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, markdown_heading_from_read_output,
-    matrix_strict_list_observed_answer, missing_file_path_from_output,
-    missing_requested_success_marker, normalize_file_token_delivery_from_auto_locator,
+    looks_like_structured_machine_output, matrix_strict_list_observed_answer,
+    missing_file_path_from_output, missing_requested_success_marker,
+    normalize_file_token_delivery_from_auto_locator,
     normalize_file_token_delivery_from_observed_paths,
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
@@ -61,13 +61,11 @@ use super::{
     replace_delivery_with_deterministic_recent_artifacts_judgment_answer,
     replace_delivery_with_deterministic_rustclaw_config_risk_answer,
     replace_delivery_with_latest_tail_read_range_answer,
-    replace_delivery_with_observed_markdown_heading_scalar,
     replace_delivery_with_requested_machine_kv_summary,
     replace_raw_observation_delivery_with_synthesis, resolve_file_token_from_auto_locator_answer,
     route_allows_file_token_only_fallback, route_prefers_language_rendered_execution_failed_step,
     route_structured_clarify_context, run_deterministic_fallback_renderer_registry,
-    run_task_lifecycle_renderer_registry, should_attach_execution_summary,
-    should_drop_passthrough_delivery_for_content_evidence,
+    run_task_lifecycle_renderer_registry, should_drop_passthrough_delivery_for_content_evidence,
     should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
     structured_compound_synthesis_can_replace_current_delivery, structured_json_values_from_output,
     successful_delivery_final_status, verify_summary_requires_resume_confirmation,
@@ -284,12 +282,6 @@ mod delivery_backfill_tests;
 
 #[path = "loop_reply_content_evidence_passthrough_tests.rs"]
 mod content_evidence_passthrough_tests;
-
-#[path = "loop_reply_markdown_scalar_tests.rs"]
-mod markdown_scalar_tests;
-
-#[path = "loop_reply_markdown_scalar_text_boundary_tests.rs"]
-mod markdown_scalar_text_boundary_tests;
 
 #[path = "loop_reply_matrix_shape_tests.rs"]
 mod matrix_shape_tests;
@@ -573,7 +565,7 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
     let state = test_state();
     let task = claimed_task("task-control-envelope");
     let mut route = scalar_route_result();
-    route.semantic_kind = OutputSemanticKind::DocumentHeading;
+    route.semantic_kind = OutputSemanticKind::None;
     let planner_output_contract = route.clone();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

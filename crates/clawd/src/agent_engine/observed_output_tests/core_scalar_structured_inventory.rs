@@ -209,6 +209,100 @@ fn config_read_uses_generic_capability_result_selector() {
 }
 
 #[test]
+fn document_title_uses_generic_capability_result_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "system_basic"
+        enabled = true
+        kind = "builtin"
+        semantic_tags = []
+        "#,
+        &["system_basic"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("title".to_string());
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "read_range",
+        "path": "docs/service_notes.md",
+        "field_selector": "title",
+        "title": "Service Notes",
+        "exists": true,
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "system_basic",
+            "step_1",
+            &serde_json::json!({
+                "action": "read_range",
+                "field_selector": "title"
+            }),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+
+    assert_eq!(
+        extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &state,
+            Some(&agent_run_context)
+        )
+        .as_deref(),
+        Some("Service Notes")
+    );
+}
+
+#[test]
+fn document_title_is_not_projected_without_explicit_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "system_basic"
+        enabled = true
+        kind = "builtin"
+        semantic_tags = []
+        "#,
+        &["system_basic"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route.requires_content_evidence = true;
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "read_range",
+        "path": "docs/service_notes.md",
+        "title": "Service Notes",
+        "exists": true,
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "system_basic",
+            "step_1",
+            &serde_json::json!({"action": "read_range"}),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+
+    assert!(extract_direct_scalar_from_generic_output_i18n(
+        &loop_state,
+        &state,
+        Some(&agent_run_context)
+    )
+    .is_none());
+}
+
+#[test]
 fn database_version_uses_generic_capability_result_selector() {
     let state = test_state_with_registry(
         r#"

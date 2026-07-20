@@ -72,6 +72,7 @@ mod policy_decision;
 mod process_sandbox;
 mod prompt_utils;
 mod providers;
+mod read_range_utils;
 mod repair_boundary_inventory;
 mod repair_signal;
 mod repo;

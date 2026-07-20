@@ -901,11 +901,6 @@ fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
             "fs_basic.stat_paths",
         ),
         (
-            "document_heading",
-            OutputSemanticKind::DocumentHeading,
-            "fs_basic.read_text_range",
-        ),
-        (
             "content_presence_check",
             OutputSemanticKind::ContentPresenceCheck,
             "fs_basic.grep_text",
@@ -1315,9 +1310,9 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 }
 
 #[test]
-fn matrix_generated_cases_cover_at_least_100_unique_contract_paths() {
+fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 100);
+    let cases = generated_contract_cases(&matrix, 99);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

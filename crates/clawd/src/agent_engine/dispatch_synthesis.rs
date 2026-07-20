@@ -12,8 +12,7 @@ mod dispatch_synthesis_local_code_projection;
 mod dispatch_synthesis_local_code_readbacks;
 #[path = "dispatch_synthesis_local_code_writes.rs"]
 mod dispatch_synthesis_local_code_writes;
-#[path = "dispatch_synthesis_markdown.rs"]
-mod dispatch_synthesis_markdown;
+use crate::read_range_utils::strip_read_range_line_prefix;
 use dispatch_synthesis_local_code_projection::{
     common_parent_path, filesystem_projection_skill, machine_code_token, normalize_projection_path,
     path_looks_like_code_or_test_file, path_looks_like_test_file, projection_paths_match,
@@ -22,10 +21,6 @@ use dispatch_synthesis_local_code_projection::{
 pub(super) use dispatch_synthesis_local_code_projection::{
     local_code_task_strict_json_projection, requested_local_code_json_fields,
     strict_json_projection_answer_satisfies_request,
-};
-use dispatch_synthesis_markdown::{
-    markdown_heading_from_read_output, selected_markdown_title_from_read_output,
-    strip_markdown_read_line_prefix,
 };
 
 pub(super) fn synthesize_answer_allows_direct_fallback(evidence_refs: &[String]) -> bool {
@@ -765,7 +760,7 @@ fn multiline_read_range_content_line_count_from_value(value: &Value) -> Option<u
         {
             return Some(
                 text.lines()
-                    .map(strip_markdown_read_line_prefix)
+                    .map(strip_read_range_line_prefix)
                     .map(str::trim)
                     .filter(|line| !line.is_empty())
                     .count(),
@@ -775,41 +770,6 @@ fn multiline_read_range_content_line_count_from_value(value: &Value) -> Option<u
     value
         .get("extra")
         .and_then(multiline_read_range_content_line_count_from_value)
-}
-
-pub(super) fn deterministic_scalar_markdown_heading_answer(
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<String> {
-    let route = agent_run_context?.output_contract()?;
-    if route.delivery_required
-        || route.semantic_kind_is_any(&[
-            crate::OutputSemanticKind::FileNames,
-            crate::OutputSemanticKind::DirectoryNames,
-            crate::OutputSemanticKind::FilePaths,
-            crate::OutputSemanticKind::DirectoryEntryGroups,
-            crate::OutputSemanticKind::ScalarCount,
-            crate::OutputSemanticKind::RawCommandOutput,
-        ])
-    {
-        return None;
-    }
-    let output = loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .filter(|step| step.is_ok())
-        .filter_map(|step| step.output.as_deref())
-        .find(|output| {
-            output.contains("\"read_range\"") || output.contains("\"read_text_range\"")
-        })?;
-    if let Some(answer) = selected_markdown_title_from_read_output(output) {
-        return Some(answer);
-    }
-    if route.response_shape != OutputResponseShape::Scalar {
-        return None;
-    }
-    markdown_heading_from_read_output(output)
 }
 
 pub(super) fn synthesize_user_language_source<'a>(

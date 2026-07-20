@@ -234,20 +234,6 @@ failure_policy = "retry_with_alternatives"
 [contracts.content_excerpt_summary.evidence_expression]
 any_of = ["content_excerpt", "candidates", "count", "field_value"]
 
-[contracts.document_heading]
-semantic_kind = "document_heading"
-operation = "extract"
-target_object = "path"
-delivery_shape = "scalar"
-allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read"]
-preferred_actions = ["fs_basic.read_text_range"]
-required_evidence = ["content_excerpt", "path"]
-final_answer_shape = "scalar"
-failure_policy = "retry_with_alternatives"
-
-[contracts.document_heading.evidence_expression]
-all_of = ["content_excerpt", "path"]
-
 [contracts.content_excerpt_with_summary]
 semantic_kind = "content_excerpt_with_summary"
 operation = "summarize"

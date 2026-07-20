@@ -131,20 +131,6 @@ use execution_status::{
     successful_content_observation_should_precede_status_summary,
 };
 
-#[path = "loop_reply_markdown_scalar.rs"]
-mod markdown_scalar;
-#[cfg(test)]
-use markdown_scalar::markdown_heading_from_read_output;
-use markdown_scalar::{
-    deterministic_scalar_markdown_heading_answer_from_loop,
-    replace_delivery_with_observed_markdown_heading_scalar,
-};
-#[cfg(test)]
-use markdown_scalar::{
-    first_markdown_heading_from_read_output, markdown_heading_from_line,
-    route_allows_observed_markdown_heading_scalar_delivery,
-};
-
 #[path = "loop_reply_execution_summary.rs"]
 mod execution_summary;
 use execution_summary::{
@@ -159,7 +145,7 @@ use execution_summary::{
 #[cfg(test)]
 use execution_summary::{
     build_execution_summary_message, build_execution_summary_messages,
-    delivery_contract_suppresses_execution_summary, should_attach_execution_summary,
+    delivery_contract_suppresses_execution_summary,
 };
 
 #[path = "loop_reply_raw_command.rs"]
@@ -1505,13 +1491,6 @@ pub(crate) async fn finalize_loop_reply(
 
     prefer_observed_answer_for_exact_contract(
         state,
-        &task.task_id,
-        &mut loop_state,
-        agent_run_context,
-        &mut delivery_deduped,
-        &mut finalizer_summary,
-    );
-    replace_delivery_with_observed_markdown_heading_scalar(
         &task.task_id,
         &mut loop_state,
         agent_run_context,

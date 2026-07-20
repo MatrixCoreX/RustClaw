@@ -287,13 +287,6 @@ pub(crate) fn structurally_satisfies_answer_contract(
     if raw_command_answer_is_exact_successful_observation(journal, candidate_answer) {
         return true;
     }
-    if markdown_heading_answer_is_grounded_in_read_observation(
-        route_result,
-        journal,
-        candidate_answer,
-    ) {
-        return true;
-    }
     if existence_with_path_answer_is_grounded_in_observation(
         route_result,
         journal,

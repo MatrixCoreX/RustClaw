@@ -1449,12 +1449,14 @@ fn read_range(
             obj.insert("field_selector".to_string(), json!(selector));
             if selector == "title" {
                 if let Some(title) = markdown_title_from_read_range_excerpt(&excerpt) {
+                    obj.insert("title".to_string(), json!(title));
                     obj.insert("field_value".to_string(), json!(title));
                     obj.insert("value".to_string(), json!(title));
                     obj.insert("value_text".to_string(), json!(title));
                     obj.insert("value_type".to_string(), json!("string"));
                     obj.insert("exists".to_string(), json!(true));
                 } else {
+                    obj.insert("title".to_string(), Value::Null);
                     obj.insert("field_value".to_string(), Value::Null);
                     obj.insert("value".to_string(), Value::Null);
                     obj.insert("value_text".to_string(), json!(""));

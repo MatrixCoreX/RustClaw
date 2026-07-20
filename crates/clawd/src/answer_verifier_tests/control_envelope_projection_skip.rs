@@ -20,7 +20,7 @@ fn should_verify_answer_skips_grounded_agent_loop_control_envelope() {
         "output_contract": null
     })
     .to_string();
-    let answer = format!("document_heading\n{envelope}");
+    let answer = format!("model_heading\n{envelope}");
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-control-envelope-skip",
         "ask",

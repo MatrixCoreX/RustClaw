@@ -15,8 +15,8 @@ use super::dispatch_synthesis_local_code_writes::{
     successful_fs_changed_write_paths, successful_fs_write_paths,
     successful_fs_write_readbacks_from_plan_trace,
 };
-use super::dispatch_synthesis_markdown::strip_markdown_read_line_prefix;
 use super::{push_unique_string, skill_output_payload};
+use crate::read_range_utils::strip_read_range_line_prefix;
 
 pub(in crate::agent_engine) fn local_code_task_strict_json_projection(
     _user_text: &str,
@@ -613,7 +613,7 @@ fn functions_from_readbacks(readbacks: &[FsReadback], write_paths: &[String]) ->
         .into_iter()
         .flat_map(|readback| readback.excerpt.lines())
     {
-        if let Some(name) = function_name_from_code_line(strip_markdown_read_line_prefix(line)) {
+        if let Some(name) = function_name_from_code_line(strip_read_range_line_prefix(line)) {
             push_unique_string(&mut source_functions, name);
         }
     }
@@ -650,7 +650,7 @@ fn functions_from_test_import_readbacks(
         .flat_map(|readback| readback.excerpt.lines())
     {
         for name in python_from_import_names_for_written_module(
-            strip_markdown_read_line_prefix(line),
+            strip_read_range_line_prefix(line),
             &source_modules,
         ) {
             push_unique_string(&mut functions, &name);

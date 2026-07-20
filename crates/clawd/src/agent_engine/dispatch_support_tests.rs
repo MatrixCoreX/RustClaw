@@ -4,10 +4,9 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
-    deterministic_scalar_markdown_heading_answer, filesystem_mutation_lifecycle_structured_answer,
-    kb_filesystem_mutation_structured_answer, strip_internal_execution_args,
-    strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
-    synthesize_bounded_read_range_direct_answer,
+    filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
+    strip_internal_execution_args, strip_unsupported_planner_metadata_args,
+    synthesize_answer_allows_direct_fallback, synthesize_bounded_read_range_direct_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
@@ -1315,70 +1314,6 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
     )
     .is_none());
     assert!(synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).is_none());
-}
-
-#[test]
-fn deterministic_scalar_markdown_heading_uses_structural_read_evidence() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r##"{"action":"read_range","excerpt":"1|# Release Checklist","path":"/tmp/release_checklist.md"}"##,
-    ));
-    let mut route = crate::IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: crate::OutputResponseShape::Scalar,
-        requires_content_evidence: true,
-        delivery_required: false,
-        locator_kind: crate::OutputLocatorKind::Path,
-        delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
-        locator_hint: "/tmp/release_checklist.md".to_string(),
-        selection: crate::OutputSelectionContract::default(),
-    };
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert_eq!(
-        deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).as_deref(),
-        Some("Release Checklist")
-    );
-
-    route.response_shape = crate::OutputResponseShape::Strict;
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-    assert!(deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).is_none());
-}
-
-#[test]
-fn deterministic_scalar_markdown_heading_defers_when_read_evidence_has_body() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r##"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"/tmp/release_checklist.md"}"##,
-    ));
-    let route = crate::IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: crate::OutputResponseShape::Scalar,
-        requires_content_evidence: true,
-        delivery_required: false,
-        locator_kind: crate::OutputLocatorKind::Path,
-        delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
-        locator_hint: "/tmp/release_checklist.md".to_string(),
-        selection: crate::OutputSelectionContract::default(),
-    };
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert!(deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).is_none());
 }
 
 #[test]

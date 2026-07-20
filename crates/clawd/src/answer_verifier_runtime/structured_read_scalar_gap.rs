@@ -74,7 +74,7 @@ pub(in crate::answer_verifier) fn read_range_excerpt_without_line_prefixes(
 ) -> String {
     excerpt
         .lines()
-        .map(strip_read_range_line_prefix)
+        .map(crate::read_range_utils::strip_read_range_line_prefix)
         .collect::<Vec<_>>()
         .join("\n")
 }

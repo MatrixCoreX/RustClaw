@@ -1262,20 +1262,9 @@ fn machine_value_is_short_machine_atom(value: &str) -> bool {
 fn read_range_excerpt_without_line_prefixes(excerpt: &str) -> String {
     excerpt
         .lines()
-        .map(strip_read_range_line_prefix)
+        .map(crate::read_range_utils::strip_read_range_line_prefix)
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn strip_read_range_line_prefix(line: &str) -> &str {
-    let Some((prefix, rest)) = line.split_once('|') else {
-        return line;
-    };
-    let prefix = prefix.trim();
-    if prefix.is_empty() || prefix.len() > 6 || !prefix.chars().all(|ch| ch.is_ascii_digit()) {
-        return line;
-    }
-    rest
 }
 
 #[cfg(test)]
