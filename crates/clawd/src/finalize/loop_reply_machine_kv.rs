@@ -382,41 +382,6 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
-    if let Some(restored) = latest_web_search_candidate_listing_delivery(loop_state, &current) {
-        if restored.trim() == current.trim() {
-            loop_state.last_user_visible_respond = Some(current);
-            return false;
-        }
-        delivery_messages.clear();
-        delivery_messages.push(restored.clone());
-        loop_state.delivery_messages.clear();
-        append_delivery_message(
-            &task.task_id,
-            &mut loop_state.delivery_messages,
-            restored.clone(),
-        );
-        loop_state.last_user_visible_respond = Some(restored);
-        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
-            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-            parsed: true,
-            contract_ok: true,
-            completion_ok: Some(true),
-            grounded_ok: Some(true),
-            format_ok: Some(true),
-            needs_clarify: Some(false),
-            used_evidence_ids_count: loop_state.executed_step_results.len(),
-            ..Default::default()
-        });
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "requested_machine_kv_summary_web_search_candidate_listing",
-            "restored",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-        return true;
-    }
     if current_delivery_is_terminal_scalar_answer(agent_run_context, &current)
         && !requested_machine_summary_should_override_scalar(&current, &answer)
     {
@@ -576,10 +541,6 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
             loop_state.executed_step_results.len(),
         );
         return true;
-    }
-    if current_delivery_preserves_web_search_listing(agent_run_context, loop_state, &current) {
-        loop_state.last_user_visible_respond = Some(current);
-        return false;
     }
     if current_delivery_is_richer_than_requested_machine_summary(
         agent_run_context,
@@ -1115,125 +1076,6 @@ fn requested_machine_summary_value_matches_scalar(current: &str, requested_summa
     };
     let value = value.trim();
     !current.is_empty() && value == current
-}
-
-fn current_delivery_preserves_web_search_listing(
-    _agent_run_context: Option<&AgentRunContext>,
-    loop_state: &LoopState,
-    current: &str,
-) -> bool {
-    let current = current.trim();
-    if current.is_empty() {
-        return false;
-    }
-    let pairs = web_search_candidate_title_sources_from_loop_state(loop_state);
-    web_search_candidate_titles_are_covered(&pairs, current)
-}
-
-fn latest_web_search_candidate_listing_delivery(
-    loop_state: &LoopState,
-    current: &str,
-) -> Option<String> {
-    if !current_delivery_is_machine_kv_only(current) {
-        return None;
-    }
-    let pairs = web_search_candidate_title_sources_from_loop_state(loop_state);
-    web_search_candidate_listing_from_pairs(pairs)
-}
-
-fn web_search_candidate_title_sources_from_loop_state(
-    loop_state: &LoopState,
-) -> Vec<(String, String)> {
-    let mut pairs = Vec::new();
-    for step in &loop_state.executed_step_results {
-        if !step.is_ok() || !matches!(step.skill.as_str(), "web_search_extract" | "browser_web") {
-            continue;
-        }
-        if let Some(output) = step.output.as_deref() {
-            for pair in web_search_candidate_title_sources_from_output(output) {
-                if !pairs.iter().any(|existing| existing == &pair) {
-                    pairs.push(pair);
-                }
-            }
-        }
-    }
-    pairs
-}
-
-fn web_search_candidate_titles_are_covered(pairs: &[(String, String)], visible: &str) -> bool {
-    let mut titles: Vec<&str> = Vec::new();
-    for (title, _source) in pairs {
-        let title = title.as_str();
-        if !titles.contains(&title) {
-            titles.push(title);
-        }
-    }
-    !titles.is_empty() && titles.into_iter().all(|title| visible.contains(title))
-}
-
-fn web_search_candidate_listing_from_pairs(pairs: Vec<(String, String)>) -> Option<String> {
-    if pairs.is_empty() {
-        return None;
-    }
-    Some(
-        pairs
-            .into_iter()
-            .map(|(title, source)| format!("{title} - {source}"))
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
-}
-
-fn web_search_candidate_title_sources_from_output(output: &str) -> Vec<(String, String)> {
-    let Ok(value) = serde_json::from_str::<Value>(output.trim()) else {
-        return Vec::new();
-    };
-    let mut pairs = Vec::new();
-    collect_web_search_candidate_title_sources_from_json(&value, &mut pairs);
-    pairs
-}
-
-fn collect_web_search_candidate_title_sources_from_json(
-    value: &Value,
-    pairs: &mut Vec<(String, String)>,
-) {
-    for pointer in [
-        "/extra/candidates",
-        "/extra/items",
-        "/candidates",
-        "/items",
-        "/results",
-    ] {
-        if let Some(items) = value.pointer(pointer).and_then(Value::as_array) {
-            collect_web_search_candidate_array_title_sources(items, pairs);
-        }
-    }
-}
-
-fn collect_web_search_candidate_array_title_sources(
-    items: &[Value],
-    pairs: &mut Vec<(String, String)>,
-) {
-    for item in items {
-        let Some(object) = item.as_object() else {
-            continue;
-        };
-        let title = object
-            .get("title")
-            .or_else(|| object.get("name"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let source = object
-            .get("source")
-            .or_else(|| object.get("domain"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        if let (Some(title), Some(source)) = (title, source) {
-            pairs.push((title.to_string(), source.to_string()));
-        }
-    }
 }
 
 fn service_status_selector_only_summary(

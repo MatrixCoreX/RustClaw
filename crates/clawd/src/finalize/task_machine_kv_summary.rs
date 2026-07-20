@@ -1,7 +1,7 @@
 #[path = "task_machine_kv_summary_path_request.rs"]
 mod path_request;
-#[path = "task_machine_kv_summary_web_service.rs"]
-mod web_service;
+#[path = "task_machine_kv_summary_service_control.rs"]
+mod service_control;
 
 #[cfg(test)]
 use path_request::requested_machine_kv_summary_from_task_final_answer;
@@ -13,13 +13,7 @@ use path_request::{
     route_preserves_generated_file_machine_report, task_machine_kv_request_surfaces,
     text_has_compare_paths_existence_fields,
 };
-#[cfg(test)]
-use web_service::web_search_candidate_title_sources_from_output;
-use web_service::{
-    final_answer_preserves_service_control_status_summary,
-    final_answer_preserves_web_search_listing,
-    web_search_candidate_listing_final_answer_from_journal,
-};
+use service_control::final_answer_preserves_service_control_status_summary;
 
 pub(super) fn recover_requested_machine_kv_summary_final_answer(
     prompt: &str,
@@ -157,31 +151,6 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         && requested_summary.as_deref().is_some_and(|summary| {
             request_surfaces_explicitly_request_kv_summary(&request_surfaces, summary)
         });
-    if let Some(restored) =
-        web_search_candidate_listing_final_answer_from_journal(journal, answer_text)
-    {
-        if restored.trim() == answer_text.trim() {
-            journal.record_final_answer(answer_text.as_str());
-            return false;
-        }
-        answer_messages.clear();
-        answer_messages.push(restored.clone());
-        *answer_text = restored;
-        journal.record_final_answer(answer_text.as_str());
-        journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
-            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-            parsed: true,
-            contract_ok: true,
-            completion_ok: Some(true),
-            grounded_ok: Some(true),
-            format_ok: Some(true),
-            needs_clarify: Some(false),
-            used_evidence_ids_count: journal.step_results.len(),
-            ..Default::default()
-        });
-        return true;
-    }
     if let Some(restored) = requested_summary
         .as_deref()
         .and_then(|summary| latest_path_batch_fact_answer_for_requested_summary(journal, summary))
@@ -375,15 +344,6 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         return false;
     }
     if final_answer_preserves_transform_structured_delivery(journal, answer_text, answer_messages) {
-        journal.record_final_answer(answer_text.as_str());
-        return false;
-    }
-    if final_answer_preserves_web_search_listing(
-        route_result,
-        journal,
-        answer_text,
-        answer_messages,
-    ) {
         journal.record_final_answer(answer_text.as_str());
         return false;
     }

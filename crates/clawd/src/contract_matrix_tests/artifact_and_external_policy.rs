@@ -631,50 +631,6 @@ fn web_page_summary_allows_browser_open_extract_for_url() {
 }
 
 #[test]
-fn web_search_summary_allows_web_search_extract() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::WebSearchSummary,
-            requires_content_evidence: true,
-            response_shape: OutputResponseShape::Strict,
-            ..IntentOutputContract::default()
-        }),
-        "web_search_extract",
-        &serde_json::json!({
-            "action": "search_extract",
-            "query": "rust async tutorial",
-            "top_k": 3
-        }),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "web_search_extract.search_extract");
-    assert_eq!(policy.contract_match, "web_search_summary");
-}
-
-#[test]
-fn web_search_summary_allows_followup_browser_extract() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::WebSearchSummary,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        }),
-        "browser_web",
-        &serde_json::json!({
-            "action": "open_extract",
-            "urls": ["https://example.com"]
-        }),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "browser_web.open_extract");
-    assert_eq!(policy.contract_match, "web_search_summary");
-}
-
-#[test]
 fn market_quote_allows_stock_quote_without_locator() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
