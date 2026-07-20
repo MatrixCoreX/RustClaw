@@ -799,9 +799,6 @@ pub(super) fn route_requires_http_body_synthesis(
     if !route.requires_content_evidence {
         return false;
     }
-    if route_requests_browser_page_body(route) {
-        return true;
-    }
     let Some(shape) = crate::evidence_policy::final_answer_shape_for_output_contract(route) else {
         return false;
     };
@@ -812,10 +809,6 @@ pub(super) fn route_requires_http_body_synthesis(
         return shape.class() == crate::evidence_policy::FinalAnswerShapeClass::Verdict;
     }
     false
-}
-
-fn route_requests_browser_page_body(route: &crate::IntentOutputContract) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::WebPageSummary)
 }
 
 fn inventory_dir_can_use_direct_names(
