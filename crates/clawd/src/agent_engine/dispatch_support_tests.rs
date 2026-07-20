@@ -1225,7 +1225,7 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };

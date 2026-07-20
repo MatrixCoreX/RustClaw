@@ -625,7 +625,7 @@ fn evidence_policy_preflight_allows_internal_synthesis_actions() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::RecentArtifactsJudgment,
+        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
     });

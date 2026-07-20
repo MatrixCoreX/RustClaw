@@ -1211,10 +1211,6 @@ pub(crate) fn delivery_payload_consistent(text: &str, messages: &[String]) -> bo
 mod decision_envelope_tests;
 
 #[cfg(test)]
-#[path = "task_journal_recent_artifacts_tests.rs"]
-mod recent_artifacts_tests;
-
-#[cfg(test)]
 #[path = "task_journal_coding_state_tests.rs"]
 mod coding_state_tests;
 

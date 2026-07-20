@@ -244,7 +244,6 @@ pub(crate) enum EvidenceToken {
     CommandOutput,
     ContentExcerpt,
     Count,
-    DirectoryStructure,
     Exists,
     ExistsFalse,
     ExistsTrue,
@@ -262,7 +261,6 @@ impl EvidenceToken {
         Self::CommandOutput,
         Self::ContentExcerpt,
         Self::Count,
-        Self::DirectoryStructure,
         Self::Exists,
         Self::ExistsFalse,
         Self::ExistsTrue,
@@ -279,7 +277,6 @@ impl EvidenceToken {
             "command_output" => Some(Self::CommandOutput),
             "content_excerpt" => Some(Self::ContentExcerpt),
             "count" => Some(Self::Count),
-            "directory_structure" => Some(Self::DirectoryStructure),
             "exists" => Some(Self::Exists),
             "exists_false" => Some(Self::ExistsFalse),
             "exists_true" => Some(Self::ExistsTrue),
@@ -299,7 +296,6 @@ impl EvidenceToken {
             Self::CommandOutput => "command_output",
             Self::ContentExcerpt => "content_excerpt",
             Self::Count => "count",
-            Self::DirectoryStructure => "directory_structure",
             Self::Exists => "exists",
             Self::ExistsFalse => "exists_false",
             Self::ExistsTrue => "exists_true",
@@ -561,14 +557,12 @@ pub(crate) enum FinalAnswerShape {
     NameList,
     PathList,
     RawOutputOrShortSummary,
-    RecentArtifactJudgment,
     RiskAssessment,
     Scalar,
     ScalarEqualityVerdict,
     SinglePath,
     StatusWithSource,
     SummaryGroundedInExcerpt,
-    SummaryGroundedInListing,
     SummaryWithEvidence,
     ValidationVerdict,
 }
@@ -627,14 +621,12 @@ impl FinalAnswerShape {
         Self::NameList,
         Self::PathList,
         Self::RawOutputOrShortSummary,
-        Self::RecentArtifactJudgment,
         Self::RiskAssessment,
         Self::Scalar,
         Self::ScalarEqualityVerdict,
         Self::SinglePath,
         Self::StatusWithSource,
         Self::SummaryGroundedInExcerpt,
-        Self::SummaryGroundedInListing,
         Self::SummaryWithEvidence,
         Self::ValidationVerdict,
     ];
@@ -653,14 +645,12 @@ impl FinalAnswerShape {
             "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
-            "recent_artifact_judgment" => Some(Self::RecentArtifactJudgment),
             "risk_assessment" => Some(Self::RiskAssessment),
             "scalar" => Some(Self::Scalar),
             "scalar_equality_verdict" => Some(Self::ScalarEqualityVerdict),
             "single_path" => Some(Self::SinglePath),
             "status_with_source" => Some(Self::StatusWithSource),
             "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
-            "summary_grounded_in_listing" => Some(Self::SummaryGroundedInListing),
             "summary_with_evidence" => Some(Self::SummaryWithEvidence),
             "validation_verdict" => Some(Self::ValidationVerdict),
             _ => None,
@@ -681,14 +671,12 @@ impl FinalAnswerShape {
             Self::NameList => "name_list",
             Self::PathList => "path_list",
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
-            Self::RecentArtifactJudgment => "recent_artifact_judgment",
             Self::RiskAssessment => "risk_assessment",
             Self::Scalar => "scalar",
             Self::ScalarEqualityVerdict => "scalar_equality_verdict",
             Self::SinglePath => "single_path",
             Self::StatusWithSource => "status_with_source",
             Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
-            Self::SummaryGroundedInListing => "summary_grounded_in_listing",
             Self::SummaryWithEvidence => "summary_with_evidence",
             Self::ValidationVerdict => "validation_verdict",
         }
@@ -706,7 +694,6 @@ impl FinalAnswerShape {
             Self::ComparisonVerdict
             | Self::ExistenceVerdictWithPath
             | Self::LifecycleResult
-            | Self::RecentArtifactJudgment
             | Self::RiskAssessment
             | Self::ScalarEqualityVerdict
             | Self::StatusWithSource
@@ -715,7 +702,6 @@ impl FinalAnswerShape {
             | Self::FailedStepWithEvidence
             | Self::RawOutputOrShortSummary
             | Self::SummaryGroundedInExcerpt
-            | Self::SummaryGroundedInListing
             | Self::SummaryWithEvidence => FinalAnswerShapeClass::GroundedSummary,
             Self::Free => FinalAnswerShapeClass::Freeform,
         }

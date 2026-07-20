@@ -261,7 +261,7 @@ fn single_listing_entry_passthrough_is_dropped_for_content_evidence() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "docs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };

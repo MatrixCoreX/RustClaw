@@ -54,9 +54,7 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "directory_names": f"列出 {FIXTURE_ROOT} 下的文件夹名，只输出名称列表。",
     "directory_entry_groups": f"列出 {FIXTURE_ROOT} 下的直接子项，并按文件和文件夹分组。",
     "file_paths": f"找出 {FIXTURE_ROOT} 下的 markdown 文件路径，只输出路径列表。",
-    "directory_purpose_summary": f"看一下 {FIXTURE_DOCS_DIR} 目录，然后一句话说明这些文件大概是做什么的。",
     "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
-    "recent_artifacts_judgment": f"列出 {FIXTURE_DOCS_DIR} 最近修改的 2 个文件，再判断它们更像文档还是产物。",
     "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
     "quantity_comparison": f"比较 {FIXTURE_DOC} 和 {FIXTURE_PACKAGE} 哪个文件更大，并给出依据。",
     "execution_failed_step": "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
@@ -83,9 +81,7 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "directory_names": f"List the folder names under {FIXTURE_ROOT}. Output only the names.",
     "directory_entry_groups": f"List the direct children under {FIXTURE_ROOT}, grouped into files and folders.",
     "file_paths": f"Find markdown file paths under {FIXTURE_ROOT}. Output only the path list.",
-    "directory_purpose_summary": f"Inspect {FIXTURE_DOCS_DIR} and explain in one sentence what these files are for.",
     "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
-    "recent_artifacts_judgment": f"List the 2 most recently modified files in {FIXTURE_DOCS_DIR}, then judge whether they look like docs or artifacts.",
     "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
     "quantity_comparison": f"Compare {FIXTURE_DOC} and {FIXTURE_PACKAGE}; tell me which file is larger and include the evidence.",
     "execution_failed_step": "Run this read-only check that should fail: cat /definitely_missing_rustclaw_contract_case. Then explain the failure reason.",
@@ -363,14 +359,6 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
                 "selector_target_kind=file",
             ]
         )
-    elif contract_id == "recent_artifacts_judgment":
-        lines.extend(
-            [
-                "selector_limit=2",
-                "selector_sort_by=mtime_desc",
-                "selector_target_kind=file",
-            ]
-        )
     elif contract_id == "quantity_comparison":
         lines.append("selector_answer_style=larger_with_sizes")
     return lines
@@ -639,8 +627,6 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
     elif contract_id == "file_paths":
         row["final_contains"] = ["release_checklist.md", "service_notes.md"]
         row["final_not_contains"] = ["package.json"]
-    elif contract_id == "recent_artifacts_judgment":
-        row["final_contains"] = ["release_checklist.md", "service_notes.md"]
     elif contract_id == "quantity_comparison":
         row["final_contains"] = ["package.json", "246", "release_checklist.md", "153"]
         row["final_not_contains"] = ["package.json：93 字节", "package.json: 93 bytes"]

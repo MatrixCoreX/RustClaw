@@ -583,33 +583,3 @@ pub(super) fn count_answer_from_latest_fs_search(
         _ => None,
     }
 }
-
-pub(super) fn directory_purpose_summary_find_ext_answer_candidate(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-) -> Option<String> {
-    if !super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::DirectoryPurposeSummary,
-    ) || route.delivery_required
-        || route.requires_content_evidence
-        || matches!(
-            route.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        )
-    {
-        return None;
-    }
-    let (results, count, ext) = latest_find_ext_results(loop_state)?;
-    if count == 0 || results.is_empty() {
-        return None;
-    }
-
-    let mut lines = vec![
-        format!("find_ext.ext={ext}"),
-        format!("find_ext.count={count}"),
-    ];
-    lines.extend(results.iter().map(|path| format!("find_ext.result={path}")));
-    lines.extend(find_ext_representative_lines(&results));
-    Some(lines.join("\n"))
-}

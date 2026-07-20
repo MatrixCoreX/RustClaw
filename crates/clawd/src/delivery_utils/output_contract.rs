@@ -176,17 +176,14 @@ pub(super) fn enforce_output_contract(
         OutputResponseShape::OneSentence
             if output_contract.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison) => {}
         OutputResponseShape::OneSentence => {
-            if !output_contract.semantic_kind_is(crate::OutputSemanticKind::DirectoryPurposeSummary)
+            *normalized_text = if output_contract.requires_content_evidence
+                || output_contract.semantic_kind.is_content_excerpt_summary()
             {
-                *normalized_text = if output_contract.requires_content_evidence
-                    || output_contract.semantic_kind.is_content_excerpt_summary()
-                {
-                    take_tail_sentence(normalized_text)
-                        .unwrap_or_else(|| take_first_sentence(normalized_text))
-                } else {
-                    take_first_sentence(normalized_text)
-                };
-            }
+                take_tail_sentence(normalized_text)
+                    .unwrap_or_else(|| take_first_sentence(normalized_text))
+            } else {
+                take_first_sentence(normalized_text)
+            };
         }
         OutputResponseShape::Scalar => {
             // QuantityComparison 的回答天然由"较大方 + 双方数值"组成（如 "docs 更多：docs 有 3 个，logs 有 2 个"），

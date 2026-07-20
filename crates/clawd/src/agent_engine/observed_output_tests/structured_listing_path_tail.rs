@@ -120,60 +120,6 @@ fn direct_answer_blocks_contract_forbidden_observation_action() {
 }
 
 #[test]
-fn directory_purpose_summary_is_not_hard_classified_by_observed_output() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"inventory_dir","path":"/tmp/docs","resolved_path":"/tmp/docs","names_only":true,"names":["release_checklist.md","operator-guide.md","rollout-summary.pdf"]}"#,
-        ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-            locator_hint: "docs".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
-    );
-}
-
-#[test]
-fn directory_purpose_summary_style_hint_uses_listing_evidence() {
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-            locator_hint: "docs".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    let hint = observed_response_style_hint(Some(&agent_run_context));
-
-    assert!(hint.contains("style_policy=directory_purpose_summary"));
-    assert!(hint.contains("evidence=listing_metadata"));
-    assert!(hint.contains("include=selected_entries,purpose_summary"));
-}
-
-#[test]
 fn generic_evidence_grounded_judgment_uses_model_synthesis_style() {
     let route_result = IntentOutputContract {
             exact_sentence_count: None,

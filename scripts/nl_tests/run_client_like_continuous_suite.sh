@@ -743,8 +743,6 @@ language_render_tags = {
     "chat",
     "content_excerpt_summary",
     "content_excerpt_with_summary",
-    "directory_purpose_summary",
-    "recent_artifacts_judgment",
     "summary",
     "workspace_project_summary",
 }

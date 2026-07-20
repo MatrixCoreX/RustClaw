@@ -406,28 +406,6 @@ fn sync_output_payload_scalar_contract_preserves_execution_summary_message() {
 }
 
 #[test]
-fn directory_purpose_summary_one_sentence_contract_preserves_multiline_listing() {
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-        ..IntentOutputContract::default()
-    };
-    let mut text =
-        "base_skill_response_contract.md\nskill_integration_guide.md\n\n这个目录主要放说明文档、操作指引和检查清单。"
-            .to_string();
-    let mut messages = vec![text.clone()];
-
-    sync_output_payload(&contract, &mut text, &mut messages);
-
-    assert_eq!(
-        text,
-        "base_skill_response_contract.md\nskill_integration_guide.md\n\n这个目录主要放说明文档、操作指引和检查清单。"
-    );
-    assert_eq!(messages, vec![text]);
-}
-
-#[test]
 fn sync_output_payload_strips_preamble_before_markdown_table() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
@@ -498,7 +476,7 @@ fn directory_lookup_contract_does_not_replace_synthesized_answer() {
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         locator_hint: "logs".to_string(),
         response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
         ..IntentOutputContract::default()
     };

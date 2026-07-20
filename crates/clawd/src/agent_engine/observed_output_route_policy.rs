@@ -97,9 +97,6 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
     {
         return "style_policy=exact_observed_value observed_source=command_output requested_format=preserve raw_passthrough=conditional".to_string();
     }
-    if route_has_marker(crate::OutputSemanticKind::DirectoryPurposeSummary) {
-        return "style_policy=directory_purpose_summary evidence=listing_metadata include=selected_entries,purpose_summary content_read_required=only_when_requested".to_string();
-    }
     if let Some(route) = route {
         if route_disallows_direct_observation_passthrough(route) {
             if route_quantity_comparison_requires_model_language_synthesis(route) {

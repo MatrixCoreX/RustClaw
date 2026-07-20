@@ -1,33 +1,4 @@
 #[test]
-fn recent_artifacts_judgment_is_not_hard_classified_by_observed_output() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "run_cmd",
-            "total 151792\n-rw-r--r--@ 1 testuser staff 76509771 Apr 12 16:30 model_io.log\n-rw-r--r--@ 1 testuser staff 906739 Apr 12 16:30 act_plan.log\n-rw-r--r--@ 1 testuser staff 191187 Apr 12 15:48 service_ops.log\n",
-        ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
-            locator_hint: "logs".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
-    );
-}
-
-#[test]
 fn direct_answer_defers_system_basic_info_summary_to_llm_for_brief_request() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

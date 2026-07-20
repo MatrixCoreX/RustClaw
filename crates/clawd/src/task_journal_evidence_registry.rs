@@ -201,14 +201,7 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "system_basic.tree_summary",
         "system_basic.tree_summary.structured_json_v1",
-        &[
-            "candidates",
-            "count",
-            "directory_structure",
-            "kind",
-            "path",
-            "size_bytes",
-        ],
+        &["candidates", "count", "kind", "path", "size_bytes"],
     ),
     step_json_extractor(
         "system_basic.inventory_dir",

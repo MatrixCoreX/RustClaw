@@ -11,12 +11,7 @@ mod structured_read_scalar_gap;
 
 use compacted_machine_ref_gap::local_compacted_machine_ref_answer_verifier_gap;
 pub(crate) use compound_listing_gap::local_compound_listing_answer_verifier_gap;
-pub(super) use compound_listing_gap::{
-    journal_has_content_excerpt_observation, observed_content_excerpt_path_names,
-    observed_inventory_names_for_contract, observed_name_is_mentioned,
-    observed_names_all_mentioned, requested_listing_name_limit,
-    structured_json_values_from_step_output,
-};
+pub(super) use compound_listing_gap::structured_json_values_from_step_output;
 pub(super) use prompt_evidence_blocks::{
     current_context_prompt_block, evidence_policy_context_prompt_block,
     execution_evidence_prompt_block, output_contract_prompt_block,

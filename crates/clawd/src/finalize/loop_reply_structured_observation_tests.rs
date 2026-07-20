@@ -524,7 +524,7 @@ fn broad_structured_read_validation_does_not_replace_directory_summary() {
         r#"{"action":"read_range","mode":"head","path":"UI/package.json","resolved_path":"UI/package.json","excerpt":"1|{\n2|  \"name\": \"react-example\"\n3|}"}"#,
     ));
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

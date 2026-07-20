@@ -204,21 +204,6 @@ required_evidence = ["candidates"]
 final_answer_shape = "path_list"
 failure_policy = "retry_with_alternatives"
 
-[contracts.directory_purpose_summary]
-semantic_kind = "directory_purpose_summary"
-operation = "summarize"
-target_object = "directory"
-delivery_shape = "summary"
-evidence_profile = "workspace_user_docs_first"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.find_entries", "fs_basic.stat_paths", "system_basic.tree_summary", "config_basic.read_field", "config_basic.read_fields", "log_analyze"]
-preferred_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.stat_paths", "fs_basic.read_text_range", "system_basic.tree_summary", "config_basic.read_field", "config_basic.read_fields"]
-required_evidence = ["candidates"]
-final_answer_shape = "summary_grounded_in_listing"
-failure_policy = "retry_with_alternatives"
-
-[contracts.directory_purpose_summary.evidence_expression]
-any_of = ["candidates", "content_excerpt"]
-
 [contracts.content_excerpt_summary]
 semantic_kind = "content_excerpt_summary"
 operation = "summarize"
@@ -244,21 +229,6 @@ preferred_actions = ["fs_basic.read_text_range"]
 required_evidence = ["content_excerpt"]
 final_answer_shape = "excerpt_plus_summary"
 failure_policy = "retry_with_alternatives"
-
-[contracts.recent_artifacts_judgment]
-semantic_kind = "recent_artifacts_judgment"
-operation = "summarize"
-target_object = "directory"
-delivery_shape = "summary"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.find_entries", "fs_basic.stat_paths", "system_basic.tree_summary"]
-preferred_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "system_basic.tree_summary", "fs_basic.stat_paths"]
-required_evidence = ["candidates", "content_excerpt"]
-final_answer_shape = "recent_artifact_judgment"
-failure_policy = "retry_with_alternatives"
-
-[contracts.recent_artifacts_judgment.evidence_expression]
-all_of = ["candidates"]
-any_of = ["content_excerpt", "directory_structure"]
 
 [contracts.scalar_count]
 semantic_kind = "scalar_count"
