@@ -177,7 +177,7 @@ fn exact_contract_keeps_publishable_synthesis_over_raw_observed_inventory() {
     let mut delivery_messages = vec!["垃圾代码端分析报告.md".to_string()];
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "document".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

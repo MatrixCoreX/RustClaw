@@ -4,8 +4,9 @@ pub(super) use list_projection::generic_observed_machine_projection_answer;
 #[cfg(test)]
 pub(super) use list_projection::matrix_strict_list_observed_answer;
 use list_projection::{
-    file_name_list_prefers_observed_projection, matrix_observed_answer_candidate_for_shape,
-    stale_file_token_delivery_bounded_read_answer, stale_file_token_delivery_listing_answer,
+    matrix_observed_answer_candidate_for_shape, route_requests_exact_name_list,
+    selected_name_list_prefers_observed_projection, stale_file_token_delivery_bounded_read_answer,
+    stale_file_token_delivery_listing_answer,
 };
 
 use tracing::info;
@@ -30,6 +31,9 @@ use super::{
 fn evidence_policy_final_answer_shape_class(
     route: &crate::IntentOutputContract,
 ) -> Option<crate::evidence_policy::FinalAnswerShapeClass> {
+    if route_requests_exact_name_list(route) {
+        return Some(crate::evidence_policy::FinalAnswerShapeClass::StrictList);
+    }
     crate::evidence_policy::final_answer_shape_for_output_contract(route).map(|shape| shape.class())
 }
 
@@ -81,7 +85,7 @@ pub(super) fn route_requires_observed_output_projection(
     ) {
         return true;
     }
-    route.semantic_kind_is(crate::OutputSemanticKind::DirectoryNames)
+    route_requests_exact_name_list(route)
 }
 
 pub(super) fn evidence_policy_candidate_satisfies_final_shape(
@@ -145,7 +149,7 @@ pub(super) fn current_synthesis_satisfies_evidence_policy_shape(
     let Some(message) = delivery_messages.last() else {
         return false;
     };
-    if file_name_list_prefers_observed_projection(route, loop_state) {
+    if selected_name_list_prefers_observed_projection(route, loop_state) {
         return false;
     }
     let task = synthetic_task_for_evidence_policy_shape_check(task_id);
@@ -264,7 +268,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
         return true;
     }
     if !current_answer.trim().is_empty()
-        && !file_name_list_prefers_observed_projection(route, loop_state)
+        && !selected_name_list_prefers_observed_projection(route, loop_state)
         && evidence_policy_candidate_satisfies_final_shape(
             task,
             user_text,
@@ -285,7 +289,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     ) else {
         return false;
     };
-    if !file_name_list_prefers_observed_projection(route, loop_state)
+    if !selected_name_list_prefers_observed_projection(route, loop_state)
         && !evidence_policy_candidate_satisfies_final_shape(
             task,
             user_text,

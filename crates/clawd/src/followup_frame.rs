@@ -522,15 +522,13 @@ fn op_kind_from_route(
 }
 
 fn output_contract_prefers_listing_followup(route_result: &crate::IntentOutputContract) -> bool {
-    route_result.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::FileNames,
-        crate::OutputSemanticKind::DirectoryNames,
-        crate::OutputSemanticKind::FilePaths,
-    ]) || matches!(
-        route_result.delivery_intent,
-        crate::OutputDeliveryIntent::DirectoryLookup
-            | crate::OutputDeliveryIntent::DirectoryBatchFiles
-    )
+    route_result.requests_exact_name_list()
+        || route_result.semantic_kind_is_any(&[crate::OutputSemanticKind::FilePaths])
+        || matches!(
+            route_result.delivery_intent,
+            crate::OutputDeliveryIntent::DirectoryLookup
+                | crate::OutputDeliveryIntent::DirectoryBatchFiles
+        )
 }
 
 fn journal_has_listing_observation(journal: &crate::task_journal::TaskJournal) -> bool {

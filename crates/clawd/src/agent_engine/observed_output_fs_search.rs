@@ -712,12 +712,9 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
     value: &serde_json::Value,
     allow_multi_result_list: bool,
 ) -> Option<String> {
-    if !super::output_route_policy::route_contract_marker_is_any(
+    if !super::output_route_policy::route_contract_marker_is(
         route,
-        &[
-            crate::OutputSemanticKind::FilePaths,
-            crate::OutputSemanticKind::FileNames,
-        ],
+        crate::OutputSemanticKind::FilePaths,
     ) && !route_requests_exact_scalar_path(route)
     {
         if !super::output_route_policy::route_contract_marker_is(
@@ -912,46 +909,4 @@ fn absolutize_fs_search_result_path(
         return rooted_candidate.display().to_string();
     }
     workspace_candidate.display().to_string()
-}
-
-fn parent_directory_listing_from_paths(paths: &[String]) -> Option<String> {
-    let mut dirs = Vec::new();
-    for path in paths {
-        let path = path.trim();
-        if path.is_empty() {
-            continue;
-        }
-        let parent = Path::new(path)
-            .parent()
-            .map(|parent| {
-                let display = parent.to_string_lossy().trim().to_string();
-                if display.is_empty() {
-                    ".".to_string()
-                } else {
-                    display
-                }
-            })
-            .unwrap_or_else(|| ".".to_string());
-        if !dirs.iter().any(|seen| seen == &parent) {
-            dirs.push(parent);
-        }
-    }
-    (!dirs.is_empty()).then(|| dirs.join("\n"))
-}
-
-pub(super) fn fs_search_contract_listing_candidate(
-    route: &crate::IntentOutputContract,
-    value: &serde_json::Value,
-) -> Option<String> {
-    if !super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::DirectoryNames,
-    ) {
-        return None;
-    }
-    let (results, count, _ext) = fs_search_find_ext_results(value)?;
-    if count == 0 || results.is_empty() {
-        return None;
-    }
-    parent_directory_listing_from_paths(&results)
 }

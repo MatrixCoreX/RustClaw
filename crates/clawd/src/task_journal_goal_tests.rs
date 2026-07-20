@@ -20,6 +20,23 @@ fn step_result(
     }
 }
 
+fn exact_file_list_route() -> crate::IntentOutputContract {
+    crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        selection: crate::OutputSelectionContract {
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::OutputScalarCountTargetKind::File,
+                target_kind_specified: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 #[test]
 fn summary_json_includes_machine_readable_task_goal() {
     let mut journal = TaskJournal::for_task("task-goal-summary", "ask", "change and verify");
@@ -189,11 +206,7 @@ fn summary_json_prefers_evidence_status_and_merges_goal_commands() {
 #[test]
 fn summary_json_marks_missing_evidence_as_remaining_work() {
     let mut journal = TaskJournal::for_task("task-goal-missing", "ask", "list files");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
+    let route = exact_file_list_route();
     journal.record_output_contract(&route.clone());
     journal.record_final_status(TaskJournalFinalStatus::Success);
 

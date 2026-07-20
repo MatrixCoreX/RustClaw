@@ -207,11 +207,12 @@ fn semantic_none_rejects_forbidden_action() {
 }
 
 #[test]
-fn action_policy_blocks_disallowed_structured_action_for_semantic_contract() {
+fn action_policy_blocks_forbidden_action_for_generic_content_contract() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::FileNames,
+            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
             ..IntentOutputContract::default()
         }),
         "run_cmd",
@@ -219,9 +220,9 @@ fn action_policy_blocks_disallowed_structured_action_for_semantic_contract() {
     )
     .expect("policy decision");
 
-    assert_eq!(policy.decision, ActionPolicyDecision::RejectedNotAllowed);
-    assert_eq!(policy.contract_match, "file_names");
-    assert_eq!(policy.required_evidence, vec!["candidates"]);
+    assert_eq!(policy.decision, ActionPolicyDecision::RejectedForbidden);
+    assert_eq!(policy.contract_match, "generic_path_content");
+    assert_eq!(policy.required_evidence, vec!["content_excerpt", "path"]);
 }
 
 #[test]
@@ -614,7 +615,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 48);
+    let cases = generated_contract_cases(&matrix, 42);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

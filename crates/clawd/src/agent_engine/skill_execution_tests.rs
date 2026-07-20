@@ -283,7 +283,7 @@ fn evidence_policy_preflight_does_not_reject_action_from_semantic_matrix_only() 
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
+        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
     });

@@ -376,7 +376,7 @@ fn fs_search_grep_text_observed_body_keeps_name_match_fallback() {
 }
 
 #[test]
-fn fs_search_find_ext_directory_contract_returns_parent_dirs() {
+fn fs_search_find_ext_unclassified_contract_keeps_observed_file_paths() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -387,7 +387,7 @@ fn fs_search_find_ext_directory_contract_returns_parent_dirs() {
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
-            semantic_kind: OutputSemanticKind::DirectoryNames,
+            semantic_kind: OutputSemanticKind::None,
             ..IntentOutputContract::default()
         };
     let agent_run_context = AgentRunContext {
@@ -397,12 +397,12 @@ fn fs_search_find_ext_directory_contract_returns_parent_dirs() {
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some(".\nscripts\nscripts/dev\ncomponent_start")
+        Some("system_report.sh\nscripts/run.sh\nscripts/dev/check.sh\ncomponent_start/start-clawd.sh")
     );
 }
 
 #[test]
-fn virtual_fs_basic_find_ext_directory_contract_returns_parent_dirs() {
+fn virtual_fs_basic_find_ext_unclassified_contract_keeps_observed_file_paths() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -413,7 +413,7 @@ fn virtual_fs_basic_find_ext_directory_contract_returns_parent_dirs() {
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
-            semantic_kind: OutputSemanticKind::DirectoryNames,
+            semantic_kind: OutputSemanticKind::None,
             ..IntentOutputContract::default()
         };
     let agent_run_context = AgentRunContext {
@@ -423,7 +423,7 @@ fn virtual_fs_basic_find_ext_directory_contract_returns_parent_dirs() {
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some(".\nscripts\nscripts/dev\ncomponent_start")
+        Some("system_report.sh\nscripts/run.sh\nscripts/dev/check.sh\ncomponent_start/start-clawd.sh")
     );
 }
 
@@ -528,9 +528,16 @@ fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::FileNames,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "scripts/nl_tests/fixtures/locator_smart/stem_unique".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                list_selector: crate::pipeline_types::OutputListSelector {
+                    target_kind: crate::OutputScalarCountTargetKind::File,
+                    target_kind_specified: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

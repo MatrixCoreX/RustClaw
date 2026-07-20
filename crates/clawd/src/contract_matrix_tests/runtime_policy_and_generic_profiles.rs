@@ -97,11 +97,12 @@ fn contract_matrix_final_answer_shapes_are_typed() {
         .map(|shape| shape.as_str())
         .collect::<BTreeSet<_>>();
 
-    assert_eq!(configured, typed);
-    for shape in configured {
+    assert!(configured.is_subset(&typed));
+    assert!(typed.contains("exact_list"));
+    for shape in &configured {
         assert_eq!(
             FinalAnswerShape::parse(shape).map(FinalAnswerShape::as_str),
-            Some(shape)
+            Some(*shape)
         );
     }
 }
@@ -138,14 +139,9 @@ fn final_answer_shape_classes_are_total_and_runtime_mapped() {
         OutputResponseShape::Scalar
     );
     assert_eq!(
-        FinalAnswerShape::NameList.coarse_response_shape(),
-        OutputResponseShape::Strict
-    );
-    assert_eq!(
         FinalAnswerShape::SummaryWithEvidence.coarse_response_shape(),
         OutputResponseShape::Free
     );
-    assert!(!FinalAnswerShape::NameList.allows_model_language());
     assert!(FinalAnswerShape::SummaryWithEvidence.allows_model_language());
 }
 
@@ -237,16 +233,23 @@ fn contract_matrix_evidence_tokens_are_typed() {
 
 #[test]
 fn bundled_contract_matrix_renders_prompt_line() {
-    let line = compact_prompt_line_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::FileNames,
+    let mut output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::None,
+        response_shape: OutputResponseShape::Strict,
         ..IntentOutputContract::default()
-    })
-    .expect("contract prompt line");
+    };
+    output_contract.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    output_contract
+        .selection
+        .list_selector
+        .target_kind_specified = true;
+    let line =
+        compact_prompt_line_for_output_contract(&output_contract).expect("contract prompt line");
 
     assert!(line.contains("evidence_policy"));
-    assert!(line.contains("source=bundled_evidence_policy"));
+    assert!(line.contains("source=validated_output_selector"));
     assert!(line.contains("planner_authority=agent_loop_registry"));
-    assert!(line.contains("match=file_names"));
+    assert!(line.contains("match=exact_list_selector"));
     assert!(line.contains("required_evidence=candidates"));
     assert!(!line.contains("allowed_actions="));
     assert!(!line.contains("forbidden_actions="));
@@ -591,11 +594,20 @@ fn configured_observation_extractors_must_exist_in_registry() {
 
 #[test]
 fn runtime_contract_snapshot_binds_matrix_and_compact_prompt_block() {
-    let snapshot = runtime_contract_snapshot_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::FileNames,
+    let mut output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
         ..IntentOutputContract::default()
-    })
-    .expect("runtime contract snapshot");
+    };
+    output_contract.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    output_contract
+        .selection
+        .list_selector
+        .target_kind_specified = true;
+    let snapshot = runtime_contract_snapshot_for_output_contract(&output_contract)
+        .expect("runtime contract snapshot");
 
     assert_eq!(
         snapshot
@@ -643,14 +655,14 @@ fn runtime_contract_snapshot_binds_matrix_and_compact_prompt_block() {
             .get("contract")
             .and_then(|value| value.get("contract_match"))
             .and_then(Value::as_str),
-        Some("file_names")
+        Some("generic_path_content")
     );
     assert_eq!(
         snapshot
             .get("contract")
             .and_then(|value| value.get("final_answer_shape"))
             .and_then(Value::as_str),
-        Some("name_list")
+        Some("exact_list")
     );
     assert_eq!(
         snapshot

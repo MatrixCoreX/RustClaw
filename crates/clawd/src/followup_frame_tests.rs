@@ -296,7 +296,7 @@ fn generic_workspace_evidence_path_does_not_persist_followup_target() {
             .to_string(),
         ));
     let route_result = IntentOutputContract {
-        response_shape: crate::OutputResponseShape::Free,
+        response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         semantic_kind: crate::OutputSemanticKind::None,
@@ -637,7 +637,14 @@ fn persisted_followup_frame_round_trips_with_slice_and_entries() {
         delivery_intent: crate::OutputDeliveryIntent::None,
         semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
         locator_hint: "model_io.log".to_string(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::OutputScalarCountTargetKind::File,
+                target_kind_specified: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -751,14 +758,21 @@ fn compact_listing_answer_persists_ordered_entries_for_followup() {
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = IntentOutputContract {
         exact_sentence_count: None,
-        response_shape: crate::OutputResponseShape::Free,
+        response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
         delivery_required: false,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::FileNames,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "logs".to_string(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::OutputScalarCountTargetKind::File,
+                target_kind_specified: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -1060,7 +1074,7 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::FileNames,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/home/guagua/rustclaw/logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };

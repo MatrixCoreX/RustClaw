@@ -41,9 +41,9 @@
             }
           ],
           "contract_matrix": {
-            "contract_match": "file_names",
-            "semantic_kind": "file_names",
-            "final_answer_shape": "name_list"
+            "contract_match": "generic_path_content",
+            "semantic_kind": "none",
+            "final_answer_shape": "exact_list"
           },
           "evidence_coverage": {
             "required_evidence": [
@@ -66,18 +66,18 @@
               "error_kind": "contract_action_rejected",
               "failure_attribution": "contract_gap",
               "contract_policy": {
-                "decision": "rejected_not_allowed",
+                "decision": "rejected_forbidden",
                 "action": "run_cmd",
-                "contract_match": "file_names",
+                "contract_match": "generic_path_content",
                 "required_evidence": [
                   "candidates"
                 ],
                 "preferred_actions": [
                   "fs_basic.list_dir"
                 ],
-                "final_answer_shape": "name_list"
+                "final_answer_shape": "exact_list"
               },
-              "error_excerpt": "{\"ok\":false,\"skill\":\"run_cmd\",\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `run_cmd` is rejected by contract `file_names`\",\"extra\":{\"failure_attribution\":\"contract_gap\"}}"
+              "error_excerpt": "{\"ok\":false,\"skill\":\"run_cmd\",\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `run_cmd` is rejected by contract `generic_path_content`\",\"extra\":{\"failure_attribution\":\"contract_gap\"}}"
             }
           ]
         }

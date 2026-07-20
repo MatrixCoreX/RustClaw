@@ -631,7 +631,7 @@ fn trace_json_includes_execution_recipe_summary() {
 
 #[test]
 fn trace_json_includes_round_source_of_truth_machine_fields() {
-    let route = route_for_semantic(crate::OutputSemanticKind::FileNames);
+    let route = route_for_semantic(crate::OutputSemanticKind::None);
     let plan = crate::PlanResult {
         goal: "inspect workspace".to_string(),
         missing_slots: Vec::new(),
@@ -962,8 +962,7 @@ fn trace_json_includes_memory_trace() {
 #[test]
 fn attach_to_result_caps_large_trace_and_preserves_contract_summary_fields() {
     let mut journal = TaskJournal::for_task("task-large-trace", "ask", "列出文件名");
-    journal
-        .record_output_contract(&route_for_semantic(crate::OutputSemanticKind::FileNames).clone());
+    journal.record_output_contract(&route_for_semantic(crate::OutputSemanticKind::None).clone());
     for idx in 0..300 {
         journal.push_task_observation(json!({
             "idx": idx,
@@ -1569,17 +1568,17 @@ fn trace_json_includes_contract_policy_for_contract_rejection() {
     let err = crate::skills::structured_skill_error_from_parts(
         "run_cmd",
         "contract_action_rejected",
-        "action `run_cmd` is rejected by contract `file_names`",
+        "action `run_cmd` is rejected by contract `generic_path_content`",
         None,
         Some(json!({
             "failure_attribution": "contract_gap",
-            "decision": "rejected_not_allowed",
+            "decision": "rejected_forbidden",
             "action": "run_cmd",
-            "contract_match": "file_names",
+            "contract_match": "generic_path_content",
             "required_evidence": ["candidates"],
             "preferred_actions": ["fs_basic.list_dir"],
             "evidence_expression": {"all_of": ["candidates"], "one_of": [], "any_of": [], "negative_evidence": []},
-            "final_answer_shape": "name_list",
+            "final_answer_shape": "exact_list",
         })),
     );
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1611,13 +1610,13 @@ fn trace_json_includes_contract_policy_for_contract_rejection() {
         step.get("contract_policy")
             .and_then(|value| value.get("decision"))
             .and_then(Value::as_str),
-        Some("rejected_not_allowed")
+        Some("rejected_forbidden")
     );
     assert_eq!(
         step.get("contract_policy")
             .and_then(|value| value.get("contract_match"))
             .and_then(Value::as_str),
-        Some("file_names")
+        Some("generic_path_content")
     );
     assert_eq!(
         step.get("contract_policy")

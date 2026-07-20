@@ -546,11 +546,20 @@ fn file_names_contract_does_not_reexpand_single_filename_answer_as_directory_loo
 
     let contract = IntentOutputContract {
         exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
         delivery_intent: OutputDeliveryIntent::DirectoryLookup,
         locator_kind: OutputLocatorKind::Path,
         locator_hint: document.display().to_string(),
-        semantic_kind: OutputSemanticKind::FileNames,
+        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
+        selection: crate::OutputSelectionContract {
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::OutputScalarCountTargetKind::File,
+                target_kind_specified: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
         ..IntentOutputContract::default()
     };
     let answer = "report.md".to_string();

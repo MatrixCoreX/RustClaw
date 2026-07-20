@@ -13,8 +13,6 @@
 //!   兜底，外加 tracing 事件保留判定原因，便于 inspect_task.sh 关联。
 
 use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
-use std::collections::BTreeSet;
-use std::path::Path;
 
 /// §7.1 verifier 判定结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,130 +70,6 @@ impl OutputContractVerdict {
             }
         }
     }
-}
-
-fn output_list_items(text: &str) -> Vec<String> {
-    text.lines()
-        .filter_map(|line| {
-            let mut item = line.trim();
-            if item.is_empty() || item.starts_with("```") {
-                return None;
-            }
-            item = item
-                .trim_start_matches(|ch: char| ch == '-' || ch == '*' || ch.is_whitespace())
-                .trim();
-            if let Some((prefix, rest)) = item.split_once('.') {
-                if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
-                    item = rest.trim();
-                }
-            } else if let Some((prefix, rest)) = item.split_once(')') {
-                if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
-                    item = rest.trim();
-                }
-            }
-            let item = item
-                .trim_matches(|ch: char| {
-                    matches!(
-                        ch,
-                        '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '。' | '，' | ',' | ';' | '：'
-                    )
-                })
-                .trim();
-            (!item.is_empty()).then(|| item.to_string())
-        })
-        .collect()
-}
-
-fn extension_hints_from_text(text: &str) -> BTreeSet<String> {
-    let mut hints = BTreeSet::new();
-    let mut chars = text.char_indices().peekable();
-    while let Some((_, ch)) = chars.next() {
-        if ch != '.' {
-            continue;
-        }
-        let mut ext = String::new();
-        while let Some((_, next)) = chars.peek().copied() {
-            if next.is_ascii_alphanumeric() || next == '_' || next == '-' {
-                ext.push(next.to_ascii_lowercase());
-                chars.next();
-            } else {
-                break;
-            }
-        }
-        if (1..=16).contains(&ext.len()) {
-            hints.insert(ext);
-        }
-    }
-    hints
-}
-
-fn final_component_extension(item: &str) -> Option<String> {
-    let item = item.trim().trim_end_matches('/');
-    let component = item
-        .rsplit(['/', '\\'])
-        .next()
-        .map(str::trim)
-        .filter(|component| !component.is_empty())?;
-    if component.starts_with('.') && component.matches('.').count() == 1 {
-        return None;
-    }
-    Path::new(component)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::trim)
-        .filter(|ext| !ext.is_empty() && ext.len() <= 16)
-        .map(|ext| ext.to_ascii_lowercase())
-}
-
-fn verify_directory_names(
-    contract: &IntentOutputContract,
-    text: &str,
-    user_request: &str,
-) -> OutputContractVerdict {
-    let items = output_list_items(text);
-    if items.is_empty() {
-        return OutputContractVerdict::reject(
-            "directory_names_empty_list_candidate",
-            "directory_names: empty list candidate",
-        );
-    }
-    let ext_hints = extension_hints_from_text(user_request);
-    let file_like = items
-        .iter()
-        .filter_map(|item| final_component_extension(item).map(|ext| (item, ext)))
-        .collect::<Vec<_>>();
-    let requested_ext_file_like = file_like
-        .iter()
-        .filter(|(_, ext)| ext_hints.contains(ext))
-        .count();
-    if requested_ext_file_like >= 2
-        || file_like.iter().any(|(item, ext)| {
-            ext_hints.contains(ext) && (item.contains('/') || item.contains('\\'))
-        })
-    {
-        return OutputContractVerdict::reject(
-            "directory_names_requested_extension_file_entries",
-            "directory_names: candidate contains file entries matching requested extension",
-        );
-    }
-    if items.len() >= 3 && file_like.len().saturating_mul(2) > items.len() {
-        return OutputContractVerdict::reject(
-            "directory_names_mostly_file_like_entries",
-            "directory_names: candidate mostly contains file-like entries",
-        );
-    }
-    let locator_hint = contract.locator_hint.trim();
-    if !locator_hint.is_empty()
-        && items.len() == 1
-        && items[0].contains(locator_hint)
-        && file_like.len() == 1
-    {
-        return OutputContractVerdict::reject(
-            "directory_names_locator_candidate_file_like",
-            "directory_names: locator candidate is file-like",
-        );
-    }
-    OutputContractVerdict::Pass
 }
 
 /// existence_with_path 的正/否、路径是否必须出现，都是语义判断。
@@ -260,7 +134,7 @@ fn scalar_count_candidate_is_structural_unavailable_result(text: &str, locator_h
 pub(crate) fn verify_output_contract(
     contract: &IntentOutputContract,
     candidate: &str,
-    user_request: &str,
+    _user_request: &str,
 ) -> OutputContractVerdict {
     let trimmed_candidate = candidate.trim();
     if trimmed_candidate.is_empty() {
@@ -277,9 +151,6 @@ pub(crate) fn verify_output_contract(
     match contract.semantic_kind {
         OutputSemanticKind::ExistenceWithPath => {
             verify_existence_with_path(contract, trimmed_candidate)
-        }
-        OutputSemanticKind::DirectoryNames => {
-            verify_directory_names(contract, trimmed_candidate, user_request)
         }
         OutputSemanticKind::ScalarCount => verify_scalar_count(contract, trimmed_candidate),
         _ => OutputContractVerdict::Pass,

@@ -45,33 +45,11 @@ fn existence_with_path_no_longer_autoprepends_or_hard_rejects() {
 }
 
 #[test]
-fn directory_names_rejects_requested_extension_file_list() {
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Strict,
-        semantic_kind: OutputSemanticKind::DirectoryNames,
-        ..IntentOutputContract::default()
-    };
-
-    let v = verify_output_contract(
-        &contract,
-        "1. build-all.sh\n2. component_start/start-clawd.sh\n3. scripts/check.sh",
-        "Find directories containing .sh files",
-    );
-
-    assert_eq!(
-        v.reason_code(),
-        Some("directory_names_requested_extension_file_entries")
-    );
-    assert!(matches!(v, OutputContractVerdict::Reject { .. }));
-}
-
-#[test]
 fn directory_names_allows_parent_dirs_with_dotted_intermediate_component() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Strict,
-        semantic_kind: OutputSemanticKind::DirectoryNames,
+        semantic_kind: OutputSemanticKind::None,
         ..IntentOutputContract::default()
     };
 

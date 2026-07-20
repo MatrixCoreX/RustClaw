@@ -371,12 +371,7 @@ fn latest_path_observed_answer_from_loop_contract(
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let contract = loop_state.output_contract.as_ref()?;
-    if !matches!(
-        contract.semantic_kind,
-        crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-    ) {
+    if !matches!(contract.semantic_kind, crate::OutputSemanticKind::FilePaths) {
         return None;
     }
     let body = latest_successful_observation_body(loop_state)?;

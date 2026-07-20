@@ -843,7 +843,7 @@ fn text_observed_evidence_extracts_count_path_and_candidates() {
 
     let mut journal = TaskJournal::for_task("task-text-candidates", "ask", "列出文件名");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
@@ -1145,7 +1145,7 @@ fn file_names_content_search_paths_satisfy_candidate_evidence() {
         "ask",
         "search workspace content and list matching files",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::FileNames);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     journal.record_output_contract(&route.clone());

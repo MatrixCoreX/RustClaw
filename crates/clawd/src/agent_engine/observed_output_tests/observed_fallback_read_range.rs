@@ -268,7 +268,6 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
 #[test]
 fn observed_fallback_prompt_uses_compact_template_for_short_listing_and_scalar_contracts() {
     for semantic_kind in [
-        OutputSemanticKind::FileNames,
         OutputSemanticKind::FilePaths,
         OutputSemanticKind::ExistenceWithPath,
     ] {
@@ -294,6 +293,28 @@ count=2"#,
             "{semantic_kind:?} should use compact finalizer"
         );
     }
+
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.requires_content_evidence = true;
+    route_result.selection.list_selector.target_kind =
+        crate::OutputScalarCountTargetKind::File;
+    route_result
+        .selection
+        .list_selector
+        .target_kind_specified = true;
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route_result),
+        ..AgentRunContext::default()
+    };
+    assert_eq!(
+        observed_answer_fallback_prompt_logical_path(
+            Some(&agent_run_context),
+            r#"status=ok
+entries=["README.md","Cargo.toml"]
+count=2"#,
+        ),
+        "prompts/observed_answer_fallback_compact_prompt.md"
+    );
 }
 
 #[test]

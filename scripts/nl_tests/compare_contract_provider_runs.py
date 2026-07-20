@@ -326,7 +326,7 @@ def run_self_test() -> int:
             raise AssertionError(f"identical fixture failed: {failures=} {inconclusive=}")
 
         drift = root / "drift"
-        write_minimal_run_case(drift, 1, final_shape="name_list")
+        write_minimal_run_case(drift, 1, final_shape="exact_list")
         failures, inconclusive = compare_observations(
             load_observations(left), load_observations(drift), "left", "drift"
         )

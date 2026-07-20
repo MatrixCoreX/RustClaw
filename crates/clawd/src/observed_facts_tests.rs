@@ -9,7 +9,7 @@ fn derives_ordered_entries_from_numbered_answer_text() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. README.md\n2. Cargo.toml\n3. configs",
         &[],
@@ -144,7 +144,7 @@ fn derives_selected_entry_index_from_bound_target_and_ordered_entries() {
         });
     let mut route = dummy_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],
@@ -212,7 +212,7 @@ fn uses_route_locator_hint_and_observed_entry_count_when_journal_lacks_scope() {
     let mut route = dummy_route_result();
     route.locator_hint = "logs".to_string();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],
@@ -313,7 +313,7 @@ fn observed_entry_count_is_derived_from_visible_entries_not_request_text() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],

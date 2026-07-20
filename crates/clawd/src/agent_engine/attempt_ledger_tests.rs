@@ -239,18 +239,18 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
     let err = crate::skills::structured_skill_error_from_parts(
         "run_cmd",
         "contract_action_rejected",
-        "action `run_cmd` is rejected by contract `file_names`",
+        "action `run_cmd` is rejected by contract `generic_path_content`",
         None,
         Some(serde_json::json!({
-            "decision": "rejected_not_allowed",
+            "decision": "rejected_forbidden",
             "policy_decision": "deny",
             "action": "run_cmd",
             "original_action_ref": "run_cmd",
             "replacement_action_ref": "fs_basic.list_dir",
-            "contract_match": "file_names",
+            "contract_match": "generic_path_content",
             "preferred_actions": ["fs_basic.list_dir"],
             "required_evidence": ["candidates"],
-            "final_answer_shape": "name_list",
+            "final_answer_shape": "exact_list",
             "permission_decision": {
                 "allowed": false,
                 "denied_by_policy": true,
@@ -273,7 +273,7 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
     let ledger = build_attempt_ledger_compact(&loop_state);
 
     assert!(ledger.contains("\"contract_policy\""));
-    assert!(ledger.contains("\"decision\": \"rejected_not_allowed\""));
+    assert!(ledger.contains("\"decision\": \"rejected_forbidden\""));
     assert!(ledger.contains("\"policy_decision\": \"deny\""));
     assert!(ledger.contains("\"preferred_actions\""));
     assert!(ledger.contains("fs_basic.list_dir"));

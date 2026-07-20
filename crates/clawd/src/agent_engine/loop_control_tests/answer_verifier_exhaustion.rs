@@ -303,9 +303,9 @@ fn structured_count_recovery_returns_machine_fields_without_language_template() 
 }
 
 #[test]
-fn structured_search_recovery_returns_machine_candidates_without_language_template() {
+fn unclassified_search_does_not_use_semantic_specific_recovery() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::FileNames;
+    route.semantic_kind = OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-search-recovery", "ask", "prompt");
     journal
@@ -325,25 +325,12 @@ fn structured_search_recovery_returns_machine_candidates_without_language_templa
     });
     let mut reply = AskReply::non_llm("README".to_string()).with_task_journal(journal);
 
-    assert!(try_recover_structured_search_answer_verifier_gap(
+    assert!(!try_recover_structured_search_answer_verifier_gap(
         Some(&answer_contract(&route)),
         "找 README 文件",
         &mut reply,
     ));
-
-    assert!(reply
-        .text
-        .contains("message_key=clawd.msg.structured_search.candidates"));
-    assert!(reply
-        .text
-        .contains("reason_code=structured_search_candidates"));
-    assert!(reply.text.contains("action=find_name"));
-    assert!(reply.text.contains("count=2"));
-    assert!(reply.text.contains("result_count=2"));
-    assert!(reply.text.contains("candidate.1=README.md"));
-    assert!(reply.text.contains("candidate.2=README.zh-CN.md"));
-    assert!(!reply.text.contains("找到"), "reply: {}", reply.text);
-    assert!(!reply.text.contains("Found"), "reply: {}", reply.text);
+    assert_eq!(reply.text, "README");
 }
 
 #[test]

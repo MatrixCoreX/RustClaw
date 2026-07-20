@@ -112,7 +112,14 @@ fn matrix_strict_list_shape_rejects_unobserved_items() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.list_selector.target_kind =
+        crate::OutputScalarCountTargetKind::File;
+    route
+        .output_contract
+        .selection
+        .list_selector
+        .target_kind_specified = true;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-matrix-list", "ask", "list files");
     journal

@@ -1311,23 +1311,23 @@ async fn direct_publishable_observed_answer_skips_strict_run_cmd_format_contract
 }
 
 #[test]
-fn observed_output_language_fallback_skips_matrix_deterministic_shape() {
+fn unclassified_output_allows_model_language_fallback() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = crate::OutputResponseShape::Free;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
 
-    assert!(!agent_context_allows_observed_output_language_fallback(
+    assert!(agent_context_allows_observed_output_language_fallback(
         Some(&agent_run_context)
     ));
     assert!(agent_context_allows_observed_output_language_fallback(None));
 }
 
 #[tokio::test]
-async fn direct_publishable_observed_answer_skips_matrix_deterministic_shape() {
+async fn unclassified_output_can_publish_grounded_observation() {
     let state = test_state();
     let task = claimed_task("task-matrix-strict-no-raw-publishable");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
@@ -1342,7 +1342,7 @@ async fn direct_publishable_observed_answer_skips_matrix_deterministic_shape() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = crate::OutputResponseShape::Free;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1356,7 +1356,7 @@ async fn direct_publishable_observed_answer_skips_matrix_deterministic_shape() {
         Some(&agent_run_context)
     )
     .await
-    .is_none());
+    .is_some());
 }
 
 #[test]

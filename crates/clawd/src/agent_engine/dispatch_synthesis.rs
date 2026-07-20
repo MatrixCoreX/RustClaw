@@ -45,11 +45,7 @@ pub(super) fn synthesize_route_allows_direct_fallback(
     {
         return true;
     }
-    if route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::FileNames,
-        crate::OutputSemanticKind::DirectoryNames,
-        crate::OutputSemanticKind::FilePaths,
-    ]) {
+    if route.semantic_kind_is_any(&[crate::OutputSemanticKind::FilePaths]) {
         return true;
     }
     if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)

@@ -137,7 +137,7 @@ fn direct_answer_uses_inventory_dir_names_for_system_basic() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::FileNames,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -166,7 +166,7 @@ fn direct_answer_uses_inventory_dir_names_for_fs_basic() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::FileNames,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "document".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -195,7 +195,7 @@ fn direct_answer_uses_inventory_dir_entry_sizes_when_names_only_is_false() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::FileNames,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -342,7 +342,7 @@ fn direct_answer_uses_latest_list_dir_even_after_synthesis_step() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::FileNames,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "document".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };

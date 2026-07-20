@@ -1039,13 +1039,13 @@ fn json_value_is_non_empty(value: &serde_json::Value) -> bool {
 }
 
 pub(super) fn output_contract_requests_exact_delivery(route: &crate::IntentOutputContract) -> bool {
-    matches!(
-        route.response_shape,
-        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-    ) || route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::RawCommandOutput,
-        crate::OutputSemanticKind::FileNames,
-        crate::OutputSemanticKind::DirectoryNames,
-        crate::OutputSemanticKind::FilePaths,
-    ])
+    route.requests_exact_name_list()
+        || matches!(
+            route.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        || route.semantic_kind_is_any(&[
+            crate::OutputSemanticKind::RawCommandOutput,
+            crate::OutputSemanticKind::FilePaths,
+        ])
 }

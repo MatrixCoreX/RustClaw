@@ -426,7 +426,7 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::FileNames;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "document".to_string();
     let actions = vec![
         AgentAction::CallTool {

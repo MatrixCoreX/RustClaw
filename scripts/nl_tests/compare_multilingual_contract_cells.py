@@ -88,7 +88,7 @@ def strict_shape_wrapping_failure(obs: Any) -> str:
         return "strict count scalar must stay a bare integer"
     if finalizer_class == "single_path" and final_shape not in {"path", "file_token"}:
         return "strict single_path must stay a path or delivery token"
-    if finalizer_class in {"strict_list", "name_list"} and final_shape != "list":
+    if finalizer_class == "strict_list" and final_shape != "list":
         return "strict list must stay line-list shaped"
     return ""
 

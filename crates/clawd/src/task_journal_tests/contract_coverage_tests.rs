@@ -6,6 +6,23 @@ fn answer_contract_from_route(
     crate::answer_verifier::AnswerContract::new("test request", route.clone())
 }
 
+fn exact_file_list_route() -> crate::IntentOutputContract {
+    crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        selection: crate::OutputSelectionContract {
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::OutputScalarCountTargetKind::File,
+                target_kind_specified: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 #[test]
 fn explicit_validation_selector_evidence_coverage_accepts_valid_flag() {
     let mut journal = TaskJournal::for_task("task-config-validation", "ask", "验证配置");
@@ -48,18 +65,15 @@ fn explicit_validation_selector_evidence_coverage_accepts_valid_flag() {
 #[test]
 fn trace_json_reports_required_vs_observed_evidence_coverage() {
     let mut journal = TaskJournal::for_task("task-evidence-coverage", "ask", "列出文件名");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
+    let route = exact_file_list_route();
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
         output: Some(
-            json!({"action": "list_dir", "names": ["Cargo.toml", "README.md"]}).to_string(),
+            json!({"action": "list_dir", "path": ".", "names": ["Cargo.toml", "README.md"]})
+                .to_string(),
         ),
         error: None,
         started_at: 1,
@@ -388,18 +402,14 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
 #[test]
 fn summary_json_includes_machine_readable_task_outcome() {
     let mut journal = TaskJournal::for_task("task-outcome", "ask", "列出文件名");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
+    let route = exact_file_list_route();
     journal.record_output_contract(&route.clone());
     journal.record_final_status(TaskJournalFinalStatus::Success);
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(json!({"names": ["Cargo.toml", "README.md"]}).to_string()),
+        output: Some(json!({"path": ".", "names": ["Cargo.toml", "README.md"]}).to_string()),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -417,7 +427,7 @@ fn summary_json_includes_machine_readable_task_outcome() {
     );
     assert_eq!(
         outcome.get("final_answer_shape").and_then(Value::as_str),
-        Some("name_list")
+        Some("exact_list")
     );
     assert_eq!(
         outcome
@@ -609,12 +619,7 @@ fn trace_json_counts_nested_builtin_tool_evidence() {
 #[test]
 fn trace_json_includes_task_level_evidence_policy_snapshot() {
     let mut journal = TaskJournal::for_task("task-contract-snapshot", "ask", "列出文件名");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
+    let route = exact_file_list_route();
     journal.record_output_contract(&route.clone());
 
     let trace = journal.to_trace_json();
@@ -624,7 +629,7 @@ fn trace_json_includes_task_level_evidence_policy_snapshot() {
 
     assert_eq!(
         snapshot.get("contract_match").and_then(Value::as_str),
-        Some("file_names")
+        Some("generic_path_content")
     );
     assert_eq!(
         snapshot
@@ -635,7 +640,7 @@ fn trace_json_includes_task_level_evidence_policy_snapshot() {
     );
     assert_eq!(
         snapshot.get("final_answer_shape").and_then(Value::as_str),
-        Some("name_list")
+        Some("exact_list")
     );
     assert!(snapshot
         .get("evidence_policy_hash")
@@ -649,7 +654,7 @@ fn trace_json_includes_task_level_evidence_policy_snapshot() {
             .get("contract")
             .and_then(|value| value.get("contract_match"))
             .and_then(Value::as_str),
-        Some("file_names")
+        Some("generic_path_content")
     );
     assert!(runtime_snapshot
         .get("compact_contract_block")
@@ -661,12 +666,7 @@ fn trace_json_includes_task_level_evidence_policy_snapshot() {
 #[test]
 fn step_trace_includes_contract_and_action_policy_for_success() {
     let mut journal = TaskJournal::for_task("task-step-contract", "ask", "列出文件名");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
+    let route = exact_file_list_route();
     journal.record_output_contract(&route.clone());
     journal.record_plan_result(&crate::PlanResult {
         goal: "list file names".to_string(),
@@ -702,7 +702,7 @@ fn step_trace_includes_contract_and_action_policy_for_success() {
 
     assert_eq!(
         step_contract.get("contract_match").and_then(Value::as_str),
-        Some("file_names")
+        Some("generic_path_content")
     );
     assert!(step_contract.get("contract_marker").is_none());
     assert!(step_contract.get("semantic_kind").is_none());
@@ -710,7 +710,7 @@ fn step_trace_includes_contract_and_action_policy_for_success() {
         step_contract
             .get("final_answer_shape")
             .and_then(Value::as_str),
-        Some("name_list")
+        Some("exact_list")
     );
     assert_eq!(
         step_contract

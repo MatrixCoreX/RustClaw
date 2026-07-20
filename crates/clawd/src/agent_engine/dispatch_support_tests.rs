@@ -1373,7 +1373,7 @@ fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::FileNames,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "document".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };

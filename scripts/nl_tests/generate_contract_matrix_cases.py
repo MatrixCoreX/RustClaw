@@ -48,8 +48,6 @@ PROBE_ACTIONS = [
 NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "不用执行任何操作，直接用一句话解释 RustClaw 是一个什么样的本地助手。",
     "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
-    "file_names": f"列出 {FIXTURE_DOCS_DIR} 目录下的文件名，只输出文件名列表。",
-    "directory_names": f"列出 {FIXTURE_ROOT} 下的文件夹名，只输出名称列表。",
     "file_paths": f"找出 {FIXTURE_ROOT} 下的 markdown 文件路径，只输出路径列表。",
     "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
     "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
@@ -67,8 +65,6 @@ NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
 EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "Do not run any operation. In one sentence, explain what kind of local assistant RustClaw is.",
     "raw_command_output": "Run pwd and briefly tell me what the command printed.",
-    "file_names": f"List the file names under {FIXTURE_DOCS_DIR}. Output only the file-name list.",
-    "directory_names": f"List the folder names under {FIXTURE_ROOT}. Output only the names.",
     "file_paths": f"Find markdown file paths under {FIXTURE_ROOT}. Output only the path list.",
     "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
     "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
@@ -86,7 +82,6 @@ EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
 JA_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"{FIXTURE_PACKAGE} が存在するか確認し、存在結果とパスだけを答えてください。",
     "scalar_count": f"{FIXTURE_DOCS_DIR} の直下にある項目数を数え、数字だけを出力してください。",
-    "file_names": f"{FIXTURE_DOCS_DIR} のファイル名を列挙し、ファイル名リストだけを出力してください。",
     "structured_keys": f"{FIXTURE_CONFIG} のトップレベルキーを読み取り、キー名リストだけを出力してください。",
     "generated_file_delivery": "tmp/contract_matrix_generated_note.txt に RustClaw contract matrix test という内容のテキストファイルを作成し、そのファイルパスを送ってください。",
 }
@@ -94,7 +89,6 @@ JA_PROMPTS_BY_CONTRACT: dict[str, str] = {
 KO_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"{FIXTURE_PACKAGE} 파일이 존재하는지 확인하고, 존재 여부와 경로만 답하세요.",
     "scalar_count": f"{FIXTURE_DOCS_DIR} 바로 아래 항목 수를 세고 숫자만 출력하세요.",
-    "file_names": f"{FIXTURE_DOCS_DIR} 디렉터리의 파일명을 나열하고 파일명 목록만 출력하세요.",
     "structured_keys": f"{FIXTURE_CONFIG} 의 최상위 키를 읽고 키 이름 목록만 출력하세요.",
     "generated_file_delivery": "tmp/contract_matrix_generated_note.txt 파일을 만들고 내용은 RustClaw contract matrix test 로 넣은 뒤, 생성된 파일 경로를 보내세요.",
 }
@@ -102,7 +96,6 @@ KO_PROMPTS_BY_CONTRACT: dict[str, str] = {
 FR_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"Vérifie si {FIXTURE_PACKAGE} existe, puis réponds uniquement avec le résultat d'existence et le chemin.",
     "scalar_count": f"Compte les éléments directement sous {FIXTURE_DOCS_DIR} et affiche uniquement le nombre.",
-    "file_names": f"Liste les noms de fichiers dans {FIXTURE_DOCS_DIR}. Affiche uniquement la liste des noms.",
     "structured_keys": f"Lis les clés de premier niveau dans {FIXTURE_CONFIG}. Affiche uniquement la liste des clés.",
     "generated_file_delivery": "Crée le fichier tmp/contract_matrix_generated_note.txt avec le contenu RustClaw contract matrix test, puis envoie-moi le chemin du fichier.",
 }
@@ -119,7 +112,6 @@ STRICT_NATIVE_PROMPT_CONTRACTS = frozenset(
     {
         "existence_with_path",
         "scalar_count",
-        "file_names",
         "structured_keys",
         "generated_file_delivery",
     }
@@ -326,11 +318,7 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
     if decision:
         lines.append(f"expected_policy_decision={decision}")
     contract_id = str(case.get("contract_id") or "")
-    if contract_id == "file_names":
-        lines.append("selector_target_kind=file")
-    elif contract_id == "directory_names":
-        lines.append("selector_target_kind=dir")
-    elif contract_id == "file_paths":
+    if contract_id == "file_paths":
         lines.extend(
             [
                 "selector_extension=md",
@@ -578,13 +566,7 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
             skill = action_skill(action_ref)
             if skill in forbidden_skills and skill not in allowed_skills:
                 row["executed_none_of"] = [skill]
-    if contract_id == "file_names":
-        row["final_contains"] = ["release_checklist.md", "service_notes.md"]
-        row["final_not_contains"] = ["archive"]
-    elif contract_id == "directory_names":
-        row["final_contains"] = ["configs", "data", "docs", "logs", "tmp"]
-        row["final_not_contains"] = ["README.md", "package.json"]
-    elif contract_id == "file_paths":
+    if contract_id == "file_paths":
         row["final_contains"] = ["release_checklist.md", "service_notes.md"]
         row["final_not_contains"] = ["package.json"]
     return row
