@@ -270,13 +270,7 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "fs_basic.grep_text",
         "fs_basic.grep_text.structured_json_v1",
-        &[
-            "candidates",
-            "command_output",
-            "content_excerpt",
-            "content_match",
-            "path",
-        ],
+        &["candidates", "command_output", "content_excerpt", "path"],
     ),
     step_json_extractor(
         "fs_basic.read_text_range",
@@ -1311,11 +1305,6 @@ pub(super) fn collect_structured_error_not_found_evidence(
         "structured_error",
         "kind",
         &json!("missing"),
-    ));
-    collector.push(json_observed_evidence_item(
-        "structured_error",
-        "content_match",
-        &json!(false),
     ));
     if let Some(path) = structured
         .extra

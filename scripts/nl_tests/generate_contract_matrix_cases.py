@@ -56,7 +56,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "file_paths": f"找出 {FIXTURE_ROOT} 下的 markdown 文件路径，只输出路径列表。",
     "directory_purpose_summary": f"看一下 {FIXTURE_DOCS_DIR} 目录，然后一句话说明这些文件大概是做什么的。",
     "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
-    "content_presence_check": f"检查 {FIXTURE_DOC} 里是否提到了 release，只回答是否有并给出依据。",
     "excerpt_kind_judgment": f"读取 {FIXTURE_DOC} 开头内容，判断它更像清单、日志还是配置。",
     "recent_artifacts_judgment": f"列出 {FIXTURE_DOCS_DIR} 最近修改的 2 个文件，再判断它们更像文档还是产物。",
     "workspace_project_summary": f"快速看一下 {FIXTURE_ROOT}，用非技术用户能听懂的话总结它是什么项目。",
@@ -88,7 +87,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "file_paths": f"Find markdown file paths under {FIXTURE_ROOT}. Output only the path list.",
     "directory_purpose_summary": f"Inspect {FIXTURE_DOCS_DIR} and explain in one sentence what these files are for.",
     "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
-    "content_presence_check": f"Check whether {FIXTURE_DOC} mentions release. Answer yes or no and include the evidence.",
     "excerpt_kind_judgment": f"Read the beginning of {FIXTURE_DOC} and judge whether it is more like a checklist, log, or config.",
     "recent_artifacts_judgment": f"List the 2 most recently modified files in {FIXTURE_DOCS_DIR}, then judge whether they look like docs or artifacts.",
     "workspace_project_summary": f"Take a quick look at {FIXTURE_ROOT} and summarize the project in beginner-friendly words.",
@@ -360,13 +358,6 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
         lines.append("selector_target_kind=file")
     elif contract_id == "directory_entry_groups":
         lines.append("selector_target_kind=any")
-    elif contract_id == "content_presence_check":
-        lines.extend(
-            [
-                "selector_query=release",
-                "selector_case_insensitive=true",
-            ]
-        )
     elif contract_id == "directory_names":
         lines.append("selector_target_kind=dir")
     elif contract_id == "file_paths":
@@ -654,9 +645,6 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
         row["final_not_contains"] = ["package.json"]
     elif contract_id == "recent_artifacts_judgment":
         row["final_contains"] = ["release_checklist.md", "service_notes.md"]
-    elif contract_id == "content_presence_check":
-        row["final_contains"] = ["release", "# Release Checklist"]
-        row["final_not_contains"] = ["不包含", "Does not contain"]
     elif contract_id == "quantity_comparison":
         row["final_contains"] = ["package.json", "246", "release_checklist.md", "153"]
         row["final_not_contains"] = ["package.json：93 字节", "package.json: 93 bytes"]

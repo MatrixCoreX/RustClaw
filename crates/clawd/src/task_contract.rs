@@ -93,7 +93,6 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::HiddenEntriesCheck
-        | OutputSemanticKind::ContentPresenceCheck
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
@@ -246,11 +245,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::WorkspaceProjectSummary => {
             fields.insert("candidates");
             fields.insert("content_excerpt");
-        }
-        OutputSemanticKind::ContentPresenceCheck => {
-            fields.insert("content_match");
-            fields.insert("content_excerpt");
-            fields.insert("field_value");
         }
         OutputSemanticKind::DirectoryPurposeSummary => {
             fields.insert("candidates");
