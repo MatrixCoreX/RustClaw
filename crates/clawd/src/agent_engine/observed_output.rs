@@ -694,7 +694,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
         FinalAnswerShape::ExistenceVerdictWithPath
             | FinalAnswerShape::RawOutputOrShortSummary
             | FinalAnswerShape::StatusWithSource
-            | FinalAnswerShape::ValidationVerdict
     )
 }
 

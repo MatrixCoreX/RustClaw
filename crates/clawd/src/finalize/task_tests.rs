@@ -28,8 +28,6 @@ use serde_json::json;
 mod answer_verifier_recovery;
 #[path = "task_tests/checkpoint_finalization.rs"]
 mod checkpoint_finalization;
-#[path = "task_tests/config_validation_delivery.rs"]
-mod config_validation_delivery;
 #[path = "task_tests/content_evidence_delivery.rs"]
 mod content_evidence_delivery;
 #[path = "task_tests/final_status.rs"]
@@ -1189,21 +1187,6 @@ fn strict_file_delivery_keeps_execution_summary_available() {
         &route,
         r#"{"file":"report.md"}"#
     ));
-}
-
-#[test]
-fn config_validation_delivery_drops_existing_execution_summary_messages() {
-    let mut route = route_result();
-    route.response_shape = crate::OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    let mut messages = vec![
-        "**Execution**\n1. Called tool `config_basic`\n   Output: valid".to_string(),
-        "pass".to_string(),
-    ];
-
-    drop_execution_summaries_when_delivery_is_scalar(&route, "pass", &mut messages);
-
-    assert_eq!(messages, vec!["pass".to_string()]);
 }
 
 #[test]

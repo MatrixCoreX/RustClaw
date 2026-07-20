@@ -1492,7 +1492,7 @@ fn enforce_mode_allows_internal_subagent_tool_visibility() {
 fn deterministic_subagent_boundary_plan_bypasses_misclassified_contract_rejection() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::ConfigValidation);
+    let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
     let mut plan = plan_result(vec![
         PlanStep {
             step_id: "s1".to_string(),
@@ -1578,7 +1578,7 @@ fn deterministic_subagent_boundary_plan_bypasses_misclassified_contract_rejectio
 fn deterministic_subagent_boundary_plan_defers_clarify_when_locator_is_structured() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::ConfigValidation);
+    let mut route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 

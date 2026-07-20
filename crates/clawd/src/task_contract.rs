@@ -92,7 +92,6 @@ pub(crate) fn operation_for_output_contract(
         }
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
-        _ => operation_for_unclassified_output_contract(output_contract),
     }
 }
 
@@ -241,9 +240,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::ExecutionFailedStep => {
             fields.insert("command_output");
-        }
-        OutputSemanticKind::ConfigValidation => {
-            fields.insert("valid");
         }
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport

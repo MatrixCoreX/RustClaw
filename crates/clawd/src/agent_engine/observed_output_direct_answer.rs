@@ -346,12 +346,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             prefers_english_free_text,
                             allow_localized_direct_template,
                         )
-                    } else if action == Some("validate_structured") {
-                        validate_structured_direct_answer_candidate(
-                            state,
-                            &value,
-                            prefers_english_free_text,
-                        )
                     } else if action == Some("info")
                         || (action.is_none() && system_basic_value_looks_like_info(&value))
                     {

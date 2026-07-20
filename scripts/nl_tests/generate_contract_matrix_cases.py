@@ -59,7 +59,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "generated_file_delivery": "写一个简单文本文件到 tmp/contract_matrix_generated_note.txt，内容是 RustClaw contract matrix test，然后把文件路径发给我。",
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
-    "config_validation": f"验证 {FIXTURE_CONFIG} 是否是可读配置，并简短说明结果。",
 }
 
 NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -81,7 +80,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "generated_file_delivery": "Write a simple text file to tmp/contract_matrix_generated_note.txt with the content RustClaw contract matrix test, then send me the file path.",
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
-    "config_validation": f"Validate whether {FIXTURE_CONFIG} is a readable config file, and briefly explain the result.",
 }
 
 EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -525,13 +523,6 @@ def planned_action_equivalents(case: dict[str, Any]) -> list[str]:
     contract_id = str(case.get("contract_id") or "")
     action = normalize_token(action_ref).replace("-", "_")
     equivalents: dict[tuple[str, str], list[str]] = {
-        ("config_validation", "config_guard"): [
-            "config_guard",
-            "config_basic.guard_rustclaw_config",
-            "config_edit.guard_config",
-            "config_basic.validate",
-            "config_edit.validate_config",
-        ],
         ("execution_failed_step", "log_analyze"): ["log_analyze", "run_cmd"],
         ("generated_file_delivery", "transform"): ["transform", "fs_basic.write_text"],
     }

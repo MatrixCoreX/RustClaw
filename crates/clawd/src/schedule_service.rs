@@ -760,12 +760,12 @@ fn schedule_compile_only_response(
     push_schedule_preview_kv(
         &mut lines,
         "final_answer_shape",
-        crate::evidence_policy::FinalAnswerShape::ValidationVerdict.as_str(),
+        crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence.as_str(),
     );
     push_schedule_preview_kv(
         &mut lines,
         "final_answer_shape_class",
-        crate::evidence_policy::FinalAnswerShape::ValidationVerdict
+        crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence
             .class()
             .as_str(),
     );

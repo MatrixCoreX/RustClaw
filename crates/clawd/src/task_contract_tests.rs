@@ -94,30 +94,3 @@ fn structured_selector_owns_required_evidence_without_domain_semantics() {
     assert!(expression.one_of.is_empty());
     assert!(expression.any_of.is_empty());
 }
-
-#[test]
-fn planner_semantic_matrix_drives_evidence_contract() {
-    let output_contract = IntentOutputContract {
-        response_shape: OutputResponseShape::Strict,
-        requires_content_evidence: true,
-        semantic_kind: OutputSemanticKind::ConfigValidation,
-        ..IntentOutputContract::default()
-    };
-
-    assert_eq!(
-        target_object_for_output_contract(&output_contract),
-        TaskTargetObject::ConfigKey
-    );
-    assert_eq!(
-        operation_for_output_contract(&output_contract),
-        TaskOperation::Validate
-    );
-    assert_eq!(
-        delivery_shape_for_output_contract(&output_contract),
-        TaskDeliveryShape::Summary
-    );
-    assert_eq!(
-        required_evidence_fields_for_output_contract(&output_contract),
-        vec!["valid"]
-    );
-}

@@ -105,9 +105,6 @@ pub(super) fn structured_scalar_candidate(
     }
     let action = value.get("action").and_then(|v| v.as_str())?;
     match action {
-        "validate_structured" => {
-            validate_structured_direct_answer_candidate(state, value, prefer_english)
-        }
         "read_range" => route
             .filter(|route| route_allows_scalar_read_range_direct_answer(route))
             .and_then(|_| {

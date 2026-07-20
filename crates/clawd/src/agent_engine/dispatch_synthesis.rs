@@ -49,7 +49,6 @@ pub(super) fn synthesize_route_allows_direct_fallback(
         crate::OutputSemanticKind::FileNames,
         crate::OutputSemanticKind::DirectoryNames,
         crate::OutputSemanticKind::FilePaths,
-        crate::OutputSemanticKind::ConfigValidation,
     ]) {
         return true;
     }

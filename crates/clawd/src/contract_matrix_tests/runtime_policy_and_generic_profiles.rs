@@ -142,10 +142,6 @@ fn final_answer_shape_classes_are_total_and_runtime_mapped() {
         OutputResponseShape::Strict
     );
     assert_eq!(
-        FinalAnswerShape::ValidationVerdict.coarse_response_shape(),
-        OutputResponseShape::OneSentence
-    );
-    assert_eq!(
         FinalAnswerShape::SummaryWithEvidence.coarse_response_shape(),
         OutputResponseShape::Free
     );

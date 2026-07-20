@@ -49,6 +49,30 @@ fn config_mutation_receipt_uses_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn config_validation_receipt_uses_generic_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "config_basic",
+            Some("validate".to_string()),
+            json!({
+                "extra": {
+                    "path": "configs/config.toml",
+                    "format": "toml",
+                    "valid": true,
+                    "root_type": "object"
+                }
+            }),
+        ));
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
 fn docker_results_use_generic_synthesis_without_domain_contract() {
     let mut loop_state = LoopState::default();
     for (action, data) in [

@@ -7,13 +7,17 @@ fn answer_contract_from_route(
 }
 
 #[test]
-fn config_validation_evidence_coverage_accepts_valid_flag() {
+fn explicit_validation_selector_evidence_coverage_accepts_valid_flag() {
     let mut journal = TaskJournal::for_task("task-config-validation", "ask", "验证配置");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ConfigValidation,
+        response_shape: crate::OutputResponseShape::Scalar,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "configs/config.toml".to_string(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("valid".to_string()),
+            ..Default::default()
+        },
         ..Default::default()
     };
     journal.record_output_contract(&route.clone());
@@ -38,7 +42,7 @@ fn config_validation_evidence_coverage_accepts_valid_flag() {
 
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
+    assert!(coverage.observed_canonical.contains("valid"));
 }
 
 #[test]

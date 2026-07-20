@@ -2,8 +2,8 @@ use std::path::Path;
 
 use tracing::info;
 
-use crate::agent_engine::{append_delivery_message, AgentRunContext};
-use crate::{AppState, ClaimedTask};
+use crate::agent_engine::AgentRunContext;
+use crate::AppState;
 
 use super::log_deterministic_delivery_record;
 
@@ -413,96 +413,4 @@ pub(super) fn discard_non_answer_separator_delivery_for_broad_structured_read(
         );
     }
     removed
-}
-
-fn validate_structured_file(path: &str, format: &str) -> Option<Result<(), String>> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|err| err.to_string())
-        .ok()?;
-    let result = match format {
-        "json" => serde_json::from_str::<serde_json::Value>(&content)
-            .map(|_| ())
-            .map_err(|err| err.to_string()),
-        "toml" => toml::from_str::<toml::Value>(&content)
-            .map(|_| ())
-            .map_err(|err| err.to_string()),
-        _ => return None,
-    };
-    Some(result)
-}
-
-pub(super) fn deterministic_structured_file_validation_from_read_range(
-    _state: &AppState,
-    _user_text: &str,
-    loop_state: &crate::agent_engine::LoopState,
-    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
-) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|context| context.output_contract())?;
-    if !route_requests_config_validation(route) {
-        return None;
-    }
-    let (path, format) = latest_broad_structured_read_range(loop_state)?;
-    let validation = validate_structured_file(&path, &format)?;
-    let mut fields = Vec::new();
-    let answer = match validation {
-        Ok(()) => {
-            fields.push("validation_status=pass".to_string());
-            fields.push(format!("format={format}"));
-            fields.join("\n")
-        }
-        Err(err) => {
-            fields.push("validation_status=fail".to_string());
-            fields.push(format!("format={format}"));
-            fields.push(format!("error={}", crate::truncate_for_agent_trace(&err)));
-            fields.join("\n")
-        }
-    };
-    Some((
-        answer,
-        crate::task_journal::TaskJournalFinalizerSummary {
-            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-            parsed: true,
-            contract_ok: true,
-            completion_ok: Some(true),
-            grounded_ok: Some(true),
-            format_ok: Some(true),
-            needs_clarify: Some(false),
-            used_evidence_ids_count: 1,
-            ..Default::default()
-        },
-    ))
-}
-
-fn route_requests_config_validation(route: &crate::IntentOutputContract) -> bool {
-    crate::finalize::route_matches_validation_verdict_output_contract(route)
-}
-
-pub(super) fn attach_deterministic_structured_file_validation_from_read_range(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut crate::agent_engine::LoopState,
-    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    let Some((answer, summary)) = deterministic_structured_file_validation_from_read_range(
-        state,
-        user_text,
-        loop_state,
-        agent_run_context,
-    ) else {
-        return false;
-    };
-    *finalizer_summary = Some(summary);
-    loop_state.last_user_visible_respond = Some(answer.clone());
-    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-    log_deterministic_delivery_record(
-        &task.task_id,
-        "fallback_from_structured_file_validation_read_range",
-        "attached",
-        agent_run_context,
-        loop_state.executed_step_results.len(),
-    );
-    true
 }

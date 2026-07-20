@@ -250,7 +250,6 @@ pub(crate) enum EvidenceToken {
     FieldValue,
     Kind,
     Path,
-    Valid,
 }
 
 impl EvidenceToken {
@@ -266,7 +265,6 @@ impl EvidenceToken {
         Self::FieldValue,
         Self::Kind,
         Self::Path,
-        Self::Valid,
     ];
 
     pub(crate) fn parse(raw: &str) -> Option<Self> {
@@ -281,7 +279,6 @@ impl EvidenceToken {
             "field_value" => Some(Self::FieldValue),
             "kind" => Some(Self::Kind),
             "path" => Some(Self::Path),
-            "valid" => Some(Self::Valid),
             _ => None,
         }
     }
@@ -299,7 +296,6 @@ impl EvidenceToken {
             Self::FieldValue => "field_value",
             Self::Kind => "kind",
             Self::Path => "path",
-            Self::Valid => "valid",
         }
     }
 }
@@ -556,7 +552,6 @@ pub(crate) enum FinalAnswerShape {
     StatusWithSource,
     SummaryGroundedInExcerpt,
     SummaryWithEvidence,
-    ValidationVerdict,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -616,7 +611,6 @@ impl FinalAnswerShape {
         Self::StatusWithSource,
         Self::SummaryGroundedInExcerpt,
         Self::SummaryWithEvidence,
-        Self::ValidationVerdict,
     ];
 
     pub(crate) fn parse(raw: &str) -> Option<Self> {
@@ -636,7 +630,6 @@ impl FinalAnswerShape {
             "status_with_source" => Some(Self::StatusWithSource),
             "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
             "summary_with_evidence" => Some(Self::SummaryWithEvidence),
-            "validation_verdict" => Some(Self::ValidationVerdict),
             _ => None,
         }
     }
@@ -658,7 +651,6 @@ impl FinalAnswerShape {
             Self::StatusWithSource => "status_with_source",
             Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
             Self::SummaryWithEvidence => "summary_with_evidence",
-            Self::ValidationVerdict => "validation_verdict",
         }
     }
 
@@ -670,10 +662,9 @@ impl FinalAnswerShape {
             Self::GroupedNameList | Self::NameList | Self::PathList => {
                 FinalAnswerShapeClass::StrictList
             }
-            Self::ExistenceVerdictWithPath
-            | Self::LifecycleResult
-            | Self::StatusWithSource
-            | Self::ValidationVerdict => FinalAnswerShapeClass::Verdict,
+            Self::ExistenceVerdictWithPath | Self::LifecycleResult | Self::StatusWithSource => {
+                FinalAnswerShapeClass::Verdict
+            }
             Self::ExcerptPlusSummary
             | Self::FailedStepWithEvidence
             | Self::RawOutputOrShortSummary
