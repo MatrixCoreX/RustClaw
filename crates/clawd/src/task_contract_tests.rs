@@ -118,13 +118,6 @@ fn structured_selector_owns_required_evidence_without_domain_semantics() {
 fn planner_semantic_matrix_drives_evidence_contract() {
     for (semantic_kind, target, operation, delivery_shape, evidence) in [
         (
-            OutputSemanticKind::PackageManagerDetection,
-            TaskTargetObject::System,
-            TaskOperation::Inspect,
-            TaskDeliveryShape::Summary,
-            vec!["field_value"],
-        ),
-        (
             OutputSemanticKind::DockerImages,
             TaskTargetObject::Process,
             TaskOperation::List,

@@ -344,13 +344,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                     })
                 }),
                 "transform" => transform_skill_formatted_output_candidate(&observed_output.body),
-                "package_manager" => package_manager_summary_candidate(
-                    state,
-                    &observed_output.body,
-                    response_shape,
-                    allow_localized_direct_template,
-                    prefers_english_free_text,
-                ),
                 "archive_basic" => {
                     if let Some(answer) = archive_unpack_direct_answer_candidate(
                         route,
@@ -613,7 +606,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                     locator_hint,
                     auto_locator_path,
                     prefer_full_path,
-                    allow_localized_direct_template,
                     prefers_english_free_text,
                 )
             })

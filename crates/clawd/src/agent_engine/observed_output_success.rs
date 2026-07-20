@@ -80,7 +80,6 @@ pub(super) fn extract_latest_generic_successful_output_with_state(
                     None,
                     None,
                     false,
-                    true,
                     false,
                 )
                 .is_some()

@@ -64,11 +64,6 @@ fn planner_semantic_contracts_own_registered_actions() {
             serde_json::json!({"action":"schema_version","db_path":"tmp/app.db"}),
         ),
         (
-            OutputSemanticKind::PackageManagerDetection,
-            "package_manager",
-            serde_json::json!({"action":"detect","dry_run":true}),
-        ),
-        (
             OutputSemanticKind::DockerContainerLifecycle,
             "docker_basic",
             serde_json::json!({"action":"restart","container":"rustclaw_api","dry_run":true}),
@@ -955,11 +950,6 @@ fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
             "content_presence_check",
             OutputSemanticKind::ContentPresenceCheck,
             "fs_basic.grep_text",
-        ),
-        (
-            "package_manager_detection",
-            OutputSemanticKind::PackageManagerDetection,
-            "package_manager.detect",
         ),
         (
             "archive_read",

@@ -30,18 +30,6 @@ pub(super) fn missing_extract_field_machine_answer(field_path: &str) -> String {
     lines.join("\n")
 }
 
-pub(super) fn package_manager_detected_machine_answer(manager: &str) -> String {
-    let mut lines = vec![
-        "message_key=clawd.msg.package_manager_detected".to_string(),
-        "reason_code=package_manager_observed".to_string(),
-        "final_answer_shape=package_manager_summary".to_string(),
-    ];
-    push_observed_machine_line(&mut lines, "manager", manager);
-    push_observed_machine_line(&mut lines, "observed_field", "package_manager");
-    push_observed_machine_line(&mut lines, "observed_value", manager);
-    lines.join("\n")
-}
-
 pub(super) fn push_observed_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
     let value = crate::truncate_for_agent_trace(
         &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
@@ -614,13 +602,6 @@ pub(super) fn structured_observed_body(skill: &str, body: &str) -> Option<String
                 })
         }
         "log_analyze" => compact_log_analyze_excerpt(&value),
-        "package_manager" => package_manager_summary_candidate(
-            None,
-            body,
-            Some(crate::OutputResponseShape::OneSentence),
-            true,
-            false,
-        ),
         _ => None,
     }
 }

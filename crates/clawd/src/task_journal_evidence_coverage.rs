@@ -422,6 +422,18 @@ pub(super) fn augment_output_contract_canonical_evidence(
     observed_extractors: &BTreeSet<String>,
     observed_canonical: &mut BTreeSet<String>,
 ) {
+    if let Some(fields) = output_contract
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+    {
+        for field in fields {
+            if observed_field_present(observed_fields, &field) {
+                observed_canonical.insert(field);
+            }
+        }
+    }
     for required in required_evidence {
         if observed_extractors
             .iter()

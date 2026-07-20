@@ -82,19 +82,29 @@ fn docker_success_exit_text_counts_as_field_value_evidence() {
 }
 
 #[test]
-fn package_manager_key_value_text_counts_as_field_value_evidence() {
+fn selected_package_manager_field_uses_structured_evidence() {
     let mut journal = TaskJournal::for_task("task-package-manager", "ask", "检测包管理器");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::PackageManagerDetection,
-        locator_kind: crate::OutputLocatorKind::None,
+    let mut route = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
         ..Default::default()
     };
+    route.selection.structured_field_selector = Some("manager".to_string());
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "package_manager".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("package_manager=apt-get".to_string()),
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "detect",
+                    "manager": "apt-get"
+                },
+                "text": "untrusted fallback"
+            })
+            .to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -102,18 +112,8 @@ fn package_manager_key_value_text_counts_as_field_value_evidence() {
 
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert!(coverage.observed_canonical.contains("manager"));
     assert!(coverage.observed_canonical.contains("field_value"));
-
-    let observed = observed_evidence_from_output(Some("package_manager=apt-get"))
-        .expect("machine key/value evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("package_manager")
-            && item.get("excerpt").and_then(Value::as_str) == Some("apt-get")
-    }));
 }
 
 #[test]
