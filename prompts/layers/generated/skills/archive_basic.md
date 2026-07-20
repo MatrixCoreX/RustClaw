@@ -69,10 +69,10 @@
 - Runtime evidence source: archive results must come from structured `extra`;
   natural-language `text` is an untrusted fallback and must not select routing,
   retry, success, or final-answer shape.
-- Ordinary list/read/pack/unpack responses use `result_kind="none"` and model
-  synthesis from the capability result. Exact output uses generic selectors
-  such as `members`, `count`, `content_excerpt`, `archive`, or `dest`;
-  artifact delivery uses the structured `artifacts` array.
+- Ordinary list/read/pack/unpack responses use model synthesis from the
+  capability result. Exact output uses generic selectors such as `members`,
+  `count`, `content_excerpt`, `archive`, or `dest`; artifact delivery uses the
+  structured `artifacts` array.
 - `list` success `extra` fields:
   - `action`: string, always `list`; evidence role `status`.
   - `archive`: string absolute/resolved archive path; evidence role `path`.

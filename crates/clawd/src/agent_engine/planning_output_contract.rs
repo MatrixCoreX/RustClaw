@@ -1,10 +1,7 @@
 use serde_json::Value;
 
 use crate::pipeline_types::OutputSelectionContract;
-use crate::{
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind,
-};
+use crate::{IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape};
 
 pub(super) fn parse_planner_output_contract(raw: &str) -> Option<IntentOutputContract> {
     let value = crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw)?;
@@ -18,11 +15,6 @@ pub(super) fn parse_planner_output_contract(raw: &str) -> Option<IntentOutputCon
         "file_token" => OutputResponseShape::FileToken,
         _ => return None,
     };
-    let result_kind_token = machine_token(contract.get("result_kind"))?;
-    let semantic_kind = OutputSemanticKind::ALL
-        .iter()
-        .copied()
-        .find(|kind| kind.as_str() == result_kind_token)?;
     let locator_kind = match machine_token(contract.get("locator_kind"))? {
         "none" => OutputLocatorKind::None,
         "path" => OutputLocatorKind::Path,
@@ -58,7 +50,6 @@ pub(super) fn parse_planner_output_contract(raw: &str) -> Option<IntentOutputCon
         delivery_required,
         locator_kind,
         delivery_intent,
-        semantic_kind,
         selection: OutputSelectionContract {
             structured_field_selector,
             ..OutputSelectionContract::default()

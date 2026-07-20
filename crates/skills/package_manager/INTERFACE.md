@@ -33,12 +33,10 @@
 
 ## Structured Evidence Contract
 - Runtime evidence source: package manager results must come from structured `extra`, not from natural-language `text`.
-- For an ordinary detection request, use `result_kind="none"`,
-  `requires_content_evidence=true`, and model synthesis from the structured
-  detection result.
+- For an ordinary detection request, use `requires_content_evidence=true` and
+  model synthesis from the structured detection result.
 - Only when the user explicitly asks for the exact manager token, use
-  `result_kind="none"`, `response_shape="scalar"`, and
-  `structured_field_selector="manager"`.
+  `response_shape="scalar"` and `structured_field_selector="manager"`.
 - `detect` success `extra` fields:
   - `action`: string, always `detect`; evidence role `status`.
   - `manager`: string detected manager; evidence role `field_value`.

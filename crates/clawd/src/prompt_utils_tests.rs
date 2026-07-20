@@ -17,7 +17,7 @@ fn validate_against_schema_rejects_out_of_range_finalizer_confidence() {
 }
 
 #[test]
-fn plan_schema_marks_unknown_output_contract_token_as_contract_violation() {
+fn plan_schema_marks_unknown_output_contract_field_as_contract_violation() {
     let raw = r#"{
         "output_contract": {
             "response_shape": "strict",
@@ -26,7 +26,8 @@ fn plan_schema_marks_unknown_output_contract_token_as_contract_violation() {
             "delivery_required": false,
             "locator_kind": "path",
             "delivery_intent": "none",
-            "result_kind": "file_first_line"
+            "structured_field_selector": null,
+            "invented_contract_field": "file_first_line"
         },
         "steps": [
             {
@@ -38,9 +39,9 @@ fn plan_schema_marks_unknown_output_contract_token_as_contract_violation() {
     }"#;
 
     let err = super::validate_against_schema::<Value>(raw, super::PromptSchemaId::PlanResult)
-        .expect_err("unknown result_kind must not bypass the planner contract");
+        .expect_err("unknown contract fields must not bypass the planner contract");
     assert!(err.is_contract_violation());
-    assert!(err.to_string().contains("$.output_contract.result_kind"));
+    assert!(err.to_string().contains("$.output_contract"));
     assert!(err.contract_violations_only_under("$.output_contract"));
 }
 
