@@ -1182,7 +1182,9 @@ fn file_paths_content_search_paths_satisfy_candidate_evidence() {
         "ask",
         "search workspace content and list matching paths",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::FilePaths);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     journal.record_output_contract(&route.clone());

@@ -48,7 +48,6 @@ PROBE_ACTIONS = [
 NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "不用执行任何操作，直接用一句话解释 RustClaw 是一个什么样的本地助手。",
     "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
-    "file_paths": f"找出 {FIXTURE_ROOT} 下的 markdown 文件路径，只输出路径列表。",
     "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
     "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
     "execution_failed_step": "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
@@ -65,7 +64,6 @@ NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
 EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "Do not run any operation. In one sentence, explain what kind of local assistant RustClaw is.",
     "raw_command_output": "Run pwd and briefly tell me what the command printed.",
-    "file_paths": f"Find markdown file paths under {FIXTURE_ROOT}. Output only the path list.",
     "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
     "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
     "execution_failed_step": "Run this read-only check that should fail: cat /definitely_missing_rustclaw_contract_case. Then explain the failure reason.",
@@ -317,14 +315,6 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
             lines.append(f"action_ref={action_ref}")
     if decision:
         lines.append(f"expected_policy_decision={decision}")
-    contract_id = str(case.get("contract_id") or "")
-    if contract_id == "file_paths":
-        lines.extend(
-            [
-                "selector_extension=md",
-                "selector_target_kind=file",
-            ]
-        )
     return lines
 
 
@@ -467,7 +457,6 @@ def live_nl_action_preference_applicable(case: dict[str, Any]) -> bool:
     if allowed_contracts is not None:
         return contract_id in allowed_contracts
     prompt_surface_action_contracts = {
-        "file_paths": {"fs_basic.find_entries"},
         "scalar_count": {"fs_basic.count_entries", "run_cmd"},
         "structured_keys": {"config_basic.list_keys", "config_basic.read_fields"},
     }
@@ -566,9 +555,6 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
             skill = action_skill(action_ref)
             if skill in forbidden_skills and skill not in allowed_skills:
                 row["executed_none_of"] = [skill]
-    if contract_id == "file_paths":
-        row["final_contains"] = ["release_checklist.md", "service_notes.md"]
-        row["final_not_contains"] = ["package.json"]
     return row
 
 

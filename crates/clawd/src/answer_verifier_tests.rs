@@ -22,7 +22,8 @@ fn route_with_mode() -> crate::answer_verifier::AnswerContract {
 #[test]
 fn verifier_list_contract_marker_requires_planner_semantic_contract() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     assert!(strict_list_route_allows_observed_subset(&route));
 }
 
@@ -380,7 +381,7 @@ fn local_missing_evidence_gap_does_not_block_on_negative_evidence_only() {
 fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "definitely_missing_dir_rustclaw_xyz/".to_string();
     let mut journal =

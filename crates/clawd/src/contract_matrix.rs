@@ -544,7 +544,6 @@ pub(crate) enum FinalAnswerShape {
     FailedStepWithEvidence,
     Free,
     LifecycleResult,
-    PathList,
     RawOutputOrShortSummary,
     Scalar,
     SinglePath,
@@ -601,7 +600,6 @@ impl FinalAnswerShape {
         Self::FailedStepWithEvidence,
         Self::Free,
         Self::LifecycleResult,
-        Self::PathList,
         Self::RawOutputOrShortSummary,
         Self::Scalar,
         Self::SinglePath,
@@ -618,7 +616,6 @@ impl FinalAnswerShape {
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
             "free" => Some(Self::Free),
             "lifecycle_result" => Some(Self::LifecycleResult),
-            "path_list" => Some(Self::PathList),
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
             "scalar" => Some(Self::Scalar),
             "single_path" => Some(Self::SinglePath),
@@ -637,7 +634,6 @@ impl FinalAnswerShape {
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
             Self::Free => "free",
             Self::LifecycleResult => "lifecycle_result",
-            Self::PathList => "path_list",
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
             Self::Scalar => "scalar",
             Self::SinglePath => "single_path",
@@ -651,7 +647,7 @@ impl FinalAnswerShape {
             Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
             Self::SinglePath => FinalAnswerShapeClass::SinglePath,
             Self::Scalar => FinalAnswerShapeClass::ScalarValue,
-            Self::ExactList | Self::PathList => FinalAnswerShapeClass::StrictList,
+            Self::ExactList => FinalAnswerShapeClass::StrictList,
             Self::ExistenceVerdictWithPath | Self::LifecycleResult => {
                 FinalAnswerShapeClass::Verdict
             }

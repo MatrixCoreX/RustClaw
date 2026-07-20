@@ -267,6 +267,23 @@ pub(crate) fn output_contract_requests_exact_scalar_path(
     output_contract_requests_exact_scalar_field(route, &["path", "resolved_path"])
 }
 
+pub(crate) fn output_contract_requests_exact_list_path(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    if route.response_shape != crate::OutputResponseShape::Strict {
+        return false;
+    }
+    let Some(fields) = route
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .and_then(exact_machine_field_selector)
+    else {
+        return false;
+    };
+    matches!(fields.as_slice(), [field] if matches!(field.as_str(), "path" | "resolved_path"))
+}
+
 pub(crate) fn output_contract_exact_scalar_field(
     route: &crate::IntentOutputContract,
     allowed_fields: &[&str],

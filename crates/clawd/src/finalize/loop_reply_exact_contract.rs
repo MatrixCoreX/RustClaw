@@ -64,7 +64,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     if has_prior_step_error && !allow_prior_step_error_replacement {
         return;
     }
-    if !route.requests_exact_name_list()
+    if !route.requests_exact_list()
         && route_expects_synthesis_over_raw_observation(route)
         && delivery_matches_latest_publishable_synthesis(loop_state, delivery_messages)
     {
@@ -92,7 +92,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     if current_delivery_is_publishable_synthesis
         && latest_publishable_synthesis_step_matches(loop_state)
         && route.semantic_kind_is_unclassified()
-        && !route.requests_exact_name_list()
+        && !route.requests_exact_list()
         && delivery_messages.last().is_some_and(|message| {
             planned_delivery_is_publishable_model_language_answer(message)
                 && delivery_is_single_line_text(message)
@@ -635,10 +635,9 @@ fn exact_fallback_candidate_is_machine_grounded(
     if route_path_locator_allows_observed_listing(route) {
         return candidate.lines().any(|line| !line.trim().is_empty());
     }
-    matches!(
-        route.semantic_kind,
-        crate::OutputSemanticKind::ExistenceWithPath | crate::OutputSemanticKind::FilePaths
-    ) && candidate.lines().any(|line| !line.trim().is_empty())
+    (route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
+        || route.requests_exact_path_list())
+        && candidate.lines().any(|line| !line.trim().is_empty())
 }
 
 fn exact_contract_answer_from_json(
@@ -648,10 +647,9 @@ fn exact_contract_answer_from_json(
     if matches!(route.response_shape, crate::OutputResponseShape::Scalar) {
         return scalar_answer_from_json(value);
     }
-    if matches!(
-        route.semantic_kind,
-        crate::OutputSemanticKind::FilePaths | crate::OutputSemanticKind::ExistenceWithPath
-    ) || matches!(route.locator_kind, crate::OutputLocatorKind::Path)
+    if route.requests_exact_path_list()
+        || route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
+        || matches!(route.locator_kind, crate::OutputLocatorKind::Path)
     {
         return path_answer_from_json(value);
     }
@@ -705,7 +703,7 @@ fn planned_delivery_is_explicit_contractual_answer(
     route: &crate::IntentOutputContract,
     delivery: &str,
 ) -> bool {
-    if route.requests_exact_name_list() {
+    if route.requests_exact_list() {
         return false;
     }
     let delivery = delivery.trim();
@@ -720,27 +718,7 @@ fn planned_delivery_is_explicit_contractual_answer(
     matches!(
         crate::output_contract_verifier::verify_output_contract(route, delivery, ""),
         crate::output_contract_verifier::OutputContractVerdict::Pass
-    ) && list_contract_candidate_is_line_list(route, delivery)
-}
-
-fn list_contract_candidate_is_line_list(
-    route: &crate::IntentOutputContract,
-    delivery: &str,
-) -> bool {
-    if !matches!(route.semantic_kind, crate::OutputSemanticKind::FilePaths) {
-        return true;
-    }
-    let lines = delivery
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>();
-    if lines.len() > 1 {
-        return true;
-    }
-    lines
-        .first()
-        .is_some_and(|line| !line.chars().any(char::is_whitespace))
+    )
 }
 
 pub(super) fn route_prefers_observed_answer(route: &crate::IntentOutputContract) -> bool {
@@ -795,10 +773,8 @@ fn route_allows_prior_step_error_observed_replacement(route: &crate::IntentOutpu
     if route.response_shape == crate::OutputResponseShape::Scalar {
         return true;
     }
-    route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::FilePaths,
-        crate::OutputSemanticKind::ExistenceWithPath,
-    ])
+    route.requests_exact_path_list()
+        || route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
 }
 
 fn delivery_has_planned_content_beyond_observed_answer(delivery: &str, observed: &str) -> bool {
@@ -826,6 +802,9 @@ pub(super) fn should_keep_planned_delivery_over_observed_answer(
     }
     if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput) {
         return false;
+    }
+    if route.requests_exact_list() && exact_list_delivery_is_observed_subset(delivery, observed) {
+        return true;
     }
     let scalar_model_language_verdict = route.response_shape == crate::OutputResponseShape::Scalar
         && route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath);
@@ -865,6 +844,24 @@ pub(super) fn should_keep_planned_delivery_over_observed_answer(
         return true;
     }
     false
+}
+
+fn exact_list_delivery_is_observed_subset(delivery: &str, observed: &str) -> bool {
+    let delivery_items = delivery
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let observed_items = observed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    !delivery_items.is_empty()
+        && delivery_items.len() <= observed_items.len()
+        && delivery_items
+            .iter()
+            .all(|item| observed_items.iter().any(|observed| observed == item))
 }
 
 fn delivery_is_structurally_richer_than_observed_projection(

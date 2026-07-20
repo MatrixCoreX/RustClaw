@@ -576,7 +576,7 @@ pub(super) fn route_allows_structured_search_recovery(
     let Some(route) = route_result else {
         return false;
     };
-    route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
+    route.output_contract.requests_exact_path_list()
 }
 
 pub(super) fn try_recover_content_excerpt_summary_answer_verifier_gap(

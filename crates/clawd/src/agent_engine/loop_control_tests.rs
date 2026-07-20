@@ -82,7 +82,8 @@ fn answer_contract(route: &IntentOutputContract) -> crate::answer_verifier::Answ
 #[test]
 fn answer_contract_for_reply_uses_journal_output_contract() {
     let mut output_contract = IntentOutputContract::default();
-    output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    output_contract.response_shape = OutputResponseShape::Strict;
+    output_contract.selection.structured_field_selector = Some("path".to_string());
     output_contract.locator_kind = OutputLocatorKind::Path;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-effective-route",
@@ -96,14 +97,18 @@ fn answer_contract_for_reply_uses_journal_output_contract() {
         answer_contract_for_reply("probe service status", &reply).expect("answer contract");
 
     assert_eq!(
-        selected.output_contract.semantic_kind,
-        OutputSemanticKind::FilePaths
+        selected
+            .output_contract
+            .selection
+            .structured_field_selector
+            .as_deref(),
+        Some("path")
     );
     assert_eq!(
         crate::evidence_policy::required_evidence_fields_for_output_contract(
             &selected.output_contract,
         ),
-        vec!["candidates".to_string()]
+        vec!["path".to_string()]
     );
 }
 
@@ -260,7 +265,7 @@ fn structured_search_verifier_exhaustion_recovers_with_full_candidate_list() {
         ])
         .with_task_journal(journal);
     let mut route = route_result(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
 
     assert!(try_recover_structured_search_answer_verifier_gap(
         Some(&answer_contract(&route)),
@@ -710,7 +715,7 @@ fn language_only_output_format_gap_prefers_latest_terminal_answer_over_stale_tex
 #[test]
 fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
     let mut route = route_result(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();

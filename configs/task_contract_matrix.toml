@@ -122,17 +122,6 @@ failure_policy = "retry_with_alternatives"
 [contracts.raw_command_output.evidence_expression]
 any_of = ["command_output", "field_value", "content_excerpt"]
 
-[contracts.file_paths]
-semantic_kind = "file_paths"
-operation = "list"
-target_object = "directory"
-delivery_shape = "list"
-allowed_actions = ["fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.grep_text"]
-preferred_actions = ["fs_basic.find_entries"]
-required_evidence = ["candidates"]
-final_answer_shape = "path_list"
-failure_policy = "retry_with_alternatives"
-
 [contracts.content_excerpt_summary]
 semantic_kind = "content_excerpt_summary"
 operation = "summarize"

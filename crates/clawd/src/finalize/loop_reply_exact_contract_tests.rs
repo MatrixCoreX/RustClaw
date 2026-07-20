@@ -260,7 +260,7 @@ fn exact_contract_keeps_planned_subset_over_raw_observed_file_paths() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

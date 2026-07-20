@@ -88,11 +88,12 @@ pub(crate) fn compact_prompt_line_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<String> {
     let matrix = bundled_contract_matrix()?;
-    if output_contract.requests_exact_name_list() {
+    if let Some(exact_list_evidence) = exact_list_evidence_fields(output_contract) {
         return Some(format!(
-            "- evidence_policy source=validated_output_selector version={} hash={} match=exact_list_selector planner_authority=agent_loop_registry evidence_profile=selected_list required_evidence=candidates final_answer_shape=exact_list",
+            "- evidence_policy source=validated_output_selector version={} hash={} match=exact_list_selector planner_authority=agent_loop_registry evidence_profile=selected_list required_evidence={} final_answer_shape=exact_list",
             matrix.matrix_version,
             matrix.matrix_version_hash(),
+            exact_list_evidence.join(","),
         ));
     }
     let matched = matrix.match_output_contract(output_contract)?;
@@ -119,8 +120,8 @@ pub(crate) fn compact_prompt_line_for_output_contract(
 pub(crate) fn required_evidence_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Vec<String>> {
-    if output_contract.requests_exact_name_list() {
-        return Some(vec!["candidates".to_string()]);
+    if let Some(fields) = exact_list_evidence_fields(output_contract) {
+        return Some(fields);
     }
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
@@ -145,19 +146,35 @@ fn evidence_expression_for_output_contract(
     output_contract: &IntentOutputContract,
     matched: &MatchedContract<'_>,
 ) -> EvidenceExpression {
-    if output_contract.requests_exact_name_list() {
+    if let Some(fields) = exact_list_evidence_fields(output_contract) {
         return EvidenceExpression {
-            all_of: vec!["candidates".to_string()],
+            all_of: fields,
             ..Default::default()
         };
     }
     matched.evidence_expression()
 }
 
+fn exact_list_evidence_fields(output_contract: &IntentOutputContract) -> Option<Vec<String>> {
+    if output_contract.requests_exact_name_list() {
+        return Some(vec!["candidates".to_string()]);
+    }
+    output_contract
+        .requests_exact_path_list()
+        .then_some(())
+        .and_then(|()| {
+            output_contract
+                .selection
+                .structured_field_selector
+                .as_deref()
+                .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+        })
+}
+
 pub(crate) fn final_answer_shape_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<FinalAnswerShape> {
-    if output_contract.requests_exact_name_list() {
+    if output_contract.requests_exact_list() {
         return Some(FinalAnswerShape::ExactList);
     }
     let matrix = bundled_contract_matrix()?;

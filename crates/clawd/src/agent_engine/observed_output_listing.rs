@@ -254,13 +254,7 @@ pub(super) fn route_prefers_plain_fs_search_paths(route: &crate::IntentOutputCon
             )
             && !route.delivery_required)
         || route.requests_exact_name_list()
-        || (matches!(
-            route.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        ) && super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::FilePaths,
-        ))
+        || route.requests_exact_path_list()
 }
 
 fn looks_like_plain_path_literal(text: &str) -> bool {
@@ -309,11 +303,7 @@ pub(super) fn route_allows_raw_listing_direct_answer(
         {
             return true;
         }
-        route.requests_exact_name_list()
-            || super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::FilePaths,
-            )
+        route.requests_exact_list()
     })
 }
 

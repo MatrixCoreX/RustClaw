@@ -258,6 +258,30 @@ fn bundled_contract_matrix_renders_prompt_line() {
 }
 
 #[test]
+fn exact_path_list_prompt_uses_selected_machine_field_evidence() {
+    let mut output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::None,
+        response_shape: OutputResponseShape::Strict,
+        ..IntentOutputContract::default()
+    };
+    output_contract.selection.structured_field_selector = Some("resolved_path".to_string());
+
+    let line =
+        compact_prompt_line_for_output_contract(&output_contract).expect("contract prompt line");
+
+    assert!(line.contains("match=exact_list_selector"));
+    assert!(line.contains("required_evidence=resolved_path"));
+    assert_eq!(
+        required_evidence_for_output_contract(&output_contract),
+        Some(vec!["resolved_path".to_string()])
+    );
+    assert_eq!(
+        final_answer_shape_for_output_contract(&output_contract),
+        Some(FinalAnswerShape::ExactList)
+    );
+}
+
+#[test]
 fn contract_matrix_covers_all_output_semantic_kinds() {
     let matrix = load_workspace_matrix();
 

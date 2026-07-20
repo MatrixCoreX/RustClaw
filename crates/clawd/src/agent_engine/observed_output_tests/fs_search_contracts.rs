@@ -74,7 +74,7 @@ fn fs_search_file_paths_contract_filters_with_structured_pattern() {
             r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/agent_intelligence_architecture_plan_20260511_已完成.md","plan/builtin_skill_capability_governance_plan_20260510.md","plan/codex_style_agent_architecture_refactor_plan_20260511.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","plan/llm_first_agent_convergence_plan_20260511.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/home/guagua/rustclaw/plan".to_string();
     let agent_run_context = AgentRunContext {
@@ -97,7 +97,7 @@ fn fs_search_file_paths_contract_uses_planner_semantic_kind() {
             r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/home/guagua/rustclaw/plan".to_string();
     let agent_run_context = AgentRunContext {
@@ -120,7 +120,7 @@ fn fs_search_file_paths_contract_preserves_multi_candidates_when_not_decisive() 
             r#"{"action":"find_name","pattern":"README","count":5,"results":["README.md","README.zh-CN.md","UI/README.md","data/vendor/whisper.cpp/examples/whisper.android.java/README_files","data/vendor/whisper.cpp/README.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint = "/home/guagua/rustclaw".to_string();
     let agent_run_context = AgentRunContext {
@@ -152,7 +152,8 @@ fn fs_search_file_paths_contract_i18n_expands_to_five_full_paths() {
         r#"{"action":"find_name","count":6,"results":["README.md","README.zh-CN.md","README_cn.md","RUSTCLAW_SERVICE_README.md","UI/README.md","Cargo.toml"],"root":""}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.selection.structured_field_selector = Some("path".to_string());
+    route.selection.list_selector.limit = Some(5);
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint = String::new();
     let agent_run_context = AgentRunContext {
@@ -165,7 +166,7 @@ fn fs_search_file_paths_contract_i18n_expands_to_five_full_paths() {
         &state,
         Some(&agent_run_context),
     )
-    .expect("file_paths should produce a full path list");
+    .expect("exact path selector should produce a full path list");
     let lines = answer.lines().collect::<Vec<_>>();
     let root = state.skill_rt.workspace_root.display().to_string();
 
@@ -338,7 +339,7 @@ fn virtual_fs_basic_grep_text_output_can_direct_answer_file_paths() {
             r#"{"action":"grep_text","query":"FirstLayerDecision","count":4,"match_count":5,"matches":[{"path":"README.md","line":45,"text":"FirstLayerDecision"},{"path":"README.md","line":95,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/ask_flow.rs","line":10,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/intent_router.rs","line":20,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/main.rs","line":30,"text":"FirstLayerDecision"}]}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::FilePaths;
+    route_result.selection.structured_field_selector = Some("path".to_string());
     route_result.requires_content_evidence = true;
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

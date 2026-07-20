@@ -262,14 +262,13 @@ fn route_uses_non_binding_workspace_evidence(route_result: &crate::IntentOutputC
     route_result.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && route_result.requires_content_evidence
         && !route_result.delivery_required
-        && !route_result.requests_exact_name_list()
+        && !route_result.requests_exact_list()
         && route_result.semantic_kind_is_unclassified()
 }
 
 fn route_contract_can_publish_ordered_entries(route_result: &crate::IntentOutputContract) -> bool {
     route_result.delivery_required
-        || route_result.requests_exact_name_list()
-        || route_result.semantic_kind_is_any(&[crate::OutputSemanticKind::FilePaths])
+        || route_result.requests_exact_list()
         || matches!(
             route_result.delivery_intent,
             crate::OutputDeliveryIntent::DirectoryLookup

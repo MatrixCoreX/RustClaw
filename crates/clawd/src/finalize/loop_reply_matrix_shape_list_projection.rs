@@ -7,6 +7,10 @@ pub(super) fn route_requests_exact_name_list(route: &crate::IntentOutputContract
     route.requests_exact_name_list()
 }
 
+pub(super) fn route_requests_exact_list(route: &crate::IntentOutputContract) -> bool {
+    route.requests_exact_list()
+}
+
 pub(super) fn selected_name_list_prefers_observed_projection(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
@@ -463,18 +467,11 @@ fn grep_text_matches_answer_from_value(value: &serde_json::Value) -> Option<Stri
 }
 
 fn route_supports_matrix_strict_list_observed_answer(route: &crate::IntentOutputContract) -> bool {
-    route_requests_name_list(route)
-        || route_requests_filesystem_path_list(route)
-        || route.semantic_kind_is(crate::OutputSemanticKind::FilePaths)
+    route_requests_exact_list(route)
 }
 
 fn route_requests_name_list(route: &crate::IntentOutputContract) -> bool {
     route_requests_exact_name_list(route)
-}
-
-fn route_requests_filesystem_path_list(route: &crate::IntentOutputContract) -> bool {
-    crate::evidence_policy::final_answer_shape_for_output_contract(route)
-        == Some(crate::evidence_policy::FinalAnswerShape::PathList)
 }
 
 fn matrix_list_selector_limit(route: &crate::IntentOutputContract) -> Option<usize> {
@@ -490,9 +487,7 @@ fn matrix_inventory_file_paths_observed_answer(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route.semantic_kind_is(crate::OutputSemanticKind::FilePaths)
-        && !route_requests_filesystem_path_list(route)
-    {
+    if !route.requests_exact_path_list() {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {

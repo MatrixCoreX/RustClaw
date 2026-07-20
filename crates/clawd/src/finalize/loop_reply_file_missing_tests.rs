@@ -389,7 +389,7 @@ async fn finalize_loop_reply_returns_not_found_for_wrapped_fs_basic_missing_file
         status: StepExecutionStatus::Error,
         output: None,
         error: Some(
-            "__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.path_batch_facts` is rejected by contract `file_paths`\",\"skill\":\"system_basic\"}"
+            "__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action rejected by output contract\",\"skill\":\"system_basic\"}"
                 .to_string(),
         ),
         started_at: 0,

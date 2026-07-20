@@ -522,8 +522,7 @@ fn op_kind_from_route(
 }
 
 fn output_contract_prefers_listing_followup(route_result: &crate::IntentOutputContract) -> bool {
-    route_result.requests_exact_name_list()
-        || route_result.semantic_kind_is_any(&[crate::OutputSemanticKind::FilePaths])
+    route_result.requests_exact_list()
         || matches!(
             route_result.delivery_intent,
             crate::OutputDeliveryIntent::DirectoryLookup

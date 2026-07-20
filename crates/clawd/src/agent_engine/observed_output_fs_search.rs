@@ -712,11 +712,7 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
     value: &serde_json::Value,
     allow_multi_result_list: bool,
 ) -> Option<String> {
-    if !super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::FilePaths,
-    ) && !route_requests_exact_scalar_path(route)
-    {
+    if !route.requests_exact_path_list() && !route_requests_exact_scalar_path(route) {
         if !super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::ExistenceWithPath,
@@ -831,21 +827,18 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
 }
 
 fn fs_search_result_list_limit(route: &crate::IntentOutputContract) -> usize {
-    if super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::FilePaths,
-    ) {
-        5
-    } else {
-        3
-    }
+    route
+        .selection
+        .list_selector
+        .limit
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(usize::MAX)
 }
 
-fn route_prefers_absolute_fs_search_file_paths(route: &crate::IntentOutputContract) -> bool {
-    super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::FilePaths,
-    ) && route.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+fn route_prefers_absolute_fs_search_paths(route: &crate::IntentOutputContract) -> bool {
+    route.requests_exact_path_list()
+        && route.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && route.locator_hint.trim().is_empty()
 }
 
@@ -856,7 +849,7 @@ pub(super) fn absolutize_fs_search_answer_paths(
     answer: String,
     prefer_full_path: bool,
 ) -> String {
-    if !prefer_full_path || !route.is_some_and(route_prefers_absolute_fs_search_file_paths) {
+    if !prefer_full_path || !route.is_some_and(route_prefers_absolute_fs_search_paths) {
         return answer;
     }
     let Some(state) = state else {
