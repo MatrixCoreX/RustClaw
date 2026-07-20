@@ -199,10 +199,7 @@ pub(super) fn generated_delivery_existing_file_content_synthesis_token(
 ) -> Option<String> {
     let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     let contract = route.clone();
-    if !route.semantic_kind_is(crate::OutputSemanticKind::GeneratedFileDelivery)
-        || !contract.delivery_required
-        || contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
-        || contract.response_shape != crate::OutputResponseShape::FileToken
+    if !contract.requests_single_file_delivery()
         || !latest_publishable_synthesis_step_matches(loop_state)
         || !loop_state
             .executed_step_results

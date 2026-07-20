@@ -1,10 +1,10 @@
 use super::*;
 
 #[test]
-fn generated_file_delivery_allows_parent_directory_creation() {
+fn generic_file_delivery_allows_parent_directory_creation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -17,7 +17,7 @@ fn generated_file_delivery_allows_parent_directory_creation() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "fs_basic.make_dir");
-    assert_eq!(policy.contract_match, "generated_file_delivery");
+    assert_eq!(policy.contract_match, "generic_delivery");
 }
 
 #[test]
@@ -164,10 +164,10 @@ fn filesystem_mutation_result_allows_readback_evidence() {
 }
 
 #[test]
-fn generated_file_delivery_allows_existing_file_path_facts() {
+fn generic_file_delivery_allows_existing_file_path_facts() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -180,14 +180,14 @@ fn generated_file_delivery_allows_existing_file_path_facts() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "fs_basic.stat_paths");
-    assert_eq!(policy.contract_match, "generated_file_delivery");
+    assert_eq!(policy.contract_match, "generic_delivery");
 }
 
 #[test]
-fn generated_file_delivery_allows_existing_file_content_evidence() {
+fn generic_file_delivery_allows_existing_file_content_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -202,14 +202,14 @@ fn generated_file_delivery_allows_existing_file_content_evidence() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "fs_basic.read_text_range");
-    assert_eq!(policy.contract_match, "generated_file_delivery");
+    assert_eq!(policy.contract_match, "generic_delivery");
 }
 
 #[test]
-fn generated_file_delivery_allows_directory_inventory_for_existing_selection() {
+fn generic_file_delivery_allows_directory_inventory_for_existing_selection() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -222,14 +222,14 @@ fn generated_file_delivery_allows_directory_inventory_for_existing_selection() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "fs_basic.list_dir");
-    assert_eq!(policy.contract_match, "generated_file_delivery");
+    assert_eq!(policy.contract_match, "generic_delivery");
 }
 
 #[test]
-fn generated_file_delivery_allows_runtime_command_observation() {
+fn generic_file_delivery_allows_runtime_command_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -245,14 +245,14 @@ fn generated_file_delivery_allows_runtime_command_observation() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "run_cmd");
-    assert_eq!(policy.contract_match, "generated_file_delivery");
+    assert_eq!(policy.contract_match, "generic_delivery");
 }
 
 #[test]
-fn generated_file_delivery_allows_audio_synthesis_file_output() {
+fn generic_file_delivery_allows_audio_synthesis_file_output() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -268,14 +268,14 @@ fn generated_file_delivery_allows_audio_synthesis_file_output() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "audio_synthesize");
-    assert_eq!(policy.contract_match, "generated_file_delivery");
+    assert_eq!(policy.contract_match, "generic_delivery");
 }
 
 #[test]
-fn generated_file_delivery_allows_image_generation_file_output() {
+fn generic_file_delivery_allows_image_generation_file_output() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -291,14 +291,14 @@ fn generated_file_delivery_allows_image_generation_file_output() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "image_generate");
-    assert_eq!(policy.contract_match, "generated_file_delivery");
+    assert_eq!(policy.contract_match, "generic_delivery");
 }
 
 #[test]
-fn generated_file_delivery_allows_image_edit_file_output() {
+fn generic_file_delivery_allows_image_edit_file_output() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -316,7 +316,7 @@ fn generated_file_delivery_allows_image_edit_file_output() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "image_edit.restyle");
-    assert_eq!(policy.contract_match, "generated_file_delivery");
+    assert_eq!(policy.contract_match, "generic_delivery");
 }
 
 #[test]

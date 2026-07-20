@@ -344,7 +344,7 @@ listing_based_digest_like = bool(re.search(r"(目录|directory listing|项目核
 hidden_files_like = bool(re.search(r"(隐藏文件|点开头|dotfiles?|hidden files?|hidden entries?)", prompt, re.I))
 named_file_delivery_like = bool(re.search(r"(发给我|发我|发过来|send me|send\b|deliver\b).*(?:`?)([A-Za-z0-9_.-]+\.[A-Za-z0-9_.-]+)(?:`?)", prompt, re.I))
 named_missing_file_like = "definitely_missing_named_file_rustclaw_" in prompt
-generated_file_delivery_like = bool(
+create_and_deliver_file_like = bool(
     re.search(r"(写个|写一个|生成|create|write)\b.*(\.sh|shell script|脚本)", prompt, re.I)
     and re.search(r"(保存|存成|写入文件|save|create file)", prompt, re.I)
     and re.search(r"(发给我|发我|发过来|send me|deliver)", prompt, re.I)
@@ -431,7 +431,7 @@ if failure_followup_like and re.search(r"(未执行任何步骤|No step failed|n
     issues.append("失败追问没有正确绑定到最近的 interrupted task context。")
 if has_write_file and not explicit_file_intent:
     issues.append("检测到 write_file，但用户未明确要求保存/创建文件，可能把文本生成误判成文件写入。")
-if generated_file_delivery_like and has_write_file and not re.search(r"(?:FILE:|IMAGE_FILE:)\S+", text):
+if create_and_deliver_file_like and has_write_file and not re.search(r"(?:FILE:|IMAGE_FILE:)\S+", text):
     issues.append("用户要求先生成文件再发送，但最终没有明确返回 FILE/IMAGE_FILE 交付。")
 if hidden_files_like and re.search(r"(运行 `?ls -a`?|run `?ls -a`?|是否需要我执行|do you want me to run)", text, re.I):
     issues.append("用户已经在问隐藏文件结果，但系统只是在建议/询问是否执行命令，没有直接回答。")

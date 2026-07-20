@@ -51,7 +51,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
     "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
     "execution_failed_step": "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
-    "generated_file_delivery": "写一个简单文本文件到 tmp/contract_matrix_generated_note.txt，内容是 RustClaw contract matrix test，然后把文件路径发给我。",
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
 }
@@ -67,7 +66,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
     "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
     "execution_failed_step": "Run this read-only check that should fail: cat /definitely_missing_rustclaw_contract_case. Then explain the failure reason.",
-    "generated_file_delivery": "Write a simple text file to tmp/contract_matrix_generated_note.txt with the content RustClaw contract matrix test, then send me the file path.",
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
 }
@@ -81,21 +79,18 @@ JA_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"{FIXTURE_PACKAGE} が存在するか確認し、存在結果とパスだけを答えてください。",
     "scalar_count": f"{FIXTURE_DOCS_DIR} の直下にある項目数を数え、数字だけを出力してください。",
     "structured_keys": f"{FIXTURE_CONFIG} のトップレベルキーを読み取り、キー名リストだけを出力してください。",
-    "generated_file_delivery": "tmp/contract_matrix_generated_note.txt に RustClaw contract matrix test という内容のテキストファイルを作成し、そのファイルパスを送ってください。",
 }
 
 KO_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"{FIXTURE_PACKAGE} 파일이 존재하는지 확인하고, 존재 여부와 경로만 답하세요.",
     "scalar_count": f"{FIXTURE_DOCS_DIR} 바로 아래 항목 수를 세고 숫자만 출력하세요.",
     "structured_keys": f"{FIXTURE_CONFIG} 의 최상위 키를 읽고 키 이름 목록만 출력하세요.",
-    "generated_file_delivery": "tmp/contract_matrix_generated_note.txt 파일을 만들고 내용은 RustClaw contract matrix test 로 넣은 뒤, 생성된 파일 경로를 보내세요.",
 }
 
 FR_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"Vérifie si {FIXTURE_PACKAGE} existe, puis réponds uniquement avec le résultat d'existence et le chemin.",
     "scalar_count": f"Compte les éléments directement sous {FIXTURE_DOCS_DIR} et affiche uniquement le nombre.",
     "structured_keys": f"Lis les clés de premier niveau dans {FIXTURE_CONFIG}. Affiche uniquement la liste des clés.",
-    "generated_file_delivery": "Crée le fichier tmp/contract_matrix_generated_note.txt avec le contenu RustClaw contract matrix test, puis envoie-moi le chemin du fichier.",
 }
 
 LOCALIZED_TASK_WRAPPERS: dict[str, str] = {
@@ -111,7 +106,6 @@ STRICT_NATIVE_PROMPT_CONTRACTS = frozenset(
         "existence_with_path",
         "scalar_count",
         "structured_keys",
-        "generated_file_delivery",
     }
 )
 STRICT_NATIVE_PROMPT_VARIANTS = ("ja_jp", "ko_kr", "fr_fr")
@@ -495,7 +489,6 @@ def planned_action_equivalents(case: dict[str, Any]) -> list[str]:
     action = normalize_token(action_ref).replace("-", "_")
     equivalents: dict[tuple[str, str], list[str]] = {
         ("execution_failed_step", "log_analyze"): ["log_analyze", "run_cmd"],
-        ("generated_file_delivery", "transform"): ["transform", "fs_basic.write_text"],
     }
     return equivalents.get((contract_id, action), [action])
 
@@ -507,7 +500,7 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
     contract_id = str(case.get("contract_id") or "")
     if case.get("contract_type") == "generic":
         if contract_id == "generic_delivery":
-            row["contract_match_any"] = ["generic_delivery", "generated_file_delivery"]
+            row["contract_match_any"] = ["generic_delivery"]
             row["contract_final_answer_shape_any"] = [
                 "delivery_token_or_path",
                 case.get("final_answer_shape", ""),

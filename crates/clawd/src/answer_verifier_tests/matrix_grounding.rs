@@ -14,7 +14,7 @@ fn single_file_delivery_rejects_token_mixed_with_prose() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-token-only", "ask", "send file");
     journal

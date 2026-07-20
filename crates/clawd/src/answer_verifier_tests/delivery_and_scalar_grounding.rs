@@ -64,7 +64,7 @@ fn grounded_file_token_uses_path_token_from_write_text_output() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-file-token", "ask", "send that file");
     journal
@@ -144,7 +144,7 @@ fn matrix_delivery_artifact_shape_rejects_raw_command_summary_answer() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-delivery-shape", "ask", "send file");
     journal
@@ -178,7 +178,7 @@ fn matrix_delivery_artifact_shape_accepts_grounded_plain_path() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-delivery-path", "ask", "send file");
     journal

@@ -307,7 +307,10 @@ fn image_generate_extra_outputs_path_counts_as_structured_path_evidence() {
             && item.get("excerpt").and_then(Value::as_str) == Some("/tmp/rustclaw-image.png")
     }));
 
-    let route = route_for_semantic(crate::OutputSemanticKind::GeneratedFileDelivery);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = crate::OutputResponseShape::FileToken;
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.observed_canonical.contains("path"));
     assert!(
