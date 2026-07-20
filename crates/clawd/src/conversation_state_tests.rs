@@ -576,57 +576,6 @@ fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
 }
 
 #[test]
-fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
-    let mut route_result = output_contract_for_test();
-    route_result.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    let prior_state = ConversationState {
-        last_primary_task_prompt: Some(
-            "再看一下 scripts/nl_tests/fixtures/device_local/logs 目录有多少个直接子项，只输出数字"
-                .to_string(),
-        ),
-        last_primary_task_output: Some("2".to_string()),
-        ..ConversationState::default()
-    };
-
-    let prompt = next_last_primary_task_prompt(
-        Some(&prior_state),
-        &route_result,
-        Some(&crate::turn_context::TurnAnalysis {
-            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
-            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
-            should_interrupt_active_run: false,
-            state_patch: None,
-            attachment_processing_required: false,
-        }),
-        "上上个目录和上个目录相比，哪个直接子项更多？只用一句话",
-        "比较 docs（3个直接子项）和 logs（2个直接子项）的直接子项数量。",
-    );
-    let output = next_last_primary_task_output(
-        Some(&prior_state),
-        &route_result,
-        Some(&crate::turn_context::TurnAnalysis {
-            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
-            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
-            should_interrupt_active_run: false,
-            state_patch: None,
-            attachment_processing_required: false,
-        }),
-        "比较 docs（3个直接子项）和 logs（2个直接子项）的直接子项数量。",
-        "上上个目录（docs）的直接子项更多，有3个，而上个目录（logs）是2个。",
-        &[],
-    );
-
-    assert_eq!(
-        prompt.as_deref(),
-        Some("上上个目录和上个目录相比，哪个直接子项更多？只用一句话")
-    );
-    assert_eq!(
-        output.as_deref(),
-        Some("上上个目录（docs）的直接子项更多，有3个，而上个目录（logs）是2个。")
-    );
-}
-
-#[test]
 fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task() {
     let mut route_result = output_contract_for_test();
     route_result.response_shape = crate::OutputResponseShape::Scalar;

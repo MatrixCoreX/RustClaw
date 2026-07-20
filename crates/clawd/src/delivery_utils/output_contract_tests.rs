@@ -146,32 +146,6 @@ fn exact_sentence_count_overrides_mislabelled_one_sentence_contract() {
 }
 
 #[test]
-fn one_sentence_quantity_comparison_preserves_derived_ratio_line() {
-    let state = crate::AppState::test_default_with_fixture_provider();
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::QuantityComparison,
-        requires_content_evidence: true,
-        ..Default::default()
-    };
-    let expected = "Cargo.lock size_bytes=121800; Cargo.toml size_bytes=2639.\nsize_ratio=46.15";
-    let mut text = expected.to_string();
-    let mut messages = vec![text.clone()];
-
-    enforce_output_contract(
-        &state,
-        "compare Cargo.lock and Cargo.toml sizes",
-        &contract,
-        &mut text,
-        &mut messages,
-    );
-
-    assert_eq!(text, expected);
-    assert_eq!(messages, vec![expected.to_string()]);
-}
-
-#[test]
 fn scalar_contract_extracts_single_machine_token_from_sentence() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let contract = IntentOutputContract {

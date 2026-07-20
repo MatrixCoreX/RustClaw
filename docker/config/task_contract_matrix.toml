@@ -231,20 +231,6 @@ final_answer_shape = "scalar"
 failure_policy = "retry_with_alternatives"
 observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "run_cmd"]
 
-[contracts.quantity_comparison]
-semantic_kind = "quantity_comparison"
-operation = "validate"
-target_object = "unknown"
-delivery_shape = "raw"
-allowed_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "fs_basic.count_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "config_basic.read_field", "config_basic.read_fields", "run_cmd"]
-preferred_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "fs_basic.count_entries", "fs_basic.list_dir", "fs_basic.read_text_range"]
-required_evidence = ["field_value", "size_bytes"]
-final_answer_shape = "comparison_verdict"
-failure_policy = "retry_with_alternatives"
-
-[contracts.quantity_comparison.evidence_expression]
-any_of = ["field_value", "size_bytes", "count"]
-
 [contracts.execution_failed_step]
 semantic_kind = "execution_failed_step"
 operation = "validate"

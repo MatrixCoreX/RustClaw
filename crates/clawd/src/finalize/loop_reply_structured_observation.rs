@@ -2,25 +2,10 @@ use std::path::Path;
 
 use tracing::info;
 
-use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
+use crate::agent_engine::{append_delivery_message, AgentRunContext};
 use crate::{AppState, ClaimedTask};
 
 use super::{direct_rustclaw_config_risk_answer, log_deterministic_delivery_record};
-
-pub(super) fn latest_successful_synthesis_output_matches(
-    loop_state: &LoopState,
-    answer: &str,
-) -> bool {
-    let answer = answer.trim();
-    !answer.is_empty()
-        && loop_state
-            .executed_step_results
-            .iter()
-            .rev()
-            .find(|step| step.is_ok() && step.skill.as_str() == "synthesize_answer")
-            .and_then(|step| step.output.as_deref())
-            .is_some_and(|output| output.trim() == answer)
-}
 
 fn json_scalar_display(value: &serde_json::Value) -> Option<String> {
     match value {

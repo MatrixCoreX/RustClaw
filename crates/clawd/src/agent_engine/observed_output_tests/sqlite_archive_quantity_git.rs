@@ -115,36 +115,6 @@ fn structured_observed_body_includes_count_inventory_breakdown_for_synthesis() {
 }
 
 #[test]
-fn direct_scalar_defers_route_locator_hint_quantity_comparison_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "list_dir", "a\nb\n"));
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_2", "list_dir", "a\nb\nc\n"));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::QuantityComparison,
-            locator_hint: "scripts".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-    assert_eq!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
-    );
-}
-
-#[test]
 fn direct_scalar_defers_compare_paths_result_to_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -159,7 +129,7 @@ fn direct_scalar_defers_compare_paths_result_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "Cargo.lock|Cargo.toml".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -178,7 +148,7 @@ fn direct_scalar_defers_compare_paths_result_to_synthesis() {
 }
 
 #[test]
-fn quantity_comparison_does_not_force_direct_scalar_observed_answer() {
+fn unclassified_compare_paths_contract_does_not_force_direct_scalar_answer() {
     let route = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
@@ -186,7 +156,7 @@ fn quantity_comparison_does_not_force_direct_scalar_observed_answer() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "Cargo.lock|Cargo.toml".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };

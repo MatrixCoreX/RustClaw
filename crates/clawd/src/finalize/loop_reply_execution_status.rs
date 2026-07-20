@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use crate::agent_engine::{append_delivery_message, AgentRunContext};
 use crate::{AppState, ClaimedTask};
 
@@ -370,22 +368,6 @@ pub(super) fn deterministic_observed_execution_status_summary(
     }
 }
 
-pub(super) fn path_display_label(value: &serde_json::Value, fallback: &str) -> String {
-    let raw = value
-        .get("path")
-        .or_else(|| value.get("resolved_path"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(fallback);
-    Path::new(raw)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(raw)
-        .to_string()
-}
 fn has_publishable_synthesis_other_than_status(
     loop_state: &crate::agent_engine::LoopState,
     status_answer: &str,

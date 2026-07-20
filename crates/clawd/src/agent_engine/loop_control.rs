@@ -383,11 +383,6 @@ fn should_stop_for_observed_finalize(
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
     }
-    if quantity_comparison_one_sentence_needs_model_language_before_stop(route_result)
-        && !has_discussion_followup_action(actions)
-    {
-        return false;
-    }
     if super::observed_output::route_disallows_direct_observation_passthrough(route_result)
         && !has_discussion_followup_action(actions)
     {
@@ -448,15 +443,6 @@ fn should_stop_for_observed_finalize(
         && required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         })
-}
-
-fn quantity_comparison_one_sentence_needs_model_language_before_stop(
-    route_result: &IntentOutputContract,
-) -> bool {
-    route_result.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison)
-        && route_result.response_shape == crate::OutputResponseShape::OneSentence
-        && crate::evidence_policy::final_answer_shape_for_output_contract(route_result)
-            .is_some_and(|shape| shape.allows_model_language())
 }
 
 fn evaluate_round_outcome(

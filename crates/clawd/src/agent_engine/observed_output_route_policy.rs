@@ -78,15 +78,6 @@ pub(super) fn observed_request_prefers_english_template(
     true
 }
 
-pub(crate) fn route_quantity_comparison_requires_model_language_synthesis(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route_contract_marker_is(route, crate::OutputSemanticKind::QuantityComparison)
-        && route.requires_content_evidence
-        && !route.delivery_required
-        && route.response_shape == crate::OutputResponseShape::Free
-}
-
 pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> String {
     let route = agent_run_context.and_then(|ctx| ctx.output_contract());
     let response_shape = route.map(|route| route.response_shape);
@@ -99,9 +90,6 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
     }
     if let Some(route) = route {
         if route_disallows_direct_observation_passthrough(route) {
-            if route_quantity_comparison_requires_model_language_synthesis(route) {
-                return "style_policy=evidence_synthesis passthrough=disallowed synthesis=quantity_comparison include=requested_model_language_synthesis".to_string();
-            }
             if let Some(count) = route.exact_sentence_count {
                 return format!(
                     "style_policy=evidence_synthesis passthrough=disallowed sentence_count={count}"
@@ -145,9 +133,6 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
 pub(crate) fn route_requires_synthesized_delivery(route: &crate::IntentOutputContract) -> bool {
     if route_allows_strict_plain_observation_passthrough(route) {
         return false;
-    }
-    if route_quantity_comparison_requires_model_language_synthesis(route) {
-        return true;
     }
     let constrained_sentence_delivery = route.response_shape
         == crate::OutputResponseShape::OneSentence

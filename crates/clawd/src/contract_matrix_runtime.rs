@@ -1,8 +1,7 @@
 use super::MatchedContract;
 use super::{
     ActionPolicyDecision, ActionRef, ContractMatrix, EvidenceExpression, FinalAnswerShape,
-    FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor, OutputSemanticKind,
-    BUNDLED_CONTRACT_MATRIX,
+    FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor, BUNDLED_CONTRACT_MATRIX,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -128,17 +127,6 @@ pub(crate) fn required_evidence_for_output_contract(
         )
     {
         fields.insert("path".to_string());
-    }
-    if output_contract.semantic_kind_is(OutputSemanticKind::QuantityComparison)
-        && matches!(
-            output_contract.locator_kind,
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::CurrentWorkspace
-        )
-    {
-        fields.insert("exists".to_string());
-        fields.insert("kind".to_string());
     }
     Some(fields.into_iter().collect())
 }

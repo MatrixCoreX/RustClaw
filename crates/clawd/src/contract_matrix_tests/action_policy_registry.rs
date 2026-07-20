@@ -781,99 +781,6 @@ fn contract_matrix_action_refs_have_registry_schemas() {
 }
 
 #[test]
-fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
-    let cases = [
-        (
-            OutputSemanticKind::ExistenceWithPath,
-            "system_basic",
-            json!({"action":"path_batch_facts", "paths":["README.md"]}),
-            "fs_basic.stat_paths",
-        ),
-        (
-            OutputSemanticKind::FileNames,
-            "system_basic",
-            json!({"action":"inventory_dir", "path":"scripts"}),
-            "fs_basic.list_dir",
-        ),
-        (
-            OutputSemanticKind::ScalarCount,
-            "system_basic",
-            json!({"action":"count_inventory", "path":"scripts"}),
-            "fs_basic.count_entries",
-        ),
-        (
-            OutputSemanticKind::ContentExcerptSummary,
-            "system_basic",
-            json!({"action":"read_range", "path":"README.md", "mode":"head", "n":5}),
-            "fs_basic.read_text_range",
-        ),
-        (
-            OutputSemanticKind::QuantityComparison,
-            "system_basic",
-            json!({"action":"compare_paths", "paths":["Cargo.toml", "README.md"]}),
-            "fs_basic.compare_paths",
-        ),
-        (
-            OutputSemanticKind::QuantityComparison,
-            "system_basic",
-            json!({"action":"count_inventory", "path":"target", "recursive":true}),
-            "fs_basic.count_entries",
-        ),
-        (
-            OutputSemanticKind::FilePaths,
-            "fs_search",
-            json!({"action":"find_ext", "root":"scripts", "ext":"sh"}),
-            "fs_basic.find_entries",
-        ),
-        (
-            OutputSemanticKind::FilePaths,
-            "fs_search",
-            json!({"action":"grep_text", "root":".", "query":"FirstLayerDecision"}),
-            "fs_basic.grep_text",
-        ),
-        (
-            OutputSemanticKind::FileNames,
-            "fs_search",
-            json!({"action":"grep_text", "root":".", "query":"FirstLayerDecision"}),
-            "fs_basic.grep_text",
-        ),
-        (
-            OutputSemanticKind::ContentExcerptSummary,
-            "read_file",
-            json!({"path":"README.md"}),
-            "fs_basic.read_text_range",
-        ),
-        (
-            OutputSemanticKind::FileNames,
-            "list_dir",
-            json!({"path":"scripts"}),
-            "fs_basic.list_dir",
-        ),
-        (
-            OutputSemanticKind::GeneratedFileDelivery,
-            "write_file",
-            json!({"path":"tmp/out.txt", "content":"ok"}),
-            "fs_basic.write_text",
-        ),
-    ];
-
-    for (semantic_kind, skill, args, expected_action_key) in cases {
-        let route = IntentOutputContract {
-            semantic_kind,
-            ..IntentOutputContract::default()
-        };
-        let policy = action_policy_for_output_contract(Some(&route), skill, &args)
-            .unwrap_or_else(|| panic!("missing policy for {skill} -> {expected_action_key}"));
-        assert!(
-            policy.is_allowed(),
-            "legacy {skill} should be allowed as {expected_action_key}, got {:?}",
-            policy.decision
-        );
-        assert_eq!(policy.action_key, expected_action_key);
-    }
-}
-
-#[test]
 fn allowed_action_keeps_original_ref_without_preferred_replacement() {
     let route = IntentOutputContract {
         semantic_kind: OutputSemanticKind::CommandOutputSummary,
@@ -1082,7 +989,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 72);
+    let cases = generated_contract_cases(&matrix, 69);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

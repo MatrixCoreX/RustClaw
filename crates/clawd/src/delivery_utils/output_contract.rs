@@ -173,8 +173,6 @@ pub(super) fn enforce_output_contract(
             // contract as one_sentence. Preserve the synthesized answer when a
             // structured count says the user requested more than one sentence.
         }
-        OutputResponseShape::OneSentence
-            if output_contract.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison) => {}
         OutputResponseShape::OneSentence => {
             *normalized_text = if output_contract.requires_content_evidence
                 || output_contract.semantic_kind.is_content_excerpt_summary()
@@ -186,15 +184,7 @@ pub(super) fn enforce_output_contract(
             };
         }
         OutputResponseShape::Scalar => {
-            // QuantityComparison 的回答天然由"较大方 + 双方数值"组成（如 "docs 更多：docs 有 3 个，logs 有 2 个"），
-            // 强行 extract_scalar_literal 会把整句压成首个 ASCII 数字 "3"，把已经合规的对比答案破坏成
-            // 单孤立数字——典型"假成功"。Comparison 类保留 LLM 的完整短句即可，下游 chat 渲染器
-            // 已经按 chat_response_prompt 的输出契约保证了简洁度。
-            if !matches!(
-                output_contract.semantic_kind,
-                crate::OutputSemanticKind::QuantityComparison
-            ) && !contains_missing_scalar_sentinel(normalized_text)
-            {
+            if !contains_missing_scalar_sentinel(normalized_text) {
                 if let Some(scalar) =
                     extract_scalar_literal_for_contract(normalized_text, output_contract)
                 {

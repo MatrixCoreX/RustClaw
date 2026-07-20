@@ -1134,7 +1134,7 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
 }
 
 #[test]
-fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
+fn contract_matrix_synthesis_defers_multiple_count_observations_to_model() {
     let state = test_state_with_registry();
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -1154,7 +1154,7 @@ fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "docs | logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1172,7 +1172,7 @@ fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
 }
 
 #[test]
-fn synthesize_direct_fallback_defers_multi_count_quantity_comparison_to_model() {
+fn synthesize_direct_fallback_defers_multiple_count_observations_to_model() {
     let state = test_state_with_registry();
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -1192,7 +1192,7 @@ fn synthesize_direct_fallback_defers_multi_count_quantity_comparison_to_model() 
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "docs | logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };

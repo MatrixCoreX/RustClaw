@@ -55,7 +55,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "file_paths": f"找出 {FIXTURE_ROOT} 下的 markdown 文件路径，只输出路径列表。",
     "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
     "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
-    "quantity_comparison": f"比较 {FIXTURE_DOC} 和 {FIXTURE_PACKAGE} 哪个文件更大，并给出依据。",
     "execution_failed_step": "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
     "generated_file_delivery": "写一个简单文本文件到 tmp/contract_matrix_generated_note.txt，内容是 RustClaw contract matrix test，然后把文件路径发给我。",
     "scalar_path_only": f"只输出 {FIXTURE_PACKAGE} 的路径，不要解释。",
@@ -80,7 +79,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "file_paths": f"Find markdown file paths under {FIXTURE_ROOT}. Output only the path list.",
     "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
     "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
-    "quantity_comparison": f"Compare {FIXTURE_DOC} and {FIXTURE_PACKAGE}; tell me which file is larger and include the evidence.",
     "execution_failed_step": "Run this read-only check that should fail: cat /definitely_missing_rustclaw_contract_case. Then explain the failure reason.",
     "generated_file_delivery": "Write a simple text file to tmp/contract_matrix_generated_note.txt with the content RustClaw contract matrix test, then send me the file path.",
     "scalar_path_only": f"Output only the path {FIXTURE_PACKAGE}. Do not explain.",
@@ -355,8 +353,6 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
                 "selector_target_kind=file",
             ]
         )
-    elif contract_id == "quantity_comparison":
-        lines.append("selector_answer_style=larger_with_sizes")
     return lines
 
 
@@ -621,10 +617,6 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
     elif contract_id == "file_paths":
         row["final_contains"] = ["release_checklist.md", "service_notes.md"]
         row["final_not_contains"] = ["package.json"]
-    elif contract_id == "quantity_comparison":
-        row["final_contains"] = ["package.json", "246", "release_checklist.md", "153"]
-        row["final_not_contains"] = ["package.json：93 字节", "package.json: 93 bytes"]
-
     return row
 
 

@@ -451,11 +451,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
             observed_canonical.insert("valid".to_string());
         }
     }
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison)
-        && observed_canonical.contains("size_bytes")
-    {
-        observed_canonical.insert("field_value".to_string());
-    }
     if output_contract.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
         && (observed_canonical.contains("content_excerpt")
             || observed_canonical.contains("field_value")

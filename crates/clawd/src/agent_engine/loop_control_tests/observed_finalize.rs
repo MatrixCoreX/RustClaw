@@ -364,33 +364,6 @@ fn observation_only_freeform_round_can_stop_for_observed_fallback() {
 }
 
 #[test]
-fn one_sentence_quantity_comparison_waits_for_model_language_followup() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"compare_paths","comparison":{"same_size":false,"size_delta_bytes":21724},"left":{"kind":"file","path":"README.md","resolved_path":"/repo/README.md","size_bytes":46905},"right":{"kind":"file","path":"AGENTS.md","resolved_path":"/repo/AGENTS.md","size_bytes":25181}}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::OneSentence);
-    route.semantic_kind = OutputSemanticKind::QuantityComparison;
-    route.locator_kind = OutputLocatorKind::Path;
-    let actions = vec![AgentAction::CallTool {
-        tool: "fs_basic".to_string(),
-        args: json!({"action":"compare_paths","left_path":"README.md","right_path":"AGENTS.md"}),
-    }];
-
-    assert!(!should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            output_contract: Some(route.clone()),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
 fn service_status_port_observation_without_direct_candidate_does_not_stop() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;

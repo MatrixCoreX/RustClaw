@@ -535,7 +535,6 @@ fn state_patch_schema_key(key: &str) -> bool {
             | "output_format"
             | "forbidden_visible_literals"
             | "primary_task_update"
-            | "quantity_comparison"
             | "required_content_literals"
             | "required_visible_literals"
             | "scope"

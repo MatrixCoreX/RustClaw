@@ -13,9 +13,8 @@ use super::{
     attach_execution_recipe_closeout_to_delivery, attach_execution_summary_to_delivery,
     auto_requested_success_marker, backfill_delivery_from_last_outputs,
     build_execution_summary_message, build_execution_summary_messages,
-    build_pending_user_input_clarify_reason, compare_paths_size_ratio_answer,
-    content_evidence_missing_target_answer, content_evidence_step_failure_answer,
-    content_evidence_terminal_respond_is_contractual_answer,
+    build_pending_user_input_clarify_reason, content_evidence_missing_target_answer,
+    content_evidence_step_failure_answer, content_evidence_terminal_respond_is_contractual_answer,
     delivery_contract_suppresses_execution_summary, delivery_is_content_answer_candidate,
     deterministic_execution_failed_step_answer, deterministic_matrix_observed_shape_answer,
     deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
@@ -24,27 +23,23 @@ use super::{
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_generated_file_path_report_from_dry_run_payload, direct_non_builtin_skill_raw_answer,
     direct_path_from_active_bound_inventory, direct_publishable_observed_answer,
-    direct_quantity_comparison_from_compare_paths, direct_raw_command_output_projection,
-    direct_rustclaw_config_risk_answer, direct_scalar_observed_answer,
-    direct_structured_observed_answer,
+    direct_raw_command_output_projection, direct_rustclaw_config_risk_answer,
+    direct_scalar_observed_answer, direct_structured_observed_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
     discard_raw_passthrough_delivery_when_structured_answer_available,
     effective_agent_run_context_for_finalization, ensure_requested_success_marker_visible,
     execution_recipe_closeout_note, final_answer_text_from_delivery, finalize_loop_reply,
     finalizer_requires_clarify, generated_delivery_existing_file_content_synthesis_token,
     has_missing_file_search_evidence, language_rendered_failed_step_finalizer_summary,
-    latest_delivery_preserves_observed_quantity_size_facts,
     latest_file_delivery_observation_is_missing,
     latest_path_batch_facts_has_implicit_metadata_fields, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, matrix_strict_list_observed_answer,
-    missing_file_path_from_output, missing_requested_success_marker,
-    normalize_file_token_delivery_from_auto_locator,
+    looks_like_structured_machine_output, missing_file_path_from_output,
+    missing_requested_success_marker, normalize_file_token_delivery_from_auto_locator,
     normalize_file_token_delivery_from_observed_paths,
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
     observed_execution_without_publishable_delivery_reply, observed_synthesis_unavailable_reply,
-    output_text_from_execution_result, path_batch_size_comparison_answer,
-    pre_execution_confirmation_checkpoint_seed,
+    output_text_from_execution_result, pre_execution_confirmation_checkpoint_seed,
     prefer_latest_synthesis_for_compound_observation_delivery,
     prefer_observed_answer_for_exact_contract, preferred_route_clarify_question,
     preserve_compound_content_summary_with_file_token, priority_last_respond_for_final_delivery,
@@ -52,7 +47,6 @@ use super::{
     replace_config_edit_machine_marker_final_answer,
     replace_delivery_with_deterministic_execution_failed_step_answer,
     replace_delivery_with_deterministic_observed_execution_status_answer,
-    replace_delivery_with_deterministic_quantity_comparison_answer,
     replace_delivery_with_deterministic_rustclaw_config_risk_answer,
     replace_delivery_with_latest_tail_read_range_answer,
     replace_delivery_with_requested_machine_kv_summary,
@@ -219,9 +213,6 @@ mod exact_contract_tests;
 
 #[path = "loop_reply_content_evidence_tests.rs"]
 mod content_evidence_tests;
-
-#[path = "loop_reply_quantity_tests.rs"]
-mod quantity_tests;
 
 #[path = "loop_reply_language_closeout_tests.rs"]
 mod language_closeout_tests;

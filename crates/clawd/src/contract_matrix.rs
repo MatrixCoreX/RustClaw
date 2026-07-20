@@ -250,7 +250,6 @@ pub(crate) enum EvidenceToken {
     FieldValue,
     Kind,
     Path,
-    SizeBytes,
     Valid,
 }
 
@@ -267,7 +266,6 @@ impl EvidenceToken {
         Self::FieldValue,
         Self::Kind,
         Self::Path,
-        Self::SizeBytes,
         Self::Valid,
     ];
 
@@ -283,7 +281,6 @@ impl EvidenceToken {
             "field_value" => Some(Self::FieldValue),
             "kind" => Some(Self::Kind),
             "path" => Some(Self::Path),
-            "size_bytes" => Some(Self::SizeBytes),
             "valid" => Some(Self::Valid),
             _ => None,
         }
@@ -302,7 +299,6 @@ impl EvidenceToken {
             Self::FieldValue => "field_value",
             Self::Kind => "kind",
             Self::Path => "path",
-            Self::SizeBytes => "size_bytes",
             Self::Valid => "valid",
         }
     }
@@ -545,7 +541,6 @@ impl ObservationExtractor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum FinalAnswerShape {
-    ComparisonVerdict,
     DeliveryTokenOrPath,
     ExistenceVerdictWithPath,
     ExcerptPlusSummary,
@@ -607,7 +602,6 @@ impl FinalAnswerShapeClass {
 impl FinalAnswerShape {
     #[cfg(test)]
     pub(crate) const ALL: &'static [Self] = &[
-        Self::ComparisonVerdict,
         Self::DeliveryTokenOrPath,
         Self::ExistenceVerdictWithPath,
         Self::ExcerptPlusSummary,
@@ -629,7 +623,6 @@ impl FinalAnswerShape {
 
     pub(crate) fn parse(raw: &str) -> Option<Self> {
         match raw.trim() {
-            "comparison_verdict" => Some(Self::ComparisonVerdict),
             "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
             "existence_verdict_with_path" => Some(Self::ExistenceVerdictWithPath),
             "excerpt_plus_summary" => Some(Self::ExcerptPlusSummary),
@@ -653,7 +646,6 @@ impl FinalAnswerShape {
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::ComparisonVerdict => "comparison_verdict",
             Self::DeliveryTokenOrPath => "delivery_token_or_path",
             Self::ExistenceVerdictWithPath => "existence_verdict_with_path",
             Self::ExcerptPlusSummary => "excerpt_plus_summary",
@@ -682,8 +674,7 @@ impl FinalAnswerShape {
             Self::GroupedNameList | Self::NameList | Self::PathList => {
                 FinalAnswerShapeClass::StrictList
             }
-            Self::ComparisonVerdict
-            | Self::ExistenceVerdictWithPath
+            Self::ExistenceVerdictWithPath
             | Self::LifecycleResult
             | Self::RiskAssessment
             | Self::StatusWithSource

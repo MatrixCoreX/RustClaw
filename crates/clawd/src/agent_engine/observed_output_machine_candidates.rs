@@ -496,17 +496,7 @@ fn count_inventory_observation_row(
     Some((path, total))
 }
 
-pub(super) fn multi_count_quantity_comparison_guard_entry(
-    loop_state: &LoopState,
-    route: Option<&crate::IntentOutputContract>,
-) -> Option<String> {
-    let route = route?;
-    if !output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::QuantityComparison,
-    ) {
-        return None;
-    }
+pub(super) fn multi_count_observation_guard_entry(loop_state: &LoopState) -> Option<String> {
     let rows = loop_state
         .executed_step_results
         .iter()
@@ -516,7 +506,7 @@ pub(super) fn multi_count_quantity_comparison_guard_entry(
         return None;
     }
     let mut lines = vec![
-        "### MULTI_COUNT_QUANTITY_COMPARISON_GUARD".to_string(),
+        "### MULTI_COUNT_OBSERVATIONS".to_string(),
         "delivery_constraint=cover_all_observed_count_rows".to_string(),
         format!("observed_count_rows={}", rows.len()),
     ];
