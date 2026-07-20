@@ -605,23 +605,6 @@ required_evidence = ["field_value"]
 final_answer_shape = "manager_name_with_basis"
 failure_policy = "retry_with_alternatives"
 
-[contracts.tool_discovery]
-semantic_kind = "tool_discovery"
-operation = "list"
-target_object = "system"
-delivery_shape = "summary"
-policy_mode = "observe"
-evidence_scope = "conversation"
-freshness = "conversation"
-artifact_kind = "text"
-channel_visibility = "user_visible"
-allowed_actions = []
-preferred_actions = []
-forbidden_actions = ["run_cmd"]
-required_evidence = []
-final_answer_shape = "free"
-failure_policy = "no_retry"
-
 [contracts.archive_list]
 semantic_kind = "archive_list"
 operation = "list"

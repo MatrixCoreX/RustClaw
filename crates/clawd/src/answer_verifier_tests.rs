@@ -178,25 +178,7 @@ fn unclassified_chat_with_backend_reference_does_not_require_model_answer_verifi
 }
 
 #[test]
-fn tool_discovery_context_only_route_skips_answer_verifier() {
-    let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ToolDiscovery;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    let journal =
-        crate::task_journal::TaskJournal::for_task("task-1", "ask", "current capabilities");
-
-    assert!(!should_verify_answer(
-        &route,
-        &journal,
-        "`fs_basic`, `git_basic`, `weather`"
-    ));
-}
-
-#[test]
-fn non_tool_discovery_contract_marker_still_uses_answer_verifier() {
+fn classified_contract_marker_still_uses_answer_verifier() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = false;

@@ -135,9 +135,6 @@ pub(crate) fn should_verify_answer(
     if finalizer_terminal_blocker_can_skip_answer_verifier(route_result, journal) {
         return false;
     }
-    if context_only_tool_discovery_answer_can_skip_answer_verifier(route_result) {
-        return false;
-    }
     if terminal_answer_only_can_skip_answer_verifier(route_result, journal) {
         return false;
     }
@@ -168,18 +165,6 @@ fn evidence_policy_requires_observation(route_result: &AnswerContract) -> bool {
             &route_result.output_contract,
         )
         .is_empty()
-}
-
-fn context_only_tool_discovery_answer_can_skip_answer_verifier(
-    route_result: &AnswerContract,
-) -> bool {
-    route_result
-        .output_contract
-        .semantic_kind_is(crate::OutputSemanticKind::ToolDiscovery)
-        && !route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
-        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
-        && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
 fn terminal_answer_only_can_skip_answer_verifier(
