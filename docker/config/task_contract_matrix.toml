@@ -282,42 +282,6 @@ required_evidence = ["content_excerpt"]
 final_answer_shape = "summary_grounded_in_excerpt"
 failure_policy = "retry_with_alternatives"
 
-[contracts.image_understanding]
-semantic_kind = "image_understanding"
-operation = "summarize"
-target_object = "web"
-delivery_shape = "summary"
-locator_kinds = ["url"]
-allowed_actions = ["image_vision", "image_vision.describe", "image_vision.analyze", "image_vision.extract", "image_vision.compare", "image_vision.screenshot_summary"]
-preferred_actions = ["image_vision.describe", "image_vision"]
-required_evidence = ["content_excerpt"]
-final_answer_shape = "summary_grounded_in_excerpt"
-failure_policy = "retry_with_alternatives"
-
-[contracts.photo_organization]
-semantic_kind = "photo_organization"
-migration_status = "transitional_capability_owned_evidence_pending"
-migration_owner = "photo_organize.planner_capabilities"
-operation = "list"
-target_object = "path"
-delivery_shape = "list"
-allowed_actions = ["photo_organize.prepare", "photo_organize.preview", "photo_organize.organize"]
-preferred_actions = ["photo_organize.prepare", "photo_organize.preview"]
-required_evidence = ["candidates", "field_value"]
-final_answer_shape = "raw_output_or_short_summary"
-failure_policy = "retry_with_alternatives"
-
-[contracts.publishing_preview]
-semantic_kind = "publishing_preview"
-operation = "inspect"
-target_object = "web"
-delivery_shape = "summary"
-allowed_actions = ["x"]
-preferred_actions = ["x"]
-required_evidence = ["field_value"]
-final_answer_shape = "raw_output_or_short_summary"
-failure_policy = "retry_with_alternatives"
-
 [contracts.schedule_preview]
 semantic_kind = "schedule_preview"
 operation = "inspect"
@@ -328,10 +292,6 @@ preferred_actions = ["schedule.preview"]
 required_evidence = ["datetime", "timezone", "title"]
 final_answer_shape = "summary_with_evidence"
 failure_policy = "retry_with_alternatives"
-
-[[contracts.publishing_preview.observation_extractors]]
-source = "x"
-extractor_kind = "text_legacy"
 
 [contracts.content_excerpt_with_summary]
 semantic_kind = "content_excerpt_with_summary"

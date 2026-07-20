@@ -500,10 +500,8 @@ fn crypto_quote_extra_content_excerpt_counts_as_market_quote_evidence() {
 #[test]
 fn image_vision_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-image-understanding", "ask", "描述图片");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ImageUnderstanding);
-    route.requires_content_evidence = true;
-    route.locator_kind = crate::OutputLocatorKind::Url;
-    route.locator_hint = "https://example.com/image.png".to_string();
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -532,10 +530,9 @@ fn image_vision_output_counts_as_content_excerpt_evidence() {
 }
 
 #[test]
-fn x_preview_output_counts_as_field_value_evidence() {
+fn x_preview_output_counts_as_generic_content_evidence() {
     let mut journal = TaskJournal::for_task("task-publishing-preview", "ask", "预览发布文案");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::PublishingPreview);
-    route.requires_content_evidence = true;
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -551,7 +548,7 @@ fn x_preview_output_counts_as_field_value_evidence() {
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(
-        coverage.observed_canonical.contains("field_value"),
+        coverage.observed_canonical.contains("content_excerpt"),
         "coverage: {coverage:?}"
     );
     assert!(coverage.observed_extractors.contains("x.text_legacy_v1"));

@@ -1,25 +1,6 @@
 use super::*;
 
 #[test]
-fn publishing_preview_semantic_owns_x_preview_policy() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::PublishingPreview,
-            requires_content_evidence: true,
-            response_shape: OutputResponseShape::OneSentence,
-            locator_kind: OutputLocatorKind::None,
-            ..IntentOutputContract::default()
-        }),
-        "x",
-        &serde_json::json!({"action":"preview","text":"RustClaw release notes","dry_run":true}),
-    );
-
-    let policy = policy.expect("semantic policy decision");
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.contract_match, "publishing_preview");
-}
-
-#[test]
 fn schedule_preview_semantic_owns_read_only_schedule_policy() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
