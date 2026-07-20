@@ -31,9 +31,8 @@ Compile natural-language scheduling requests into structured schedule plans.
 - Preview output exposes `dry_run=true`, `preview_only=true`, `would_mutate=false`, stable
   `datetime` (for a parsed one-time `run_at`), and `title` (the parsed task content), while
   preserving the canonical schedule/task fields.
-- For an ordinary preview, set `result_kind="none"`,
-  `requires_content_evidence=true`, and let the model synthesize the answer from
-  observed preview data.
+- For an ordinary preview, set `requires_content_evidence=true` and let the
+  model synthesize the answer from observed preview data.
 - Only when the user explicitly requests the exact `datetime`, `timezone`, and
   `title` machine fields, set `response_shape="strict"` and
   `structured_field_selector="datetime,timezone,title"`. Return only observed

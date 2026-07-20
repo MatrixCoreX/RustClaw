@@ -89,6 +89,27 @@ observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list
 all_of = ["count"]
 
 [[generic_profiles]]
+name = "generic_exact_command_output"
+semantic_kind = "none"
+delivery_required = false
+response_shapes = ["strict"]
+structured_field_selectors = ["command_output"]
+policy_mode = "enforce"
+evidence_scope = "current_task"
+freshness = "current_task"
+artifact_kind = "text"
+channel_visibility = "user_visible"
+evidence_profile = "generic"
+allowed_actions = ["run_cmd", "http_basic", "process_basic", "system_basic.runtime_status", "system_basic.info", "fs_basic.read_text_range", "fs_basic.grep_text"]
+preferred_actions = ["fs_basic.read_text_range", "system_basic.runtime_status", "system_basic.info", "http_basic", "process_basic", "run_cmd"]
+required_evidence = ["command_output"]
+final_answer_shape = "raw_output_or_short_summary"
+failure_policy = "retry_with_alternatives"
+
+[generic_profiles.evidence_expression]
+any_of = ["command_output", "field_value", "content_excerpt"]
+
+[[generic_profiles]]
 name = "generic_path_inspection"
 semantic_kind = "none"
 requires_content_evidence = false

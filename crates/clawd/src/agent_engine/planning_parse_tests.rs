@@ -96,7 +96,8 @@ async fn invalid_optional_output_contract_does_not_discard_valid_steps() {
         "delivery_required": false,
         "locator_kind": "none",
         "delivery_intent": "none",
-        "result_kind": "invented_permission_preview"
+        "structured_field_selector": null,
+        "invented_contract_field": "permission_preview"
       },
       "steps": [
         {
@@ -150,8 +151,8 @@ async fn output_contract_recovery_does_not_bypass_capability_resolution() {
         "delivery_required": false,
         "locator_kind": "none",
         "delivery_intent": "none",
-        "result_kind": "invented_permission_preview",
-        "structured_field_selector": "decision"
+        "structured_field_selector": "decision",
+        "invented_contract_field": "permission_preview"
       },
       "steps": [
         {

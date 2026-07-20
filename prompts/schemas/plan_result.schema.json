@@ -23,7 +23,7 @@
     "OutputContract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["response_shape", "exact_sentence_count", "requires_content_evidence", "delivery_required", "locator_kind", "delivery_intent", "result_kind", "structured_field_selector"],
+      "required": ["response_shape", "exact_sentence_count", "requires_content_evidence", "delivery_required", "locator_kind", "delivery_intent", "structured_field_selector"],
       "properties": {
         "response_shape": {"type": "string", "enum": ["free", "one_sentence", "strict", "scalar", "file_token"]},
         "exact_sentence_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20},
@@ -31,7 +31,6 @@
         "delivery_required": {"type": "boolean"},
         "locator_kind": {"type": "string", "enum": ["none", "path", "current_workspace", "url", "filename"]},
         "delivery_intent": {"type": "string", "enum": ["none", "file_single", "directory_lookup", "directory_batch_files"]},
-        "result_kind": {"type": "string", "enum": ["none", "raw_command_output"]},
         "structured_field_selector": {
           "type": ["string", "null"],
           "maxLength": 256,
