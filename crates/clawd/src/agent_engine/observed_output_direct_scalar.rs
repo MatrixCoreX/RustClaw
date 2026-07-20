@@ -67,10 +67,8 @@ pub(super) fn structured_scalar_candidate(
             });
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
-    if market_quote_skill_supports_scalar(state, skill) {
-        if let Some(answer) = market_quote_scalar_candidate(route, &value) {
-            return Some(answer);
-        }
+    if let Some(answer) = selected_structured_scalar_candidate(route, &value) {
+        return Some(answer);
     }
     if skill == "db_basic" {
         if let Some(route) = route {
@@ -372,79 +370,41 @@ pub(super) fn structured_scalar_candidate(
     }
 }
 
-pub(super) fn market_quote_scalar_candidate(
+fn selected_structured_scalar_candidate(
     route: Option<&crate::IntentOutputContract>,
     value: &serde_json::Value,
 ) -> Option<String> {
     let route = route?;
-    if !route_is_market_quote(route) || route.response_shape != crate::OutputResponseShape::Scalar {
+    if route.response_shape != crate::OutputResponseShape::Scalar {
         return None;
     }
-    let quote = value
-        .get("quote")
-        .or_else(|| value.pointer("/extra/quote"))
-        .filter(|quote| quote.is_object())?;
-    let price = quote
-        .get("price_usd")
-        .or_else(|| quote.get("price"))
-        .or_else(|| quote.get("last"))
-        .and_then(|value| value.as_f64())?;
-    let symbol = quote
-        .get("symbol")
-        .or_else(|| value.get("symbol"))
-        .or_else(|| value.pointer("/extra/symbol"))
-        .and_then(|value| value.as_str())
+    let selector = route
+        .selection
+        .structured_field_selector
+        .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty());
-    Some(match symbol {
-        Some(symbol) => format!("{symbol} ${}", format_market_price(price)),
-        None => format!("${}", format_market_price(price)),
-    })
-}
-
-fn route_is_market_quote(route: &crate::IntentOutputContract) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::MarketQuote)
-}
-
-pub(super) fn market_quote_output_has_scalar_price(
-    state: Option<&AppState>,
-    skill: &str,
-    body: &str,
-) -> bool {
-    if !market_quote_skill_supports_scalar(state, skill) {
-        return false;
-    }
-    serde_json::from_str::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| {
+        .filter(|selector| {
+            !selector.is_empty()
+                && !selector.contains(',')
+                && !selector.chars().any(char::is_whitespace)
+                && !selector.chars().any(|ch| matches!(ch, '*' | '[' | ']'))
+        })?;
+    structured_value_at_path(value, selector)
+        .or_else(|| {
             value
-                .get("quote")
-                .or_else(|| value.pointer("/extra/quote"))
-                .cloned()
+                .get("extra")
+                .and_then(|extra| structured_value_at_path(extra, selector))
         })
-        .and_then(|quote| {
-            quote
-                .get("price_usd")
-                .or_else(|| quote.get("price"))
-                .or_else(|| quote.get("last"))
-                .and_then(|value| value.as_f64())
-        })
-        .is_some()
+        .and_then(value_scalar_text)
 }
 
-pub(super) fn market_quote_skill_supports_scalar(state: Option<&AppState>, skill: &str) -> bool {
-    state
-        .and_then(|state| state.get_skills_registry())
-        .is_some_and(|registry| registry.has_semantic_tag(skill, MARKET_QUOTE_SCALAR_SEMANTIC_TAG))
-}
-
-pub(super) fn format_market_price(price: f64) -> String {
-    let raw = if price.abs() >= 1.0 {
-        format!("{price:.2}")
-    } else {
-        format!("{price:.8}")
-    };
-    raw.trim_end_matches('0').trim_end_matches('.').to_string()
+fn structured_value_at_path<'a>(
+    value: &'a serde_json::Value,
+    selector: &str,
+) -> Option<&'a serde_json::Value> {
+    selector
+        .split('.')
+        .try_fold(value, |current, segment| current.as_object()?.get(segment))
 }
 
 pub(super) fn package_manager_summary_candidate(

@@ -103,10 +103,7 @@ use output_entries::{
 
 #[path = "observed_output_direct_scalar.rs"]
 mod output_direct_scalar;
-use output_direct_scalar::{
-    market_quote_output_has_scalar_price, package_manager_summary_candidate,
-    structured_scalar_candidate,
-};
+use output_direct_scalar::{package_manager_summary_candidate, structured_scalar_candidate};
 
 #[path = "observed_output_direct_answer.rs"]
 mod output_direct_answer;
@@ -210,8 +207,6 @@ const OBSERVED_ANSWER_FALLBACK_PROMPT_LOGICAL_PATH: &str =
     "prompts/observed_answer_fallback_prompt.md";
 const OBSERVED_ANSWER_FALLBACK_COMPACT_PROMPT_LOGICAL_PATH: &str =
     "prompts/observed_answer_fallback_compact_prompt.md";
-const MARKET_QUOTE_SCALAR_SEMANTIC_TAG: &str = "market_quote_scalar";
-
 fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     state: Option<&AppState>,
     route: Option<&crate::IntentOutputContract>,
