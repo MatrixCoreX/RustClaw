@@ -1133,7 +1133,7 @@ fn exact_observed_answer_does_not_replace_mixed_failure_summary() {
 }
 
 #[test]
-fn scalar_contract_preserves_structured_observed_payload_over_planned_delivery() {
+fn scalar_contract_projects_explicit_structured_field_over_planned_delivery() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
@@ -1162,6 +1162,7 @@ fn scalar_contract_preserves_structured_observed_payload_over_planned_delivery()
     let mut route = scalar_route_result();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "crates/clawd/Cargo.toml".to_string();
+    route.selection.structured_field_selector = Some("value".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some(
@@ -1185,26 +1186,7 @@ fn scalar_contract_preserves_structured_observed_payload_over_planned_delivery()
     );
 
     assert_eq!(delivery.len(), 1);
-    let payload: serde_json::Value =
-        serde_json::from_str(&delivery[0]).expect("delivery should remain structured JSON");
-    assert_eq!(
-        payload
-            .pointer("/message_key")
-            .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.config_edit.read")
-    );
-    assert_eq!(
-        payload
-            .pointer("/field_path")
-            .and_then(serde_json::Value::as_str),
-        Some("workspace.package.version")
-    );
-    assert_eq!(
-        payload
-            .pointer("/value")
-            .and_then(serde_json::Value::as_str),
-        Some("0.1.7")
-    );
+    assert_eq!(delivery[0], "0.1.7");
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
         Some(delivery[0].as_str())

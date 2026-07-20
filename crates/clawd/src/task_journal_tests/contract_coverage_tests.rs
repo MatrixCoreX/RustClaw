@@ -42,83 +42,6 @@ fn config_validation_evidence_coverage_accepts_valid_flag() {
 }
 
 #[test]
-fn config_mutation_plan_change_evidence_counts_as_valid_plan_proof() {
-    let mut journal = TaskJournal::for_task("task-config-plan", "ask", "preview config change");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ConfigMutation);
-    route.requires_content_evidence = true;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "configs/config.toml".to_string();
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_edit".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "action": "plan_config_change",
-                    "path": "configs/config.toml",
-                    "resolved_path": "/repo/configs/config.toml",
-                    "field_path": "skills.skill_switches.example",
-                    "old_value": null,
-                    "new_value": true,
-                    "would_change": true,
-                    "requires_confirmation": true
-                },
-                "text": "{\"action\":\"plan_config_change\",\"path\":\"configs/config.toml\",\"field_path\":\"skills.skill_switches.example\",\"new_value\":true,\"would_change\":true,\"requires_confirmation\":true}"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("valid"));
-}
-
-#[test]
-fn config_mutation_apply_validated_flag_counts_as_valid_evidence() {
-    let mut journal = TaskJournal::for_task("task-config-apply", "ask", "apply config change");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ConfigMutation);
-    route.requires_content_evidence = true;
-    route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "configs/config.toml".to_string();
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_edit".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "apply_config_change",
-                "path": "configs/config.toml",
-                "resolved_path": "/repo/configs/config.toml",
-                "field_path": "skills.skill_switches.example",
-                "old_value": null,
-                "new_value": true,
-                "applied": true,
-                "validated": true
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("valid"));
-}
-
-#[test]
 fn trace_json_reports_required_vs_observed_evidence_coverage() {
     let mut journal = TaskJournal::for_task("task-evidence-coverage", "ask", "列出文件名");
     let route = crate::IntentOutputContract {
@@ -251,9 +174,8 @@ fn structured_selector_evidence_coverage_accepts_guard_findings() {
     assert!(coverage.observed_canonical.contains("count"));
     assert!(items.iter().any(|item| {
         item.get("field").and_then(Value::as_str) == Some("risks[1]")
-            && item.get("excerpt").and_then(Value::as_str)
-                == Some("tools.allow_path_outside_workspace=true")
-            && item.get("redacted").is_none()
+            && item.get("redacted").and_then(Value::as_bool) == Some(true)
+            && item.get("excerpt").is_none()
     }));
 }
 

@@ -223,21 +223,6 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
         "prompts/observed_answer_fallback_prompt.md"
     );
 
-    let mut mutation_route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    mutation_route.semantic_kind = OutputSemanticKind::ConfigMutation;
-    mutation_route.requires_content_evidence = true;
-    let mutation_context = AgentRunContext {
-        output_contract: Some(mutation_route.clone()),
-        ..AgentRunContext::default()
-    };
-    assert_eq!(
-        observed_answer_fallback_prompt_logical_path(
-            Some(&mutation_context),
-            "status=ok\nchanged=true"
-        ),
-        "prompts/observed_answer_fallback_prompt.md"
-    );
-
     let mut delivery_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     delivery_route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     delivery_route.delivery_required = true;

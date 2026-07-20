@@ -223,13 +223,6 @@ pub(super) fn structural_satisfaction_can_skip_verifier(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if config_guard_machine_payload_can_skip_answer_verifier(
-        route_result,
-        journal,
-        candidate_answer,
-    ) {
-        return true;
-    }
     if confirmed_missing_file_delivery_can_skip_answer_verifier(
         route_result,
         journal,
@@ -452,13 +445,6 @@ pub(super) fn local_missing_evidence_verifier_gap_for_answer(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
-    if config_guard_machine_payload_can_skip_answer_verifier(
-        route_result,
-        journal,
-        candidate_answer,
-    ) {
-        return None;
-    }
     let gap = local_missing_evidence_verifier_gap(route_result, journal)?;
     if missing_target_answer_is_grounded_in_latest_error(
         route_result,
@@ -574,45 +560,6 @@ fn status_observation_value(value: &serde_json::Value) -> bool {
         return true;
     }
     value.get("extra").is_some_and(status_observation_value)
-}
-
-fn config_guard_machine_payload_can_skip_answer_verifier(
-    route_result: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-    candidate_answer: &str,
-) -> bool {
-    let contract = route_result.effective_output_contract();
-    if contract.delivery_required
-        || !route_result.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-    {
-        return false;
-    }
-    if !is_config_guard_machine_payload(candidate_answer) {
-        return false;
-    }
-    finalizer_grounded_machine_payload_can_skip_verifier(journal)
-}
-
-fn is_config_guard_machine_payload(candidate_answer: &str) -> bool {
-    let Ok(serde_json::Value::Object(object)) =
-        serde_json::from_str::<serde_json::Value>(candidate_answer.trim())
-    else {
-        return false;
-    };
-    let Some(message_key) = object
-        .get("message_key")
-        .and_then(serde_json::Value::as_str)
-    else {
-        return false;
-    };
-    matches!(
-        message_key,
-        "clawd.msg.config_edit.guard" | "clawd.msg.config_risk.summary"
-    ) && object.contains_key("path")
-        && (object.contains_key("risk_count")
-            || object.contains_key("count")
-            || object.contains_key("candidates")
-            || object.contains_key("risks"))
 }
 
 fn finalizer_grounded_machine_payload_can_skip_verifier(

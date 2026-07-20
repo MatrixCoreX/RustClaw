@@ -42,8 +42,8 @@ pub(crate) use task::{
 // === LOOP REPLY 层（已物理位于 finalize/loop_reply.rs，Stage 2.3）===
 // 从 LoopState 选择 delivery + 构建 journal
 pub(crate) use loop_reply::{
-    deterministic_matrix_observed_shape_answer, direct_config_edit_observed_answer,
-    finalize_loop_reply, raw_command_machine_field_delivery_satisfies_request,
+    deterministic_matrix_observed_shape_answer, finalize_loop_reply,
+    raw_command_machine_field_delivery_satisfies_request,
     raw_command_machine_field_projection_from_journal,
     selected_tail_read_range_line_from_step_output,
 };

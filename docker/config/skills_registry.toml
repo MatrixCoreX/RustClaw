@@ -313,7 +313,7 @@ confirmation_exempt_when = [
   { action = "restart_if_requested", restart = false },
 ]
 planner_capabilities = [
-  { name = "config.preview_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "config_change_preview" },
+  { name = "config.preview_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.plan_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.plan_config_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.apply_change", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },

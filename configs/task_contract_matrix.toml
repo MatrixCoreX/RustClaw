@@ -306,18 +306,3 @@ preferred_actions = ["config_basic.validate", "config_basic.read_fields"]
 required_evidence = ["valid"]
 final_answer_shape = "validation_verdict"
 failure_policy = "retry_with_alternatives"
-
-[contracts.config_mutation]
-semantic_kind = "config_mutation"
-operation = "modify"
-target_object = "config_key"
-delivery_shape = "summary"
-allowed_actions = ["config_edit.plan_config_change", "config_edit.apply_config_change", "config_edit.validate_config", "config_edit.guard_config", "config_edit.read_back", "config_edit.restart_if_requested", "config_basic.read_field"]
-preferred_actions = ["config_edit.plan_config_change", "config_edit.apply_config_change", "config_edit.validate_config", "config_edit.read_back"]
-required_evidence = ["field_value", "path", "valid"]
-final_answer_shape = "summary_with_evidence"
-failure_policy = "retry_with_alternatives"
-
-[contracts.config_mutation.evidence_expression]
-all_of = ["path", "valid"]
-any_of = ["field_value"]

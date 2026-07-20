@@ -245,11 +245,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ConfigValidation => {
             fields.insert("valid");
         }
-        OutputSemanticKind::ConfigMutation => {
-            fields.insert("field_value");
-            fields.insert("path");
-            fields.insert("valid");
-        }
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => {

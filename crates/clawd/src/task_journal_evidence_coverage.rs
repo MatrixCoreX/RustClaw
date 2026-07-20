@@ -442,15 +442,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
             observed_canonical.insert(required.clone());
         }
     }
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ConfigMutation) {
-        if observed_field_present(observed_fields, "valid")
-            || observed_field_present(observed_fields, "validated")
-            || config_mutation_plan_fields_present(observed_fields)
-            || observed_extractors.contains("config_edit.plan_config_change.structured_json_v1")
-        {
-            observed_canonical.insert("valid".to_string());
-        }
-    }
     if output_contract.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
         && (observed_canonical.contains("content_excerpt")
             || observed_canonical.contains("field_value")
@@ -646,14 +637,6 @@ fn step_output_action_value(value: &Value) -> Option<&str> {
 
 pub(super) fn observed_field_present(observed_fields: &BTreeSet<String>, field: &str) -> bool {
     observed_fields.contains(field) || observed_fields.contains(&format!("extra.{field}"))
-}
-
-pub(super) fn config_mutation_plan_fields_present(observed_fields: &BTreeSet<String>) -> bool {
-    observed_field_present(observed_fields, "path")
-        && observed_field_present(observed_fields, "field_path")
-        && observed_field_present(observed_fields, "new_value")
-        && observed_field_present(observed_fields, "would_change")
-        && observed_field_present(observed_fields, "requires_confirmation")
 }
 
 pub(super) fn normalize_evidence_field(field: &str) -> String {

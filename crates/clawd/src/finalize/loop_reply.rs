@@ -18,10 +18,7 @@ use deterministic_fallback_renderers::run_deterministic_fallback_renderer_regist
 
 #[path = "loop_reply_capability_result_renderers.rs"]
 mod capability_result_renderers;
-use capability_result_renderers::{
-    attach_config_edit_observed_answer_from_registry, replace_config_edit_machine_marker_delivery,
-    replace_config_edit_machine_marker_final_answer, run_service_status_observed_fields_renderer,
-};
+use capability_result_renderers::run_service_status_observed_fields_renderer;
 
 #[path = "loop_reply_capability_synthesis.rs"]
 mod capability_synthesis;
@@ -75,13 +72,6 @@ use machine_projections::inventory_ranked_size_list_answer;
 mod compare_paths_metadata;
 use compare_paths_metadata::replace_final_delivery_with_compare_paths_required_metadata;
 
-#[path = "loop_reply_config_edit.rs"]
-mod config_edit;
-#[cfg(test)]
-use config_edit::delivery_matches_config_guard_answer;
-pub(crate) use config_edit::direct_config_edit_observed_answer;
-use config_edit::direct_rustclaw_config_risk_answer;
-
 #[path = "loop_reply_structured_observation.rs"]
 mod structured_observation;
 #[cfg(test)]
@@ -91,7 +81,6 @@ use structured_observation::{
     deterministic_structured_container_summary_answer, direct_db_basic_observed_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
     message_is_non_answer_separator,
-    replace_delivery_with_deterministic_rustclaw_config_risk_answer,
 };
 
 #[path = "loop_reply_execution_status.rs"]
@@ -113,8 +102,7 @@ mod execution_summary;
 use execution_summary::{
     attach_execution_summary_to_delivery, delivery_matches_latest_publishable_synthesis,
     delivery_messages_include_delivery_token, directory_entry_groups_prefers_observed_groups,
-    execution_summary_arg_is_sensitive, execution_summary_value_to_string,
-    latest_grounded_synthesis_for_mixed_listing_contract,
+    execution_summary_arg_is_sensitive, latest_grounded_synthesis_for_mixed_listing_contract,
     latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, output_text_from_execution_result,
     plan_step_for_execution, raw_command_arg_from_plan_step, truncate_with_ellipsis,
@@ -288,8 +276,7 @@ use language_closeout::{
     auto_requested_success_marker, ensure_requested_success_marker_visible,
     execution_recipe_budget_exhausted_message, execution_recipe_missing_success_marker_message,
     final_reply_language_hint, missing_requested_success_marker,
-    prefer_english_for_agent_contextual_user_text, prefer_english_for_user_text,
-    route_allows_model_language_final_answer,
+    prefer_english_for_agent_contextual_user_text, route_allows_model_language_final_answer,
     route_prefers_language_rendered_execution_failed_step, route_resolved_intent,
 };
 
@@ -521,15 +508,6 @@ pub(crate) async fn finalize_loop_reply(
             return Ok(reply);
         }
     }
-    attach_config_edit_observed_answer_from_registry(
-        state,
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    );
-
     let should_try_observed_scalar_fallback = crate::finalize::should_attempt_observed_fallback(
         loop_state.has_tool_or_skill_output,
         loop_state.has_recoverable_failure_context,
@@ -544,23 +522,6 @@ pub(crate) async fn finalize_loop_reply(
             log_deterministic_delivery_record(
                 &task.task_id,
                 "fallback_from_observed_scalar",
-                "attached",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-        }
-    }
-
-    if loop_state.delivery_messages.is_empty() {
-        if let Some((answer, summary)) =
-            direct_rustclaw_config_risk_answer(state, user_text, &loop_state)
-        {
-            finalizer_summary = Some(summary);
-            loop_state.last_user_visible_respond = Some(answer.clone());
-            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-            log_deterministic_delivery_record(
-                &task.task_id,
-                "fallback_from_rustclaw_config_risk_observed",
                 "attached",
                 agent_run_context,
                 loop_state.executed_step_results.len(),
@@ -1088,13 +1049,6 @@ pub(crate) async fn finalize_loop_reply(
             &mut finalizer_summary,
         );
     }
-    replace_delivery_with_deterministic_rustclaw_config_risk_answer(
-        state,
-        task,
-        user_text,
-        &mut loop_state,
-        &mut finalizer_summary,
-    );
     append_compound_file_delivery_token_from_route(state, task, &mut loop_state, agent_run_context);
     discard_non_answer_separator_delivery_for_broad_structured_read(&task.task_id, &mut loop_state);
     if loop_state.delivery_messages.is_empty() {
@@ -1386,15 +1340,6 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
-    replace_config_edit_machine_marker_delivery(
-        state,
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
-    );
     mark_machine_envelope_delivery_complete(
         task,
         &mut loop_state,
@@ -1500,24 +1445,6 @@ pub(crate) async fn finalize_loop_reply(
             loop_state.executed_step_results.len(),
         );
     }
-    replace_config_edit_machine_marker_delivery(
-        state,
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
-    );
-    replace_config_edit_machine_marker_final_answer(
-        state,
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
-    );
     render_machine_payload_delivery_if_needed(
         state,
         task,

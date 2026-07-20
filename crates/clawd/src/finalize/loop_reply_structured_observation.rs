@@ -5,7 +5,7 @@ use tracing::info;
 use crate::agent_engine::{append_delivery_message, AgentRunContext};
 use crate::{AppState, ClaimedTask};
 
-use super::{direct_rustclaw_config_risk_answer, log_deterministic_delivery_record};
+use super::log_deterministic_delivery_record;
 
 fn json_scalar_display(value: &serde_json::Value) -> Option<String> {
     match value {
@@ -505,67 +505,4 @@ pub(super) fn attach_deterministic_structured_file_validation_from_read_range(
         loop_state.executed_step_results.len(),
     );
     true
-}
-
-pub(super) fn replace_delivery_with_deterministic_rustclaw_config_risk_answer(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut crate::agent_engine::LoopState,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    if config_edit_machine_payload_already_available(loop_state) {
-        return false;
-    }
-    let Some((answer, summary)) = direct_rustclaw_config_risk_answer(state, user_text, loop_state)
-    else {
-        return false;
-    };
-    if loop_state
-        .delivery_messages
-        .last()
-        .map(|message| message.trim() == answer.trim())
-        .unwrap_or(false)
-    {
-        loop_state.last_user_visible_respond = Some(answer);
-        *finalizer_summary = Some(summary);
-        return true;
-    }
-    loop_state.delivery_messages.clear();
-    append_delivery_message(
-        &task.task_id,
-        &mut loop_state.delivery_messages,
-        answer.clone(),
-    );
-    loop_state.last_user_visible_respond = Some(answer);
-    *finalizer_summary = Some(summary);
-    log_deterministic_delivery_record(
-        &task.task_id,
-        "replace_with_deterministic_rustclaw_config_risk",
-        "replaced",
-        None,
-        loop_state.executed_step_results.len(),
-    );
-    true
-}
-
-fn config_edit_machine_payload_already_available(
-    loop_state: &crate::agent_engine::LoopState,
-) -> bool {
-    loop_state
-        .delivery_messages
-        .iter()
-        .any(|message| super::config_edit::config_edit_machine_payload_text(message).is_some())
-        || loop_state
-            .last_user_visible_respond
-            .as_deref()
-            .is_some_and(|message| {
-                super::config_edit::config_edit_machine_payload_text(message).is_some()
-            })
-        || loop_state
-            .last_publishable_synthesis_output
-            .as_deref()
-            .is_some_and(|message| {
-                super::config_edit::config_edit_machine_payload_text(message).is_some()
-            })
 }

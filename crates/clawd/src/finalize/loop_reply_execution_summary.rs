@@ -4,10 +4,9 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 
 #[cfg(test)]
 use super::{
-    delivery_matches_config_guard_answer, delivery_message_is_json_container,
-    last_respond_matches_single_line_observation, looks_like_raw_command_snapshot,
-    message_is_non_answer_separator, output_contract_requests_exact_delivery,
-    route_has_evidence_policy_final_shape,
+    delivery_message_is_json_container, last_respond_matches_single_line_observation,
+    looks_like_raw_command_snapshot, message_is_non_answer_separator,
+    output_contract_requests_exact_delivery, route_has_evidence_policy_final_shape,
     route_requires_evidence_policy_deterministic_final_answer, single_publishable_delivery_message,
 };
 use super::{
@@ -153,17 +152,6 @@ pub(super) fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
         .collect::<String>();
     truncated.push_str("...");
     truncated
-}
-
-pub(super) fn execution_summary_value_to_string(value: &serde_json::Value) -> String {
-    let raw = match value {
-        serde_json::Value::String(value) => value.trim().to_string(),
-        serde_json::Value::Number(value) => value.to_string(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        serde_json::Value::Null => String::new(),
-        _ => value.to_string(),
-    };
-    crate::visible_text::sanitize_user_visible_text(&raw)
 }
 
 pub(super) fn execution_summary_arg_is_sensitive(key: &str) -> bool {
@@ -465,9 +453,6 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
             .iter()
             .any(|message| delivery_message_is_json_container(message))
     {
-        return true;
-    }
-    if delivery_matches_config_guard_answer(loop_state, delivery_messages) {
         return true;
     }
     if delivery_matches_latest_transform_observation(loop_state, delivery_messages) {

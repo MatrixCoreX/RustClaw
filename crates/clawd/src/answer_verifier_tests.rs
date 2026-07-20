@@ -337,67 +337,6 @@ fn local_missing_evidence_gap_skips_when_required_fields_are_observed() {
 }
 
 #[test]
-fn config_guard_machine_payload_skips_missing_evidence_verifier_gap() {
-    let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config.toml".to_string();
-    let answer = json!({
-        "message_key": "clawd.msg.config_edit.guard",
-        "reason_code": "config_edit_guard_risk_found",
-        "path": "configs/config.toml",
-        "risk_count": 2,
-        "count": 2,
-        "candidates": [
-            "tools.allow_sudo=true",
-            "tools.allow_path_outside_workspace=true"
-        ]
-    })
-    .to_string();
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-config-guard-json", "ask", "config");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "guard_config",
-                "path": "configs/config.toml",
-                "risk_count": 2,
-                "candidates": [
-                    "tools.allow_sudo=true",
-                    "tools.allow_path_outside_workspace=true"
-                ]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
-        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-        parsed: true,
-        contract_ok: true,
-        completion_ok: Some(true),
-        grounded_ok: Some(true),
-        format_ok: Some(true),
-        needs_clarify: Some(false),
-        used_evidence_ids_count: 1,
-        ..Default::default()
-    });
-
-    assert!(local_missing_evidence_verifier_gap_for_answer(&route, &journal, &answer).is_none());
-    assert!(structural_satisfaction_can_skip_verifier(
-        &route, &journal, &answer
-    ));
-}
-
-#[test]
 fn local_missing_evidence_gap_does_not_block_on_negative_evidence_only() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;

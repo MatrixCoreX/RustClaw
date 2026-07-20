@@ -44,7 +44,7 @@ use dispatch_synthesis::{
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
-    synthesize_route_prefers_model_language_observed_status, synthesize_user_language_source,
+    synthesize_route_prefers_model_language_observed_status,
 };
 use dispatch_synthesis_bounded_read::synthesize_bounded_read_range_direct_answer;
 pub(super) use execution_status::deterministic_observed_execution_status_answer;
@@ -905,22 +905,6 @@ pub(super) async fn handle_synthesize_answer_action(
                     loop_state,
                     agent_run_context,
                 ) {
-                    return Ok(answer);
-                }
-            }
-            if agent_run_context
-                .and_then(|context| context.output_contract())
-                .is_none_or(|route| {
-                    !route.semantic_kind_is(crate::OutputSemanticKind::ConfigMutation)
-                })
-            {
-                if let Some((answer, _summary)) =
-                    crate::finalize::direct_config_edit_observed_answer(
-                        state,
-                        synthesize_user_language_source(user_text, agent_run_context),
-                        loop_state,
-                    )
-                {
                     return Ok(answer);
                 }
             }

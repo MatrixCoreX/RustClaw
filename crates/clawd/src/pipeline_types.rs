@@ -91,7 +91,6 @@ pub(crate) enum OutputSemanticKind {
     FilesystemMutationResult,
     ExistenceWithPath,
     ConfigValidation,
-    ConfigMutation,
 }
 
 impl OutputSemanticKind {
@@ -113,7 +112,6 @@ impl OutputSemanticKind {
         Self::FilesystemMutationResult,
         Self::ExistenceWithPath,
         Self::ConfigValidation,
-        Self::ConfigMutation,
     ];
 
     pub(crate) fn as_str(self) -> &'static str {
@@ -135,7 +133,6 @@ impl OutputSemanticKind {
             Self::FilesystemMutationResult => "filesystem_mutation_result",
             Self::ExistenceWithPath => "existence_with_path",
             Self::ConfigValidation => "config_validation",
-            Self::ConfigMutation => "config_mutation",
         }
     }
 

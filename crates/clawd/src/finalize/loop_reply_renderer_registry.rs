@@ -92,13 +92,6 @@ pub(super) const FINALIZER_RENDERER_REGISTRY: &[FinalizerRendererDescriptor] = &
         summary_contract: "control_intent",
     },
     FinalizerRendererDescriptor {
-        key: "config_edit_observed_answer",
-        shape_class: FinalizerRendererShapeClass::CapabilityResult,
-        owner_module: "finalize::loop_reply_config_edit",
-        entrypoint: "direct_config_edit_observed_answer",
-        summary_contract: "finalizer_summary",
-    },
-    FinalizerRendererDescriptor {
         key: "scalar_placeholder_terminal_direct_answer",
         shape_class: FinalizerRendererShapeClass::DeterministicFallback,
         owner_module: "finalize::loop_reply_scalar_placeholder",

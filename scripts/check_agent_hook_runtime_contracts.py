@@ -177,12 +177,6 @@ REQUIRED_FILE_TOKENS = {
         "build_terminal_from_loop_state as build_loop_journal",
         ".await",
     ),
-    "crates/clawd/src/finalize/loop_reply_config_edit.rs": (
-        "agent_hook_runtime_surface_answer",
-        '"agent.hooks.handlers"',
-        "PolicyDecision::all_tokens()",
-        "HookStage::all()",
-    ),
     "crates/clawd/src/finalize/loop_reply_machine_kv.rs": (
         "current_delivery_contains_agent_hook_runtime_surface",
         '"agent.hooks.handlers"',
@@ -315,7 +309,6 @@ LEGACY_FIXED_POLICY_SCAN_FILES = (
     "crates/clawd/src/agent_hooks.rs",
     "crates/clawd/src/agent_hooks/runtime.rs",
     "crates/clawd/src/agent_hooks/shared.rs",
-    "crates/clawd/src/finalize/loop_reply_config_edit.rs",
     "crates/clawd/src/finalize/loop_reply_machine_kv.rs",
     "crates/clawd/src/finalize/loop_reply_synthesis_preference.rs",
     "prompts/layers/overlays/agent_tool_spec.md",

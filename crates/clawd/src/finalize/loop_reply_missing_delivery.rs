@@ -6,9 +6,8 @@ use super::{
     deterministic_execution_failed_step_answer, deterministic_matrix_observed_shape_answer,
     deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
     deterministic_observed_execution_status_summary,
-    deterministic_structured_container_summary_answer, direct_config_edit_observed_answer,
-    direct_db_basic_observed_answer, direct_generated_file_path_report_from_dry_run_payload,
-    direct_rustclaw_config_risk_answer, output_text_from_execution_result,
+    deterministic_structured_container_summary_answer, direct_db_basic_observed_answer,
+    direct_generated_file_path_report_from_dry_run_payload, output_text_from_execution_result,
     planned_delivery_identifies_failed_observed_step, preferred_route_clarify_question,
     route_prefers_language_rendered_execution_failed_step, route_resolved_intent,
     route_structured_clarify_context,
@@ -341,16 +340,6 @@ async fn missing_delivery_after_observation_message(
             return answer;
         }
     }
-    if let Some((answer, _summary)) =
-        direct_config_edit_observed_answer(state, user_text, loop_state)
-    {
-        return answer;
-    }
-    if let Some((answer, _summary)) =
-        direct_rustclaw_config_risk_answer(state, user_text, loop_state)
-    {
-        return answer;
-    }
     if let Some(answer) = deterministic_structured_container_summary_answer(
         state,
         user_text,
@@ -448,8 +437,6 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
                 })
                 .flatten()
         })
-        .or_else(|| direct_config_edit_observed_answer(state, user_text, loop_state))
-        .or_else(|| direct_rustclaw_config_risk_answer(state, user_text, loop_state))
         .or_else(|| {
             deterministic_structured_container_summary_answer(
                 state,

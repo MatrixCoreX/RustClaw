@@ -433,7 +433,7 @@ async fn observed_execution_without_delivery_skips_summary_for_extract_field_res
 }
 
 #[tokio::test]
-async fn observed_execution_without_delivery_preserves_structured_config_payload() {
+async fn observed_execution_without_delivery_uses_language_synthesis_for_config_read() {
     let state = test_state();
     let task = claimed_task("task-structured-container-summary");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -463,46 +463,9 @@ async fn observed_execution_without_delivery_preserves_structured_config_payload
     .expect("observed execution reply");
 
     assert!(!reply.should_fail_task);
-    let payload: serde_json::Value =
-        serde_json::from_str(&reply.text).expect("reply should remain structured JSON");
-    assert_eq!(
-        payload
-            .pointer("/message_key")
-            .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.config_edit.read")
-    );
-    assert_eq!(
-        payload
-            .pointer("/reason_code")
-            .and_then(serde_json::Value::as_str),
-        Some("config_edit_read")
-    );
-    assert_eq!(
-        payload
-            .pointer("/field_path")
-            .and_then(serde_json::Value::as_str),
-        Some("scripts")
-    );
-    let current_value = payload
-        .pointer("/value")
-        .and_then(serde_json::Value::as_str)
-        .expect("value should be a JSON object string");
-    let scripts: serde_json::Value =
-        serde_json::from_str(current_value).expect("value should parse as JSON");
-    assert_eq!(
-        scripts
-            .pointer("/build")
-            .and_then(serde_json::Value::as_str),
-        Some("echo build")
-    );
-    assert_eq!(
-        scripts.pointer("/dev").and_then(serde_json::Value::as_str),
-        Some("echo dev")
-    );
-    assert_eq!(
-        scripts.pointer("/lint").and_then(serde_json::Value::as_str),
-        Some("echo lint")
-    );
+    assert!(!reply.text.trim().is_empty());
+    assert!(!reply.text.contains("clawd.msg.config_edit"));
+    assert!(!reply.text.contains("config_edit_read"));
     assert_eq!(reply.messages, vec![reply.text.clone()]);
     assert_eq!(
         reply
