@@ -1347,39 +1347,6 @@ fn generic_path_content_directory_counts_can_complete_from_count_evidence() {
 }
 
 #[test]
-fn system_basic_info_without_action_uses_info_extractor() {
-    let mut journal =
-        TaskJournal::for_task("task-system-info", "ask", "return current workspace path");
-    let route = route_for_semantic(crate::OutputSemanticKind::ScalarPathOnly);
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "system_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "hostname": "devbox",
-                "os": "linux",
-                "arch": "x86_64",
-                "cwd": "/home/guagua/rustclaw",
-                "workspace_root": "/home/guagua/rustclaw"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage
-        .observed_extractors
-        .contains("system_basic.info.structured_json_v1"));
-}
-
-#[test]
 fn docker_unavailable_text_counts_as_field_value_evidence() {
     let mut journal =
         TaskJournal::for_task("task-docker-unavailable", "ask", "检查 Docker 是否可用");

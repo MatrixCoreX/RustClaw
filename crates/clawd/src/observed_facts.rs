@@ -305,22 +305,27 @@ fn scalar_path_answer_bound_target(
     }
     normalize_scalar_path_bound_target(
         line,
-        route_result.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly),
+        crate::machine_kv_projection::output_contract_requests_exact_scalar_field(
+            route_result,
+            &["path", "resolved_path"],
+        ),
     )
 }
 
 fn scalar_path_contract_can_bind_target(route_result: &crate::IntentOutputContract) -> bool {
-    route_result.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly)
-        || (matches!(
-            route_result.response_shape,
-            crate::OutputResponseShape::Scalar
-        ) && route_result.requires_content_evidence
-            && matches!(
-                route_result.locator_kind,
-                crate::OutputLocatorKind::Path
-                    | crate::OutputLocatorKind::Filename
-                    | crate::OutputLocatorKind::CurrentWorkspace
-            ))
+    crate::machine_kv_projection::output_contract_requests_exact_scalar_field(
+        route_result,
+        &["path", "resolved_path"],
+    ) || (matches!(
+        route_result.response_shape,
+        crate::OutputResponseShape::Scalar
+    ) && route_result.requires_content_evidence
+        && matches!(
+            route_result.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        ))
 }
 
 fn normalize_scalar_path_bound_target(

@@ -1118,9 +1118,12 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("resolved_path".to_string()),
+            ..Default::default()
+        },
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),

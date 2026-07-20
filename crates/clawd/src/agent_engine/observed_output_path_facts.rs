@@ -364,6 +364,7 @@ pub(super) fn path_batch_fact_preferred_path<'a>(
 
 pub(super) fn system_basic_path_batch_scalar_path_candidate(
     value: &serde_json::Value,
+    field: &str,
 ) -> Option<String> {
     if value.get("action").and_then(|v| v.as_str()) != Some("path_batch_facts") {
         return None;
@@ -378,7 +379,13 @@ pub(super) fn system_basic_path_batch_scalar_path_candidate(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     exists
-        .then(|| path_batch_fact_preferred_path(entry).map(normalize_observed_scalar_path))
+        .then(|| {
+            let fact = entry.get("fact").and_then(|value| value.as_object());
+            fact.and_then(|fact| fact.get(field))
+                .or_else(|| entry.get(field))
+                .and_then(|value| value.as_str())
+                .map(normalize_observed_scalar_path)
+        })
         .flatten()
 }
 

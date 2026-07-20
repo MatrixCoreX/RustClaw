@@ -196,25 +196,28 @@ pub(super) fn route_allows_scalar_read_range_direct_answer(
             ))
 }
 
-pub(super) fn route_requests_scalar_path_only(route: &crate::IntentOutputContract) -> bool {
-    route.response_shape == crate::OutputResponseShape::Scalar
-        && super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::ScalarPathOnly,
-        )
+pub(super) fn route_requests_exact_scalar_path(route: &crate::IntentOutputContract) -> bool {
+    crate::machine_kv_projection::output_contract_requests_exact_scalar_path(route)
+}
+
+pub(super) fn exact_scalar_path_selector(route: &crate::IntentOutputContract) -> Option<String> {
+    crate::machine_kv_projection::output_contract_exact_scalar_field(
+        route,
+        &["path", "resolved_path"],
+    )
 }
 
 pub(super) fn route_allows_path_batch_scalar_path_observed_answer(
     route: &crate::IntentOutputContract,
 ) -> bool {
-    route_requests_scalar_path_only(route) && !route.requires_content_evidence
+    route_requests_exact_scalar_path(route) && !route.requires_content_evidence
 }
 
 pub(super) fn recent_file_path_candidate_for_scalar_path(
     loop_state: &LoopState,
     route: Option<&crate::IntentOutputContract>,
 ) -> Option<String> {
-    if !route.is_some_and(route_requests_scalar_path_only) {
+    if !route.is_some_and(route_requests_exact_scalar_path) {
         return None;
     }
     let latest_file_step_idx = latest_successful_step_index(loop_state, |step| {
@@ -242,7 +245,7 @@ pub(super) fn recent_file_path_candidate_for_scalar_path(
 }
 
 pub(super) fn route_prefers_plain_fs_search_paths(route: &crate::IntentOutputContract) -> bool {
-    route_requests_scalar_path_only(route)
+    route_requests_exact_scalar_path(route)
         || (route.response_shape == crate::OutputResponseShape::Strict
             && route.locator_kind == crate::OutputLocatorKind::Path
             && super::output_route_policy::route_contract_marker_is(

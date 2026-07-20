@@ -237,7 +237,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                         .then(|| system_basic_info_value("system_basic", &observed_output.body))
                         .flatten();
                     if let Some(info) = system_basic_info.as_ref() {
-                        if route.is_some_and(route_requests_scalar_path_only) {
+                        if route.is_some_and(route_requests_exact_scalar_path) {
                             return system_basic_info_scalar_path_candidate(info);
                         }
                         if route.is_some_and(|route| {
@@ -355,7 +355,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                     } else if action == Some("info")
                         || (action.is_none() && system_basic_value_looks_like_info(&value))
                     {
-                        if route.is_some_and(route_requests_scalar_path_only) {
+                        if route.is_some_and(route_requests_exact_scalar_path) {
                             system_basic_info_scalar_path_candidate(&value)
                         } else {
                             None
@@ -365,12 +365,24 @@ pub(super) fn extract_answer_from_observed_output_impl(
                     {
                         path_batch_file_delivery_token_candidate(route, &value)
                     } else if action == Some("path_batch_facts")
+                        && route.is_some_and(route_allows_path_batch_scalar_path_observed_answer)
+                    {
+                        route
+                            .and_then(exact_scalar_path_selector)
+                            .and_then(|field| {
+                                system_basic_path_batch_scalar_path_candidate(&value, &field)
+                            })
+                    } else if action == Some("path_batch_facts")
                         && route.is_some_and(|route| {
-                            route_allows_path_batch_scalar_path_observed_answer(route)
-                                || route_scalar_has_plain_path_terminal_respond(route, loop_state)
+                            route_scalar_has_plain_path_terminal_respond(route, loop_state)
                         })
                     {
-                        system_basic_path_batch_scalar_path_candidate(&value)
+                        loop_state
+                            .last_user_visible_respond
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|answer| !answer.is_empty())
+                            .map(ToOwned::to_owned)
                     } else if action == Some("path_batch_facts")
                         && route.is_some_and(route_requests_scalar_existence)
                     {

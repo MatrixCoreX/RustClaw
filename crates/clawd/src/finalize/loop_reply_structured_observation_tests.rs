@@ -2,66 +2,6 @@ use super::*;
 use crate::finalize::loop_reply::deterministic_structured_container_summary_answer;
 
 #[test]
-fn scalar_path_only_matrix_answer_projects_ambiguous_find_name_candidates() {
-    let state = test_state();
-    let task = claimed_task("task-scalar-path-list-from-find-name");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"find_name","count":4,"results":["scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"],"root":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "fs_basic",
-        r#"{"action":"path_batch_facts","count":4,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},"path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"},"path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"},{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},"path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"},"path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"}],"include_missing":true}"#,
-    ));
-    let mut route = scalar_route_result();
-    route.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "abcd".to_string();
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-
-    let (answer, summary) = super::deterministic_matrix_observed_shape_answer(
-        &state,
-        &task,
-        "find abcd",
-        &loop_state,
-        Some(&ctx),
-    )
-    .expect("scalar path candidate list");
-
-    assert_eq!(
-        answer,
-        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"
-    );
-    let delivery_messages = vec![answer.clone()];
-    let journal = crate::finalize::build_from_loop_state(
-        &task,
-        "find abcd",
-        &loop_state,
-        Some(&ctx),
-        Some(summary.clone()),
-        crate::task_journal::delivery_payload_consistent(&answer, &delivery_messages),
-        &answer,
-        crate::task_journal::TaskJournalFinalStatus::Success,
-    );
-    let answer_contract = crate::answer_verifier::AnswerContract::new("find abcd", route.clone());
-    assert!(
-        crate::answer_verifier::structurally_satisfies_answer_contract(
-            &answer_contract,
-            &journal,
-            &answer,
-        )
-    );
-    assert_eq!(summary.format_ok, Some(true));
-}
-
-#[test]
 fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(2);

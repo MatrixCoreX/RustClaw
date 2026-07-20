@@ -81,7 +81,7 @@ pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::IntentOutput
 pub(crate) fn route_matches_single_path_output_contract(
     route: &crate::IntentOutputContract,
 ) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly)
+    crate::machine_kv_projection::output_contract_requests_exact_scalar_path(route)
         || crate::evidence_policy::final_answer_shape_for_output_contract(route).is_some_and(
             |shape| shape.class() == crate::evidence_policy::FinalAnswerShapeClass::SinglePath,
         )

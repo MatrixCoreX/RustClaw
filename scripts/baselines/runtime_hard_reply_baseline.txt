@@ -738,10 +738,6 @@ crates/clawd/src/output_contract_verifier.rs	directory_names: locator candidate 
 crates/clawd/src/output_contract_verifier.rs	scalar_count: candidate contains no integer literal	"scalar_count: candidate contains no integer literal",
 crates/clawd/src/output_contract_verifier.rs	scalar_count: empty candidate	"scalar_count: empty candidate",
 crates/clawd/src/output_contract_verifier.rs	scalar_count: extracted only unique integer from candidate	"scalar_count: extracted only unique integer from candidate",
-crates/clawd/src/output_contract_verifier.rs	scalar_path_only: candidate does not contain a path or locator token	"scalar_path_only: candidate does not contain a path or locator token",
-crates/clawd/src/output_contract_verifier.rs	scalar_path_only: empty candidate	"scalar_path_only: empty candidate",
-crates/clawd/src/output_contract_verifier.rs	scalar_path_only: extracted first path token	"scalar_path_only: extracted first path token",
-crates/clawd/src/output_contract_verifier.rs	scalar_path_only: non-scalar candidate does not contain a path or locator token	"scalar_path_only: non-scalar candidate does not contain a path or locator token",
 crates/clawd/src/output_contract_verifier.rs	shape 整形	//! [`crate::delivery_utils::output_contract::enforce_output_contract`] "shape 整形"之上的 guard。
 crates/clawd/src/output_contract_verifier.rs	明显违反 contract	//! - 只拦"明显违反 contract"的结构性 anti-pattern，宁可漏拦也不要误拦合规答案。
 crates/clawd/src/prompt_utils.rs	initial parse error: {first_err}; repaired parse error: {second_err}	"initial parse error: {first_err}; repaired parse error: {second_err}"

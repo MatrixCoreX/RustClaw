@@ -929,7 +929,6 @@ fn route_allows_prior_step_error_observed_replacement(route: &crate::IntentOutpu
         crate::OutputSemanticKind::DirectoryNames,
         crate::OutputSemanticKind::DirectoryEntryGroups,
         crate::OutputSemanticKind::FilePaths,
-        crate::OutputSemanticKind::ScalarPathOnly,
         crate::OutputSemanticKind::ExistenceWithPath,
     ])
 }

@@ -74,33 +74,6 @@ impl OutputContractVerdict {
     }
 }
 
-/// "回答里含路径/locator 结构"的 guard：
-/// - 含 `/`（绝对/相对路径或 URL 风），或
-/// - 含 `\`（Windows 路径），或
-/// - locator_hint 非空且回答里出现该 hint 字面。
-fn contains_path_or_locator(text: &str, locator_hint: &str) -> bool {
-    let t = text.trim();
-    if t.contains('/') || t.contains('\\') {
-        return true;
-    }
-    let hint = locator_hint.trim();
-    !hint.is_empty() && t.contains(hint)
-}
-
-fn first_path_like_token(text: &str) -> Option<String> {
-    text.split_whitespace()
-        .map(|s| {
-            s.trim_matches(|c: char| {
-                matches!(
-                    c,
-                    '"' | '\'' | '`' | '(' | ')' | '。' | '，' | ',' | '.' | ';' | ':' | '：'
-                )
-            })
-        })
-        .find(|tok| !tok.is_empty() && (tok.contains('/') || tok.contains('\\')))
-        .map(str::to_string)
-}
-
 fn output_list_items(text: &str) -> Vec<String> {
     text.lines()
         .filter_map(|line| {
@@ -234,36 +207,6 @@ fn verify_existence_with_path(
     OutputContractVerdict::Pass
 }
 
-/// scalar_path_only：回答应该就是一个路径/locator 字面。
-/// - 不含路径/locator marker → Reject；
-/// - 含 path-like token + 无关 prose → Reshape 抽出第一个 path token。
-fn verify_scalar_path_only(contract: &IntentOutputContract, text: &str) -> OutputContractVerdict {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return OutputContractVerdict::reject(
-            "scalar_path_only_empty_candidate",
-            "scalar_path_only: empty candidate",
-        );
-    }
-    if let Some(token) = first_path_like_token(trimmed) {
-        if token != trimmed {
-            return OutputContractVerdict::reshape(
-                "scalar_path_only_extracted_first_path_token",
-                "scalar_path_only: extracted first path token",
-                token,
-            );
-        }
-        return OutputContractVerdict::Pass;
-    }
-    if !contains_path_or_locator(trimmed, &contract.locator_hint) {
-        return OutputContractVerdict::reject(
-            "scalar_path_only_missing_path_or_locator",
-            "scalar_path_only: candidate does not contain a path or locator token",
-        );
-    }
-    OutputContractVerdict::Pass
-}
-
 /// scalar_count：回答里至少要有一个整数字面（或纯数字 candidate）。
 /// 候选文本中只有一个唯一整数值 → Reshape 取该整数；完全无整数 → Reject。
 fn verify_scalar_count(contract: &IntentOutputContract, text: &str) -> OutputContractVerdict {
@@ -334,21 +277,6 @@ pub(crate) fn verify_output_contract(
     match contract.semantic_kind {
         OutputSemanticKind::ExistenceWithPath => {
             verify_existence_with_path(contract, trimmed_candidate)
-        }
-        OutputSemanticKind::ScalarPathOnly
-            if matches!(contract.response_shape, OutputResponseShape::Scalar) =>
-        {
-            verify_scalar_path_only(contract, trimmed_candidate)
-        }
-        OutputSemanticKind::ScalarPathOnly => {
-            if contains_path_or_locator(trimmed_candidate, &contract.locator_hint) {
-                OutputContractVerdict::Pass
-            } else {
-                OutputContractVerdict::reject(
-                    "scalar_path_only_non_scalar_missing_path_or_locator",
-                    "scalar_path_only: non-scalar candidate does not contain a path or locator token",
-                )
-            }
         }
         OutputSemanticKind::DirectoryNames => {
             verify_directory_names(contract, trimmed_candidate, user_request)

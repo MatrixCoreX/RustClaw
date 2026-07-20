@@ -310,7 +310,7 @@ fn execution_summary_suppressed_for_scalar_value_contract() {
     ));
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

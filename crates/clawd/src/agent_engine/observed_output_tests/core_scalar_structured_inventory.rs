@@ -1081,10 +1081,10 @@ fn execution_failed_step_guard_skips_contract_policy_gap_errors() {
 #[test]
 fn scalar_path_observed_route_rejects_content_evidence_contract() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.requires_content_evidence = true;
 
-    assert!(route_requests_scalar_path_only(&route));
+    assert!(route_requests_exact_scalar_path(&route));
     assert!(!route_allows_path_batch_scalar_path_observed_answer(&route));
 
     route.requires_content_evidence = false;
@@ -1094,9 +1094,9 @@ fn scalar_path_observed_route_rejects_content_evidence_contract() {
 #[test]
 fn observed_output_route_policy_uses_direct_output_contract() {
     let mut scalar_path_route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    scalar_path_route.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    scalar_path_route.selection.structured_field_selector = Some("path".to_string());
     scalar_path_route.requires_content_evidence = false;
-    assert!(route_requests_scalar_path_only(&scalar_path_route));
+    assert!(route_requests_exact_scalar_path(&scalar_path_route));
     assert!(route_allows_path_batch_scalar_path_observed_answer(
         &scalar_path_route
     ));

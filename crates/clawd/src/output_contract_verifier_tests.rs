@@ -45,67 +45,6 @@ fn existence_with_path_no_longer_autoprepends_or_hard_rejects() {
 }
 
 #[test]
-fn pass_scalar_path_only_for_pure_path() {
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::ScalarPathOnly,
-        ..IntentOutputContract::default()
-    };
-    let v = verify_output_contract(&contract, "/etc/passwd", "?");
-    assert_eq!(v, OutputContractVerdict::Pass);
-}
-
-#[test]
-fn reshape_scalar_path_only_extracts_path_structurally() {
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::ScalarPathOnly,
-        ..IntentOutputContract::default()
-    };
-    let candidate = "路径是 /etc/passwd。";
-    let v = verify_output_contract(&contract, candidate, "?");
-    match v {
-        OutputContractVerdict::Reshape {
-            reason_code,
-            reshaped,
-            ..
-        } => {
-            assert_eq!(reason_code, "scalar_path_only_extracted_first_path_token");
-            assert_eq!(reshaped, "/etc/passwd");
-        }
-        other => panic!("expected Reshape extracting path, got: {other:?}"),
-    }
-}
-
-#[test]
-fn reject_scalar_path_only_when_no_path_or_locator() {
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::ScalarPathOnly,
-        ..IntentOutputContract::default()
-    };
-    let v = verify_output_contract(&contract, "我不知道在哪", "?");
-    assert!(matches!(v, OutputContractVerdict::Reject { .. }));
-}
-
-#[test]
-fn strict_scalar_path_semantic_preserves_path_metadata_answer() {
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Strict,
-        semantic_kind: OutputSemanticKind::ScalarPathOnly,
-        ..IntentOutputContract::default()
-    };
-
-    let v = verify_output_contract(&contract, "/tmp/hello.sh file", "?");
-
-    assert_eq!(v, OutputContractVerdict::Pass);
-}
-
-#[test]
 fn directory_names_rejects_requested_extension_file_list() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,

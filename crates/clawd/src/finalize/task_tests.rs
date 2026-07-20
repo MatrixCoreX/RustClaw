@@ -1559,7 +1559,7 @@ fn resume_failure_unbound_path_lookup_is_clarify_result() {
     let mut route = route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "case_only/report.md".to_string();
     let resume_ctx = json!({
@@ -1595,7 +1595,7 @@ fn resume_failure_unbound_directory_lookup_is_clarify_result_without_path_batch(
     let mut route = route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.locator_hint = "case_only/report.md".to_string();
     let resume_ctx = json!({
@@ -1628,7 +1628,7 @@ fn resume_failure_unbound_path_lookup_does_not_reclassify_delivery() {
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::FileToken;
     route.delivery_required = true;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     let resume_ctx = json!({
         "completed_messages": [
             "subtask#1 skill(system_basic): success\n{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":false,\"path\":\"missing.txt\"}],\"include_missing\":true}"

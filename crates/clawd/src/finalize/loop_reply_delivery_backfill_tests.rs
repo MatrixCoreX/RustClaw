@@ -14,7 +14,7 @@ fn backfill_delivery_prefers_contractual_last_respond_over_synthesis() {
         "/home/guagua/rustclaw\n",
     ));
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_hint.clear();
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

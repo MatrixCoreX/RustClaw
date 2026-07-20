@@ -1,7 +1,8 @@
 use super::{
     collect_machine_text_fragments_from_output,
     collect_requested_machine_kv_surfaces_from_state_patch, exact_machine_field_selector,
-    parse_machine_kv_units, requested_machine_kv_summary_from_observations,
+    output_contract_requests_exact_scalar_field, parse_machine_kv_units,
+    requested_machine_kv_summary_from_observations, requested_machine_summary_matches_scalar,
     structured_json_satisfies_field_selector,
 };
 
@@ -940,4 +941,48 @@ fn exact_machine_selector_is_bounded_and_domain_neutral() {
     );
     assert!(exact_machine_field_selector("text").is_none());
     assert!(exact_machine_field_selector("items.*").is_none());
+}
+
+#[test]
+fn exact_scalar_field_contract_requires_one_validated_selector() {
+    let mut route = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Scalar,
+        ..Default::default()
+    };
+    assert!(!output_contract_requests_exact_scalar_field(
+        &route,
+        &["path", "resolved_path"]
+    ));
+
+    route.selection.structured_field_selector = Some("path".to_string());
+    assert!(output_contract_requests_exact_scalar_field(
+        &route,
+        &["path", "resolved_path"]
+    ));
+
+    route.selection.structured_field_selector = Some("path,resolved_path".to_string());
+    assert!(!output_contract_requests_exact_scalar_field(
+        &route,
+        &["path", "resolved_path"]
+    ));
+}
+
+#[test]
+fn exact_path_summary_matches_lexically_equivalent_scalar() {
+    let mut route = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Scalar,
+        ..Default::default()
+    };
+    route.selection.structured_field_selector = Some("resolved_path".to_string());
+
+    assert!(requested_machine_summary_matches_scalar(
+        Some(&route),
+        "/workspace/project",
+        "resolved_path=/workspace/project/."
+    ));
+    assert!(!requested_machine_summary_matches_scalar(
+        Some(&route),
+        "/workspace/project",
+        "resolved_path=/workspace/other"
+    ));
 }

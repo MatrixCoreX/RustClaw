@@ -254,6 +254,82 @@ pub(crate) fn exact_machine_field_selector(selector: &str) -> Option<Vec<String>
     Some(normalized)
 }
 
+pub(crate) fn output_contract_requests_exact_scalar_field(
+    route: &crate::IntentOutputContract,
+    allowed_fields: &[&str],
+) -> bool {
+    output_contract_exact_scalar_field(route, allowed_fields).is_some()
+}
+
+pub(crate) fn output_contract_requests_exact_scalar_path(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    output_contract_requests_exact_scalar_field(route, &["path", "resolved_path"])
+}
+
+pub(crate) fn output_contract_exact_scalar_field(
+    route: &crate::IntentOutputContract,
+    allowed_fields: &[&str],
+) -> Option<String> {
+    if route.response_shape != crate::OutputResponseShape::Scalar {
+        return None;
+    }
+    let Some(fields) = route
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .and_then(exact_machine_field_selector)
+    else {
+        return None;
+    };
+    let [field] = fields.as_slice() else {
+        return None;
+    };
+    allowed_fields
+        .contains(&field.as_str())
+        .then(|| field.to_string())
+}
+
+pub(crate) fn requested_machine_summary_matches_scalar(
+    route: Option<&crate::IntentOutputContract>,
+    current: &str,
+    requested_summary: &str,
+) -> bool {
+    let mut lines = requested_summary
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let Some(line) = lines.next() else {
+        return false;
+    };
+    if lines.next().is_some() {
+        return false;
+    }
+    let Some((key, value)) = line.split_once('=') else {
+        return false;
+    };
+    let current = current.trim();
+    let value = value.trim();
+    if current.is_empty() || value.is_empty() {
+        return false;
+    }
+    if value == current {
+        return true;
+    }
+    let selector = route
+        .and_then(|route| output_contract_exact_scalar_field(route, &["path", "resolved_path"]));
+    selector.as_deref() == Some(key.trim())
+        && normalize_machine_path(current) == normalize_machine_path(value)
+}
+
+fn normalize_machine_path(value: &str) -> std::path::PathBuf {
+    std::path::Path::new(value.trim())
+        .components()
+        .filter(|component| !matches!(component, std::path::Component::CurDir))
+        .map(|component| component.as_os_str())
+        .collect()
+}
+
 fn structured_json_contains_field_path(value: &serde_json::Value, path: &[&str]) -> bool {
     if path.is_empty() {
         return false;

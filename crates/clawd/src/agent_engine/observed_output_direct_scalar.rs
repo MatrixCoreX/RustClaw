@@ -98,7 +98,7 @@ pub(super) fn structured_scalar_candidate(
     }
     let value = structured_observed_body_value(&value);
     if skill == "system_basic"
-        && route.is_some_and(route_requests_scalar_path_only)
+        && route.is_some_and(route_requests_exact_scalar_path)
         && system_basic_value_looks_like_info(value)
     {
         return system_basic_info_scalar_path_candidate(value);
@@ -130,8 +130,8 @@ pub(super) fn structured_scalar_candidate(
                     .and_then(|v| v.get("total"))
                     .and_then(value_scalar_text)
                     .or_else(|| inventory_dir_names(&value).map(|names| names.len().to_string()))
-            } else if route.is_some_and(route_requests_scalar_path_only) {
-                inventory_dir_scalar_path_candidate(&value, prefer_full_path)
+            } else if let Some(field) = route.and_then(exact_scalar_path_selector) {
+                inventory_dir_scalar_path_candidate(&value, &field)
             } else {
                 None
             }
@@ -239,8 +239,8 @@ pub(super) fn structured_scalar_candidate(
         "path_batch_facts" => {
             if route.is_some_and(route_requests_scalar_existence) {
                 system_basic_scalar_existence_candidate(state, value, prefer_english)
-            } else if route.is_some_and(route_requests_scalar_path_only) {
-                system_basic_path_batch_scalar_path_candidate(value)
+            } else if let Some(field) = route.and_then(exact_scalar_path_selector) {
+                system_basic_path_batch_scalar_path_candidate(value, &field)
             } else {
                 None
             }

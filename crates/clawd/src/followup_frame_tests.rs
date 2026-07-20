@@ -1352,9 +1352,12 @@ fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_pos
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: selected.clone(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("path".to_string()),
+            ..Default::default()
+        },
     };
 
     replace_active_frame_from_ask_outcome(

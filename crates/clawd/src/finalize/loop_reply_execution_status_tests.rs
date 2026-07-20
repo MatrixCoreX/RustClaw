@@ -221,7 +221,7 @@ fn deterministic_missing_observed_target_answer_skips_after_later_fallback_succe
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "plan/missing.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {

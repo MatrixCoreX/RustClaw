@@ -69,10 +69,6 @@ fn route_contract_marker_is(
     route.output_contract_marker_is(semantic_kind)
 }
 
-pub(super) fn route_contract_marker_is_scalar_path_only(route: &AnswerContract) -> bool {
-    route_contract_marker_is(route, crate::OutputSemanticKind::ScalarPathOnly)
-}
-
 fn route_contract_marker_is_service_status(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ServiceStatus)
 }
@@ -91,23 +87,7 @@ pub(super) fn evidence_policy_single_path_answer_is_grounded_in_successful_obser
             .iter()
             .any(|observed_path| single_path_matches_observed(&candidate_path, observed_path));
     }
-    if !route_contract_marker_is_scalar_path_only(route) {
-        return false;
-    }
-    let candidate_items = strict_list_answer_items(candidate_answer);
-    if candidate_items.len() <= 1 {
-        return false;
-    }
-    let observed_variants = observed_strict_list_items(route, journal)
-        .iter()
-        .flat_map(|item| strict_list_item_variants(item))
-        .collect::<BTreeSet<_>>();
-    !observed_variants.is_empty()
-        && candidate_items.iter().all(|item| {
-            strict_list_item_variants(item)
-                .iter()
-                .any(|item| observed_variants.contains(item))
-        })
+    false
 }
 
 pub(super) fn evidence_policy_delivery_artifact_answer_is_grounded_in_successful_observation(

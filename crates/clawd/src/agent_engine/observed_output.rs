@@ -34,13 +34,13 @@ use output_listing::route_prefers_direct_observed_answer_for_scalar;
 pub(crate) use output_listing::scalar_route_prefers_structured_observed_answer;
 use output_listing::{
     canonical_existing_path, count_answer_from_latest_fs_search, count_answer_from_latest_listing,
-    current_turn_request_text, latest_successful_list_dir_answer_candidate,
-    looks_like_shell_long_listing_line, normalized_listing_text,
-    recent_file_path_candidate_for_scalar_path, resolve_listing_entry_full_path,
-    route_allows_path_batch_scalar_path_observed_answer, route_allows_raw_listing_direct_answer,
-    route_allows_scalar_read_range_direct_answer,
+    current_turn_request_text, exact_scalar_path_selector,
+    latest_successful_list_dir_answer_candidate, looks_like_shell_long_listing_line,
+    normalized_listing_text, recent_file_path_candidate_for_scalar_path,
+    resolve_listing_entry_full_path, route_allows_path_batch_scalar_path_observed_answer,
+    route_allows_raw_listing_direct_answer, route_allows_scalar_read_range_direct_answer,
     route_allows_strict_plain_observation_passthrough, route_prefers_plain_fs_search_paths,
-    route_requests_scalar_count, route_requests_scalar_existence, route_requests_scalar_path_only,
+    route_requests_exact_scalar_path, route_requests_scalar_count, route_requests_scalar_existence,
     route_scalar_has_plain_path_terminal_respond, strict_plain_observation_passthrough_candidate,
 };
 
@@ -292,11 +292,7 @@ fn system_basic_scalar_path_candidate_satisfies_contract(
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
-    if !output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::ScalarPathOnly,
-    ) || route.response_shape != crate::OutputResponseShape::Scalar
-    {
+    if !route_requests_exact_scalar_path(route) {
         return false;
     }
     let answer = answer.trim();
@@ -488,7 +484,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
-    let prefer_full_path = route.is_some_and(route_requests_scalar_path_only);
+    let prefer_full_path = route.is_some_and(route_requests_exact_scalar_path);
     let request_language_hint = current_turn_request_text(route, agent_run_context)
         .map(observed_request_language_hint)
         .unwrap_or("config_default");
@@ -553,7 +549,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
-    let prefer_full_path = route.is_some_and(route_requests_scalar_path_only);
+    let prefer_full_path = route.is_some_and(route_requests_exact_scalar_path);
     let request_language_hint = current_turn_request_text(route, agent_run_context)
         .map(crate::language_policy::request_language_hint)
         .unwrap_or("config_default");
