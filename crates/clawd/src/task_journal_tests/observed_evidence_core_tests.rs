@@ -403,7 +403,8 @@ fn rss_fetch_extra_field_value_counts_as_structured_rss_evidence() {
             && item.get("redacted").is_none()
     }));
 
-    let route = route_for_semantic(crate::OutputSemanticKind::RssNewsFetch);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.locator_kind = crate::OutputLocatorKind::None;
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(

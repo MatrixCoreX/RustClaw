@@ -69,6 +69,45 @@ fn weather_result_preserves_structured_fields_for_generic_synthesis() {
 }
 
 #[test]
+fn rss_result_preserves_items_and_sources_for_generic_synthesis() {
+    let output = json!({
+        "text": "machine fallback",
+        "extra": {
+            "action": "latest",
+            "items": [
+                {
+                    "title": "Release notes",
+                    "source_host": "example.invalid",
+                    "date": "2026-07-20"
+                }
+            ],
+            "sources_ok": 1,
+            "sources_failed": 0
+        }
+    });
+    let envelope = super::successful_execution_envelope(
+        "rss_fetch",
+        "step_2",
+        &json!({"action": "latest", "limit": 1}),
+        &output.to_string(),
+        output.get("extra"),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/items/0/title"),
+        Some(&json!("Release notes"))
+    );
+    assert_eq!(
+        envelope.data.pointer("/extra/items/0/source_host"),
+        Some(&json!("example.invalid"))
+    );
+    assert_eq!(
+        envelope.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+}
+
+#[test]
 fn pending_result_becomes_poll_continuation() {
     let envelope = super::successful_execution_envelope(
         "video_generate",

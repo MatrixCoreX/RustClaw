@@ -559,13 +559,6 @@ pub(super) struct StructuredCountFinding {
     pub(super) recursive: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RssNewsItem {
-    pub(super) title: String,
-    pub(super) source_host: String,
-    pub(super) date: Option<String>,
-}
-
 pub(super) fn try_recover_log_analyze_answer_verifier_gap(
     user_text: &str,
     reply: &mut AskReply,
@@ -671,83 +664,6 @@ pub(super) fn try_recover_structured_search_answer_verifier_gap(
         finding.action, finding.count
     );
     true
-}
-
-pub(super) fn try_recover_rss_news_answer_verifier_gap(reply: &mut AskReply) -> bool {
-    let Some(verifier) = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-    else {
-        return false;
-    };
-    if !verifier.high_confidence_retry_gap() || !rss_verifier_requests_source_grounding(verifier) {
-        return false;
-    }
-    if !reply
-        .task_journal
-        .as_ref()
-        .is_some_and(journal_output_contract_evidence_is_complete)
-    {
-        return false;
-    }
-    let items = observed_rss_news_items(reply);
-    if items.is_empty() {
-        return false;
-    }
-    apply_rss_news_items_answer(reply, &items);
-    info!(
-        "answer_verifier_retry_exhausted_recovered_with_rss_structured_items count={}",
-        items.len()
-    );
-    true
-}
-
-pub(super) fn try_preserve_rss_source_hosts_from_structured_evidence(reply: &mut AskReply) -> bool {
-    if !reply.task_journal.as_ref().is_some_and(|journal| {
-        journal
-            .answer_verifier_summary
-            .as_ref()
-            .is_none_or(|verifier| verifier.pass)
-            && journal_output_contract_evidence_is_complete(journal)
-    }) {
-        return false;
-    }
-    let items = observed_rss_news_items(reply);
-    if items.is_empty() || rss_answer_contains_observed_source_hosts(&reply.text, &items) {
-        return false;
-    }
-    apply_rss_news_items_answer(reply, &items);
-    info!(
-        "rss_source_host_fidelity_recovered_with_structured_items count={}",
-        items.len()
-    );
-    true
-}
-
-fn journal_output_contract_evidence_is_complete(
-    journal: &crate::task_journal::TaskJournal,
-) -> bool {
-    journal
-        .output_contract
-        .as_ref()
-        .is_some_and(|output_contract| {
-            crate::task_journal::evidence_coverage_for_output_contract(output_contract, journal)
-                .is_complete()
-        })
-}
-
-pub(super) fn apply_rss_news_items_answer(reply: &mut AskReply, items: &[RssNewsItem]) {
-    let answer = deterministic_rss_news_items_text(items);
-    let messages = vec![answer.clone()];
-    if let Some(journal) = reply.task_journal.as_mut() {
-        mark_answer_verifier_recovery_success(journal, &answer);
-    }
-    reply.text = answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = false;
 }
 
 pub(super) fn route_allows_structured_search_recovery(
@@ -1610,15 +1526,6 @@ pub(super) fn collect_json_scalar_values(value: &serde_json::Value, values: &mut
     }
 }
 
-pub(super) fn rss_verifier_requests_source_grounding(
-    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
-) -> bool {
-    verifier
-        .missing_evidence_fields
-        .iter()
-        .any(|field| matches!(field.as_str(), "source" | "source_host" | "field_value"))
-}
-
 pub(super) fn structured_search_verifier_requests_full_candidates(
     verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
 ) -> bool {
@@ -1705,46 +1612,4 @@ pub(super) fn observed_structured_search_findings(
         findings.push(finding);
     }
     findings
-}
-
-pub(super) fn observed_rss_news_items(reply: &AskReply) -> Vec<RssNewsItem> {
-    let mut items = Vec::new();
-    let Some(journal) = reply.task_journal.as_ref() else {
-        return items;
-    };
-    for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok
-            || !step.skill.eq_ignore_ascii_case("rss_fetch")
-        {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        let Some(mut parsed_items) = parse_rss_news_items(output) else {
-            continue;
-        };
-        items.append(&mut parsed_items);
-    }
-    let mut seen = std::collections::BTreeSet::new();
-    items.retain(|item| {
-        seen.insert((
-            item.title.clone(),
-            item.source_host.clone(),
-            item.date.clone(),
-        ))
-    });
-    items
-}
-
-pub(super) fn rss_answer_contains_observed_source_hosts(
-    answer: &str,
-    items: &[RssNewsItem],
-) -> bool {
-    let hosts = items
-        .iter()
-        .map(|item| item.source_host.as_str())
-        .filter(|host| !host.trim().is_empty())
-        .collect::<std::collections::BTreeSet<_>>();
-    !hosts.is_empty() && hosts.iter().all(|host| answer.contains(host))
 }

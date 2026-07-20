@@ -708,7 +708,7 @@ planner_capabilities = [
   { name = "rss.fetch_feed", action = "fetch", effect = "observe", required = ["url|feed_url|feed_urls"], optional = ["limit", "timeout_seconds", "topic", "topic_token"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["latest", "fetch"] }, category = { type = "string" }, topic = { type = "string" }, topic_token = { type = "string" }, url = { type = "string" }, feed_url = { type = "string" }, feed_urls = { type = "array", items = { type = "string" } }, limit = { type = "integer" }, timeout_seconds = { type = "integer" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "image_vision"

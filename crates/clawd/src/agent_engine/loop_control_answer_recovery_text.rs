@@ -58,25 +58,6 @@ pub(super) fn deterministic_structured_search_summary_text(
     lines.join("\n")
 }
 
-pub(super) fn deterministic_rss_news_items_text(items: &[RssNewsItem]) -> String {
-    items
-        .iter()
-        .take(12)
-        .enumerate()
-        .map(|(idx, item)| {
-            let mut fields = vec![
-                format!("title={}", item.title),
-                format!("source_host={}", item.source_host),
-            ];
-            if let Some(date) = item.date.as_deref() {
-                fields.push(format!("date={date}"));
-            }
-            format!("{}. {}", idx + 1, fields.join(" | "))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 pub(super) fn deterministic_structured_count_summary_text(
     _user_text: &str,
     finding: &StructuredCountFinding,
