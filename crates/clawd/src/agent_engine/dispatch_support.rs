@@ -38,8 +38,8 @@ use dispatch_local_code_projection_gate::{
 use dispatch_synthesis::{
     archive_database_aggregate_structured_answer, deterministic_scalar_markdown_heading_answer,
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
-    local_code_task_strict_json_projection, package_docker_probe_structured_answer,
-    requested_local_code_json_fields, route_resolved_intent, step_has_observable_synthesis_fact,
+    local_code_task_strict_json_projection, requested_local_code_json_fields,
+    route_resolved_intent, step_has_observable_synthesis_fact,
     strict_json_projection_answer_satisfies_request, synthesize_answer_allows_direct_fallback,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
@@ -880,9 +880,6 @@ pub(super) async fn handle_synthesize_answer_action(
                 }
             }
             if let Some(answer) = archive_database_aggregate_structured_answer(loop_state) {
-                return Ok(answer);
-            }
-            if let Some(answer) = package_docker_probe_structured_answer(loop_state) {
                 return Ok(answer);
             }
             if let Some(answer) =

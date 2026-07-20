@@ -107,11 +107,7 @@ fn observed_fallback_prompt_uses_compact_template_for_structured_semantic_contra
     route_result.requires_content_evidence = true;
     route_result.delivery_required = false;
     route_result.delivery_intent = OutputDeliveryIntent::None;
-    for semantic_kind in [
-        OutputSemanticKind::SqliteTableListing,
-        OutputSemanticKind::DockerPs,
-        OutputSemanticKind::DockerLogs,
-    ] {
+    for semantic_kind in [OutputSemanticKind::SqliteTableListing] {
         route_result.semantic_kind = semantic_kind;
         let agent_run_context = AgentRunContext {
             output_contract: Some(route_result.clone()),
@@ -280,18 +276,19 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
         "prompts/observed_answer_fallback_prompt.md"
     );
 
-    let mut docker_mutation_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    docker_mutation_route.semantic_kind = OutputSemanticKind::None;
-    docker_mutation_route.requires_content_evidence = true;
-    docker_mutation_route.delivery_required = false;
-    docker_mutation_route.delivery_intent = OutputDeliveryIntent::None;
-    let docker_mutation_context = AgentRunContext {
-        output_contract: Some(docker_mutation_route.clone()),
+    let mut unclassified_mutation_route =
+        chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    unclassified_mutation_route.semantic_kind = OutputSemanticKind::None;
+    unclassified_mutation_route.requires_content_evidence = true;
+    unclassified_mutation_route.delivery_required = false;
+    unclassified_mutation_route.delivery_intent = OutputDeliveryIntent::None;
+    let unclassified_mutation_context = AgentRunContext {
+        output_contract: Some(unclassified_mutation_route.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
         observed_answer_fallback_prompt_logical_path(
-            Some(&docker_mutation_context),
+            Some(&unclassified_mutation_context),
             "status=ok\nchanged=true"
         ),
         "prompts/observed_answer_fallback_prompt.md"

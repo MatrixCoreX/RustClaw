@@ -556,7 +556,6 @@ pub(crate) enum FinalAnswerShape {
     ArchiveMemberExcerpt,
     ArchiveMemberList,
     ComparisonVerdict,
-    ContainerList,
     CreatedArchivePath,
     DatabaseKindJudgment,
     DeliveryTokenOrPath,
@@ -567,12 +566,10 @@ pub(crate) enum FinalAnswerShape {
     Free,
     GitStateSummary,
     GroupedNameList,
-    ImageList,
     JudgmentWithExcerptBasis,
     KeyListOrKeySummary,
     LifecycleResult,
     ListOrEmptyStatement,
-    LogExcerptOrSummary,
     NameList,
     PathList,
     PresenceVerdictWithMatch,
@@ -642,7 +639,6 @@ impl FinalAnswerShape {
         Self::ArchiveMemberExcerpt,
         Self::ArchiveMemberList,
         Self::ComparisonVerdict,
-        Self::ContainerList,
         Self::CreatedArchivePath,
         Self::DatabaseKindJudgment,
         Self::DeliveryTokenOrPath,
@@ -653,12 +649,10 @@ impl FinalAnswerShape {
         Self::Free,
         Self::GitStateSummary,
         Self::GroupedNameList,
-        Self::ImageList,
         Self::JudgmentWithExcerptBasis,
         Self::KeyListOrKeySummary,
         Self::LifecycleResult,
         Self::ListOrEmptyStatement,
-        Self::LogExcerptOrSummary,
         Self::NameList,
         Self::PathList,
         Self::PresenceVerdictWithMatch,
@@ -686,7 +680,6 @@ impl FinalAnswerShape {
             "archive_member_excerpt" => Some(Self::ArchiveMemberExcerpt),
             "archive_member_list" => Some(Self::ArchiveMemberList),
             "comparison_verdict" => Some(Self::ComparisonVerdict),
-            "container_list" => Some(Self::ContainerList),
             "created_archive_path" => Some(Self::CreatedArchivePath),
             "database_kind_judgment" => Some(Self::DatabaseKindJudgment),
             "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
@@ -697,12 +690,10 @@ impl FinalAnswerShape {
             "free" => Some(Self::Free),
             "git_state_summary" => Some(Self::GitStateSummary),
             "grouped_name_list" => Some(Self::GroupedNameList),
-            "image_list" => Some(Self::ImageList),
             "judgment_with_excerpt_basis" => Some(Self::JudgmentWithExcerptBasis),
             "key_list_or_key_summary" => Some(Self::KeyListOrKeySummary),
             "lifecycle_result" => Some(Self::LifecycleResult),
             "list_or_empty_statement" => Some(Self::ListOrEmptyStatement),
-            "log_excerpt_or_summary" => Some(Self::LogExcerptOrSummary),
             "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
             "presence_verdict_with_match" => Some(Self::PresenceVerdictWithMatch),
@@ -732,7 +723,6 @@ impl FinalAnswerShape {
             Self::ArchiveMemberExcerpt => "archive_member_excerpt",
             Self::ArchiveMemberList => "archive_member_list",
             Self::ComparisonVerdict => "comparison_verdict",
-            Self::ContainerList => "container_list",
             Self::CreatedArchivePath => "created_archive_path",
             Self::DatabaseKindJudgment => "database_kind_judgment",
             Self::DeliveryTokenOrPath => "delivery_token_or_path",
@@ -743,12 +733,10 @@ impl FinalAnswerShape {
             Self::Free => "free",
             Self::GitStateSummary => "git_state_summary",
             Self::GroupedNameList => "grouped_name_list",
-            Self::ImageList => "image_list",
             Self::JudgmentWithExcerptBasis => "judgment_with_excerpt_basis",
             Self::KeyListOrKeySummary => "key_list_or_key_summary",
             Self::LifecycleResult => "lifecycle_result",
             Self::ListOrEmptyStatement => "list_or_empty_statement",
-            Self::LogExcerptOrSummary => "log_excerpt_or_summary",
             Self::NameList => "name_list",
             Self::PathList => "path_list",
             Self::PresenceVerdictWithMatch => "presence_verdict_with_match",
@@ -780,9 +768,7 @@ impl FinalAnswerShape {
                 FinalAnswerShapeClass::ScalarValue
             }
             Self::ArchiveMemberList
-            | Self::ContainerList
             | Self::GroupedNameList
-            | Self::ImageList
             | Self::KeyListOrKeySummary
             | Self::ListOrEmptyStatement
             | Self::NameList
@@ -805,7 +791,6 @@ impl FinalAnswerShape {
             | Self::ExcerptPlusSummary
             | Self::FailedStepWithEvidence
             | Self::GitStateSummary
-            | Self::LogExcerptOrSummary
             | Self::ProjectSummaryGroundedInFiles
             | Self::RawOutputOrShortSummary
             | Self::SummaryGroundedInExcerpt

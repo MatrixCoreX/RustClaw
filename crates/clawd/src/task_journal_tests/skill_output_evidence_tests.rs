@@ -117,36 +117,6 @@ fn selected_package_manager_field_uses_structured_evidence() {
 }
 
 #[test]
-fn docker_unavailable_text_counts_as_list_candidate_evidence() {
-    let mut journal =
-        TaskJournal::for_task("task-docker-images-unavailable", "ask", "列出 Docker 镜像");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::DockerImages,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "docker_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("docker unavailable: No such file or directory (os error 2)".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(
-        coverage.observed_canonical.contains("candidates"),
-        "coverage: {coverage:?}"
-    );
-
-    assert!(coverage.observed_canonical.contains("command_output"));
-}
-
-#[test]
 fn structured_keys_array_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-structured-keys", "ask", "列出配置键");
     let route = route_for_semantic(crate::OutputSemanticKind::StructuredKeys);
@@ -175,32 +145,30 @@ fn structured_keys_array_counts_as_field_value_evidence() {
 }
 
 #[test]
-fn docker_command_not_found_text_counts_as_docker_contract_evidence() {
-    for (semantic_kind, expected_canonical) in [
-        (crate::OutputSemanticKind::ServiceStatus, "field_value"),
-        (crate::OutputSemanticKind::DockerLogs, "candidates"),
-    ] {
-        let mut journal =
-            TaskJournal::for_task("task-docker-command-not-found", "ask", "检查 Docker");
-        let route = route_for_semantic(semantic_kind);
-        journal.record_output_contract(&route.clone());
-        journal.push_step_result(&crate::executor::StepExecutionResult {
-            step_id: "step_1".to_string(),
-            skill: "run_cmd".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some("bash: line 1: docker: command not found\n".to_string()),
-            error: None,
-            started_at: 1,
-            finished_at: 2,
-        });
+fn command_not_found_text_counts_as_service_status_evidence() {
+    let mut journal = TaskJournal::for_task(
+        "task-command-not-found",
+        "ask",
+        "Check service availability",
+    );
+    let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+    journal.record_output_contract(&route.clone());
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "run_cmd".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some("bash: line 1: service-cli: command not found\n".to_string()),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
 
-        let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-        assert!(coverage.is_complete(), "coverage: {coverage:?}");
-        assert!(
-            coverage.observed_canonical.contains(expected_canonical),
-            "coverage: {coverage:?}"
-        );
-    }
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
+    assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert!(
+        coverage.observed_canonical.contains("field_value"),
+        "coverage: {coverage:?}"
+    );
 }
 
 #[test]

@@ -6,9 +6,8 @@ use super::{
     archive_database_aggregate_structured_answer, classify_skill_failure_recovery,
     deterministic_observed_execution_status_answer, deterministic_scalar_markdown_heading_answer,
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
-    package_docker_probe_structured_answer, strip_internal_execution_args,
-    strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
-    synthesize_bounded_read_range_direct_answer,
+    strip_internal_execution_args, strip_unsupported_planner_metadata_args,
+    synthesize_answer_allows_direct_fallback, synthesize_bounded_read_range_direct_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
@@ -1144,48 +1143,6 @@ fn archive_database_aggregate_structured_answer_combines_observations() {
             .pointer("/database/tables/2")
             .and_then(serde_json::Value::as_str),
         Some("users")
-    );
-}
-
-#[test]
-fn package_docker_probe_structured_answer_combines_observations() {
-    let mut loop_state = LoopState::new(1);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "package_manager",
-        r#"{"extra":{"action":"detect","manager":"apt-get","platform":"linux","candidate_order":["apt-get","apt","dnf"]},"text":"package_manager=apt-get"}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_2",
-        "docker_basic",
-        r#"{"extra":{"action":"version","available":false,"command_succeeded":false,"exit_code":127,"docker_args":["--version"],"output":"docker: command not found"},"text":"exit=127\ndocker: command not found"}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_3",
-        "docker_basic",
-        r#"{"extra":{"action":"ps","available":false,"command_succeeded":false,"exit_code":127,"docker_args":["ps","-a"],"output":"docker: command not found"},"text":"exit=127\ndocker: command not found"}"#,
-    ));
-
-    let answer = package_docker_probe_structured_answer(&loop_state).expect("probe answer");
-    let value: serde_json::Value = serde_json::from_str(&answer).expect("json answer");
-
-    assert_eq!(
-        value
-            .pointer("/package_manager/manager")
-            .and_then(serde_json::Value::as_str),
-        Some("apt-get")
-    );
-    assert_eq!(
-        value
-            .pointer("/docker/version/available")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        value
-            .pointer("/docker/containers/output")
-            .and_then(serde_json::Value::as_str),
-        Some("docker: command not found")
     );
 }
 

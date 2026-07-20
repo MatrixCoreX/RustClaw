@@ -82,10 +82,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "archive_read": f"读取 {FIXTURE_ARCHIVE} 里的 notes.txt 内容片段，并简短总结。",
     "archive_pack": f"把 {FIXTURE_DOCS_DIR} 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。",
     "archive_unpack": f"把 {FIXTURE_ARCHIVE} 解压到 tmp/contract_matrix_unpacked，并简短说明结果。",
-    "docker_ps": "列出当前 Docker 容器，如果没有也要说明观察结果。",
-    "docker_images": "列出当前 Docker 镜像，如果没有也要说明观察结果。",
-    "docker_logs": "查看最近一个 Docker 容器日志片段，如果没有容器就说明无法获取日志的原因。",
-    "docker_container_lifecycle": "检查 Docker 是否可用，并说明是否能执行容器生命周期操作。",
 }
 
 NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -129,10 +125,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "archive_read": f"Read a content excerpt from notes.txt inside {FIXTURE_ARCHIVE}, then summarize it briefly.",
     "archive_pack": f"Pack {FIXTURE_DOCS_DIR} into tmp/contract_matrix_docs_bundle.zip and tell me the generated path.",
     "archive_unpack": f"Unpack {FIXTURE_ARCHIVE} into tmp/contract_matrix_unpacked and briefly describe the result.",
-    "docker_ps": "List the current Docker containers. If there are none, say what you observed.",
-    "docker_images": "List the current Docker images. If there are none, say what you observed.",
-    "docker_logs": "Read a recent log excerpt from the latest Docker container. If no container exists, explain why logs cannot be read.",
-    "docker_container_lifecycle": "Check whether Docker is available and say whether container lifecycle operations can be performed.",
 }
 
 EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {

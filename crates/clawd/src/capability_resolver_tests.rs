@@ -113,6 +113,39 @@ fn package_detection_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
+fn docker_capabilities_resolve_without_domain_output_semantic_kinds() {
+    let state = state_with_workspace_registry();
+    for (capability, expected_action, args) in [
+        ("docker.list_containers", "ps", json!({})),
+        ("docker.list_images", "images", json!({})),
+        (
+            "docker.read_logs",
+            "logs",
+            json!({"container": "rustclaw-test", "tail": 20}),
+        ),
+        (
+            "docker.restart_container",
+            "restart",
+            json!({"container": "rustclaw-test"}),
+        ),
+    ] {
+        let (action, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, args);
+
+        assert_eq!(record.output_semantic_kind, None, "{capability}");
+        let Some(AgentAction::CallTool { tool, args }) = action else {
+            panic!("expected docker tool action for {capability}");
+        };
+        assert_eq!(tool, "docker_basic", "{capability}");
+        assert_eq!(
+            args.get("action").and_then(Value::as_str),
+            Some(expected_action),
+            "{capability}"
+        );
+    }
+}
+
+#[test]
 fn weather_capability_resolves_without_domain_output_semantic_kind() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

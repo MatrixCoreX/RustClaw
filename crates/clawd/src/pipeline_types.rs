@@ -117,10 +117,6 @@ pub(crate) enum OutputSemanticKind {
     ArchiveRead,
     ArchivePack,
     ArchiveUnpack,
-    DockerPs,
-    DockerImages,
-    DockerLogs,
-    DockerContainerLifecycle,
 }
 
 impl OutputSemanticKind {
@@ -168,10 +164,6 @@ impl OutputSemanticKind {
         Self::ArchiveRead,
         Self::ArchivePack,
         Self::ArchiveUnpack,
-        Self::DockerPs,
-        Self::DockerImages,
-        Self::DockerLogs,
-        Self::DockerContainerLifecycle,
     ];
 
     pub(crate) fn as_str(self) -> &'static str {
@@ -219,10 +211,6 @@ impl OutputSemanticKind {
             Self::ArchiveRead => "archive_read",
             Self::ArchivePack => "archive_pack",
             Self::ArchiveUnpack => "archive_unpack",
-            Self::DockerPs => "docker_ps",
-            Self::DockerImages => "docker_images",
-            Self::DockerLogs => "docker_logs",
-            Self::DockerContainerLifecycle => "docker_container_lifecycle",
         }
     }
 
