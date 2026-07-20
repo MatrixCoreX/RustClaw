@@ -217,6 +217,39 @@ fn config_field_results_use_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn multiple_structured_fields_use_generic_synthesis_without_comparison_contract() {
+    let mut loop_state = LoopState::default();
+    for (path, field_path, value) in [
+        ("UI/package.json", "name", "rustclaw-ui"),
+        ("crates/clawd/Cargo.toml", "package.name", "clawd"),
+    ] {
+        loop_state
+            .capability_results
+            .push(CapabilityResultEnvelope::ok(
+                "config_basic",
+                Some("read_field".to_string()),
+                json!({
+                    "extra": {
+                        "action": "read_field",
+                        "path": path,
+                        "field_path": field_path,
+                        "exists": true,
+                        "value": value,
+                        "value_text": value,
+                        "value_type": "string"
+                    }
+                }),
+            ));
+    }
+
+    assert_eq!(loop_state.capability_results.len(), 2);
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
 fn read_range_title_result_uses_generic_synthesis_without_domain_contract() {
     let mut loop_state = LoopState::default();
     loop_state

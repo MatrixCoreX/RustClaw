@@ -117,14 +117,12 @@ pub(crate) use output_read_range::{
 mod output_structured_scalar;
 #[cfg(test)]
 pub(crate) use output_structured_scalar::latest_structured_scalar_observation_text;
+pub(crate) use output_structured_scalar::recent_structured_scalar_observation_count;
 #[cfg(test)]
 use output_structured_scalar::structured_scalar_observation_from_extract_item;
 use output_structured_scalar::{
     multiple_structured_scalar_observations_need_synthesis,
     route_needs_structured_scalar_pair_synthesis, structured_scalar_observation_from_value,
-};
-pub(crate) use output_structured_scalar::{
-    recent_structured_scalar_observation_count, structured_scalar_equality_direct_answer,
 };
 
 #[path = "observed_output_structured_fields.rs"]
@@ -505,16 +503,6 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         return None;
     }
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
-        if let Some(answer) =
-            structured_scalar_equality_direct_answer(None, route, loop_state, agent_run_context)
-        {
-            return evidence_policy_checked_direct_candidate(
-                Some(route),
-                loop_state,
-                auto_locator_path,
-                answer,
-            );
-        }
         if route_needs_structured_scalar_pair_synthesis(loop_state, agent_run_context) {
             return None;
         }
@@ -576,19 +564,6 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
     let allow_localized_direct_template =
         observed_language_supports_bilingual_template(request_language_hint);
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
-        if let Some(answer) = structured_scalar_equality_direct_answer(
-            Some(state),
-            route,
-            loop_state,
-            agent_run_context,
-        ) {
-            return evidence_policy_checked_direct_candidate(
-                Some(route),
-                loop_state,
-                auto_locator_path,
-                answer,
-            );
-        }
         if route_needs_structured_scalar_pair_synthesis(loop_state, agent_run_context) {
             return None;
         }
@@ -725,7 +700,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
         FinalAnswerShape::ComparisonVerdict
             | FinalAnswerShape::ExistenceVerdictWithPath
             | FinalAnswerShape::RawOutputOrShortSummary
-            | FinalAnswerShape::ScalarEqualityVerdict
             | FinalAnswerShape::StatusWithSource
             | FinalAnswerShape::ValidationVerdict
     )

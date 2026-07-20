@@ -558,7 +558,6 @@ pub(crate) enum FinalAnswerShape {
     RawOutputOrShortSummary,
     RiskAssessment,
     Scalar,
-    ScalarEqualityVerdict,
     SinglePath,
     StatusWithSource,
     SummaryGroundedInExcerpt,
@@ -621,7 +620,6 @@ impl FinalAnswerShape {
         Self::RawOutputOrShortSummary,
         Self::RiskAssessment,
         Self::Scalar,
-        Self::ScalarEqualityVerdict,
         Self::SinglePath,
         Self::StatusWithSource,
         Self::SummaryGroundedInExcerpt,
@@ -644,7 +642,6 @@ impl FinalAnswerShape {
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
             "risk_assessment" => Some(Self::RiskAssessment),
             "scalar" => Some(Self::Scalar),
-            "scalar_equality_verdict" => Some(Self::ScalarEqualityVerdict),
             "single_path" => Some(Self::SinglePath),
             "status_with_source" => Some(Self::StatusWithSource),
             "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
@@ -669,7 +666,6 @@ impl FinalAnswerShape {
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
             Self::RiskAssessment => "risk_assessment",
             Self::Scalar => "scalar",
-            Self::ScalarEqualityVerdict => "scalar_equality_verdict",
             Self::SinglePath => "single_path",
             Self::StatusWithSource => "status_with_source",
             Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
@@ -690,7 +686,6 @@ impl FinalAnswerShape {
             | Self::ExistenceVerdictWithPath
             | Self::LifecycleResult
             | Self::RiskAssessment
-            | Self::ScalarEqualityVerdict
             | Self::StatusWithSource
             | Self::ValidationVerdict => FinalAnswerShapeClass::Verdict,
             Self::ExcerptPlusSummary

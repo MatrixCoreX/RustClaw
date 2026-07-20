@@ -865,19 +865,6 @@ pub(super) async fn handle_synthesize_answer_action(
             if let Some(answer) = capability_synthesis_answer {
                 return Ok(answer);
             }
-            if let Some(route) = agent_run_context.and_then(|context| context.output_contract())
-            {
-                if let Some(answer) =
-                    crate::agent_engine::observed_output::structured_scalar_equality_direct_answer(
-                        Some(state),
-                        route,
-                        loop_state,
-                        agent_run_context,
-                    )
-                {
-                    return Ok(answer);
-                }
-            }
             if let Some(answer) =
                 kb_filesystem_mutation_structured_answer(loop_state, agent_run_context)
             {

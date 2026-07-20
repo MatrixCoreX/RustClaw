@@ -567,7 +567,6 @@ pub(super) fn replace_delivery_with_direct_scalar_observed_answer(
         && planned_delivery_is_publishable_model_language_answer(current_delivery)
         && delivery_is_single_line_text(current_delivery)
         && !machine_field_placeholder_delivery_for_scalar_contract(current_delivery, route)
-        && !recent_scalar_observed_answer_extends_delivery(current_delivery, &answer, route)
     {
         return false;
     }
@@ -619,7 +618,6 @@ fn scalar_contract_delivery_should_be_replaced_with_observed_scalar(
             .filter(|line| !line.trim().is_empty())
             .count()
             > 1
-        || recent_scalar_observed_answer_extends_delivery(delivery, answer, route)
         || delivery.contains(answer)
 }
 
@@ -636,26 +634,6 @@ fn scalar_machine_selector_projection(delivery: &str) -> bool {
     }
     line.chars()
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-}
-
-fn recent_scalar_observed_answer_extends_delivery(
-    delivery: &str,
-    answer: &str,
-    route: Option<&crate::IntentOutputContract>,
-) -> bool {
-    route.is_some_and(|route| {
-        let contract = route.clone();
-        route.semantic_kind_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
-            && !contract.delivery_required
-    }) && answer.contains(delivery)
-        && answer
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .count()
-            > delivery
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .count()
 }
 
 fn machine_field_placeholder_delivery_for_scalar_contract(
@@ -1172,30 +1150,6 @@ fn direct_structured_observed_answer_impl(
     if raw_command_output_needs_structural_projection(route, loop_state) {
         return None;
     }
-    if let Some(answer) =
-        crate::agent_engine::observed_output::structured_scalar_equality_direct_answer(
-            state,
-            route,
-            loop_state,
-            agent_run_context,
-        )
-    {
-        return Some((
-            answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                parsed: true,
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: 2,
-                ..Default::default()
-            },
-        ));
-    }
     if route.clone().requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
         && !crate::finalize::route_matches_service_status_output_contract(route)
@@ -1493,11 +1447,6 @@ pub(super) fn route_allows_direct_scalar_observed_answer(
 ) -> bool {
     let contract = route.clone();
     if route.semantic_kind_is(crate::OutputSemanticKind::ScalarCount) {
-        return true;
-    }
-    if route.semantic_kind_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
-        && !contract.delivery_required
-    {
         return true;
     }
     if contract.response_shape == crate::OutputResponseShape::Scalar {

@@ -392,42 +392,6 @@ fn requested_machine_kv_summary_failure_recovery_projects_read_range_fields() {
 }
 
 #[test]
-fn requested_machine_kv_summary_final_guard_preserves_compare_paths_existence_fields() {
-    let prompt = "return same_path=false and both exist fields";
-    let mut route = route_result();
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-compare-paths-final", "ask", prompt);
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "fs_basic",
-            r#"{"extra":{"action":"compare_paths","field_value":{"same_path":false,"left_exists":true,"right_exists":true}}}"#,
-        ));
-    let mut answer_text = "same_path=false\nleft_exists=true\nright_exists=true".to_string();
-    let mut answer_messages = vec![answer_text.clone()];
-
-    assert!(!apply_requested_machine_kv_summary_to_final_answer(
-        prompt,
-        &route,
-        &mut journal,
-        &mut answer_text,
-        &mut answer_messages,
-    ));
-
-    assert_eq!(
-        answer_text,
-        "same_path=false\nleft_exists=true\nright_exists=true"
-    );
-    assert_eq!(answer_messages, vec![answer_text.clone()]);
-    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
-}
-
-#[test]
 fn requested_machine_kv_summary_final_guard_preserves_content_evidence_synthesis() {
     let prompt = "Read README.md first 20 lines and answer existence, line count, and title.";
     let mut route = route_result();

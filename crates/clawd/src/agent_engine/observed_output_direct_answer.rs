@@ -93,16 +93,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
 
     if let Some(route) = route {
         if let Some(answer) =
-            structured_scalar_equality_direct_answer(state, route, loop_state, agent_run_context)
-        {
-            return evidence_policy_checked_direct_candidate(
-                Some(route),
-                loop_state,
-                auto_locator_path,
-                answer,
-            );
-        }
-        if let Some(answer) =
             multi_status_json_summary_candidate(route, loop_state).and_then(|answer| {
                 evidence_policy_checked_direct_candidate(
                     Some(route),

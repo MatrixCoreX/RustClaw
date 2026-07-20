@@ -90,9 +90,7 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
-        OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
-            TaskOperation::Validate
-        }
+        OutputSemanticKind::QuantityComparison => TaskOperation::Validate,
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
         _ => operation_for_unclassified_output_contract(output_contract),
@@ -242,7 +240,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::FilePaths => {
             fields.insert("candidates");
         }
-        OutputSemanticKind::ServiceStatus | OutputSemanticKind::RecentScalarEqualityCheck => {
+        OutputSemanticKind::ServiceStatus => {
             fields.insert("field_value");
         }
         OutputSemanticKind::ExecutionFailedStep => {

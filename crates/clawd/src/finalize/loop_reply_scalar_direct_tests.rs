@@ -1,7 +1,6 @@
 use super::*;
 use crate::finalize::loop_reply::{
-    enforce_delivery_output_contract, replace_delivery_with_direct_scalar_observed_answer,
-    replace_delivery_with_direct_structured_observed_answer,
+    enforce_delivery_output_contract, replace_delivery_with_direct_structured_observed_answer,
 };
 
 #[tokio::test]
@@ -385,120 +384,6 @@ async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_obs
 
     assert_eq!(reply.text, "/home/guagua/rustclaw");
     assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
-    assert!(!reply.should_fail_task);
-}
-
-#[tokio::test]
-async fn finalize_loop_reply_replaces_partial_recent_scalar_delivery_with_observed_fields() {
-    let state = test_state();
-    let task = claimed_task("task-recent-scalar-compare-paths-fields");
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
-    route.response_shape = OutputResponseShape::Strict;
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false},"field_value":{"left_exists":true,"right_exists":true,"same_path":false},"left":{"exists":true,"kind":"file","path":"service_notes.md"},"right":{"exists":true,"kind":"file","path":"release_checklist.md"}},"text":"{}"}"#,
-    ));
-    loop_state
-        .delivery_messages
-        .push("same_path=false".to_string());
-    loop_state.last_user_visible_respond = Some("same_path=false".to_string());
-    let (direct_answer, _) =
-        direct_scalar_observed_answer(Some(&state), &loop_state, Some(&agent_run_context))
-            .expect("direct scalar answer should use compare_paths field_value");
-    assert_eq!(
-        direct_answer,
-        "same_path=false\nleft_exists=true\nright_exists=true"
-    );
-    let mut replacement_state = loop_state.clone();
-    let mut finalizer_summary = None;
-    assert!(replace_delivery_with_direct_scalar_observed_answer(
-        &state,
-        &task,
-        &mut replacement_state,
-        Some(&agent_run_context),
-        &mut finalizer_summary
-    ));
-    assert_eq!(
-        replacement_state.last_user_visible_respond.as_deref(),
-        Some("same_path=false\nleft_exists=true\nright_exists=true")
-    );
-
-    let reply = finalize_loop_reply(
-        &state,
-        &task,
-        "return same_path and existence fields",
-        loop_state,
-        Some(&agent_run_context),
-    )
-    .await
-    .expect("finalize should preserve observed fields");
-
-    assert_eq!(
-        reply.text,
-        "same_path=false\nleft_exists=true\nright_exists=true"
-    );
-    assert_eq!(
-        reply.messages,
-        vec!["same_path=false\nleft_exists=true\nright_exists=true".to_string()]
-    );
-    assert!(!reply.should_fail_task);
-}
-
-#[tokio::test]
-async fn finalize_loop_reply_restores_recent_scalar_existence_fields_after_late_compression() {
-    let state = test_state();
-    let task = claimed_task("task-recent-scalar-late-existence-restore");
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
-    route.response_shape = OutputResponseShape::OneSentence;
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let richer_answer = "same_path=false\nleft_exists=true\nright_exists=true";
-    let mut loop_state = crate::agent_engine::LoopState::new(5);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false},"field_value":{"left_exists":true,"right_exists":true,"same_path":false},"left":{"exists":true,"kind":"file","path":"service_notes.md"},"right":{"exists":true,"kind":"file","path":"release_checklist.md"}},"text":"{}"}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "synthesize_answer",
-        richer_answer,
-    ));
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_3", "respond", richer_answer));
-    loop_state.delivery_messages.push(richer_answer.to_string());
-    loop_state.last_publishable_synthesis_output = Some(richer_answer.to_string());
-    loop_state.last_user_visible_respond = Some(richer_answer.to_string());
-
-    let reply = finalize_loop_reply(
-        &state,
-        &task,
-        "return same_path and both exist fields",
-        loop_state,
-        Some(&agent_run_context),
-    )
-    .await
-    .expect("finalize should restore compare_paths existence fields");
-
-    assert_eq!(reply.text, richer_answer);
-    assert_eq!(reply.messages, vec![richer_answer.to_string()]);
     assert!(!reply.should_fail_task);
 }
 
@@ -989,50 +874,6 @@ fn direct_structured_observed_answer_skips_ambiguous_multi_structured_scalars() 
     };
     assert!(
         direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context)).is_none()
-    );
-}
-
-#[test]
-fn direct_structured_observed_answer_formats_scalar_equality_pair() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.executed_step_results.push(StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "system_basic".to_string(),
-        status: StepExecutionStatus::Ok,
-        output: Some(
-            r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"react-example","value":"react-example","value_type":"string"}"#
-                .to_string(),
-        ),
-        error: None,
-        started_at: 0,
-        finished_at: 0,
-    });
-    loop_state.executed_step_results.push(StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "system_basic".to_string(),
-        status: StepExecutionStatus::Ok,
-        output: Some(
-            r#"{"action":"extract_field","exists":true,"field_path":"package.name","value_text":"clawd","value":"clawd","value_type":"string"}"#
-                .to_string(),
-        ),
-        error: None,
-        started_at: 0,
-        finished_at: 0,
-    });
-    let mut route = free_route_result();
-    route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let (answer, summary) =
-        direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
-            .expect("recent scalar equality should use structured field values");
-    assert_eq!(answer, "react-example != clawd");
-    assert_eq!(
-        summary.disposition,
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
     );
 }
 

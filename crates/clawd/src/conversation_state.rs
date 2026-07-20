@@ -309,7 +309,6 @@ fn standalone_contextual_chat_result_starts_primary_task(
     matches!(
         route_result.semantic_kind,
         crate::OutputSemanticKind::QuantityComparison
-            | crate::OutputSemanticKind::RecentScalarEqualityCheck
     )
 }
 

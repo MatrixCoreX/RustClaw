@@ -341,43 +341,6 @@ fn raw_strict_model_language_output_does_not_stop_on_bare_observation() {
 }
 
 #[test]
-fn observed_structured_scalar_equality_pair_can_stop_without_synthesis_round() {
-    let mut loop_state = LoopState::new(3);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "config_basic",
-        r#"{"action":"read_field","path":"UI/package.json","resolved_path":"/repo/UI/package.json","field_path":"name","exists":true,"value_text":"react-example","value":"react-example","value_type":"string"}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_2",
-        "config_basic",
-        r#"{"action":"read_field","path":"crates/clawd/Cargo.toml","resolved_path":"/repo/crates/clawd/Cargo.toml","field_path":"package.name","exists":true,"value_text":"clawd","value":"clawd","value_type":"string"}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
-    let actions = vec![
-        AgentAction::CallTool {
-            tool: "config_basic".to_string(),
-            args: json!({"action":"read_field","path":"UI/package.json","field_path":"name"}),
-        },
-        AgentAction::CallTool {
-            tool: "config_basic".to_string(),
-            args: json!({"action":"read_field","path":"crates/clawd/Cargo.toml","field_path":"package.name"}),
-        },
-    ];
-
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            output_contract: Some(route.clone()),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
 fn observation_only_freeform_round_can_stop_for_observed_fallback() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;

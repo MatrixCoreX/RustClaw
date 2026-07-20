@@ -11,28 +11,6 @@ fn load_workspace_matrix() -> ContractMatrix {
 }
 
 #[test]
-fn recent_scalar_equality_allows_structured_field_extractors() {
-    let matrix = load_workspace_matrix();
-    let contract = matrix
-        .semantic_contract(OutputSemanticKind::RecentScalarEqualityCheck)
-        .expect("recent scalar equality contract");
-    let matched = MatchedContract::Semantic(contract);
-    for action in [
-        "config_basic.read_field",
-        "config_basic.read_fields",
-        "system_basic.info",
-        "system_basic.runtime_status",
-    ] {
-        let action_ref = ActionRef::parse(action).expect("action parses");
-        assert_eq!(
-            matched.action_policy(&action_ref),
-            ActionPolicyDecision::Allowed,
-            "{action} should be allowed for scalar field and local runtime observations"
-        );
-    }
-}
-
-#[test]
 fn command_output_summary_allows_structured_field_extractors() {
     let matrix = load_workspace_matrix();
     let contract = matrix
