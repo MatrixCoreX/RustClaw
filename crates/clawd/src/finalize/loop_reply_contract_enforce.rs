@@ -8,11 +8,11 @@ use super::{
     generated_delivery_existing_file_content_synthesis_token,
     last_respond_matches_single_line_observation, latest_publishable_respond_step_output,
     latest_tail_read_range_answer_from_loop, log_deterministic_delivery_record,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    output_contract_requests_exact_delivery, planned_delivery_is_publishable_model_language_answer,
+    looks_like_structured_machine_output, output_contract_requests_exact_delivery,
+    planned_delivery_is_publishable_model_language_answer,
     publishable_summary_has_multi_source_observation,
-    route_requires_compound_content_file_delivery, route_requires_raw_tail_read_passthrough,
-    strict_raw_command_output_exact_observation_answer, valid_publishable_synthesis_output,
+    route_requires_compound_content_file_delivery, route_requires_exact_tail_read_delivery,
+    strict_exact_observation_output_exact_observation_answer, valid_publishable_synthesis_output,
 };
 
 pub(super) async fn enforce_delivery_output_contract(
@@ -123,7 +123,7 @@ pub(super) async fn enforce_delivery_output_contract(
             .or_else(|| loop_state.delivery_messages.last().cloned())
             .unwrap_or_default()
     };
-    if route_requires_raw_tail_read_passthrough(Some(route)) {
+    if route_requires_exact_tail_read_delivery(Some(route)) {
         if let Some(answer) = latest_tail_read_range_answer_from_loop(loop_state, false) {
             let answer = answer.trim().to_string();
             let seed_matches = seed_text.trim() == answer;
@@ -138,7 +138,7 @@ pub(super) async fn enforce_delivery_output_contract(
                 loop_state.delivery_messages = vec![answer];
                 log_deterministic_delivery_record(
                     &task.task_id,
-                    "final_result_keep_strict_raw_tail_read_observation",
+                    "final_result_keep_strict_exact_tail_read_observation",
                     "kept",
                     agent_run_context,
                     loop_state.executed_step_results.len(),
@@ -147,13 +147,13 @@ pub(super) async fn enforce_delivery_output_contract(
             }
         }
     }
-    if strict_raw_command_output_exact_observation_answer(route, loop_state, &seed_text) {
+    if strict_exact_observation_output_exact_observation_answer(route, loop_state, &seed_text) {
         let answer = seed_text.trim().to_string();
         loop_state.last_user_visible_respond = Some(answer.clone());
         loop_state.delivery_messages = vec![answer];
         log_deterministic_delivery_record(
             &task.task_id,
-            "final_result_use_exact_raw_command_observation",
+            "final_result_use_exact_exact_observation_observation",
             "kept",
             agent_run_context,
             loop_state.executed_step_results.len(),
@@ -264,7 +264,7 @@ pub(super) async fn enforce_delivery_output_contract(
                     user_text,
                     "",
                     &format!("{:?}", route.response_shape),
-                    &format!("{:?}", route.semantic_kind),
+                    "",
                     reason_code,
                     reason,
                     &language_hint,
@@ -294,7 +294,7 @@ fn complete_machine_record_for_scalar<'a>(
 ) -> Option<&'a str> {
     if route.response_shape != crate::OutputResponseShape::Scalar
         || route.delivery_required
-        || !route.semantic_kind_is_unclassified()
+        || !route.does_not_request_exact_command_output()
     {
         return None;
     }
@@ -334,7 +334,7 @@ fn model_language_evidence_summary_should_skip_low_level_reshape(
         crate::evidence_policy::final_answer_shape_for_output_contract(route),
         Some(
             crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence
-                | crate::evidence_policy::FinalAnswerShape::RawOutputOrShortSummary
+                | crate::evidence_policy::FinalAnswerShape::ExactObservationOrShortSummary
         )
     ) {
         return false;
@@ -343,7 +343,7 @@ fn model_language_evidence_summary_should_skip_low_level_reshape(
     if !planned_delivery_is_publishable_model_language_answer(candidate) {
         return false;
     }
-    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    if route.requests_exact_command_output()
         && !publishable_summary_has_multi_source_observation(loop_state)
     {
         return false;
@@ -363,7 +363,7 @@ pub(super) fn route_prefers_content_evidence_synthesis(
     synthesis: &str,
 ) -> bool {
     let contract = route.clone();
-    let content_summary_contract = route.semantic_kind_is_unclassified()
+    let content_summary_contract = route.does_not_request_exact_command_output()
         && !matches!(
             contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
@@ -372,7 +372,7 @@ pub(super) fn route_prefers_content_evidence_synthesis(
         && !contract.delivery_required
         && (contract.response_shape == crate::OutputResponseShape::OneSentence
             || contract.exact_sentence_count.is_some())
-        && route.semantic_kind_is_unclassified();
+        && route.does_not_request_exact_command_output();
     if !contract.requires_content_evidence
         || contract.delivery_required
         || (output_contract_requests_exact_delivery(route)
@@ -398,7 +398,7 @@ pub(super) async fn discard_meta_respond_placeholder_for_content_evidence(
         return;
     };
     let respond = last_respond.trim();
-    let Some(raw_passthrough) = should_drop_passthrough_delivery_for_content_evidence(
+    let Some(observed_passthrough) = should_drop_passthrough_delivery_for_content_evidence(
         loop_state,
         requires_content_evidence,
         agent_run_context,
@@ -421,13 +421,13 @@ pub(super) async fn discard_meta_respond_placeholder_for_content_evidence(
     // §3.4 finalize-tier: drop_passthrough_delivery 是 finalize 决策层。
     let meta_placeholder =
         crate::semantic_judge::is_meta_respond_instruction(state, task, respond).await;
-    if !raw_passthrough && !meta_placeholder {
+    if !observed_passthrough && !meta_placeholder {
         return;
     }
     info!(
-        "content_evidence_drop_passthrough_respond task_id={} raw_passthrough={} meta_placeholder={} text={}",
+        "content_evidence_drop_passthrough_respond task_id={} observed_passthrough={} meta_placeholder={} text={}",
         task.task_id,
-        raw_passthrough,
+        observed_passthrough,
         meta_placeholder,
         crate::truncate_for_log(respond)
     );
@@ -461,7 +461,7 @@ pub(super) fn should_drop_passthrough_delivery_for_content_evidence(
 
     let route_has_semantic_answer_contract = agent_run_context
         .and_then(|ctx| ctx.output_contract())
-        .is_some_and(|route| !route.semantic_kind_is_unclassified());
+        .is_some_and(|route| !route.does_not_request_exact_command_output());
     let direct_structured_answer = route_has_semantic_answer_contract
         .then(|| direct_structured_observed_answer(None, loop_state, agent_run_context))
         .flatten()
@@ -479,7 +479,7 @@ pub(super) fn should_drop_passthrough_delivery_for_content_evidence(
         return Some(false);
     }
 
-    let raw_passthrough = loop_state
+    let observed_passthrough = loop_state
         .executed_step_results
         .iter()
         .rfind(|step| {
@@ -493,19 +493,18 @@ pub(super) fn should_drop_passthrough_delivery_for_content_evidence(
             if respond == body {
                 return Some(true);
             }
-            (step.skill == "list_dir"
-                && crate::agent_engine::observed_output::normalized_observed_listing(body)
-                    .is_some_and(|listing| {
-                        listing.trim() == respond
-                            || listing
-                                .lines()
-                                .map(str::trim)
-                                .any(|entry| !entry.is_empty() && entry == respond)
-                    }))
-            .then_some(true)
+            crate::agent_engine::observed_output::normalized_observed_listing(body)
+                .is_some_and(|listing| {
+                    listing.trim() == respond
+                        || listing
+                            .lines()
+                            .map(str::trim)
+                            .any(|entry| !entry.is_empty() && entry == respond)
+                })
+                .then_some(true)
         })
         .unwrap_or(false);
-    Some(raw_passthrough)
+    Some(observed_passthrough)
 }
 
 pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
@@ -534,25 +533,23 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
     {
         return true;
     }
-    if matches!(
-        route.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput
-    ) {
-        return strict_raw_command_output_exact_observation_answer(route, loop_state, respond);
+    if route.requests_exact_command_output() {
+        return strict_exact_observation_output_exact_observation_answer(
+            route, loop_state, respond,
+        );
     }
     if direct_scalar_observed_answer(None, loop_state, agent_run_context)
         .is_some_and(|(answer, _)| answer.trim() == respond.trim())
     {
         return true;
     }
-    let has_answer_semantic = !matches!(route.semantic_kind, crate::OutputSemanticKind::None);
     let has_constrained_answer_shape = matches!(
         contract.response_shape,
         crate::OutputResponseShape::Scalar
             | crate::OutputResponseShape::OneSentence
             | crate::OutputResponseShape::Strict
     );
-    if !has_answer_semantic && !has_constrained_answer_shape {
+    if !has_constrained_answer_shape {
         return false;
     }
     let answer = respond.trim();
@@ -562,7 +559,6 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
         || crate::finalize::looks_like_internal_trace_artifact(answer)
         || crate::finalize::is_execution_summary_message(answer)
         || looks_like_structured_machine_output(answer)
-        || looks_like_raw_command_snapshot(answer)
     {
         return false;
     }
@@ -590,7 +586,7 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
     )
 }
 
-pub(super) fn discard_raw_passthrough_delivery_when_structured_answer_available(
+pub(super) fn discard_observed_passthrough_delivery_when_structured_answer_available(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -607,7 +603,7 @@ pub(super) fn discard_raw_passthrough_delivery_when_structured_answer_available(
     if current_delivery.is_empty() {
         return;
     }
-    let raw_passthrough = loop_state
+    let observed_passthrough = loop_state
         .executed_step_results
         .iter()
         .rfind(|step| {
@@ -625,7 +621,7 @@ pub(super) fn discard_raw_passthrough_delivery_when_structured_answer_available(
             (current_delivery == first_line).then_some(true)
         })
         .unwrap_or(false);
-    if !raw_passthrough {
+    if !observed_passthrough {
         return;
     }
     if last_respond_matches_single_line_observation(loop_state, current_delivery) {
@@ -648,7 +644,7 @@ pub(super) fn discard_raw_passthrough_delivery_when_structured_answer_available(
     }
 
     info!(
-        "drop_raw_passthrough_delivery_for_structured_answer task_id={} raw={} structured={}",
+        "drop_observed_passthrough_delivery_for_structured_answer task_id={} raw={} structured={}",
         task.task_id,
         crate::truncate_for_log(current_delivery),
         crate::truncate_for_log(structured_answer.as_deref().unwrap_or("<synthesis>"))

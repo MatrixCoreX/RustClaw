@@ -214,7 +214,7 @@ pub(super) fn generated_delivery_existing_file_content_synthesis_token(
 }
 
 fn step_output_is_file_write(step: &crate::executor::StepExecutionResult) -> bool {
-    if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+    if !step.is_ok() {
         return false;
     }
     step.output.as_deref().map(str::trim).is_some_and(|output| {

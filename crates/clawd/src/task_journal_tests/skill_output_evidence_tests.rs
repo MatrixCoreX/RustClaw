@@ -7,7 +7,7 @@ fn generic_file_delivery_wrapped_missing_find_name_supplies_checked_path_evidenc
         "ask",
         "send definitely_missing_named_file_golden_001.txt",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = crate::OutputResponseShape::FileToken;
@@ -46,7 +46,6 @@ fn generic_file_delivery_wrapped_missing_find_name_supplies_checked_path_evidenc
 fn docker_success_exit_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-docker-version", "ask", "检查 Docker 是否可用");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
@@ -156,7 +155,7 @@ fn command_not_found_text_counts_as_generic_command_evidence() {
         "ask",
         "Check service availability",
     );
-    let route = route_for_semantic(crate::OutputSemanticKind::None);
+    let route = route_for_contract(false);
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -176,7 +175,7 @@ fn command_not_found_text_counts_as_generic_command_evidence() {
 #[test]
 fn scalar_count_json_value_counts_as_count_evidence() {
     let mut journal = TaskJournal::for_task("task-scalar-count", "ask", "输出数量");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.selection.structured_field_selector = Some("count".to_string());
     journal.record_output_contract(&route.clone());
@@ -198,7 +197,7 @@ fn scalar_count_json_value_counts_as_count_evidence() {
 #[test]
 fn log_analyze_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-log-summary", "ask", "总结日志异常");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "logs".to_string();
@@ -228,7 +227,7 @@ fn log_analyze_output_counts_as_content_excerpt_evidence() {
 #[test]
 fn browser_web_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-web-summary", "ask", "总结网页");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::Url;
     route.locator_hint = "https://example.com".to_string();
@@ -287,7 +286,7 @@ fn browser_web_output_counts_as_content_excerpt_evidence() {
 #[test]
 fn web_search_extract_output_counts_as_candidates_evidence() {
     let mut journal = TaskJournal::for_task("task-web-search-summary", "ask", "总结搜索结果");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -323,7 +322,7 @@ fn web_search_extract_output_counts_as_candidates_evidence() {
 #[test]
 fn web_search_extract_empty_candidates_count_as_candidates_evidence() {
     let mut journal = TaskJournal::for_task("task-web-search-empty", "ask", "总结搜索结果");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -368,7 +367,7 @@ fn web_search_extract_empty_candidates_count_as_candidates_evidence() {
 #[test]
 fn weather_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-weather-query", "ask", "查天气");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
@@ -401,7 +400,7 @@ fn weather_output_counts_as_content_excerpt_evidence() {
 #[test]
 fn stock_output_counts_as_generic_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-market-quote", "ask", "查行情");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
@@ -433,7 +432,7 @@ fn stock_output_counts_as_generic_content_excerpt_evidence() {
 #[test]
 fn crypto_quote_extra_content_excerpt_counts_as_generic_evidence() {
     let mut journal = TaskJournal::for_task("task-crypto-quote", "ask", "查 BTCUSDT 价格");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
@@ -473,7 +472,7 @@ fn crypto_quote_extra_content_excerpt_counts_as_generic_evidence() {
 #[test]
 fn image_vision_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-image-understanding", "ask", "描述图片");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -505,7 +504,7 @@ fn image_vision_output_counts_as_content_excerpt_evidence() {
 #[test]
 fn x_preview_output_counts_as_generic_content_evidence() {
     let mut journal = TaskJournal::for_task("task-publishing-preview", "ask", "预览发布文案");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.locator_kind = crate::OutputLocatorKind::None;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -979,7 +978,7 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
         .any(|item| item.as_str() == Some("size_bytes")));
 
     let mut journal = TaskJournal::for_task("task-large-mtime-dir", "ask", "list recent entries");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1003,7 +1002,6 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
 fn health_check_fields_count_as_generic_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-health-fields", "ask", "inspect runtime health");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::None,
         ..Default::default()
     };
@@ -1026,7 +1024,7 @@ fn health_check_fields_count_as_generic_field_value_evidence() {
 #[test]
 fn wrapped_system_basic_info_counts_as_generic_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-system-info", "ask", "show runtime information");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1070,7 +1068,7 @@ fn wrapped_system_basic_info_counts_as_generic_field_value_evidence() {
 fn doc_parse_metadata_path_counts_as_required_path_before_truncation() {
     let mut journal =
         TaskJournal::for_task("task-doc-parse-path", "ask", "读 README 并用三句话总结");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::Filename;
     route.locator_hint = "README.md".to_string();
@@ -1115,7 +1113,7 @@ fn doc_parse_metadata_path_counts_as_required_path_before_truncation() {
 fn run_cmd_process_output_counts_as_generic_command_evidence() {
     let mut journal =
         TaskJournal::for_task("task-process-run-cmd", "ask", "inspect the running process");
-    let route = route_for_semantic(crate::OutputSemanticKind::None);
+    let route = route_for_contract(false);
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1139,7 +1137,7 @@ fn run_cmd_process_output_counts_as_generic_command_evidence() {
 fn http_basic_text_counts_as_generic_field_value_evidence() {
     let mut journal =
         TaskJournal::for_task("task-http-basic-fields", "ask", "检查本地 health 接口");
-    let route = route_for_semantic(crate::OutputSemanticKind::None);
+    let route = route_for_contract(false);
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1164,7 +1162,7 @@ fn http_basic_json_wrapper_extracts_embedded_body_status_fields() {
         "ask",
         "observe local health endpoint",
     );
-    let route = route_for_semantic(crate::OutputSemanticKind::None);
+    let route = route_for_contract(false);
     journal.record_output_contract(&route.clone());
     let body = json!({
         "ok": true,
@@ -1305,13 +1303,13 @@ fn http_basic_json_wrapper_body_counts_as_generic_content_excerpt_evidence() {
 }
 
 #[test]
-fn raw_command_output_http_basic_text_counts_as_command_output_evidence() {
+fn exact_observation_output_http_basic_text_counts_as_command_output_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-raw-command-http-basic",
         "ask",
         "请求 http://127.0.0.1:8787/v1/health",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::RawCommandOutput);
+    let mut route = route_for_contract(true);
     route.requires_content_evidence = true;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1330,13 +1328,13 @@ fn raw_command_output_http_basic_text_counts_as_command_output_evidence() {
 }
 
 #[test]
-fn raw_command_output_file_read_excerpt_counts_as_command_output_evidence() {
+fn exact_observation_output_file_read_excerpt_counts_as_command_output_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-raw-command-file-read",
         "ask",
         "读取 README.md 前 4 行",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::RawCommandOutput);
+    let mut route = route_for_contract(true);
     route.requires_content_evidence = true;
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {

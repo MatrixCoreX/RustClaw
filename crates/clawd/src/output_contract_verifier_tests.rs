@@ -1,11 +1,9 @@
 use super::*;
-use crate::OutputSemanticKind;
 
 fn contract_existence(hint: &str) -> IntentOutputContract {
     IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::None,
         locator_hint: hint.to_string(),
         ..IntentOutputContract::default()
     }
@@ -50,7 +48,6 @@ fn directory_names_allows_parent_dirs_with_dotted_intermediate_component() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Strict,
-        semantic_kind: OutputSemanticKind::None,
         ..IntentOutputContract::default()
     };
 
@@ -68,7 +65,6 @@ fn pass_scalar_count_for_pure_integer() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -84,7 +80,6 @@ fn reshape_scalar_count_extracts_sole_int_from_multiline_candidate() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -111,7 +106,6 @@ fn reshape_scalar_count_extracts_sole_int_from_single_line_candidate() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -130,7 +124,6 @@ fn pass_scalar_count_missing_target_failure_without_integer() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -151,7 +144,6 @@ fn pass_scalar_count_missing_target_failure_with_digits_in_path() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -172,7 +164,6 @@ fn reject_scalar_count_when_no_integer_at_all() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()

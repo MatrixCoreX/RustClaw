@@ -233,13 +233,6 @@ crates/clawd/src/channel_send.rs	whatsapp api_base is empty	return Err("whatsapp
 crates/clawd/src/channel_send.rs	whatsapp phone_number_id is empty	return Err("whatsapp phone_number_id is empty".to_string());
 crates/clawd/src/channel_send.rs	whatsapp_web.bridge_base_url is empty	return Err("whatsapp_web.bridge_base_url is empty".to_string());
 crates/clawd/src/clarify_state.rs	acquire db for clarify state clear: {err}	.map_err(|err| anyhow::anyhow!("acquire db for clarify state clear: {err}"))?;
-crates/clawd/src/contract_matrix.rs	contract `{key}` declares semantic_kind `{declared}`	"contract `{key}` declares semantic_kind `{declared}`"
-crates/clawd/src/contract_matrix.rs	contract `{key}` has unknown evidence_expression token `{token}`	"contract `{key}` has unknown evidence_expression token `{token}`"
-crates/clawd/src/contract_matrix.rs	contract `{key}` has unknown final_answer_shape `{}`	"contract `{key}` has unknown final_answer_shape `{}`",
-crates/clawd/src/contract_matrix.rs	contract `{key}` has unknown required_evidence `{field}`	"contract `{key}` has unknown required_evidence `{field}`"
-crates/clawd/src/contract_matrix.rs	contract `{key}` missing evidence_expression	errors.push(format!("contract `{key}` missing evidence_expression"));
-crates/clawd/src/contract_matrix.rs	contract `{key}` missing final_answer_shape	errors.push(format!("contract `{key}` missing final_answer_shape"));
-crates/clawd/src/contract_matrix.rs	contract `{key}` missing observation_sources	errors.push(format!("contract `{key}` missing observation_sources"));
 crates/clawd/src/contract_matrix.rs	generic profile `{}` has unknown evidence_expression token `{token}`	"generic profile `{}` has unknown evidence_expression token `{token}`",
 crates/clawd/src/contract_matrix.rs	generic profile `{}` has unknown final_answer_shape `{}`	"generic profile `{}` has unknown final_answer_shape `{}`",
 crates/clawd/src/contract_matrix.rs	generic profile `{}` has unknown required_evidence `{field}`	"generic profile `{}` has unknown required_evidence `{field}`",
@@ -249,7 +242,6 @@ crates/clawd/src/contract_matrix.rs	generic profile `{}` missing observation_sou
 crates/clawd/src/contract_matrix.rs	generic profile missing name	errors.push("generic profile missing name".to_string());
 crates/clawd/src/contract_matrix.rs	invalid failure attribution `{raw}`	errors.push(format!("invalid failure attribution `{raw}`"));
 crates/clawd/src/contract_matrix.rs	matrix_version must not be empty	errors.push("matrix_version must not be empty".to_string());
-crates/clawd/src/contract_matrix.rs	missing contract for semantic `{key}`	None => errors.push(format!("missing contract for semantic `{key}`")),
 crates/clawd/src/contract_matrix.rs	parse task contract matrix: {}	.with_context(|| format!("parse task contract matrix: {}", path.display()))?;
 crates/clawd/src/contract_matrix.rs	read task contract matrix: {}	.with_context(|| format!("read task contract matrix: {}", path.display()))?;
 crates/clawd/src/contract_matrix.rs	schema_version must be positive	errors.push("schema_version must be positive".to_string());
@@ -258,7 +250,6 @@ crates/clawd/src/contract_matrix.rs	trace_policy.max_excerpt_chars must be posit
 crates/clawd/src/contract_matrix.rs	trace_policy.max_items must be positive	errors.push("trace_policy.max_items must be positive".to_string());
 crates/clawd/src/contract_matrix.rs	trace_policy.provider_evidence_view must be provider_safe_redacted	"trace_policy.provider_evidence_view must be provider_safe_redacted".to_string(),
 crates/clawd/src/contract_matrix.rs	trace_policy.raw_excerpt_policy must be no_full_raw_excerpt	errors.push("trace_policy.raw_excerpt_policy must be no_full_raw_excerpt".to_string());
-crates/clawd/src/contract_matrix.rs	unknown semantic contract `{key}`	errors.push(format!("unknown semantic contract `{key}`"));
 crates/clawd/src/contract_matrix_runtime.rs	contract matrix parse failed: {err}	toml::from_str(source).map_err(|err| format!("contract matrix parse failed: {err}"))?;
 crates/clawd/src/contract_matrix_runtime.rs	contract matrix shape invalid: {}	"contract matrix shape invalid: {}",
 crates/clawd/src/conversation_state.rs	Task so far:\n{prior}\n\n{label}: {current_prompt}{patch}	format!("Task so far:\\n{prior}\\n\\n{label}: {current_prompt}{patch}")

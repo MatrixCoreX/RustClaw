@@ -1,8 +1,5 @@
 use super::apply_requested_machine_kv_summary_to_final_answer;
-use crate::{
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind,
-};
+use crate::{IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape};
 
 #[test]
 fn generic_route_preserves_structured_media_dry_run_report_over_short_machine_summary() {
@@ -99,7 +96,6 @@ fn generic_free_route() -> IntentOutputContract {
         delivery_required: false,
         locator_kind: OutputLocatorKind::None,
         delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind: OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     }

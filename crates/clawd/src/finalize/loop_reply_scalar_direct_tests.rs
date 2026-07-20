@@ -8,7 +8,7 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
     let state = test_state();
     let task = claimed_task("task-raw-scalar-synthesis-error");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -54,7 +54,6 @@ async fn finalize_loop_reply_replaces_scalar_machine_assignment_with_observed_va
     let state = test_state();
     let task = claimed_task("task-schema-version-scalar-machine-assignment");
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
     route.delivery_required = false;
@@ -98,12 +97,11 @@ async fn finalize_loop_reply_replaces_scalar_machine_assignment_with_observed_va
 async fn finalize_loop_reply_preserves_publishable_evidence_summary_over_scalar_projection() {
     let state = test_state();
     let task = claimed_task("task-generic-evidence-summary-over-scalar");
-    let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    let mut route = free_route_result();
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.response_shape = crate::OutputResponseShape::Free;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -190,7 +188,6 @@ async fn scalar_contract_restores_complete_terminal_multi_machine_record() {
     let state = test_state();
     let task = claimed_task("task-multi-machine-record");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = false;
@@ -234,7 +231,6 @@ async fn scalar_contract_keeps_single_line_publishable_multi_machine_record() {
     let state = test_state();
     let task = claimed_task("task-single-line-machine-record");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = false;
@@ -279,7 +275,7 @@ async fn finalize_loop_reply_replaces_wrapped_runtime_status_scalar_delivery() {
     let state = test_state();
     let task = claimed_task("task-wrapped-runtime-status-scalar");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -292,6 +288,21 @@ async fn finalize_loop_reply_replaces_wrapped_runtime_status_scalar_delivery() {
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "system_basic", wrapped));
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "system_basic",
+            "step_1",
+            &serde_json::json!({"action": "runtime_status"}),
+            wrapped,
+            Some(&serde_json::json!({
+                "action": "runtime_status",
+                "command_output": "guagua",
+                "field_value": "guagua",
+                "kind": "current_user",
+                "value": "guagua"
+            })),
+        ));
     loop_state.delivery_messages.push(wrapped.to_string());
     loop_state.last_user_visible_respond = Some(wrapped.to_string());
 
@@ -392,7 +403,6 @@ async fn finalize_loop_reply_preserves_richer_generic_path_facts_delivery() {
     let state = test_state();
     let task = claimed_task("task-existence-summary-same-path-richer");
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     route.requires_content_evidence = true;
     route.delivery_required = false;
@@ -777,7 +787,7 @@ fn direct_structured_observed_answer_preserves_publishable_respond_for_content_r
 }
 
 #[test]
-fn direct_structured_observed_answer_skips_raw_passthrough_for_strict_exact_sentence() {
+fn direct_structured_observed_answer_skips_observed_passthrough_for_strict_exact_sentence() {
     let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(StepExecutionResult {
@@ -793,7 +803,6 @@ fn direct_structured_observed_answer_skips_raw_passthrough_for_strict_exact_sent
     route.response_shape = OutputResponseShape::Strict;
     route.exact_sentence_count = Some(1);
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -824,7 +833,6 @@ fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
     route.response_shape = OutputResponseShape::Strict;
     route.exact_sentence_count = Some(1);
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -922,7 +930,6 @@ fn direct_scalar_finalize_reports_missing_path_before_extracting_path_field() {
     let mut route = scalar_route_result();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "configs/config_copy".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -962,7 +969,6 @@ fn direct_scalar_finalize_does_not_repair_limited_listing_from_drifted_scalar_co
     let mut route = scalar_route_result();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1008,7 +1014,6 @@ fn direct_scalar_finalize_preserves_planned_count_inventory_breakdown() {
         r#"{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26}}"#,
     ));
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1038,7 +1043,6 @@ fn direct_scalar_finalize_uses_total_count_without_component_plan() {
         r#"{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26}}"#,
     ));
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1066,7 +1070,6 @@ fn direct_scalar_finalize_uses_wrapped_count_inventory_total() {
         r#"{"extra":{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26},"path":"logs"},"text":"{\"action\":\"count_inventory\",\"counts\":{\"total\":66,\"files\":40,\"dirs\":26},\"path\":\"logs\"}"}"#,
     ));
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     route.locator_hint = "logs".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -1099,7 +1102,6 @@ fn scalar_count_contract_projects_find_ext_count_from_machine_field() {
     route.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1132,7 +1134,6 @@ fn one_sentence_count_waits_for_model_synthesis() {
     ));
     let mut route = scalar_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1161,7 +1162,6 @@ fn direct_structured_finalize_defers_path_inspection_to_model_synthesis() {
     let mut route = scalar_route_result();
     route.response_shape = OutputResponseShape::Free;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "rustclaw.service".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -1239,7 +1239,7 @@ fn direct_non_builtin_finalize_skips_structured_machine_output() {
 }
 
 #[tokio::test]
-async fn direct_publishable_observed_answer_skips_run_cmd_without_explicit_raw_contract() {
+async fn direct_publishable_observed_answer_accepts_plain_observation_without_exact_contract() {
     let state = test_state();
     let task = claimed_task("task-no-raw-run-cmd-passthrough");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
@@ -1255,24 +1255,24 @@ async fn direct_publishable_observed_answer_skips_run_cmd_without_explicit_raw_c
     });
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
 
-    assert!(direct_publishable_observed_answer(
-        &state,
-        &task,
-        &loop_state,
-        Some(&agent_run_context)
-    )
-    .await
-    .is_none());
+    let (answer, summary) =
+        direct_publishable_observed_answer(&state, &task, &loop_state, Some(&agent_run_context))
+            .await
+            .expect("publishable plain observation");
+    assert_eq!(answer, "/home/guagua/rustclaw");
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
 }
 
 #[tokio::test]
-async fn direct_publishable_observed_answer_skips_strict_run_cmd_format_contract() {
+async fn direct_publishable_observed_answer_accepts_exact_plain_observation() {
     let state = test_state();
     let task = claimed_task("task-strict-run-cmd-format");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
@@ -1288,26 +1288,26 @@ async fn direct_publishable_observed_answer_skips_strict_run_cmd_format_contract
     });
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
 
-    assert!(direct_publishable_observed_answer(
-        &state,
-        &task,
-        &loop_state,
-        Some(&agent_run_context)
-    )
-    .await
-    .is_none());
+    let (answer, summary) =
+        direct_publishable_observed_answer(&state, &task, &loop_state, Some(&agent_run_context))
+            .await
+            .expect("publishable exact observation");
+    assert_eq!(answer, "/home/guagua/rustclaw");
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
 }
 
 #[test]
 fn unclassified_output_allows_model_language_fallback() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = crate::OutputResponseShape::Free;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1336,7 +1336,6 @@ async fn unclassified_output_can_publish_grounded_observation() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = crate::OutputResponseShape::Free;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1372,7 +1371,6 @@ fn direct_scalar_finalize_accepts_strict_single_line_observation() {
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::None;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1386,7 +1384,7 @@ fn direct_scalar_finalize_accepts_strict_single_line_observation() {
 }
 
 #[test]
-fn direct_scalar_finalize_skips_strict_raw_command_output_contract() {
+fn direct_scalar_finalize_skips_strict_exact_observation_output_contract() {
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
@@ -1402,7 +1400,7 @@ fn direct_scalar_finalize_skips_strict_raw_command_output_contract() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.exact_sentence_count = Some(1);
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1443,7 +1441,7 @@ fn raw_structured_passthrough_is_dropped_for_scalar_contract() {
 }
 
 #[test]
-fn structured_user_input_delivery_is_not_dropped_as_raw_passthrough() {
+fn structured_user_input_delivery_is_not_dropped_as_observed_passthrough() {
     let message = "Please provide the source directory.";
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
@@ -1563,7 +1561,6 @@ fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_quer
     });
     let mut route = scalar_route_result();
     route.requires_content_evidence = false;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1603,7 +1600,6 @@ fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1612,7 +1608,7 @@ fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
         ..Default::default()
     };
 
-    discard_raw_passthrough_delivery_when_structured_answer_available(
+    discard_observed_passthrough_delivery_when_structured_answer_available(
         &claimed_task("task-archive"),
         &mut loop_state,
         Some(&agent_run_context),

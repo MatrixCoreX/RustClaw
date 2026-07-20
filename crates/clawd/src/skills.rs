@@ -503,12 +503,6 @@ fn crypto_recoverable_i18n_error_from_structured(
     Some((message_key, error_kind, exchange, action))
 }
 
-pub(crate) fn crypto_recoverable_i18n_error_key(skill_name: &str, err: &str) -> Option<String> {
-    let structured = parse_structured_skill_error(err)?;
-    crypto_recoverable_i18n_error_from_structured(skill_name, &structured)
-        .map(|(message_key, _, _, _)| message_key)
-}
-
 pub(crate) fn policy_block_default_text(
     _state: &AppState,
     _task: &ClaimedTask,

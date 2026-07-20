@@ -123,7 +123,6 @@ fn unclassified_inventory_keeps_model_synthesis_with_read_evidence() {
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -177,7 +176,6 @@ fn exact_contract_keeps_publishable_synthesis_over_raw_observed_inventory() {
     let mut delivery_messages = vec!["垃圾代码端分析报告.md".to_string()];
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "document".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -218,7 +216,6 @@ fn path_inspection_keeps_model_language_verdict_over_observation() {
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::OneSentence;
     route.requires_content_evidence = false;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
@@ -308,7 +305,6 @@ fn exact_contract_keeps_explicit_json_delivery_over_observed_phrase() {
         vec![r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#.to_string()];
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "README.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

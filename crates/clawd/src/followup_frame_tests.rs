@@ -299,7 +299,6 @@ fn generic_workspace_evidence_path_does_not_persist_followup_target() {
         response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
-        semantic_kind: crate::OutputSemanticKind::None,
         ..IntentOutputContract::default()
     };
 
@@ -635,7 +634,6 @@ fn persisted_followup_frame_round_trips_with_slice_and_entries() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "model_io.log".to_string(),
         selection: crate::OutputSelectionContract {
             list_selector: crate::pipeline_types::OutputListSelector {
@@ -721,7 +719,6 @@ fn config_read_field_extra_path_persists_followup_bound_target() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "fallback.toml".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -763,7 +760,6 @@ fn compact_listing_answer_persists_ordered_entries_for_followup() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "logs".to_string(),
         selection: crate::OutputSelectionContract {
             list_selector: crate::pipeline_types::OutputListSelector {
@@ -824,7 +820,6 @@ fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_foll
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: root.to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -890,7 +885,6 @@ fn visible_listing_answer_overrides_full_journal_listing_for_followup() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -972,7 +966,6 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::None,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1074,7 +1067,6 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/home/guagua/rustclaw/logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1242,7 +1234,6 @@ fn selected_target_turn_inherits_prior_ordered_entries_and_index() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "logs/clawd.log".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1302,7 +1293,6 @@ fn scalar_answer_matching_prior_ordered_entry_persists_selected_index() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::None,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1366,7 +1356,6 @@ fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_pos
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: selected.clone(),
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("path".to_string()),
@@ -1435,7 +1424,6 @@ fn delivery_answer_sets_bound_target_from_file_token_and_inherits_selection() {
         delivery_required: true,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::FileSingle,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1494,7 +1482,6 @@ fn delivery_answer_with_absolute_file_token_still_inherits_relative_listing_sele
         delivery_required: true,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::FileSingle,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1540,7 +1527,6 @@ fn clarify_outcome_clears_active_followup_frame() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1583,7 +1569,6 @@ fn clarify_outcome_with_stale_locator_hint_still_clears_followup_frame() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/rustclaw-workspace/old/logs/model_io.log".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };

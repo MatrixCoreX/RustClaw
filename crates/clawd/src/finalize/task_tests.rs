@@ -7,7 +7,7 @@ use super::{
     apply_requested_machine_kv_summary_to_final_answer, ask_runtime_failure_default_text,
     ask_runtime_failure_machine_payload, assistant_memory_source_text,
     compose_answer_verifier_failure_user_message, delivery_path_gap_should_finalize_as_clarify,
-    deterministic_filtered_log_entry_recovery, deterministic_raw_tail_read_failure_recovery,
+    deterministic_exact_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
     deterministic_tree_summary_rows_failure_recovery,
     drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
     finalize_ask_checkpointed, finalize_ask_result, journal_has_checkpointed_nonterminal_lifecycle,
@@ -72,7 +72,7 @@ fn finalization_uses_planner_contract_from_answer_journal() {
 fn finalization_uses_machine_fallback_when_planner_contract_is_unavailable() {
     let selected = planner_output_contract_for_finalization(None);
 
-    assert!(selected.semantic_kind_is_unclassified());
+    assert!(selected.does_not_request_exact_command_output());
     assert!(!selected.delivery_required);
 }
 
@@ -256,7 +256,7 @@ fn observed_tool_evidence_retry_ignores_failed_tool_step() {
 }
 
 #[test]
-fn requested_machine_kv_summary_final_guard_replaces_raw_observation_answer() {
+fn requested_machine_kv_summary_final_guard_replaces_direct_observation_answer() {
     let prompt = "Return exactly machine summary command=python3 scripts/sync_skill_docs.py";
     let route = route_result();
     let mut journal =
@@ -295,7 +295,6 @@ fn requested_machine_kv_summary_final_guard_preserves_colon_field_values() {
     let prompt = "Return text_excerpt and detected_format.";
     let mut route = route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-colon-fields", "ask", prompt);
     journal
@@ -339,7 +338,6 @@ fn requested_machine_kv_summary_failure_recovery_projects_read_range_fields() {
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("total_lines".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-read-range-machine-kv", "ask", prompt);
@@ -393,7 +391,6 @@ fn requested_machine_kv_summary_final_guard_preserves_content_evidence_synthesis
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "README.md".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-content-evidence-final", "ask", prompt);
@@ -553,7 +550,6 @@ fn delivery_path_gap_without_observation_finalizes_as_clarify() {
     let mut route = route_result();
     route.delivery_required = true;
     route.response_shape = crate::OutputResponseShape::FileToken;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
 
     let mut journal =
@@ -888,7 +884,7 @@ fn filtered_log_entry_gap_recovers_from_read_range_observation() {
 }
 
 #[test]
-fn raw_tail_read_failure_recovery_returns_observed_excerpt() {
+fn exact_tail_read_failure_recovery_returns_observed_excerpt() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {
         claim_attempt: 0,
@@ -904,7 +900,7 @@ fn raw_tail_read_failure_recovery_returns_observed_excerpt() {
     };
     let mut route = route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -941,7 +937,7 @@ fn raw_tail_read_failure_recovery_returns_observed_excerpt() {
         finished_at: 2,
     });
 
-    let recovered = deterministic_raw_tail_read_failure_recovery(
+    let recovered = deterministic_exact_tail_read_failure_recovery(
         &state,
         &task,
         "read tail lines",

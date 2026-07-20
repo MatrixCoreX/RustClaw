@@ -1,8 +1,8 @@
 use super::{
-    collect_whitelisted_env_pairs, crypto_recoverable_i18n_error_key, extract_task_request_text,
-    is_crypto_account_access_error, is_missing_target_skill_error, is_recoverable_skill_error,
-    parse_policy_block_error, parse_structured_skill_error, policy_block_default_text,
-    policy_block_error, request_reply_language, run_safe_command, skill_error_machine_observation,
+    collect_whitelisted_env_pairs, extract_task_request_text, is_crypto_account_access_error,
+    is_missing_target_skill_error, is_recoverable_skill_error, parse_policy_block_error,
+    parse_structured_skill_error, policy_block_default_text, policy_block_error,
+    request_reply_language, run_safe_command, skill_error_machine_observation,
     skill_runner_env_strict_enabled, structured_skill_error_from_parts,
     structured_skill_error_string, task_allows_path_outside_workspace, task_allows_sudo,
     task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
@@ -1593,10 +1593,6 @@ fn structured_crypto_credential_errors_are_recoverable_i18n() {
     );
 
     assert!(is_recoverable_skill_error("crypto", &err));
-    assert_eq!(
-        crypto_recoverable_i18n_error_key("crypto", &err).as_deref(),
-        Some("crypto.err.okx_not_bound")
-    );
     let observation: serde_json::Value =
         serde_json::from_str(&skill_error_machine_observation("crypto", &err).unwrap()).unwrap();
     assert_eq!(

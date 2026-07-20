@@ -6,9 +6,8 @@ use super::valid_publishable_synthesis_output;
 #[cfg(test)]
 use super::{
     delivery_message_is_json_container, last_respond_matches_single_line_observation,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    message_is_non_answer_separator, output_contract_requests_exact_delivery,
-    route_has_evidence_policy_final_shape,
+    looks_like_structured_machine_output, message_is_non_answer_separator,
+    output_contract_requests_exact_delivery, route_has_evidence_policy_final_shape,
     route_requires_evidence_policy_deterministic_final_answer, single_publishable_delivery_message,
     step_output_is_read_range,
 };
@@ -69,9 +68,7 @@ fn plan_step_matches_execution(
     step: &crate::executor::StepExecutionResult,
 ) -> bool {
     let plan_skill = plan_step.skill.trim();
-    if !(plan_skill.eq_ignore_ascii_case(step.skill.trim())
-        || (step.skill == "run_cmd" && plan_skill.eq_ignore_ascii_case("run_cmd")))
-    {
+    if !plan_skill.eq_ignore_ascii_case(step.skill.trim()) {
         return false;
     }
     plan_step_action_matches_execution(plan_step, step)
@@ -146,7 +143,9 @@ pub(super) fn plan_step_for_execution<'a>(
         })
 }
 
-pub(super) fn raw_command_arg_from_plan_step(plan_step: Option<&crate::PlanStep>) -> Option<&str> {
+pub(super) fn exact_observation_arg_from_plan_step(
+    plan_step: Option<&crate::PlanStep>,
+) -> Option<&str> {
     let args = &plan_step?.args;
     args.get("command")
         .or_else(|| args.get("cmd"))
@@ -339,7 +338,7 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     }
     if has_publishable_answer
         && route.requires_content_evidence
-        && !route.semantic_kind_is_unclassified()
+        && !route.does_not_request_exact_command_output()
     {
         return true;
     }
@@ -381,7 +380,7 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     if contract.response_shape != crate::OutputResponseShape::Scalar {
         return false;
     }
-    if !route.semantic_kind_is_unclassified() {
+    if !route.does_not_request_exact_command_output() {
         return false;
     }
     delivery_messages.iter().any(|message| {
@@ -537,9 +536,6 @@ fn delivery_matches_synthesized_content_answer(
     ) {
         return false;
     }
-    if !matches!(route.semantic_kind, crate::OutputSemanticKind::None) {
-        return false;
-    }
     let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
         return false;
     };
@@ -579,10 +575,7 @@ fn delivery_matches_grounded_content_answer(
         return false;
     }
     if matches!(route.response_shape, crate::OutputResponseShape::FileToken)
-        || matches!(
-            route.semantic_kind,
-            crate::OutputSemanticKind::RawCommandOutput
-        )
+        || route.requests_exact_command_output()
     {
         return false;
     }
@@ -604,7 +597,6 @@ fn delivery_matches_grounded_content_answer(
         || crate::finalize::looks_like_planner_artifact(delivery_text)
         || crate::finalize::looks_like_internal_trace_artifact(delivery_text)
         || looks_like_structured_machine_output(delivery_text)
-        || looks_like_raw_command_snapshot(delivery_text)
         || message_is_non_answer_separator(delivery_text)
     {
         return false;
@@ -664,7 +656,7 @@ fn delivery_matches_latest_transform_observation(
         .executed_step_results
         .iter()
         .rev()
-        .filter(|step| step.is_ok() && step.skill == "transform")
+        .filter(|step| step.is_ok())
         .filter_map(|step| step.output.as_deref())
         .any(|output| {
             crate::agent_engine::observed_output::transform_skill_formatted_output_candidate(output)

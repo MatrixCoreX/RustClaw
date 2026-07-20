@@ -34,7 +34,6 @@ P3_KEYS = (
     "runtime_action",
     "runtime_default_args",
     "runtime_rewrite_arg_keys",
-    "runtime_rewrite_semantic_kinds",
     "once_per_task",
     "dedup_scope",
     "idempotent",

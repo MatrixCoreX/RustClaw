@@ -65,7 +65,8 @@ Required fields for rollout comparison:
 - `final_answer_shape`
 - `final_answer_shape_class`
 - `output_contract.response_shape`
-- `output_contract.semantic_kind` only when reviewing normalizer/schema compatibility trace, not as a current capability selector
+- `output_contract.structured_field_selector`
+- `contract_matrix.contract_match`
 - `answer_verifier_summary.pass`
 - `answer_verifier_summary.missing_evidence_fields`
 - `final_failure_attribution`

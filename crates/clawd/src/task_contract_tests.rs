@@ -35,7 +35,6 @@ fn generic_path_inspection_requires_structural_path_evidence() {
         response_shape: OutputResponseShape::Free,
         locator_kind: OutputLocatorKind::Path,
         locator_hint: "README.md".to_string(),
-        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: false,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("exists,path".to_string()),
@@ -60,7 +59,6 @@ fn unclassified_contract_uses_machine_output_fields_only() {
         locator_kind: OutputLocatorKind::Path,
         locator_hint: "README.md".to_string(),
         requires_content_evidence: true,
-        semantic_kind: OutputSemanticKind::None,
         ..IntentOutputContract::default()
     };
 

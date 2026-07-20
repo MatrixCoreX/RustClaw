@@ -675,7 +675,7 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
 fn output_contract_requires_policy(output_contract: Option<&crate::IntentOutputContract>) -> bool {
     output_contract
         .map(|contract| {
-            !contract.semantic_kind_is_unclassified()
+            !contract.does_not_request_exact_command_output()
                 || contract.requires_content_evidence
                 || contract.delivery_required
         })

@@ -262,7 +262,6 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
     );
     let route = crate::IntentOutputContract {
         requires_content_evidence: true,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "README.md".to_string(),
         ..Default::default()
@@ -458,7 +457,6 @@ fn summary_json_includes_machine_readable_task_outcome() {
 fn trace_json_reports_missing_required_evidence() {
     let mut journal = TaskJournal::for_task("task-evidence-missing", "ask", "这个路径是否存在");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         response_shape: crate::OutputResponseShape::Free,
         requires_content_evidence: false,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -504,7 +502,6 @@ fn trace_json_reports_missing_required_evidence() {
 fn trace_json_uses_evidence_expression_for_confirmed_absence() {
     let mut journal = TaskJournal::for_task("task-evidence-absence", "ask", "这个路径是否存在");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         response_shape: crate::OutputResponseShape::Free,
         requires_content_evidence: false,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -561,7 +558,6 @@ fn trace_json_uses_evidence_expression_for_confirmed_absence() {
 fn trace_json_reports_missing_evidence_expression_alternative() {
     let mut journal = TaskJournal::for_task("task-evidence-missing-alt", "ask", "这个路径是否存在");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         response_shape: crate::OutputResponseShape::Free,
         requires_content_evidence: false,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -593,7 +589,6 @@ fn trace_json_reports_missing_evidence_expression_alternative() {
 fn trace_json_counts_nested_builtin_tool_evidence() {
     let mut journal = TaskJournal::for_task("task-nested-evidence", "ask", "这个路径是否存在");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         response_shape: crate::OutputResponseShape::Free,
         requires_content_evidence: false,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -732,7 +727,6 @@ fn step_trace_includes_contract_and_action_policy_for_success() {
         Some("generic_path_content")
     );
     assert!(step_contract.get("contract_marker").is_none());
-    assert!(step_contract.get("semantic_kind").is_none());
     assert_eq!(
         step_contract
             .get("final_answer_shape")
@@ -766,8 +760,7 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
         "ask",
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite",
     );
-    let mut route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
+    let route = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::OneSentence,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -824,8 +817,6 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("schema_version"));
     assert!(coverage.evidence_expression.is_none());
-
-    route.semantic_kind = crate::OutputSemanticKind::None;
     assert!(
         crate::answer_verifier::local_missing_evidence_verifier_gap(
             &answer_contract_from_route(&route),
@@ -844,7 +835,6 @@ fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
         "current working directory",
     );
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         response_shape: crate::OutputResponseShape::Scalar,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,

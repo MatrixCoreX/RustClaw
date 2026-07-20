@@ -226,7 +226,7 @@ fn route_needs_workspace_text_evidence_before_observed_finalize(
     route.requires_content_evidence
         && !route.delivery_required
         && route.response_shape == crate::OutputResponseShape::Free
-        && route.semantic_kind_is_unclassified()
+        && route.does_not_request_exact_command_output()
         && route.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && route.locator_hint.trim().is_empty()
 }

@@ -64,7 +64,6 @@ fn grounded_file_token_uses_path_token_from_write_text_output() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-file-token", "ask", "send that file");
     journal
@@ -139,12 +138,11 @@ fn confirmed_missing_file_delivery_skips_model_verifier() {
 }
 
 #[test]
-fn matrix_delivery_artifact_shape_rejects_raw_command_summary_answer() {
+fn matrix_delivery_artifact_shape_rejects_exact_observation_summary_answer() {
     let mut route = route_with_mode();
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-delivery-shape", "ask", "send file");
     journal
@@ -178,7 +176,6 @@ fn matrix_delivery_artifact_shape_accepts_grounded_plain_path() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-delivery-path", "ask", "send file");
     journal
@@ -244,7 +241,6 @@ fn scalar_answer_grounded_in_plain_observation_skips_llm_verifier() {
 fn scalar_answer_grounded_in_json_observation_skips_llm_verifier() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-json-scalar", "ask", "count them");

@@ -5,13 +5,12 @@ fn unclassified_service_evidence_contract() -> crate::IntentOutputContract {
     crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
-        semantic_kind: crate::OutputSemanticKind::None,
         ..Default::default()
     }
 }
 
 #[test]
-fn service_capability_refs_complete_machine_field_evidence_without_semantic_kind() {
+fn service_capability_refs_complete_machine_field_evidence_without_domain_routing() {
     for capability_ref in [
         "capability_ref=service.status",
         "capability_ref=service_control.status",

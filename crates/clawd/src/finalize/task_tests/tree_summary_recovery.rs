@@ -1,5 +1,5 @@
 use super::super::{
-    deterministic_raw_tail_read_failure_recovery,
+    deterministic_exact_tail_read_failure_recovery,
     task_tree_summary_recovery::deterministic_tree_summary_rows_failure_recovery,
 };
 
@@ -26,7 +26,7 @@ fn raw_tail_recovery_fixture(
     };
     let mut route = super::route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -85,7 +85,7 @@ fn raw_tail_recovery_ignores_json_hidden_in_visible_text() {
     }));
 
     assert_eq!(
-        deterministic_raw_tail_read_failure_recovery(
+        deterministic_exact_tail_read_failure_recovery(
             &state,
             &task,
             "read tail lines",
@@ -109,7 +109,7 @@ fn raw_tail_recovery_accepts_extra_machine_payload() {
     }));
 
     assert_eq!(
-        deterministic_raw_tail_read_failure_recovery(
+        deterministic_exact_tail_read_failure_recovery(
             &state,
             &task,
             "read tail lines",

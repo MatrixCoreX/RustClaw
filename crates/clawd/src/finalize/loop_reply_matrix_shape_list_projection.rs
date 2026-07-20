@@ -255,23 +255,7 @@ fn latest_plan_requested_directory_inventory(loop_state: &LoopState) -> bool {
         .iter()
         .rev()
         .filter_map(|round| round.plan_result.as_ref())
-        .any(|plan| {
-            plan.steps.iter().any(|step| {
-                let action = step
-                    .args
-                    .get("action")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim);
-                matches!(action, Some("list_dir" | "inventory_dir"))
-                    || matches!(
-                        step.skill.as_str(),
-                        "filesystem.list_dir"
-                            | "filesystem.list_entries"
-                            | "fs_basic.list_dir"
-                            | "system_basic.inventory_dir"
-                    )
-            })
-        })
+        .any(|plan| !plan.steps.is_empty())
 }
 
 fn observed_directory_listing_answer(loop_state: &LoopState) -> Option<String> {
@@ -311,12 +295,6 @@ fn directory_listing_answer_from_value(value: &serde_json::Value) -> Option<Stri
         if let Some(answer) = directory_listing_answer_from_value(extra) {
             return Some(answer);
         }
-    }
-    if !matches!(
-        value.get("action").and_then(serde_json::Value::as_str),
-        Some("inventory_dir" | "list_dir")
-    ) {
-        return None;
     }
     let mut items = observed_directory_listing_names(value);
     items.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
@@ -430,11 +408,8 @@ fn generic_machine_projection_from_value(value: &serde_json::Value) -> Option<St
             return Some(answer);
         }
     }
-    match value.get("action").and_then(serde_json::Value::as_str) {
-        Some("inventory_dir" | "list_dir") => directory_listing_answer_from_value(value),
-        Some("grep_text") => grep_text_matches_answer_from_value(value),
-        _ => None,
-    }
+    directory_listing_answer_from_value(value)
+        .or_else(|| grep_text_matches_answer_from_value(value))
 }
 
 fn grep_text_matches_answer_from_value(value: &serde_json::Value) -> Option<String> {

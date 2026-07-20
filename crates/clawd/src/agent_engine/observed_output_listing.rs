@@ -166,11 +166,6 @@ pub(super) fn route_allows_scalar_read_range_direct_answer(
         route.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
     ) && !route.delivery_required
-        && (super::output_route_policy::route_is_unclassified_contract(route)
-            || super::output_route_policy::route_contract_marker_is_any(
-                route,
-                &[crate::OutputSemanticKind::RawCommandOutput],
-            ))
 }
 
 pub(super) fn route_requests_exact_scalar_path(route: &crate::IntentOutputContract) -> bool {

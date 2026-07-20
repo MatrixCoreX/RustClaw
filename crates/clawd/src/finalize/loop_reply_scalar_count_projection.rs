@@ -70,7 +70,6 @@ fn plan_requests_count_inventory_file_dir_breakdown(loop_state: &LoopState) -> b
         .any(|plan| {
             plan.steps.iter().any(|step| {
                 step.is_skill_invocation()
-                    && step.skill == "system_basic"
                     && step.args.get("action").and_then(|value| value.as_str())
                         == Some("count_inventory")
                     && step

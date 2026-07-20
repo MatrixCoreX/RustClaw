@@ -145,18 +145,13 @@ pub(super) fn deterministic_structured_container_summary_answer(
     ) {
         return None;
     }
-    if !matches!(route.semantic_kind, crate::OutputSemanticKind::None) {
-        return None;
-    }
     let _ = state;
     let _ = user_text;
     loop_state
         .executed_step_results
         .iter()
         .rev()
-        .filter(|step| {
-            step.is_ok() && matches!(step.skill.as_str(), "system_basic" | "config_basic")
-        })
+        .filter(|step| step.is_ok())
         .filter_map(|step| step.output.as_deref())
         .filter_map(|output| serde_json::from_str::<serde_json::Value>(output).ok())
         .find_map(|value| structured_container_from_extract_value(&value, false))
@@ -183,7 +178,6 @@ pub(super) fn direct_db_basic_observed_answer(
         .rev()
         .find(|step| {
             step.is_ok()
-                && step.skill == "db_basic"
                 && step
                     .output
                     .as_deref()
@@ -359,7 +353,7 @@ fn latest_broad_structured_read_range(
         .executed_step_results
         .iter()
         .rev()
-        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "system_basic" | "fs_basic"))
+        .filter(|step| step.is_ok())
         .filter_map(|step| step.output.as_deref())
         .filter_map(|output| serde_json::from_str::<serde_json::Value>(output).ok())
         .find_map(|value| broad_structured_read_range_from_value(&value))

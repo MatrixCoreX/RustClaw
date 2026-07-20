@@ -81,11 +81,9 @@ fn observed_fallback_overlays_bound_observed_data_exactly_once() {
 #[test]
 fn unclassified_status_observation_uses_regular_synthesis_template() {
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.requires_content_evidence = true;
     route_result.delivery_required = false;
     route_result.delivery_intent = OutputDeliveryIntent::None;
-    route_result.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
@@ -211,7 +209,6 @@ fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_mach
 #[test]
 fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts() {
     let mut content_route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    content_route.semantic_kind = OutputSemanticKind::None;
     content_route.requires_content_evidence = true;
     let content_context = AgentRunContext {
         output_contract: Some(content_route.clone()),
@@ -223,7 +220,6 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
     );
 
     let mut delivery_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    delivery_route.semantic_kind = OutputSemanticKind::None;
     delivery_route.delivery_required = true;
     let delivery_context = AgentRunContext {
         output_contract: Some(delivery_route.clone()),
@@ -236,7 +232,6 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
 
     let mut unclassified_mutation_route =
         chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    unclassified_mutation_route.semantic_kind = OutputSemanticKind::None;
     unclassified_mutation_route.requires_content_evidence = true;
     unclassified_mutation_route.delivery_required = false;
     unclassified_mutation_route.delivery_intent = OutputDeliveryIntent::None;
@@ -252,8 +247,7 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
         "prompts/observed_answer_fallback_prompt.md"
     );
 
-    let mut terminal_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    terminal_route.semantic_kind = OutputSemanticKind::None;
+    let terminal_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     let terminal_context = AgentRunContext {
         output_contract: Some(terminal_route.clone()),
         ..AgentRunContext::default()
@@ -267,11 +261,8 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
 
 #[test]
 fn observed_fallback_prompt_uses_compact_template_for_short_listing_and_scalar_contracts() {
-    for (semantic_kind, structured_field_selector) in
-        [(OutputSemanticKind::None, Some("path"))]
-    {
+    for structured_field_selector in [Some("path")] {
         let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-        route_result.semantic_kind = semantic_kind;
         route_result.selection.structured_field_selector =
             structured_field_selector.map(str::to_string);
         route_result.requires_content_evidence = true;
@@ -291,7 +282,7 @@ count=2"#,
 
         assert_eq!(
             path, "prompts/observed_answer_fallback_compact_prompt.md",
-            "{semantic_kind:?}/{structured_field_selector:?} should use compact finalizer"
+            "{structured_field_selector:?} should use compact finalizer"
         );
     }
 
@@ -333,7 +324,6 @@ fn generic_content_is_not_hard_summarized_by_observed_output() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/config.toml".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -348,7 +338,7 @@ fn generic_content_is_not_hard_summarized_by_observed_output() {
 }
 
 #[tokio::test]
-async fn observed_fallback_keeps_strict_raw_tail_read_before_composer() {
+async fn observed_fallback_keeps_strict_exact_tail_read_before_composer() {
     let state = AppState::test_default_with_fixture_provider();
     let task = claimed_task("task-observed-strict-raw-tail");
     let mut loop_state = LoopState::new(2);
@@ -358,7 +348,7 @@ async fn observed_fallback_keeps_strict_raw_tail_read_before_composer() {
         r#"{"action":"read_range","mode":"tail","requested_n":2,"excerpt":"98|WARN provider failed: http 401: credential_missing\n99|WARN memory preference fallback failed: http 401","path":"/tmp/clawd-dev.log"}"#,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route_result.configure_exact_command_output();
     route_result.response_shape = OutputResponseShape::Strict;
     route_result.requires_content_evidence = true;
     route_result.delivery_required = false;
@@ -408,7 +398,6 @@ fn direct_answer_keeps_fallback_for_unstructured_content() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/README.txt".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -438,7 +427,6 @@ fn direct_answer_defers_doc_parse_content_to_model_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -466,7 +454,6 @@ fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -496,7 +483,6 @@ fn direct_answer_defers_filename_content_to_model_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -522,12 +508,14 @@ fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Filename,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
-            locator_hint: "README.md".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Filename,
+        delivery_intent: OutputDeliveryIntent::None,
+        locator_hint: "README.md".to_string(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -541,7 +529,7 @@ fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
 }
 
 #[test]
-fn raw_command_output_read_range_direct_answer_preserves_visible_blank_line() {
+fn exact_observation_output_read_range_direct_answer_preserves_visible_blank_line() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -550,14 +538,16 @@ fn raw_command_output_read_range_direct_answer_preserves_visible_blank_line() {
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
+        response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
-            locator_hint: "README.md".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+        locator_hint: "README.md".to_string(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -586,14 +576,16 @@ fn raw_read_range_direct_answer_sanitizes_log_excerpt() {
         .push(ok_step("step_1", "system_basic", &skill_output));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
+        response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
-            locator_hint: "feishud.log".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+        locator_hint: "feishud.log".to_string(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -638,7 +630,6 @@ fn scalar_route_fs_basic_tail_read_range_prefers_structured_excerpt() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -675,7 +666,6 @@ fn direct_answer_defers_path_content_to_model_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/config.toml".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -704,7 +694,6 @@ fn direct_answer_does_not_passthrough_read_range_when_summary_is_requested() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -735,7 +724,6 @@ fn direct_answer_defers_read_range_passthrough_when_language_conflicts() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "service_notes.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -767,7 +755,6 @@ fn path_inspection_contract_does_not_passthrough_read_range() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
@@ -802,7 +789,6 @@ fn direct_answer_prefers_current_turn_excerpt_summary_request_over_resolved_inte
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };

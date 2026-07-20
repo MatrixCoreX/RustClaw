@@ -198,7 +198,6 @@ async fn schedule_compile_only_create_returns_preview_without_insert() {
     assert!(reply.contains("task_content=check service"));
     assert!(reply.contains("title=check service"));
     assert!(!reply.contains("contract_marker"));
-    assert!(!reply.contains("semantic_kind"));
     let db = state.core.db.get().expect("db");
     let count: i64 = db
         .query_row("SELECT COUNT(*) FROM scheduled_jobs", [], |row| row.get(0))

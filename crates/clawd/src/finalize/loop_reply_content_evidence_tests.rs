@@ -202,7 +202,9 @@ async fn content_evidence_wrapped_crypto_account_error_is_completion() {
     .expect("wrapped recoverable crypto account error should be publishable");
 
     assert!(!answer.contains("message_key="));
-    assert!(!answer.contains("error_kind="));
+    assert!(answer.contains("reason_code=content_evidence_step_failed"));
+    assert!(answer.contains("error_kind=unknown"));
+    assert!(answer.contains("structured_skill=crypto"));
     assert!(!answer.contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
     assert!(!answer.trim().is_empty());
     assert_eq!(summary.completion_ok, Some(true));
@@ -214,11 +216,7 @@ async fn content_evidence_wrapped_crypto_account_error_is_completion() {
 
 #[tokio::test]
 async fn content_evidence_crypto_credential_error_is_completion() {
-    let mut state = test_state();
-    state.policy.schedule.i18n_dict.insert(
-        "crypto.err.okx_not_bound".to_string(),
-        "OKX_BINDING_REQUIRED".to_string(),
-    );
+    let state = test_state();
     let task = claimed_task("task-crypto-credential-error");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
@@ -258,9 +256,10 @@ async fn content_evidence_crypto_credential_error_is_completion() {
     .await
     .expect("recoverable crypto credential error should be publishable");
 
-    assert_eq!(answer, "OKX_BINDING_REQUIRED");
-    assert!(!answer.contains("message_key="));
-    assert!(!answer.contains("error_kind="));
+    assert!(answer.contains("reason_code=content_evidence_step_failed"));
+    assert!(answer.contains("error_kind=credential_not_bound"));
+    assert!(answer.contains("structured_skill=crypto"));
+    assert!(!answer.contains("OKX_BINDING_REQUIRED"));
     assert_eq!(summary.completion_ok, Some(true));
     assert_eq!(
         summary.disposition,
@@ -312,7 +311,11 @@ async fn finalize_loop_reply_treats_wrapped_crypto_account_error_as_success() {
 
     assert!(!reply.should_fail_task);
     assert!(!reply.text.contains("message_key="));
-    assert!(!reply.text.contains("error_kind="));
+    assert!(reply
+        .text
+        .contains("reason_code=content_evidence_step_failed"));
+    assert!(reply.text.contains("error_kind=unknown"));
+    assert!(reply.text.contains("structured_skill=crypto"));
     assert!(!reply.text.contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
     assert!(!reply.text.trim().is_empty());
     assert_eq!(
@@ -399,7 +402,6 @@ async fn finalize_loop_reply_treats_missing_read_target_as_user_result() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "document/missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -600,7 +602,6 @@ async fn finalize_loop_reply_treats_read_file_not_found_marker_as_user_result() 
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "/tmp/missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

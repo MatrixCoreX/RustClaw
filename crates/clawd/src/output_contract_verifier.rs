@@ -134,7 +134,7 @@ pub(crate) fn verify_output_contract(
 
     // 默认契约（response_shape=Free + contract_marker=None）不强制任何形状，直接 Pass。
     if matches!(contract.response_shape, OutputResponseShape::Free)
-        && contract.semantic_kind_is_unclassified()
+        && contract.does_not_request_exact_command_output()
     {
         return OutputContractVerdict::Pass;
     }

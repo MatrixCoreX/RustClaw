@@ -48,10 +48,10 @@ pub(super) const FINALIZER_RENDERER_REGISTRY: &[FinalizerRendererDescriptor] = &
         summary_contract: "finalizer_summary",
     },
     FinalizerRendererDescriptor {
-        key: "raw_command_machine_field_projection",
+        key: "exact_observation_machine_field_projection",
         shape_class: FinalizerRendererShapeClass::FinalAnswerShape,
-        owner_module: "finalize::loop_reply_raw_command",
-        entrypoint: "replace_final_delivery_with_raw_command_machine_field_projection",
+        owner_module: "finalize::loop_reply_exact_observation",
+        entrypoint: "replace_final_delivery_with_exact_observation_machine_field_projection",
         summary_contract: "finalizer_summary",
     },
     FinalizerRendererDescriptor {

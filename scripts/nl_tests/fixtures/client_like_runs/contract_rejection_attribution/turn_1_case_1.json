@@ -42,7 +42,8 @@
           ],
           "contract_matrix": {
             "contract_match": "generic_path_content",
-            "semantic_kind": "none",
+            "response_shape": "strict",
+            "structured_field_selector": "",
             "final_answer_shape": "exact_list"
           },
           "evidence_coverage": {

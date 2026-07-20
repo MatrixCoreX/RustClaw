@@ -1,11 +1,11 @@
-use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
+use crate::{IntentOutputContract, OutputResponseShape};
 #[cfg(test)]
 use anyhow::{Context, Result};
 #[cfg(test)]
 use claw_core::skill_registry::SkillsRegistry;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 #[cfg(test)]
 use std::path::Path;
 use std::sync::OnceLock;
@@ -45,7 +45,6 @@ pub(crate) struct ContractMatrix {
     pub(crate) policy: MatrixPolicy,
     pub(crate) trace_policy: MatrixTracePolicy,
     pub(crate) generic_profiles: Vec<GenericProfile>,
-    pub(crate) contracts: BTreeMap<String, MatrixContract>,
 }
 
 impl Default for ContractMatrix {
@@ -57,7 +56,6 @@ impl Default for ContractMatrix {
             policy: MatrixPolicy::default(),
             trace_policy: MatrixTracePolicy::default(),
             generic_profiles: Vec::new(),
-            contracts: BTreeMap::new(),
         }
     }
 }
@@ -125,7 +123,7 @@ impl FailureAttribution {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub(crate) struct MatrixPolicy {
-    pub(crate) unknown_semantic: String,
+    pub(crate) unknown_contract: String,
     pub(crate) unknown_action: String,
     pub(crate) evidence_missing: String,
 }
@@ -133,7 +131,7 @@ pub(crate) struct MatrixPolicy {
 impl Default for MatrixPolicy {
     fn default() -> Self {
         Self {
-            unknown_semantic: "reject".to_string(),
+            unknown_contract: "reject".to_string(),
             unknown_action: "reject".to_string(),
             evidence_missing: "retry_then_fail".to_string(),
         }
@@ -305,90 +303,8 @@ impl EvidenceToken {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct MatrixContract {
-    pub(crate) semantic_kind: String,
-    pub(crate) operation: String,
-    pub(crate) target_object: String,
-    pub(crate) delivery_shape: String,
-    pub(crate) policy_mode: String,
-    pub(crate) evidence_scope: String,
-    pub(crate) freshness: String,
-    pub(crate) artifact_kind: String,
-    pub(crate) channel_visibility: String,
-    pub(crate) evidence_profile: String,
-    pub(crate) allowed_actions: Vec<String>,
-    pub(crate) preferred_actions: Vec<String>,
-    pub(crate) forbidden_actions: Vec<String>,
-    pub(crate) required_evidence: Vec<String>,
-    pub(crate) final_answer_shape: String,
-    pub(crate) none_passthrough: bool,
-    pub(crate) failure_policy: String,
-    pub(crate) locator_kinds: Vec<String>,
-    pub(crate) observation_sources: Vec<String>,
-    pub(crate) observation_extractors: Vec<ObservationExtractor>,
-    pub(crate) evidence_expression: EvidenceExpression,
-}
-
-impl MatrixContract {
-    pub(crate) fn normalized_required_evidence(&self) -> Vec<String> {
-        normalized_tokens(&self.required_evidence)
-    }
-
-    fn evidence_expression(&self) -> EvidenceExpression {
-        self.evidence_expression
-            .effective(&self.normalized_required_evidence())
-    }
-
-    fn observation_sources(&self) -> Vec<String> {
-        let configured = normalized_tokens(&self.observation_sources);
-        if configured.is_empty() {
-            normalized_tokens(&self.allowed_actions)
-        } else {
-            configured
-        }
-    }
-
-    fn observation_extractors(&self) -> Vec<ObservationExtractor> {
-        observation_extractors_for_sources(self.observation_sources(), &self.observation_extractors)
-    }
-
-    fn policy_mode(&self) -> String {
-        normalized_contract_field(&self.policy_mode, "enforce")
-    }
-
-    fn evidence_scope(&self) -> String {
-        normalized_contract_field(&self.evidence_scope, "current_task")
-    }
-
-    fn freshness(&self) -> String {
-        normalized_contract_field(&self.freshness, "current_task")
-    }
-
-    fn artifact_kind(&self) -> String {
-        if !self.artifact_kind.trim().is_empty() {
-            return normalized_contract_field(&self.artifact_kind, "text");
-        }
-        if normalize_action_token(&self.final_answer_shape) == "delivery_token_or_path" {
-            "file".to_string()
-        } else {
-            "text".to_string()
-        }
-    }
-
-    fn channel_visibility(&self) -> String {
-        normalized_contract_field(&self.channel_visibility, "user_visible")
-    }
-
-    fn evidence_profile(&self) -> String {
-        normalized_contract_field(&self.evidence_profile, "generic")
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
 pub(crate) struct GenericProfile {
     pub(crate) name: String,
-    pub(crate) semantic_kind: String,
     pub(crate) requires_content_evidence: Option<bool>,
     pub(crate) delivery_required: Option<bool>,
     pub(crate) response_shapes: Vec<String>,
@@ -413,10 +329,6 @@ pub(crate) struct GenericProfile {
 
 impl GenericProfile {
     fn matches(&self, output: &IntentOutputContract) -> bool {
-        let semantic_kind = self.semantic_kind.trim();
-        if !semantic_kind.is_empty() && semantic_kind != output.semantic_kind.as_str() {
-            return false;
-        }
         if let Some(expected) = self.requires_content_evidence {
             if expected != output.requires_content_evidence {
                 return false;
@@ -462,6 +374,14 @@ impl GenericProfile {
             }
         }
         true
+    }
+
+    fn match_specificity(&self) -> usize {
+        usize::from(!self.structured_field_selectors.is_empty()) * 64
+            + usize::from(self.delivery_required.is_some()) * 32
+            + usize::from(self.requires_content_evidence.is_some()) * 16
+            + usize::from(!self.response_shapes.is_empty()) * 8
+            + usize::from(!self.locator_kinds.is_empty()) * 4
     }
 
     pub(crate) fn normalized_required_evidence(&self) -> Vec<String> {
@@ -570,7 +490,7 @@ pub(crate) enum FinalAnswerShape {
     FailedStepWithEvidence,
     Free,
     LifecycleResult,
-    RawOutputOrShortSummary,
+    ExactObservationOrShortSummary,
     Scalar,
     SinglePath,
     SummaryWithEvidence,
@@ -623,7 +543,7 @@ impl FinalAnswerShape {
         Self::FailedStepWithEvidence,
         Self::Free,
         Self::LifecycleResult,
-        Self::RawOutputOrShortSummary,
+        Self::ExactObservationOrShortSummary,
         Self::Scalar,
         Self::SinglePath,
         Self::SummaryWithEvidence,
@@ -636,7 +556,7 @@ impl FinalAnswerShape {
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
             "free" => Some(Self::Free),
             "lifecycle_result" => Some(Self::LifecycleResult),
-            "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
+            "exact_observation_or_short_summary" => Some(Self::ExactObservationOrShortSummary),
             "scalar" => Some(Self::Scalar),
             "single_path" => Some(Self::SinglePath),
             "summary_with_evidence" => Some(Self::SummaryWithEvidence),
@@ -651,7 +571,7 @@ impl FinalAnswerShape {
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
             Self::Free => "free",
             Self::LifecycleResult => "lifecycle_result",
-            Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
+            Self::ExactObservationOrShortSummary => "exact_observation_or_short_summary",
             Self::Scalar => "scalar",
             Self::SinglePath => "single_path",
             Self::SummaryWithEvidence => "summary_with_evidence",
@@ -666,7 +586,7 @@ impl FinalAnswerShape {
             Self::ExactList => FinalAnswerShapeClass::StrictList,
             Self::LifecycleResult => FinalAnswerShapeClass::Verdict,
             Self::FailedStepWithEvidence
-            | Self::RawOutputOrShortSummary
+            | Self::ExactObservationOrShortSummary
             | Self::SummaryWithEvidence => FinalAnswerShapeClass::GroundedSummary,
             Self::Free => FinalAnswerShapeClass::Freeform,
         }
@@ -747,24 +667,15 @@ impl ActionRef {
     }
 }
 
-pub(crate) enum MatchedContract<'a> {
-    Semantic(&'a MatrixContract),
-    Generic(&'a GenericProfile),
-}
+pub(crate) struct MatchedContract<'a>(&'a GenericProfile);
 
 impl<'a> MatchedContract<'a> {
     pub(crate) fn required_evidence(&self) -> Vec<String> {
-        match self {
-            Self::Semantic(contract) => contract.normalized_required_evidence(),
-            Self::Generic(profile) => profile.normalized_required_evidence(),
-        }
+        self.0.normalized_required_evidence()
     }
 
     pub(crate) fn final_answer_shape(&self) -> &str {
-        match self {
-            Self::Semantic(contract) => contract.final_answer_shape.as_str(),
-            Self::Generic(profile) => profile.final_answer_shape.as_str(),
-        }
+        self.0.final_answer_shape.as_str()
     }
 
     pub(crate) fn final_answer_shape_kind(&self) -> Option<FinalAnswerShape> {
@@ -772,24 +683,15 @@ impl<'a> MatchedContract<'a> {
     }
 
     pub(crate) fn evidence_expression(&self) -> EvidenceExpression {
-        match self {
-            Self::Semantic(contract) => contract.evidence_expression(),
-            Self::Generic(profile) => profile.evidence_expression(),
-        }
+        self.0.evidence_expression()
     }
 
     fn observation_sources(&self) -> Vec<String> {
-        match self {
-            Self::Semantic(contract) => contract.observation_sources(),
-            Self::Generic(profile) => profile.observation_sources(),
-        }
+        self.0.observation_sources()
     }
 
     fn observation_extractors(&self) -> Vec<ObservationExtractor> {
-        match self {
-            Self::Semantic(contract) => contract.observation_extractors(),
-            Self::Generic(profile) => profile.observation_extractors(),
-        }
+        self.0.observation_extractors()
     }
 
     fn observation_extractor_for_source(&self, source: &str) -> Option<ObservationExtractor> {
@@ -801,73 +703,43 @@ impl<'a> MatchedContract<'a> {
     }
 
     fn policy_mode(&self) -> String {
-        match self {
-            Self::Semantic(contract) => contract.policy_mode(),
-            Self::Generic(profile) => profile.policy_mode(),
-        }
+        self.0.policy_mode()
     }
 
     fn evidence_scope(&self) -> String {
-        match self {
-            Self::Semantic(contract) => contract.evidence_scope(),
-            Self::Generic(profile) => profile.evidence_scope(),
-        }
+        self.0.evidence_scope()
     }
 
     fn freshness(&self) -> String {
-        match self {
-            Self::Semantic(contract) => contract.freshness(),
-            Self::Generic(profile) => profile.freshness(),
-        }
+        self.0.freshness()
     }
 
     fn artifact_kind(&self) -> String {
-        match self {
-            Self::Semantic(contract) => contract.artifact_kind(),
-            Self::Generic(profile) => profile.artifact_kind(),
-        }
+        self.0.artifact_kind()
     }
 
     fn channel_visibility(&self) -> String {
-        match self {
-            Self::Semantic(contract) => contract.channel_visibility(),
-            Self::Generic(profile) => profile.channel_visibility(),
-        }
+        self.0.channel_visibility()
     }
 
     pub(crate) fn evidence_profile(&self) -> String {
-        match self {
-            Self::Semantic(contract) => contract.evidence_profile(),
-            Self::Generic(profile) => profile.evidence_profile(),
-        }
+        self.0.evidence_profile()
     }
 
     fn match_name(&self) -> &str {
-        match self {
-            Self::Semantic(contract) => contract.semantic_kind.as_str(),
-            Self::Generic(profile) => profile.name.as_str(),
-        }
+        self.0.name.as_str()
     }
 
     fn allowed_actions(&self) -> &[String] {
-        match self {
-            Self::Semantic(contract) => contract.allowed_actions.as_slice(),
-            Self::Generic(profile) => profile.allowed_actions.as_slice(),
-        }
+        self.0.allowed_actions.as_slice()
     }
 
     fn forbidden_actions(&self) -> &[String] {
-        match self {
-            Self::Semantic(contract) => contract.forbidden_actions.as_slice(),
-            Self::Generic(profile) => profile.forbidden_actions.as_slice(),
-        }
+        self.0.forbidden_actions.as_slice()
     }
 
     fn preferred_actions(&self) -> &[String] {
-        match self {
-            Self::Semantic(contract) => contract.preferred_actions.as_slice(),
-            Self::Generic(profile) => profile.preferred_actions.as_slice(),
-        }
+        self.0.preferred_actions.as_slice()
     }
 
     fn action_policy(&self, action: &ActionRef) -> ActionPolicyDecision {
@@ -876,15 +748,6 @@ impl<'a> MatchedContract<'a> {
         }
         let allowed_actions = self.allowed_actions();
         if allowed_actions.is_empty() {
-            if matches!(
-                self,
-                Self::Semantic(MatrixContract {
-                    none_passthrough: true,
-                    ..
-                })
-            ) {
-                return ActionPolicyDecision::Allowed;
-            }
             return ActionPolicyDecision::RejectedNoActionsAllowed;
         }
         if action_matches_any(action, allowed_actions) {
@@ -910,29 +773,15 @@ impl ContractMatrix {
         Self::load_from_path(&workspace_root.join(CONTRACT_MATRIX_REL_PATH))
     }
 
-    pub(crate) fn semantic_contract(
-        &self,
-        semantic_kind: OutputSemanticKind,
-    ) -> Option<&MatrixContract> {
-        self.contracts.get(semantic_kind.as_str())
-    }
-
     pub(crate) fn match_output_contract(
         &self,
         output: &IntentOutputContract,
     ) -> Option<MatchedContract<'_>> {
-        if output.semantic_kind != OutputSemanticKind::None {
-            return self
-                .semantic_contract(output.semantic_kind)
-                .map(MatchedContract::Semantic);
-        }
-        for profile in &self.generic_profiles {
-            if profile.matches(output) {
-                return Some(MatchedContract::Generic(profile));
-            }
-        }
-        self.semantic_contract(OutputSemanticKind::None)
-            .map(MatchedContract::Semantic)
+        self.generic_profiles
+            .iter()
+            .filter(|profile| profile.matches(output))
+            .max_by_key(|profile| profile.match_specificity())
+            .map(MatchedContract)
     }
 
     pub(crate) fn validate_shape(&self) -> Vec<String> {
@@ -980,81 +829,6 @@ impl ContractMatrix {
         }
         if self.trace_policy.max_excerpt_chars == 0 {
             errors.push("trace_policy.max_excerpt_chars must be positive".to_string());
-        }
-        for kind in OutputSemanticKind::ALL {
-            let key = kind.as_str();
-            match self.contracts.get(key) {
-                Some(contract) => {
-                    let declared = contract.semantic_kind.trim();
-                    if declared != key {
-                        errors.push(format!(
-                            "contract `{key}` declares semantic_kind `{declared}`"
-                        ));
-                    }
-                    if contract.final_answer_shape.trim().is_empty() {
-                        errors.push(format!("contract `{key}` missing final_answer_shape"));
-                    } else if FinalAnswerShape::parse(&contract.final_answer_shape).is_none() {
-                        errors.push(format!(
-                            "contract `{key}` has unknown final_answer_shape `{}`",
-                            contract.final_answer_shape
-                        ));
-                    }
-                    let required = contract.normalized_required_evidence();
-                    for field in &required {
-                        if EvidenceToken::parse(field).is_none() {
-                            errors.push(format!(
-                                "contract `{key}` has unknown required_evidence `{field}`"
-                            ));
-                        }
-                    }
-                    if !required.is_empty() && contract.evidence_expression().is_empty() {
-                        errors.push(format!("contract `{key}` missing evidence_expression"));
-                    }
-                    for token in evidence_expression_tokens(&contract.evidence_expression) {
-                        if EvidenceToken::parse(&token).is_none() {
-                            errors.push(format!(
-                                "contract `{key}` has unknown evidence_expression token `{token}`"
-                            ));
-                        }
-                    }
-                    if !required.is_empty() && contract.observation_sources().is_empty() {
-                        errors.push(format!("contract `{key}` missing observation_sources"));
-                    }
-                    validate_contract_runtime_fields(
-                        &mut errors,
-                        &format!("contract `{key}`"),
-                        &contract.policy_mode,
-                        &contract.evidence_scope,
-                        &contract.freshness,
-                        &contract.artifact_kind,
-                        &contract.channel_visibility,
-                        &contract.evidence_profile,
-                    );
-                    validate_artifact_shape_contract(
-                        &mut errors,
-                        &format!("contract `{key}`"),
-                        Some(&contract.delivery_shape),
-                        &contract.final_answer_shape,
-                        &contract.artifact_kind,
-                        &contract.channel_visibility,
-                    );
-                    validate_observation_extractors(
-                        &mut errors,
-                        &format!("contract `{key}`"),
-                        &contract.observation_sources(),
-                        &contract.observation_extractors,
-                    );
-                }
-                None => errors.push(format!("missing contract for semantic `{key}`")),
-            }
-        }
-        for key in self.contracts.keys() {
-            if !OutputSemanticKind::ALL
-                .iter()
-                .any(|kind| kind.as_str() == key.as_str())
-            {
-                errors.push(format!("unknown semantic contract `{key}`"));
-            }
         }
         let mut generic_names = BTreeSet::new();
         for profile in &self.generic_profiles {
@@ -1133,49 +907,12 @@ impl ContractMatrix {
 
     pub(crate) fn matrix_version_hash(&self) -> String {
         let mut input = format!(
-            "{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}",
             self.schema_version,
             self.matrix_version,
-            self.contracts.len(),
             self.generic_profiles.len(),
             self.trace_policy.stable_key()
         );
-        for (key, contract) in &self.contracts {
-            input.push('|');
-            input.push_str(key);
-            input.push(':');
-            input.push_str(&contract.normalized_required_evidence().join(","));
-            input.push(':');
-            input.push_str(&contract.final_answer_shape);
-            input.push(':');
-            input.push_str(&normalized_tokens(&contract.allowed_actions).join(","));
-            input.push(':');
-            input.push_str(&normalized_tokens(&contract.preferred_actions).join(","));
-            input.push(':');
-            input.push_str(&normalized_tokens(&contract.forbidden_actions).join(","));
-            input.push(':');
-            input.push_str(
-                &contract
-                    .evidence_expression
-                    .stable_key(&contract.normalized_required_evidence()),
-            );
-            input.push(':');
-            input.push_str(&contract.policy_mode());
-            input.push(':');
-            input.push_str(&contract.evidence_scope());
-            input.push(':');
-            input.push_str(&contract.freshness());
-            input.push(':');
-            input.push_str(&contract.artifact_kind());
-            input.push(':');
-            input.push_str(&contract.channel_visibility());
-            input.push(':');
-            input.push_str(&contract.evidence_profile());
-            input.push(':');
-            input.push_str(&observation_extractors_stable_key(
-                &contract.observation_extractors(),
-            ));
-        }
         for profile in &self.generic_profiles {
             input.push('|');
             input.push_str("generic:");
@@ -1219,11 +956,6 @@ impl ContractMatrix {
     #[cfg(test)]
     pub(crate) fn all_action_tokens(&self) -> BTreeSet<String> {
         let mut out = BTreeSet::new();
-        for contract in self.contracts.values() {
-            collect_action_tokens(&mut out, &contract.allowed_actions);
-            collect_action_tokens(&mut out, &contract.preferred_actions);
-            collect_action_tokens(&mut out, &contract.forbidden_actions);
-        }
         for profile in &self.generic_profiles {
             collect_action_tokens(&mut out, &profile.allowed_actions);
             collect_action_tokens(&mut out, &profile.preferred_actions);
@@ -1267,15 +999,6 @@ impl ContractMatrix {
         registry: &SkillsRegistry,
     ) -> Vec<String> {
         let mut errors = BTreeSet::new();
-        for (key, contract) in &self.contracts {
-            collect_external_observation_admission_errors(
-                &mut errors,
-                &format!("contract `{key}`"),
-                &contract.observation_sources(),
-                &contract.observation_extractors(),
-                registry,
-            );
-        }
         for profile in &self.generic_profiles {
             collect_external_observation_admission_errors(
                 &mut errors,

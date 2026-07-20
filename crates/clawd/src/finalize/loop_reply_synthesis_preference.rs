@@ -3,7 +3,7 @@ use tracing::info;
 use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
 use crate::ClaimedTask;
 
-pub(super) fn replace_raw_passthrough_delivery_with_publishable_synthesis(
+pub(super) fn replace_observed_passthrough_delivery_with_publishable_synthesis(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -12,7 +12,7 @@ pub(super) fn replace_raw_passthrough_delivery_with_publishable_synthesis(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if !super::delivery_backfill::route_expects_synthesis_over_raw_observation(route) {
+    if !super::delivery_backfill::route_expects_synthesis_over_direct_observation(route) {
         return false;
     }
     let Some(synthesis) = super::delivery_backfill::valid_publishable_synthesis_output(loop_state)
@@ -28,7 +28,7 @@ pub(super) fn replace_raw_passthrough_delivery_with_publishable_synthesis(
     {
         return false;
     }
-    let has_raw_passthrough = delivery_messages.iter().any(|message| {
+    let has_observed_passthrough = delivery_messages.iter().any(|message| {
         let candidate = message.trim();
         !candidate.is_empty()
             && candidate != synthesis
@@ -38,11 +38,11 @@ pub(super) fn replace_raw_passthrough_delivery_with_publishable_synthesis(
                 loop_state, candidate,
             ))
     });
-    if !has_raw_passthrough {
+    if !has_observed_passthrough {
         return false;
     }
     info!(
-        "final_result_replace_raw_passthrough_delivery_with_synthesis task_id={} synthesis={}",
+        "final_result_replace_observed_passthrough_delivery_with_synthesis task_id={} synthesis={}",
         task.task_id,
         crate::truncate_for_log(&synthesis)
     );
@@ -57,7 +57,7 @@ pub(super) fn replace_raw_passthrough_delivery_with_publishable_synthesis(
     loop_state.last_user_visible_respond = Some(synthesis);
     super::delivery_record::log_deterministic_delivery_record(
         &task.task_id,
-        "final_result_replace_raw_passthrough_delivery_with_synthesis",
+        "final_result_replace_observed_passthrough_delivery_with_synthesis",
         "replaced",
         agent_run_context,
         loop_state.executed_step_results.len(),
@@ -81,15 +81,15 @@ pub(super) fn prefer_latest_synthesis_for_compound_observation_delivery(
             contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
-        || route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        || route.requests_exact_command_output()
     {
         return false;
     }
-    if super::raw_command::output_contract_requests_exact_delivery(route) {
+    if super::exact_observation::output_contract_requests_exact_delivery(route) {
         return false;
     }
     if !contract.requires_content_evidence
-        && !super::delivery_backfill::route_expects_synthesis_over_raw_observation(route)
+        && !super::delivery_backfill::route_expects_synthesis_over_direct_observation(route)
         && !route_allows_grounded_compound_terminal_delivery(route, loop_state)
     {
         return false;
@@ -221,7 +221,7 @@ fn route_allows_grounded_compound_terminal_delivery(
     let contract = route.clone();
     if contract.delivery_required
         || !matches!(contract.response_shape, crate::OutputResponseShape::Free)
-        || super::raw_command::output_contract_requests_exact_delivery(route)
+        || super::exact_observation::output_contract_requests_exact_delivery(route)
     {
         return false;
     }
@@ -254,7 +254,7 @@ pub(super) fn structured_compound_synthesis_can_replace_current_delivery(
         || crate::finalize::looks_like_planner_artifact(synthesis)
         || crate::finalize::looks_like_internal_trace_artifact(synthesis)
         || (crate::finalize::is_execution_summary_message(synthesis) && !agent_hook_runtime_surface)
-        || super::raw_command::output_contract_requests_exact_delivery(route)
+        || super::exact_observation::output_contract_requests_exact_delivery(route)
         || route.delivery_required
     {
         return false;

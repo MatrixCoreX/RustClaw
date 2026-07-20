@@ -8,14 +8,16 @@ fn direct_answer_defers_system_basic_info_summary_to_llm_for_brief_request() {
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::OneSentence,
+            response_shape: OutputResponseShape::Strict,
             requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("command_output".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -37,12 +39,11 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::OneSentence,
+            response_shape: OutputResponseShape::Strict,
             requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "scripts/skill_calls".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -121,9 +122,11 @@ fn direct_answer_defers_system_basic_info_summary_without_action_field() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("command_output".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -145,14 +148,16 @@ fn direct_answer_defers_system_basic_info_for_free_shape_request() {
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
+            response_shape: OutputResponseShape::Strict,
             requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
             locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("command_output".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -179,7 +184,6 @@ fn direct_answer_defers_system_basic_info_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -209,7 +213,6 @@ fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() 
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("resolved_path".to_string()),
@@ -241,7 +244,6 @@ fn direct_scalar_extracts_cwd_from_system_basic_info_without_action_field() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("path".to_string()),
@@ -282,7 +284,6 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "pwd_line.txt".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("path".to_string()),
@@ -315,7 +316,6 @@ fn generic_workspace_summary_is_not_hard_summarized_by_observed_output() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -363,7 +363,6 @@ fn exact_path_selector_uses_auto_locator_full_path_for_unique_list_dir_match() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "report.md".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("path".to_string()),
@@ -414,7 +413,6 @@ fn exact_path_selector_uses_rooted_full_path_for_unique_find_name_match() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "report.md".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("path".to_string()),
@@ -453,7 +451,6 @@ fn exact_path_selector_prefers_resolved_path_from_path_batch_facts() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "report.md".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("resolved_path".to_string()),
@@ -511,7 +508,6 @@ fn path_fact_without_exact_path_selector_does_not_direct_render() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "report.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -549,7 +545,6 @@ fn direct_scalar_counts_multiline_list_dir_when_route_requests_count() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("count".to_string()),
                 ..Default::default()
@@ -581,7 +576,6 @@ fn direct_scalar_uses_inventory_dir_count_for_scalar_count() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("count".to_string()),
                 ..Default::default()
@@ -613,7 +607,6 @@ fn non_scalar_count_observation_waits_for_model_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("count".to_string()),
                 ..Default::default()
@@ -644,7 +637,6 @@ fn exact_path_selector_projects_inventory_directory_path() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "/tmp/stem_multi".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("path".to_string()),

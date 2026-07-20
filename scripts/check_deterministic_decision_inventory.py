@@ -198,7 +198,7 @@ BRANCH_INVENTORY: tuple[BranchInventoryEntry, ...] = (
         name="deterministic_delivery_trace_record",
         path="crates/clawd/src/finalize/loop_reply_delivery_record.rs",
         category="compat_trace",
-        input_fields=("reason_code", "semantic_kind", "response_shape"),
+        input_fields=("reason_code", "response_shape", "structured_field_selector"),
         output_fields=("deterministic_delivery_record",),
         tokens=("log_deterministic_delivery_record", "deterministic_delivery_record"),
     ),

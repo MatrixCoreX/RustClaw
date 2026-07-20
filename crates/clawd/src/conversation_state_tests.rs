@@ -187,7 +187,6 @@ fn standalone_side_answer_preserves_existing_primary_task() {
     route_result.delivery_required = false;
     route_result.locator_kind = crate::OutputLocatorKind::None;
     route_result.delivery_intent = crate::OutputDeliveryIntent::None;
-    route_result.semantic_kind = crate::OutputSemanticKind::None;
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -242,7 +241,6 @@ fn direct_standalone_side_answer_preserves_existing_primary_task() {
     route_result.delivery_required = false;
     route_result.locator_kind = crate::OutputLocatorKind::None;
     route_result.delivery_intent = crate::OutputDeliveryIntent::None;
-    route_result.semantic_kind = crate::OutputSemanticKind::None;
     let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
@@ -774,7 +772,6 @@ fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
     let mut route_result = output_contract_for_test();
     route_result.requires_content_evidence = true;
     route_result.response_shape = crate::OutputResponseShape::Scalar;
-    route_result.semantic_kind = crate::OutputSemanticKind::None;
     route_result.selection.structured_field_selector = Some("count".to_string());
 
     let prompt = next_last_primary_task_prompt(

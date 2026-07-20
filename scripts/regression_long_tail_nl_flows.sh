@@ -898,9 +898,9 @@ append_summary() {
   local case_name="$2"
   local auth_kind="$3"
   local assertion="$4"
-  local result_kind="$5"
+  local outcome_kind="$5"
   local note="$6"
-  python3 - "$LOG_DIR/summary.jsonl" "$round_no" "$case_name" "$auth_kind" "$assertion" "$result_kind" "$note" <<'PY'
+  python3 - "$LOG_DIR/summary.jsonl" "$round_no" "$case_name" "$auth_kind" "$assertion" "$outcome_kind" "$note" <<'PY'
 import json
 import sys
 from pathlib import Path

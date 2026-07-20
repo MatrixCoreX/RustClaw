@@ -66,7 +66,8 @@ def structural_signature(obs: Any) -> dict[str, Any]:
     return {
         "status": obs.status,
         "contract_match": obs.contract_match,
-        "contract_semantic_kind": obs.contract_semantic_kind,
+        "contract_response_shape": obs.contract_response_shape,
+        "contract_structured_field_selector": obs.contract_structured_field_selector,
         "contract_final_answer_shape": obs.contract_final_answer_shape,
         "required_evidence": normalized_list(obs.required_evidence),
         "missing_evidence": normalized_list(obs.missing_evidence),
@@ -188,7 +189,8 @@ def min_repro_side(obs: Any | None, run_dir: Path) -> dict[str, Any] | None:
         },
         "contract": {
             "match": obs.contract_match,
-            "semantic_kind": obs.contract_semantic_kind,
+            "response_shape": obs.contract_response_shape,
+            "structured_field_selector": obs.contract_structured_field_selector,
             "final_answer_shape": obs.contract_final_answer_shape,
             "required_evidence": obs.required_evidence,
             "missing_evidence": obs.missing_evidence,
@@ -290,7 +292,8 @@ def write_minimal_run_case(
                     "trace": {
                         "contract_matrix": {
                             "contract_match": contract_match,
-                            "semantic_kind": contract_match,
+                            "response_shape": "scalar",
+                            "structured_field_selector": "count",
                             "final_answer_shape": final_shape,
                         },
                         "evidence_coverage": {

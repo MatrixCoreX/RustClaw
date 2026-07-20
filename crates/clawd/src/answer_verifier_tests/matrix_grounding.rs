@@ -14,7 +14,6 @@ fn single_file_delivery_rejects_token_mixed_with_prose() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-token-only", "ask", "send file");
     journal
@@ -54,7 +53,6 @@ fn single_file_delivery_rejects_token_mixed_with_prose() {
 fn matrix_scalar_shape_rejects_unregistered_fallback_extractor_values() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-scalar-fallback-extractor",
@@ -80,7 +78,6 @@ fn matrix_scalar_shape_rejects_unregistered_fallback_extractor_values() {
 fn matrix_scalar_shape_accepts_admitted_external_extra_count() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-external-admitted",
@@ -122,7 +119,6 @@ fn matrix_scalar_shape_accepts_admitted_external_extra_count() {
 fn matrix_scalar_shape_does_not_use_content_excerpt_as_field_value() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-scalar-content-excerpt",
         "ask",
@@ -154,7 +150,6 @@ fn scalar_json_read_range_candidate_can_satisfy_field_value_gap() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "package.json".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-scalar-json-read-range",
         "ask",
@@ -186,13 +181,13 @@ fn scalar_json_read_range_candidate_can_satisfy_field_value_gap() {
 }
 
 #[test]
-fn raw_command_output_bounded_read_excerpt_can_skip_verifier() {
+fn exact_observation_output_bounded_read_excerpt_can_skip_verifier() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/clawd-dev.log".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.configure_exact_command_output();
     let observed_line = "2026-05-15T15:58:11Z WARN provider auth failed code=401";
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-raw-read-tail", "ask", "tail log");
@@ -237,13 +232,13 @@ fn raw_command_output_bounded_read_excerpt_can_skip_verifier() {
 }
 
 #[test]
-fn raw_command_output_bounded_read_excerpt_respects_locator_path() {
+fn exact_observation_output_bounded_read_excerpt_respects_locator_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/expected.log".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.configure_exact_command_output();
     let observed_line = "line from another file";
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-raw-read-wrong-path", "ask", "tail log");
@@ -274,7 +269,6 @@ fn raw_command_output_bounded_read_excerpt_respects_locator_path() {
 fn matrix_scalar_shape_ignores_read_text_structured_fields() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-scalar-read-fields",
@@ -307,7 +301,6 @@ fn matrix_scalar_shape_ignores_read_text_structured_fields() {
 fn matrix_strict_list_shape_ignores_read_text_list_fields() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-list-read-fields",
@@ -344,7 +337,6 @@ fn matrix_strict_list_shape_uses_observed_evidence_map_values() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.selection.list_selector.target_kind =
         crate::OutputScalarCountTargetKind::File;
     route
@@ -384,7 +376,6 @@ fn matrix_scalar_shape_accepts_count_from_array_evidence_for_non_scalar_route_sh
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-array-count", "ask", "count rows");
@@ -470,7 +461,6 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
     let mut list_route = route_with_mode();
     list_route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     list_route.output_contract.requires_content_evidence = true;
-    list_route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut list_journal =
         crate::task_journal::TaskJournal::for_task("task-synth-list", "ask", "list files");
     list_journal
@@ -517,7 +507,6 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
 
     let mut scalar_route = route_with_mode();
     scalar_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    scalar_route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     scalar_route
         .output_contract
         .selection
@@ -574,7 +563,6 @@ fn matrix_single_path_shape_uses_observed_evidence_map_paths() {
 fn path_inspection_answer_still_uses_model_verifier_after_existing_path_fact() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
@@ -610,7 +598,6 @@ fn path_inspection_answer_still_uses_model_verifier_after_existing_path_fact() {
 fn path_inspection_answer_still_uses_model_verifier_after_missing_path_fact() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
@@ -643,7 +630,6 @@ fn path_inspection_answer_still_uses_model_verifier_after_missing_path_fact() {
 fn path_inspection_answer_ignores_doc_parse_path_facts() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
@@ -680,7 +666,6 @@ fn path_inspection_answer_ignores_doc_parse_path_facts() {
 fn path_inspection_answer_ignores_read_text_path_facts() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
@@ -716,8 +701,7 @@ fn path_inspection_answer_ignores_read_text_path_facts() {
 #[test]
 fn exact_single_run_cmd_output_skips_llm_verifier_without_scalar_contract() {
     let mut route = route_with_mode();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.configure_exact_command_output();
     let mut journal = crate::task_journal::TaskJournal::for_task("task-run-cmd", "ask", "run it");
     journal
         .step_results
@@ -751,7 +735,8 @@ fn exact_single_run_cmd_output_skips_llm_verifier_without_scalar_contract() {
 
 #[test]
 fn exact_repeated_run_cmd_output_skips_llm_verifier() {
-    let route = route_with_mode();
+    let mut route = route_with_mode();
+    route.output_contract.configure_exact_command_output();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-retry-command", "ask", "run it");
     for idx in 1..=3 {
@@ -777,7 +762,8 @@ fn exact_repeated_run_cmd_output_skips_llm_verifier() {
 
 #[test]
 fn exact_run_cmd_output_skip_rejects_mixed_external_outputs() {
-    let route = route_with_mode();
+    let mut route = route_with_mode();
+    route.output_contract.configure_exact_command_output();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-two-commands", "ask", "run both");
     for (idx, output) in ["first", "second"].into_iter().enumerate() {
@@ -802,8 +788,8 @@ fn exact_run_cmd_output_skip_rejects_mixed_external_outputs() {
 #[test]
 fn free_shape_non_command_plain_observation_still_uses_llm_verifier() {
     let mut route = route_with_mode();
+    route.output_contract.configure_exact_command_output();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-free", "ask", "summarize output");
     journal

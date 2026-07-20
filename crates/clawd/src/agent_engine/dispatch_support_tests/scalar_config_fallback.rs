@@ -16,7 +16,6 @@ fn synthesize_direct_fallback_allows_wrapped_empty_config_scalar_for_path_contra
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "Cargo.toml".to_string(),
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("value".to_string()),

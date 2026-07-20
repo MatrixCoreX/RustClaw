@@ -36,12 +36,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
         observed_request_prefers_english_template(state, request_language_hint);
     let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route);
     let health_check_prefers_raw_payload = has_route_contract
-        && route.is_some_and(|route| {
-            super::output_route_policy::route_contract_marker_is(
-                route,
-                crate::OutputSemanticKind::RawCommandOutput,
-            )
-        })
+        && route.is_some_and(crate::IntentOutputContract::requests_exact_command_output)
         && !matches!(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
@@ -291,12 +286,7 @@ pub(super) fn fs_search_output_direct_answer_candidate(
     allow_multi_result_list: bool,
     prefer_full_path: bool,
 ) -> Option<String> {
-    if route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::RawCommandOutput,
-        )
-    }) {
+    if route.is_some_and(crate::IntentOutputContract::requests_exact_command_output) {
         return fs_search_direct_answer_candidate(
             state,
             value,
@@ -355,10 +345,6 @@ pub(super) fn route_allows_tail_read_range_direct_passthrough(
         return false;
     }
     route.requires_content_evidence
-        && (super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::RawCommandOutput,
-        ) || super::output_route_policy::route_is_unclassified_contract(route))
 }
 
 pub(super) fn route_allows_read_range_direct_passthrough(
@@ -395,10 +381,8 @@ pub(super) fn route_allows_raw_read_range_direct_passthrough(
     let Some(route) = route else {
         return false;
     };
-    super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::RawCommandOutput,
-    ) && route.requires_content_evidence
+    route.requests_exact_command_output()
+        && route.requires_content_evidence
         && !route.delivery_required
 }
 

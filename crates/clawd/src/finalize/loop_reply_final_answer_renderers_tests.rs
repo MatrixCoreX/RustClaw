@@ -155,7 +155,6 @@ fn machine_kv_renderer_does_not_expand_missing_path_into_domain_template() {
     let task = claimed_task("task-missing-path-machine-kv");
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.selection.structured_field_selector = Some("path,exists,error_code".to_string());
     let ctx = crate::agent_engine::AgentRunContext {

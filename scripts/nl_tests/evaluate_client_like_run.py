@@ -420,7 +420,8 @@ class Observation:
     verifier_issue_attributions: list[str]
     verifier_needs_confirmation: list[bool]
     contract_match: str
-    contract_semantic_kind: str
+    contract_response_shape: str
+    contract_structured_field_selector: str
     contract_final_answer_shape: str
     required_evidence: list[str]
     observed_evidence_fields: list[str]
@@ -497,8 +498,15 @@ def observe_file(path: Path) -> Observation:
         contract_match=(
             str(contract_matrix.get("contract_match") or "") if isinstance(contract_matrix, dict) else ""
         ),
-        contract_semantic_kind=(
-            str(contract_matrix.get("semantic_kind") or "") if isinstance(contract_matrix, dict) else ""
+        contract_response_shape=(
+            str(contract_matrix.get("response_shape") or "")
+            if isinstance(contract_matrix, dict)
+            else ""
+        ),
+        contract_structured_field_selector=(
+            str(contract_matrix.get("structured_field_selector") or "")
+            if isinstance(contract_matrix, dict)
+            else ""
         ),
         contract_final_answer_shape=(
             str(contract_matrix.get("final_answer_shape") or "") if isinstance(contract_matrix, dict) else ""
@@ -778,7 +786,8 @@ def evaluate(obs: Observation, expected: dict[str, Any]) -> list[str]:
             )
     contract_checks = {
         "contract_match": obs.contract_match,
-        "contract_semantic_kind": obs.contract_semantic_kind,
+        "contract_response_shape": obs.contract_response_shape,
+        "contract_structured_field_selector": obs.contract_structured_field_selector,
         "contract_final_answer_shape": obs.contract_final_answer_shape,
     }
     for key, observed in contract_checks.items():
@@ -848,7 +857,8 @@ def baseline_row(obs: Observation) -> dict[str, Any]:
         "verifier_issue_attributions": obs.verifier_issue_attributions,
         "verifier_needs_confirmation": obs.verifier_needs_confirmation,
         "contract_match": obs.contract_match,
-        "contract_semantic_kind": obs.contract_semantic_kind,
+        "contract_response_shape": obs.contract_response_shape,
+        "contract_structured_field_selector": obs.contract_structured_field_selector,
         "contract_final_answer_shape": obs.contract_final_answer_shape,
         "required_evidence": obs.required_evidence,
         "observed_evidence_fields": obs.observed_evidence_fields,

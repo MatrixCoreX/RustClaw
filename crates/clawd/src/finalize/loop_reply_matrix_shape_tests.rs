@@ -358,7 +358,6 @@ fn matrix_shape_guard_replaces_unstructured_strict_list_with_observed_list() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "document".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -404,7 +403,6 @@ fn matrix_shape_guard_replaces_scalar_count_field_placeholder_with_observed_valu
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "logs".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -444,7 +442,6 @@ fn matrix_strict_list_shape_builds_list_from_observed_json() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "document".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -469,7 +466,6 @@ fn matrix_strict_list_ignores_inventory_json_hidden_in_visible_text() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "document".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
     let hidden_payload = serde_json::json!({
@@ -525,7 +521,7 @@ fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
 }
 
 #[test]
-fn matrix_path_list_inventory_uses_planner_semantic_kind() {
+fn matrix_path_list_inventory_uses_planner_output_contract() {
     let state = test_state();
     let task = claimed_task("task-fs-path-list-inventory-capability-shape");
     let mut route = free_route_result();
@@ -640,7 +636,6 @@ fn matrix_file_name_list_prefers_wrapped_names_over_size_summary_synthesis() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "document".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -739,7 +734,6 @@ fn matrix_strict_list_shape_builds_directory_names_from_inventory_dirs() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::Dir;
     route.selection.list_selector.target_kind_specified = true;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -762,7 +756,6 @@ fn name_list_renderer_uses_file_names_contract() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -785,7 +778,6 @@ fn name_list_renderer_uses_directory_names_contract() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::Dir;
     route.selection.list_selector.target_kind_specified = true;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -806,7 +798,6 @@ fn name_list_renderer_uses_directory_names_contract() {
 #[test]
 fn name_list_contract_requires_observed_projection() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;

@@ -155,7 +155,7 @@ fn output_contract_machine_json(contract: &crate::IntentOutputContract) -> Value
         "delivery_required": contract.delivery_required,
         "locator_kind": contract.locator_kind.as_str(),
         "delivery_intent": contract.delivery_intent.as_str(),
-        "result_kind": contract.semantic_kind.as_str(),
+        "structured_field_selector": contract.selection.structured_field_selector,
         "final_answer_shape": crate::evidence_policy::final_answer_shape_for_output_contract(contract)
             .map(|shape| shape.as_str())
             .unwrap_or_else(|| contract.response_shape.as_str()),

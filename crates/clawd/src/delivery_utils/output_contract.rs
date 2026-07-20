@@ -143,7 +143,7 @@ fn should_strip_preamble_before_markdown_table(output_contract: &IntentOutputCon
     {
         return false;
     }
-    if output_contract.semantic_kind_is_unclassified() {
+    if output_contract.does_not_request_exact_command_output() {
         return true;
     }
     !crate::evidence_policy::final_answer_shape_for_output_contract(output_contract)

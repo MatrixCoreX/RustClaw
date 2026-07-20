@@ -555,11 +555,13 @@ fn final_answer_preserves_transform_structured_delivery(
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
-    journal.step_results.iter().any(|step| {
-        step.status == crate::executor::StepExecutionStatus::Ok && step.skill == "transform"
-    }) && std::iter::once(answer_text)
-        .chain(answer_messages.iter().map(String::as_str))
-        .any(|text| text_is_markdown_table(text) || text_is_json_object_or_array(text))
+    journal
+        .step_results
+        .iter()
+        .any(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        && std::iter::once(answer_text)
+            .chain(answer_messages.iter().map(String::as_str))
+            .any(|text| text_is_markdown_table(text) || text_is_json_object_or_array(text))
 }
 
 fn text_is_markdown_table(text: &str) -> bool {
@@ -795,7 +797,6 @@ fn candidate_is_publishable_evidence_summary(candidate: &str, requested_summary:
         || crate::finalize::looks_like_internal_trace_artifact(candidate)
         || crate::finalize::is_execution_summary_message(candidate)
         || text_is_json_object_or_array(candidate)
-        || text_looks_like_raw_command_snapshot(candidate)
         || text_is_machine_kv_only(candidate)
     {
         return false;
@@ -810,18 +811,6 @@ fn candidate_is_publishable_evidence_summary(candidate: &str, requested_summary:
     let token_count = candidate.split_whitespace().count();
     candidate_chars > summary_chars.saturating_add(16)
         && (nonempty_lines > 1 || token_count >= 6 || candidate_chars >= 48)
-}
-
-fn text_looks_like_raw_command_snapshot(text: &str) -> bool {
-    let text = text.trim();
-    text.starts_with("exit=")
-        && text.contains('\n')
-        && (text.contains("\nCOMMAND ")
-            || text.contains("(LISTEN)")
-            || text.contains("\nLISTEN ")
-            || text.contains("State  Recv-Q")
-            || text.contains("%CPU")
-            || text.contains("PID PPID"))
 }
 
 fn text_is_machine_kv_only(text: &str) -> bool {

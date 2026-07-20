@@ -34,7 +34,7 @@ fn route_allows_bounded_read_range_direct_answer(route: &crate::IntentOutputCont
                 | OutputLocatorKind::CurrentWorkspace
         )
         && !contract.requires_content_evidence
-        && route.semantic_kind_is_unclassified()
+        && route.does_not_request_exact_command_output()
 }
 
 fn bounded_read_range_answer_from_output(output: &str) -> Option<String> {

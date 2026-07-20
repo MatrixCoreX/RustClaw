@@ -13,7 +13,6 @@ fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/tmp/test_bundle.zip".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
@@ -91,7 +90,6 @@ fn direct_db_basic_observed_answer_counts_rows_for_scalar_count_contract() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
@@ -124,7 +122,6 @@ fn structured_container_summary_returns_machine_fields_for_empty_object() {
     ));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -157,7 +154,6 @@ fn structured_container_summary_returns_machine_fields_for_empty_array() {
     ));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

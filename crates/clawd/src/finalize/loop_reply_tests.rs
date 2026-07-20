@@ -22,17 +22,16 @@ use super::{
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_non_builtin_skill_raw_answer, direct_path_from_active_bound_inventory,
-    direct_publishable_observed_answer, direct_raw_command_output_projection,
-    direct_scalar_observed_answer, direct_structured_observed_answer,
+    direct_publishable_observed_answer, direct_scalar_observed_answer,
+    direct_structured_observed_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
-    discard_raw_passthrough_delivery_when_structured_answer_available,
+    discard_observed_passthrough_delivery_when_structured_answer_available,
     effective_agent_run_context_for_finalization, ensure_requested_success_marker_visible,
     execution_recipe_closeout_note, final_answer_text_from_delivery, finalize_loop_reply,
     finalizer_requires_clarify, generated_delivery_existing_file_content_synthesis_token,
     has_missing_file_search_evidence, latest_file_delivery_observation_is_missing,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    missing_file_path_from_output, missing_requested_success_marker,
-    normalize_file_token_delivery_from_auto_locator,
+    looks_like_structured_machine_output, missing_file_path_from_output,
+    missing_requested_success_marker, normalize_file_token_delivery_from_auto_locator,
     normalize_file_token_delivery_from_observed_paths,
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
@@ -45,10 +44,9 @@ use super::{
     replace_delivery_with_deterministic_observed_execution_status_answer,
     replace_delivery_with_latest_tail_read_range_answer,
     replace_delivery_with_requested_machine_kv_summary,
-    replace_raw_observation_delivery_with_synthesis, resolve_file_token_from_auto_locator_answer,
-    route_allows_file_token_only_fallback, route_structured_clarify_context,
-    run_deterministic_fallback_renderer_registry, run_task_lifecycle_renderer_registry,
-    should_drop_passthrough_delivery_for_content_evidence,
+    resolve_file_token_from_auto_locator_answer, route_allows_file_token_only_fallback,
+    route_structured_clarify_context, run_deterministic_fallback_renderer_registry,
+    run_task_lifecycle_renderer_registry, should_drop_passthrough_delivery_for_content_evidence,
     should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
     structured_compound_synthesis_can_replace_current_delivery, structured_json_values_from_output,
     successful_delivery_final_status, verify_summary_requires_resume_confirmation,
@@ -58,7 +56,7 @@ use super::{
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
     AgentRuntimeConfig, AppState, ClaimedTask, IntentOutputContract, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+    OutputResponseShape, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
@@ -207,12 +205,6 @@ mod execution_status_tests;
 
 #[path = "loop_reply_observed_contract_tests.rs"]
 mod observed_contract_tests;
-
-#[path = "loop_reply_raw_command_tests.rs"]
-mod raw_command_tests;
-
-#[path = "loop_reply_raw_command_text_boundary_tests.rs"]
-mod raw_command_text_boundary_tests;
 
 #[path = "loop_reply_error_finalize_tests.rs"]
 mod error_finalize_tests;
@@ -432,7 +424,6 @@ fn scalar_route_result() -> IntentOutputContract {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Filename,
         delivery_intent: Default::default(),
-        semantic_kind: Default::default(),
         locator_hint: "package.json".to_string(),
         selection: crate::OutputSelectionContract::default(),
     }
@@ -510,8 +501,7 @@ fn plan_result_with_raw_text(raw_plan_text: &str) -> crate::PlanResult {
 async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
     let state = test_state();
     let task = claimed_task("task-control-envelope");
-    let mut route = scalar_route_result();
-    route.semantic_kind = OutputSemanticKind::None;
+    let route = scalar_route_result();
     let planner_output_contract = route.clone();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

@@ -9,7 +9,6 @@ fn derives_ordered_entries_from_numbered_answer_text() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. README.md\n2. Cargo.toml\n3. configs",
         &[],
@@ -65,7 +64,6 @@ fn derives_structural_bullet_entries_from_generic_visible_candidate_answer() {
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "在 `fuzzy_top3` 目录下找到4个文件名包含 \"abcd\" 的文件：\n- `abcd_report.md`\n- `my_abcd.txt`\n- `x_abcd_log.txt`\n- `zz_abcd_backup.log`\n这些都是模糊匹配测试的 fixture 文件。",
         &[],
@@ -144,7 +142,6 @@ fn derives_selected_entry_index_from_bound_target_and_ordered_entries() {
         });
     let mut route = dummy_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],
@@ -212,7 +209,6 @@ fn uses_route_locator_hint_and_observed_entry_count_when_journal_lacks_scope() {
     let mut route = dummy_route_result();
     route.locator_hint = "logs".to_string();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],
@@ -313,7 +309,6 @@ fn observed_entry_count_is_derived_from_visible_entries_not_request_text() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],

@@ -34,7 +34,7 @@ use super::{
 use crate::{
     runtime::{AgentRuntimeConfig, SkillViewsSnapshot},
     AppState, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, ScheduleRuntime, ToolsPolicy,
+    ScheduleRuntime, ToolsPolicy,
 };
 
 struct TempDirGuard {
@@ -132,7 +132,6 @@ fn contract_with_delivery_intent(
     IntentOutputContract {
         exact_sentence_count: None,
         delivery_intent,
-        semantic_kind: Default::default(),
         locator_hint: locator_hint.to_string(),
         ..IntentOutputContract::default()
     }
@@ -428,7 +427,6 @@ fn sync_output_payload_preserves_model_language_summary_before_markdown_table() 
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Free,
-        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
         ..IntentOutputContract::default()
     };
@@ -476,7 +474,6 @@ fn directory_lookup_contract_does_not_replace_synthesized_answer() {
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         locator_hint: "logs".to_string(),
         response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
         ..IntentOutputContract::default()
     };
@@ -550,7 +547,6 @@ fn file_names_contract_does_not_reexpand_single_filename_answer_as_directory_loo
         delivery_intent: OutputDeliveryIntent::DirectoryLookup,
         locator_kind: OutputLocatorKind::Path,
         locator_hint: document.display().to_string(),
-        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
         selection: crate::OutputSelectionContract {
             list_selector: crate::pipeline_types::OutputListSelector {

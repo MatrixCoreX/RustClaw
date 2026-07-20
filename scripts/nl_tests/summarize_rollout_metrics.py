@@ -34,8 +34,9 @@ COUNTER_FIELDS = (
     "vendor_counts",
     "budget_profile_counts",
     "language_counts",
-    "semantic_kind_counts",
     "contract_match_counts",
+    "contract_response_shape_counts",
+    "contract_selector_counts",
     "final_answer_shape_counts",
     "capability_counts",
     "planner_first_action_counts",
@@ -1163,8 +1164,9 @@ def summarize_run(
     vendor_counts: Counter[str] = Counter()
     budget_profile_counts: Counter[str] = Counter()
     language_counts: Counter[str] = Counter()
-    semantic_kind_counts: Counter[str] = Counter()
     contract_match_counts: Counter[str] = Counter()
+    contract_response_shape_counts: Counter[str] = Counter()
+    contract_selector_counts: Counter[str] = Counter()
     final_answer_shape_counts: Counter[str] = Counter()
     capability_counts: Counter[str] = Counter()
     capability_outcome_counts: dict[str, Counter[str]] = defaultdict(Counter)
@@ -1249,8 +1251,13 @@ def summarize_run(
         detected_budget = detected_budget_profile(summary, trace, budget_profile)
         budget_profile_counts[detected_budget] += 1
         language_counts[language_bucket(summary.get("input_text"))] += 1
-        semantic_kind_counts[str(contract.get("semantic_kind") or "unknown")] += 1
         contract_match_counts[str(contract.get("contract_match") or "unknown")] += 1
+        contract_response_shape_counts[
+            str(contract.get("response_shape") or "unknown")
+        ] += 1
+        contract_selector_counts[
+            str(contract.get("structured_field_selector") or "none")
+        ] += 1
         final_answer_shape_counts[str(contract.get("final_answer_shape") or "unknown")] += 1
         delivery_consistent_counts[bool_token(metrics.get("delivery_consistent"))] += 1
         planner_first_action_counts[planner_first_action(trace)] += 1
@@ -1416,8 +1423,11 @@ def summarize_run(
         "vendor_counts": dict(sorted(vendor_counts.items())),
         "budget_profile_counts": dict(sorted(budget_profile_counts.items())),
         "language_counts": dict(sorted(language_counts.items())),
-        "semantic_kind_counts": dict(sorted(semantic_kind_counts.items())),
         "contract_match_counts": dict(sorted(contract_match_counts.items())),
+        "contract_response_shape_counts": dict(
+            sorted(contract_response_shape_counts.items())
+        ),
+        "contract_selector_counts": dict(sorted(contract_selector_counts.items())),
         "final_answer_shape_counts": dict(sorted(final_answer_shape_counts.items())),
         "capability_counts": dict(sorted(capability_counts.items())),
         "capability_outcomes": capability_outcome_report(capability_outcome_counts),

@@ -16,9 +16,11 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
         locator_hint: "/tmp/app.log".to_string(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -75,7 +77,6 @@ fn synthesize_direct_fallback_allows_explicit_scalar_extraction() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/service_notes.md".to_string(),
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("value".to_string()),
@@ -108,7 +109,6 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/service_notes.md".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -137,7 +137,6 @@ fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/README.md".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -169,7 +168,6 @@ fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/service_notes.md".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -179,8 +177,7 @@ fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
     };
     assert!(synthesize_bounded_read_range_direct_answer(&loop_state, Some(&summary_ctx)).is_none());
 
-    let mut generic_evidence_route = base_route.clone();
-    generic_evidence_route.semantic_kind = crate::OutputSemanticKind::None;
+    let generic_evidence_route = base_route.clone();
     let generic_evidence_ctx = AgentRunContext {
         output_contract: Some(generic_evidence_route),
         ..AgentRunContext::default()
@@ -191,7 +188,6 @@ fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
     );
 
     let mut scalar_route = base_route;
-    scalar_route.semantic_kind = crate::OutputSemanticKind::None;
     scalar_route.response_shape = crate::OutputResponseShape::Scalar;
     let scalar_ctx = AgentRunContext {
         output_contract: Some(scalar_route.clone()),

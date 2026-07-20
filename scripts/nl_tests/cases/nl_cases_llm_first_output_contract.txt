@@ -1,15 +1,15 @@
-# Targeted multi-turn NL regression cases for the LLM-first semantic contract.
+# Targeted multi-turn NL regression cases for the LLM-first output contract.
 # Focus:
 # - agent_display_name_hint from request-layer routing
-# - semantic_kind-driven follow-up handling in observed output / finalizer
+# - planner-owned output-contract follow-up handling
 # Format: case_name|turn1|turn2|turn3
 
 context_agent_display_name_cn_direct|后面提到你的时候，我会叫你“小爪值班”。先记住这个设定|先随口回一句你记住了|那我之后该怎么称呼你？只回答名字
 context_agent_display_name_en_direct|From now on, I will refer to you as Clawy Helper. Please remember that.|Reply with a short acknowledgement only.|What should I call you from now on? Reply with the name only.
 context_agent_display_name_cn_indirect|后面我要提到你的时候，统一按“巡检爪”这个称呼来|先简单答一句行|现在我应该怎么称呼你？只输出名字
-context_service_status_semantic_contract|先记一下，“那个服务”指 clawd|看看那个服务现在是不是在运行|只用一句话说状态，不要展开
-context_exists_with_path_semantic_contract|先记一下，“那个文件”指 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md|检查那个文件在不在，只回答有或没有，并给出路径|把刚才那个路径单独发我
-context_quantity_compare_semantic_contract|先看一下 scripts/nl_tests/fixtures/device_local/docs 目录有多少个直接子项，只输出数字|再看一下 scripts/nl_tests/fixtures/device_local/logs 目录有多少个直接子项，只输出数字|上上个目录和上个目录相比，哪个直接子项更多？只用一句话
+context_service_status_output_contract|先记一下，“那个服务”指 clawd|看看那个服务现在是不是在运行|只用一句话说状态，不要展开
+context_exists_with_path_output_contract|先记一下，“那个文件”指 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md|检查那个文件在不在，只回答有或没有，并给出路径|把刚才那个路径单独发我
+context_quantity_compare_output_contract|先看一下 scripts/nl_tests/fixtures/device_local/docs 目录有多少个直接子项，只输出数字|再看一下 scripts/nl_tests/fixtures/device_local/logs 目录有多少个直接子项，只输出数字|上上个目录和上个目录相比，哪个直接子项更多？只用一句话
 continuous|task_append_split_sentence_cn_turn1|legacy_shape,turn_chain,allow_clarify|帮我写个方案
 continuous|task_append_split_sentence_cn_turn2|legacy_shape,turn_chain,allow_clarify|面向老板
 continuous|task_append_split_sentence_cn_turn3|legacy_shape,turn_chain|不要太技术，控制在 80 字内，只输出正文

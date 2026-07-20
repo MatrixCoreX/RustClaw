@@ -62,7 +62,7 @@ use task_delivery_guards::{
 use task_deterministic_recovery::{
     mark_answer_verifier_recovered_by_deterministic_observed_evidence,
     recover_answer_verifier_gap_with_deterministic_machine_evidence,
-    recover_raw_command_machine_field_final_answer,
+    recover_exact_observation_machine_field_final_answer,
 };
 use task_failure_lifecycle::failed_task_lifecycle_payload;
 #[cfg(test)]
@@ -72,7 +72,7 @@ use task_machine_kv_summary::recover_requested_machine_kv_summary_final_answer;
 use task_memory::assistant_memory_source_text;
 use task_memory::{insert_ask_memory_pair, insert_unfinished_goal_memory};
 use task_observed_failure_recovery::{
-    deterministic_filtered_log_entry_recovery, deterministic_raw_tail_read_failure_recovery,
+    deterministic_exact_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
 };
 use task_payload_helpers::{
     answer_verifier_forces_task_failure, answer_verifier_should_force_task_failure,
@@ -671,7 +671,7 @@ pub(crate) async fn finalize_ask_result(
                 journal.answer_verifier_summary = None;
                 journal.record_final_answer(&answer_text);
             }
-            if recover_raw_command_machine_field_final_answer(
+            if recover_exact_observation_machine_field_final_answer(
                 route_result,
                 &mut journal,
                 &mut answer_text,
@@ -680,13 +680,13 @@ pub(crate) async fn finalize_ask_result(
                 failure_reply = false;
                 semantic_clarify = false;
                 info!(
-                    "finalize_raw_command_machine_fields_recovered task_id={} answer={}",
+                    "finalize_exact_observation_machine_fields_recovered task_id={} answer={}",
                     task.task_id,
                     crate::truncate_for_log(&answer_text)
                 );
             }
             if failure_reply {
-                if let Some(recovered_answer) = deterministic_raw_tail_read_failure_recovery(
+                if let Some(recovered_answer) = deterministic_exact_tail_read_failure_recovery(
                     state,
                     task,
                     prompt,
@@ -701,7 +701,7 @@ pub(crate) async fn finalize_ask_result(
                     journal.answer_verifier_summary = None;
                     journal.record_final_answer(&answer_text);
                     info!(
-                        "finalize_raw_tail_read_failure_recovered task_id={} answer={}",
+                        "finalize_exact_tail_read_failure_recovered task_id={} answer={}",
                         task.task_id,
                         crate::truncate_for_log(&answer_text)
                     );
@@ -886,7 +886,7 @@ pub(crate) async fn finalize_ask_result(
                 semantic_clarify = true;
                 journal.answer_verifier_summary = None;
             }
-            if recover_raw_command_machine_field_final_answer(
+            if recover_exact_observation_machine_field_final_answer(
                 route_result,
                 &mut journal,
                 &mut answer_text,
@@ -895,7 +895,7 @@ pub(crate) async fn finalize_ask_result(
                 failure_reply = false;
                 semantic_clarify = false;
                 info!(
-                    "finalize_raw_command_machine_fields_recovered task_id={} answer={}",
+                    "finalize_exact_observation_machine_fields_recovered task_id={} answer={}",
                     task.task_id,
                     crate::truncate_for_log(&answer_text)
                 );

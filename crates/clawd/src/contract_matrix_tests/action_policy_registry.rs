@@ -3,17 +3,15 @@ use super::*;
 #[test]
 fn non_bridge_package_actions_remain_structured_contract_inputs() {
     let cases = [(
-        OutputSemanticKind::None,
         "package_manager",
         serde_json::json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
         "package_manager.smart_install",
         "generic_path_content",
     )];
 
-    for (semantic_kind, skill, args, expected_action, expected_contract) in cases {
+    for (skill, args, expected_action, expected_contract) in cases {
         let policy = action_policy_for_output_contract(
             Some(&IntentOutputContract {
-                semantic_kind,
                 requires_content_evidence: true,
                 response_shape: OutputResponseShape::Strict,
                 locator_kind: OutputLocatorKind::Path,
@@ -46,7 +44,6 @@ fn non_bridge_package_actions_remain_structured_contract_inputs() {
 fn generic_inline_transform_allows_transform_without_locator() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             response_shape: OutputResponseShape::Strict,
             locator_kind: OutputLocatorKind::None,
@@ -72,7 +69,6 @@ fn generic_inline_transform_allows_transform_without_locator() {
 fn generic_inline_transform_allows_kb_namespace_catalog_capability() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             response_shape: OutputResponseShape::Strict,
             locator_kind: OutputLocatorKind::None,
@@ -93,7 +89,6 @@ fn generic_inline_transform_allows_kb_namespace_catalog_capability() {
 fn generic_inline_transform_allows_kb_search_capability() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             response_shape: OutputResponseShape::Strict,
             locator_kind: OutputLocatorKind::None,
@@ -118,7 +113,6 @@ fn generic_inline_transform_allows_kb_search_capability() {
 #[test]
 fn generic_path_content_contract_has_parsed_final_shape() {
     let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::Path,
@@ -137,7 +131,6 @@ fn generic_path_content_contract_has_parsed_final_shape() {
 #[test]
 fn generic_path_content_allows_supplemental_directory_listing() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::Path,
@@ -189,11 +182,10 @@ fn generic_delivery_allows_directory_listing_for_selection() {
 }
 
 #[test]
-fn semantic_none_rejects_forbidden_action() {
+fn unmatched_contract_rejects_forbidden_action() {
     let matrix = load_workspace_matrix();
     let contract = matrix
         .match_output_contract(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             ..IntentOutputContract::default()
@@ -211,7 +203,6 @@ fn semantic_none_rejects_forbidden_action() {
 fn action_policy_blocks_forbidden_action_for_generic_content_contract() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             ..IntentOutputContract::default()
@@ -227,11 +218,15 @@ fn action_policy_blocks_forbidden_action_for_generic_content_contract() {
 }
 
 #[test]
-fn action_policy_allows_process_snapshot_for_raw_command_output_contract() {
+fn action_policy_allows_process_snapshot_for_exact_command_output_contract() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
+            response_shape: crate::OutputResponseShape::Strict,
             requires_content_evidence: true,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("command_output".to_string()),
+                ..Default::default()
+            },
             ..IntentOutputContract::default()
         }),
         "process_basic",
@@ -244,15 +239,19 @@ fn action_policy_allows_process_snapshot_for_raw_command_output_contract() {
 
     assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "process_basic.ps");
-    assert_eq!(policy.contract_match, "raw_command_output");
+    assert_eq!(policy.contract_match, "generic_exact_command_output");
 }
 
 #[test]
-fn action_policy_allows_http_observation_for_raw_command_output_contract() {
+fn action_policy_allows_http_observation_for_exact_command_output_contract() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
+            response_shape: crate::OutputResponseShape::Strict,
             requires_content_evidence: true,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("command_output".to_string()),
+                ..Default::default()
+            },
             ..IntentOutputContract::default()
         }),
         "http_basic",
@@ -265,7 +264,7 @@ fn action_policy_allows_http_observation_for_raw_command_output_contract() {
 
     assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "http_basic.get");
-    assert_eq!(policy.contract_match, "raw_command_output");
+    assert_eq!(policy.contract_match, "generic_exact_command_output");
     assert!(policy
         .evidence_expression
         .any_of
@@ -273,10 +272,14 @@ fn action_policy_allows_http_observation_for_raw_command_output_contract() {
 }
 
 #[test]
-fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contract() {
+fn action_policy_allows_safe_file_read_equivalent_for_exact_command_output_contract() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::RawCommandOutput,
+        response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
         ..IntentOutputContract::default()
     };
 
@@ -293,7 +296,7 @@ fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contrac
     .expect("fs policy decision");
     assert_eq!(fs_policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(fs_policy.action_key, "fs_basic.read_text_range");
-    assert_eq!(fs_policy.contract_match, "raw_command_output");
+    assert_eq!(fs_policy.contract_match, "generic_exact_command_output");
     assert!(fs_policy
         .evidence_expression
         .any_of
@@ -312,7 +315,7 @@ fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contrac
     .expect("system policy decision");
     assert_eq!(system_policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(system_policy.action_key, "fs_basic.read_text_range");
-    assert_eq!(system_policy.contract_match, "raw_command_output");
+    assert_eq!(system_policy.contract_match, "generic_exact_command_output");
 }
 
 #[test]
@@ -410,7 +413,6 @@ fn contract_matrix_action_refs_have_registry_schemas() {
 #[test]
 fn legacy_canonicalization_records_original_and_replacement_refs() {
     let route = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
         response_shape: OutputResponseShape::Strict,
         locator_kind: OutputLocatorKind::Path,
@@ -442,21 +444,6 @@ fn bundled_matrix_observation_sources_have_extractor_registry_refs() {
     let matrix = load_workspace_matrix();
     let mut missing = Vec::new();
 
-    for (name, contract) in &matrix.contracts {
-        for extractor in contract.observation_extractors() {
-            if crate::task_journal::evidence_extractor_registry_trace(
-                &extractor.source,
-                &extractor.extractor_kind,
-            )
-            .is_none()
-            {
-                missing.push(format!(
-                    "contract `{name}` observation_source `{}` extractor_kind `{}`",
-                    extractor.source, extractor.extractor_kind
-                ));
-            }
-        }
-    }
     for profile in &matrix.generic_profiles {
         for extractor in profile.observation_extractors() {
             if crate::task_journal::evidence_extractor_registry_trace(
@@ -598,12 +585,11 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    // Each current semantic contract and generic profile contributes an
-    // evidence-shape, allowed-action, and rejected-action path.
-    let cases = generated_contract_cases(&matrix, 24);
+    // Each generic profile contributes evidence-shape, allowed-action, and
+    // rejected-action paths.
+    let cases = generated_contract_cases(&matrix, 20);
 
     let mut ids = BTreeSet::new();
-    let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();
     let mut generic_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut decisions = BTreeSet::new();
 
@@ -614,14 +600,9 @@ fn matrix_generated_cases_cover_current_unique_contract_paths() {
             case.id
         );
 
-        match &case.matched {
-            GeneratedContractMatch::Semantic(kind) => {
-                *semantic_counts.entry(kind.as_str()).or_default() += 1;
-            }
-            GeneratedContractMatch::Generic(name) => {
-                *generic_counts.entry(name.clone()).or_default() += 1;
-            }
-        }
+        *generic_counts
+            .entry(case.matched_profile.clone())
+            .or_default() += 1;
 
         let matched = matched_for_generated_case(&matrix, case);
         assert_eq!(
@@ -651,12 +632,6 @@ fn matrix_generated_cases_cover_current_unique_contract_paths() {
         }
     }
 
-    assert!(
-        OutputSemanticKind::ALL
-            .iter()
-            .all(|kind| semantic_counts.contains_key(kind.as_str())),
-        "generated cases must cover every semantic kind"
-    );
     assert!(
         matrix
             .generic_profiles

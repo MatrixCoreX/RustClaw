@@ -141,9 +141,7 @@ fn structured_listing_recovery_does_not_override_workspace_summary_with_content_
         });
     let mut reply = AskReply::non_llm("RustClaw is a local agent runtime.".to_string())
         .with_task_journal(journal);
-    let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::None;
-
+    let route = route_result(OutputResponseShape::Free);
     assert!(!try_recover_structured_listing_answer_verifier_gap(
         Some(&answer_contract(&route)),
         &mut reply

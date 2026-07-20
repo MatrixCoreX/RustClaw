@@ -38,7 +38,6 @@ fn unclassified_freeform_response_skips_answer_verifier() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     let journal =
@@ -56,7 +55,6 @@ fn unclassified_terminal_respond_step_skips_answer_verifier() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     let mut journal =
@@ -81,7 +79,6 @@ fn planner_plain_terminal_answer_only_skips_answer_verifier() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -109,7 +106,6 @@ fn planner_plain_answer_with_tool_observation_still_uses_answer_verifier() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     let mut journal =
@@ -158,7 +154,6 @@ fn unclassified_chat_with_backend_reference_does_not_require_model_answer_verifi
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     let journal =
@@ -174,7 +169,6 @@ fn unclassified_chat_with_backend_reference_does_not_require_model_answer_verifi
 #[test]
 fn unclassified_content_evidence_still_uses_answer_verifier() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
@@ -187,7 +181,6 @@ fn unclassified_content_evidence_still_uses_answer_verifier() {
 #[test]
 fn content_evidence_verification_does_not_depend_on_route_trace() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
@@ -214,7 +207,6 @@ fn clarify_final_status_skips_answer_verifier() {
 #[test]
 fn local_missing_evidence_gap_reports_required_fields() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -240,7 +232,6 @@ fn local_missing_evidence_gap_reports_required_fields() {
 #[test]
 fn local_missing_evidence_gap_uses_contract_not_route_trace() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -267,7 +258,6 @@ fn local_missing_evidence_gap_uses_contract_not_route_trace() {
 fn local_missing_evidence_gap_skips_non_path_status_observation() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.requires_content_evidence = false;
     let mut journal =
@@ -324,7 +314,6 @@ fn local_missing_evidence_gap_skips_non_path_status_observation() {
 #[test]
 fn local_missing_evidence_gap_skips_when_required_fields_are_observed() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap-ok", "ask", "list names");
@@ -429,7 +418,6 @@ fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
 fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_hint = "/tmp/rustclaw-missing.md".to_string();
@@ -460,7 +448,6 @@ fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
 fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_hint = "/tmp/rustclaw-missing.md | README.md".to_string();
@@ -505,7 +492,6 @@ fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path()
 fn structural_satisfaction_keeps_verifier_when_not_found_answer_omits_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_hint = "/tmp/rustclaw-missing.md".to_string();
@@ -534,7 +520,6 @@ fn structural_satisfaction_keeps_verifier_when_not_found_answer_omits_path() {
 fn should_verify_answer_skips_permission_denied_terminal_finalizer() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/etc/shadow".to_string();
@@ -664,7 +649,6 @@ fn local_missing_evidence_gap_skips_crypto_account_access_terminal_finalizer() {
 fn local_missing_evidence_gap_keeps_gap_for_non_missing_terminal_error() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.selection.list_selector.target_kind =
         crate::OutputScalarCountTargetKind::File;
     route
@@ -715,7 +699,6 @@ fn local_missing_evidence_gap_keeps_gap_for_non_missing_terminal_error() {
 #[test]
 fn path_inspection_does_not_use_structural_shortcut_or_skip_missing_evidence() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -760,7 +743,6 @@ fn grounded_generic_summary_does_not_skip_verifier_without_exact_contract() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-finalizer-summary-skip", "ask", "list");

@@ -135,8 +135,8 @@ pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::OutputSelectionContract;
 pub(crate) use pipeline_types::{
     plan_step_from_agent_action, IntentOutputContract, MachineTokenMarkers, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind,
-    PlanKind, PlanResult, PlanStep,
+    OutputLocatorKind, OutputResponseShape, OutputScalarCountTargetKind, PlanKind, PlanResult,
+    PlanStep,
 };
 pub(crate) use prompt_utils::{
     extract_first_json_value_any, log_prompt_render, log_prompt_render_with_version,

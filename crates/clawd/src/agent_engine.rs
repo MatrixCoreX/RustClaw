@@ -93,27 +93,6 @@ pub(crate) fn local_code_strict_json_projection_should_defer_finalizer_fallback(
     )
 }
 
-pub(crate) fn record_successful_run_cmd_command_output_var(
-    loop_state: &mut LoopState,
-    normalized_skill: &str,
-    step_id: &str,
-    args: &Value,
-) {
-    self::dispatch_support::record_successful_run_cmd_command_output_var(
-        loop_state,
-        normalized_skill,
-        step_id,
-        args,
-    );
-}
-
-pub(crate) fn successful_run_cmd_command_for_step(
-    loop_state: &LoopState,
-    step_id: &str,
-) -> Option<String> {
-    self::dispatch_support::successful_run_cmd_command_for_step(loop_state, step_id)
-}
-
 pub(crate) use self::context_compaction::run_model_assisted_context_compaction;
 use self::execution_loop::execute_actions_once;
 use self::loop_control::{

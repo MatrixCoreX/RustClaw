@@ -28,7 +28,6 @@ fn context_with_machine_fields(
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind: Default::default(),
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };

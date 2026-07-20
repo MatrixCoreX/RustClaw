@@ -307,7 +307,7 @@ fn image_generate_extra_outputs_path_counts_as_structured_path_evidence() {
             && item.get("excerpt").and_then(Value::as_str) == Some("/tmp/rustclaw-image.png")
     }));
 
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = crate::OutputResponseShape::FileToken;
@@ -406,7 +406,7 @@ fn rss_fetch_extra_field_value_counts_as_structured_rss_evidence() {
             && item.get("redacted").is_none()
     }));
 
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.locator_kind = crate::OutputLocatorKind::None;
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.observed_canonical.contains("field_value"));
@@ -846,7 +846,6 @@ fn text_observed_evidence_extracts_count_path_and_candidates() {
 
     let mut journal = TaskJournal::for_task("task-text-candidates", "ask", "列出文件名");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
@@ -885,7 +884,7 @@ fn generic_path_content_list_dir_candidates_satisfy_directory_evidence() {
         "ask",
         "summarize selected directory entries",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -928,7 +927,7 @@ fn current_workspace_inventory_names_by_kind_satisfies_field_value_evidence() {
         "ask",
         "group current workspace top-level entries",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
@@ -969,7 +968,7 @@ fn generic_path_content_find_entries_result_path_satisfies_path_evidence() {
         "ask",
         "return the matching path",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -1007,7 +1006,7 @@ fn generic_path_content_wrapped_find_name_result_path_satisfies_path_evidence() 
         "ask",
         "return the matching path",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -1048,7 +1047,7 @@ fn generic_path_content_name_results_paths_satisfy_path_evidence() {
         "ask",
         "return paths matched by structured name search",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -1101,7 +1100,7 @@ fn generic_path_content_db_path_satisfies_path_evidence() {
         "ask",
         "read sqlite schema version for selected database",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -1148,7 +1147,7 @@ fn file_names_content_search_paths_satisfy_candidate_evidence() {
         "ask",
         "search workspace content and list matching files",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     journal.record_output_contract(&route.clone());
@@ -1185,7 +1184,7 @@ fn file_paths_content_search_paths_satisfy_candidate_evidence() {
         "ask",
         "search workspace content and list matching paths",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.response_shape = crate::OutputResponseShape::Strict;
     route.selection.structured_field_selector = Some("path".to_string());
     route.requires_content_evidence = true;
@@ -1218,13 +1217,13 @@ fn file_paths_content_search_paths_satisfy_candidate_evidence() {
 }
 
 #[test]
-fn raw_command_output_grep_text_satisfies_command_output_evidence() {
+fn exact_observation_output_grep_text_satisfies_command_output_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-raw-grep-command-output",
         "ask",
         "search a bound file and return matching lines",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::RawCommandOutput);
+    let mut route = route_for_contract(true);
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -1265,7 +1264,7 @@ fn generic_path_content_directory_inventory_can_complete_from_listing_evidence()
         "ask",
         "summarize repository layout from directory counts",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
@@ -1306,7 +1305,7 @@ fn generic_path_content_directory_counts_can_complete_from_count_evidence() {
         "ask",
         "compare direct directory entry counts",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
@@ -1356,7 +1355,6 @@ fn docker_unavailable_text_counts_as_generic_command_evidence() {
     let mut journal =
         TaskJournal::for_task("task-docker-unavailable", "ask", "检查 Docker 是否可用");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
@@ -1383,7 +1381,7 @@ fn generic_delivery_missing_find_count_satisfies_negative_delivery_evidence() {
         "ask",
         "send definitely_missing_named_file_golden_001.txt",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_for_contract(false);
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = crate::OutputResponseShape::FileToken;

@@ -30,12 +30,15 @@ mod failure_attribution;
 #[path = "task_journal_tests/frontdoor_llm_metrics.rs"]
 mod frontdoor_llm_metrics;
 
-fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::IntentOutputContract {
-    crate::IntentOutputContract {
-        semantic_kind,
+fn route_for_contract(exact_command_output: bool) -> crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract {
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
+    };
+    if exact_command_output {
+        route.configure_exact_command_output();
     }
+    route
 }
 
 #[test]
@@ -631,7 +634,7 @@ fn trace_json_includes_execution_recipe_summary() {
 
 #[test]
 fn trace_json_includes_round_source_of_truth_machine_fields() {
-    let route = route_for_semantic(crate::OutputSemanticKind::None);
+    let route = route_for_contract(false);
     let plan = crate::PlanResult {
         goal: "inspect workspace".to_string(),
         missing_slots: Vec::new(),
@@ -962,7 +965,7 @@ fn trace_json_includes_memory_trace() {
 #[test]
 fn attach_to_result_caps_large_trace_and_preserves_contract_summary_fields() {
     let mut journal = TaskJournal::for_task("task-large-trace", "ask", "列出文件名");
-    journal.record_output_contract(&route_for_semantic(crate::OutputSemanticKind::None).clone());
+    journal.record_output_contract(&route_for_contract(false).clone());
     for idx in 0..300 {
         journal.push_task_observation(json!({
             "idx": idx,
@@ -1450,7 +1453,6 @@ fn trace_json_preserves_planner_action_ref() {
     let output_contract = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
-        semantic_kind: crate::OutputSemanticKind::None,
         ..Default::default()
     };
     journal.record_output_contract(&output_contract);

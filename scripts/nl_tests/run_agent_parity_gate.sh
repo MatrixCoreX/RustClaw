@@ -378,17 +378,17 @@ echo "AGENT_PARITY_GATE_STEP agent_loop_static_contracts"
     --fail-on-ui-visible
 } > "${OUT_DIR}/agent_loop_static_contracts.txt"
 
-echo "AGENT_PARITY_GATE_STEP semantic_boundary_contracts"
+echo "AGENT_PARITY_GATE_STEP planner_runtime_boundary_contracts"
 {
-  python3 "${ROOT_DIR}/scripts/check_runtime_semantic_rewrite_boundary.py" --self-test
-  python3 "${ROOT_DIR}/scripts/check_runtime_semantic_rewrite_boundary.py"
+  python3 "${ROOT_DIR}/scripts/check_planner_runtime_boundary.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_planner_runtime_boundary.py"
   python3 "${ROOT_DIR}/scripts/check_contract_repair_loop_observation_boundary.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_contract_repair_loop_observation_boundary.py"
   python3 "${ROOT_DIR}/scripts/check_route_reason_marker_facade.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_route_reason_marker_facade.py"
-  python3 "${ROOT_DIR}/scripts/check_output_semantic_kind_write_boundary.py" --self-test
-  python3 "${ROOT_DIR}/scripts/check_output_semantic_kind_write_boundary.py"
-} > "${OUT_DIR}/semantic_boundary_contracts.txt"
+  python3 "${ROOT_DIR}/scripts/check_finalizer_architecture.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_finalizer_architecture.py"
+} > "${OUT_DIR}/planner_runtime_boundary_contracts.txt"
 
 echo "AGENT_PARITY_GATE_STEP agent_architecture_boundary_contracts"
 {
@@ -556,7 +556,7 @@ fi
   echo "clawcli_models_readiness_contracts=1"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
-  echo "semantic_boundary_contracts=1"
+  echo "planner_runtime_boundary_contracts=1"
   echo "agent_architecture_boundary_contracts=1"
   echo "deterministic_boundary_inventory_contracts=1"
   echo "maintainability_skill_contracts=1"

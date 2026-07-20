@@ -13,12 +13,11 @@ fn direct_answer_preserves_run_cmd_directory_entry_names() {
     ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
+            response_shape: OutputResponseShape::Strict,
             requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -52,7 +51,6 @@ fn direct_answer_preserves_run_cmd_directory_entry_names_without_request_text_li
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -93,7 +91,6 @@ fn run_cmd_exists_token_is_not_interpreted_as_a_path_verdict() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "rustclaw.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
@@ -124,7 +121,6 @@ fn run_cmd_not_found_token_is_not_interpreted_as_a_path_verdict() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "rustclaw.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
@@ -154,7 +150,6 @@ fn direct_answer_defers_health_check_json_for_act_free_shape() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -182,7 +177,6 @@ fn direct_answer_defers_health_check_contract_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -231,7 +225,6 @@ fn direct_answer_defers_wrapped_health_check_free_shape() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -261,7 +254,6 @@ fn direct_answer_defers_health_check_diagnostic_summary_for_system_health_fields
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -290,7 +282,6 @@ fn direct_answer_defers_health_check_summary_for_act_free_shape() {
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::None,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: Default::default(),
                 locator_hint: String::new(),
                 selection: crate::OutputSelectionContract::default(),
             };
@@ -301,34 +292,6 @@ fn direct_answer_defers_health_check_summary_for_act_free_shape() {
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
         None
-    );
-}
-
-#[test]
-fn direct_answer_passes_health_check_json_only_for_raw_output_contract() {
-    let mut loop_state = LoopState::new(2);
-    let body = r#"{"clawd_health_port_open":true,"telegramd_process_count":0}"#;
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "health_check", body));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::None,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
-            locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some(body)
     );
 }
 
@@ -352,7 +315,6 @@ fn direct_answer_defers_health_check_summary_over_later_steps_to_llm() {
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::None,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: Default::default(),
                 locator_hint: String::new(),
                 selection: crate::OutputSelectionContract::default(),
             };
@@ -381,7 +343,6 @@ fn direct_answer_defers_health_check_one_sentence_summary_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -410,7 +371,6 @@ fn direct_answer_defers_health_check_unhealthy_summary_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -439,7 +399,6 @@ fn direct_answer_defers_health_check_telegramd_stopped_summary_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -468,7 +427,6 @@ fn direct_answer_defers_health_check_language_sensitive_summary_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -501,7 +459,6 @@ fn direct_answer_defers_health_check_os_summary_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -534,7 +491,6 @@ fn direct_answer_defers_health_check_os_warning_summary_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -567,7 +523,6 @@ fn direct_answer_defers_process_basic_port_summary_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -638,7 +593,6 @@ fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -765,7 +719,6 @@ fn direct_answer_uses_generic_selector_for_process_listener_count() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("listener_count".to_string()),
@@ -797,7 +750,6 @@ fn direct_answer_defers_process_basic_observation_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -847,7 +799,6 @@ fn direct_answer_prefers_process_basic_status_over_later_system_info() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "telegramd".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };

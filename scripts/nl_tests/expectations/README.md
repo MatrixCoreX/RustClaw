@@ -58,8 +58,10 @@ Supported fields:
 - `final_shape`
 - `contract_match`
 - `contract_match_any`
-- `contract_semantic_kind`
-- `contract_semantic_kind_any`
+- `contract_response_shape`
+- `contract_response_shape_any`
+- `contract_structured_field_selector`
+- `contract_structured_field_selector_any`
 - `contract_final_answer_shape`
 - `contract_final_answer_shape_any`
 - `required_evidence_all`

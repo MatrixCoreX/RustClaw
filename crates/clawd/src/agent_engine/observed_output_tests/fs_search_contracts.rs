@@ -89,7 +89,7 @@ fn fs_search_file_paths_contract_filters_with_structured_pattern() {
 }
 
 #[test]
-fn fs_search_file_paths_contract_uses_planner_semantic_kind() {
+fn fs_search_file_paths_contract_uses_planner_output_contract() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -191,7 +191,6 @@ fn direct_scalar_count_uses_latest_fs_search_count() {
             r#"{"action":"find_name","count":10,"patterns":["clarify"],"results":["a.txt","b.txt"],"root":"scripts/nl_tests/cases"}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
 
     let agent_run_context = AgentRunContext {
@@ -284,7 +283,7 @@ fn fs_search_grep_text_direct_answer_returns_matching_lines_when_listing_allowed
 }
 
 #[test]
-fn raw_command_output_grep_text_direct_answer_returns_matching_lines() {
+fn exact_observation_output_grep_text_direct_answer_returns_matching_lines() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -292,7 +291,7 @@ fn raw_command_output_grep_text_direct_answer_returns_matching_lines() {
         r#"{"action":"grep_text","query":"ERROR","count":1,"match_count":1,"matches":[{"path":"scripts/nl_tests/fixtures/device_local/logs/app.log","line":16,"text":"2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata"}],"results":["scripts/nl_tests/fixtures/device_local/logs/app.log"]}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
         "scripts/nl_tests/fixtures/device_local/logs/app.log".to_string();
@@ -389,7 +388,6 @@ fn fs_search_find_ext_unclassified_contract_keeps_observed_file_paths() {
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
-            semantic_kind: OutputSemanticKind::None,
             ..IntentOutputContract::default()
         };
     let agent_run_context = AgentRunContext {
@@ -415,7 +413,6 @@ fn virtual_fs_basic_find_ext_unclassified_contract_keeps_observed_file_paths() {
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
-            semantic_kind: OutputSemanticKind::None,
             ..IntentOutputContract::default()
         };
     let agent_run_context = AgentRunContext {
@@ -530,7 +527,6 @@ fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "scripts/nl_tests/fixtures/locator_smart/stem_unique".to_string(),
             selection: crate::OutputSelectionContract {
                 list_selector: crate::pipeline_types::OutputListSelector {
@@ -697,7 +693,6 @@ fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -781,7 +776,6 @@ fn path_inspection_defers_non_bilingual_answer_to_model_synthesis() {
             r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/rustclaw-missing-ja.txt"}],"include_missing":true}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.requires_content_evidence = false;
     route_result.locator_kind = OutputLocatorKind::Path;
     route_result.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
@@ -824,7 +818,6 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "README.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -847,7 +840,7 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
         .contains("sentence_count=3"));
     route_result.exact_sentence_count = None;
 
-    route_result.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route_result.configure_exact_command_output();
     route_result.response_shape = OutputResponseShape::Strict;
     route_result.exact_sentence_count = Some(1);
     agent_run_context.output_contract = Some(route_result.clone());
@@ -856,33 +849,24 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("requested_format=preserve"));
     route_result.exact_sentence_count = None;
-    route_result.semantic_kind = OutputSemanticKind::None;
-
     route_result.response_shape = OutputResponseShape::Scalar;
     route_result.selection.structured_field_selector = Some("value".to_string());
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=scalar"));
     assert!(observed_response_style_hint(Some(&agent_run_context)).contains("bare_value=true"));
-
-    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.response_shape = OutputResponseShape::OneSentence;
     route_result.requires_content_evidence = false;
     route_result.selection.structured_field_selector = Some("exists,path".to_string());
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=one_sentence"));
-
-    route_result.semantic_kind = OutputSemanticKind::None;
-
     route_result.selection.structured_field_selector = Some("count".to_string());
     route_result.response_shape = OutputResponseShape::OneSentence;
     route_result.requires_content_evidence = true;
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=evidence_synthesis"));
-
-    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.response_shape = OutputResponseShape::Free;
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
@@ -893,7 +877,7 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
     assert!(observed_contract_json(Some(&agent_run_context))
         .contains(r#""direct_observation_passthrough_allowed":false"#));
 
-    route_result.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route_result.configure_exact_command_output();
     route_result.response_shape = OutputResponseShape::Strict;
     route_result.locator_kind = OutputLocatorKind::None;
     route_result.locator_hint.clear();
@@ -1098,9 +1082,9 @@ fn strict_plain_observation_contract_requires_synthesis() {
 }
 
 #[test]
-fn raw_command_contract_allows_observation_passthrough() {
+fn exact_observation_contract_allows_observation_passthrough() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     assert!(!route_requires_synthesized_delivery(&route));
 
     let agent_run_context = AgentRunContext {

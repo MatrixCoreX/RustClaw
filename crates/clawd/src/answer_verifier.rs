@@ -9,8 +9,8 @@ const DEFAULT_RETRY_INSTRUCTION: &str =
     "retry_policy=use_observed_evidence_and_original_contract;repeat_rejected_answer=false";
 #[path = "answer_verifier_control_envelope.rs"]
 mod answer_verifier_control_envelope;
-#[path = "answer_verifier_delivery_raw.rs"]
-mod answer_verifier_delivery_raw;
+#[path = "answer_verifier_delivery_exact.rs"]
+mod answer_verifier_delivery_exact;
 #[path = "answer_verifier_evidence_policy.rs"]
 mod answer_verifier_evidence_policy;
 #[path = "answer_verifier_machine_kv.rs"]
@@ -20,7 +20,7 @@ mod answer_verifier_runtime;
 #[path = "answer_verifier_scalar.rs"]
 mod answer_verifier_scalar;
 
-use answer_verifier_delivery_raw::*;
+use answer_verifier_delivery_exact::*;
 use answer_verifier_evidence_policy::*;
 #[cfg(test)]
 pub(crate) use answer_verifier_runtime::local_missing_evidence_verifier_gap;
@@ -47,15 +47,8 @@ impl AnswerContract {
         }
     }
 
-    pub(crate) fn output_contract_marker_is(
-        &self,
-        semantic_kind: crate::OutputSemanticKind,
-    ) -> bool {
-        self.output_contract.semantic_kind_is(semantic_kind)
-    }
-
     pub(crate) fn output_contract_is_unclassified(&self) -> bool {
-        self.output_contract.semantic_kind_is_unclassified()
+        self.output_contract.does_not_request_exact_command_output()
     }
 
     pub(crate) fn effective_output_contract(&self) -> crate::IntentOutputContract {
@@ -134,7 +127,7 @@ pub(crate) fn should_verify_answer(
     }
     evidence_policy_requires_observation(route_result)
         || !journal.step_results.is_empty()
-        || route_has_output_contract_marker(route_result)
+        || route_result.output_contract.requests_exact_command_output()
 }
 
 fn terminal_answer_has_no_tool_observations(journal: &crate::task_journal::TaskJournal) -> bool {
@@ -143,10 +136,6 @@ fn terminal_answer_has_no_tool_observations(journal: &crate::task_journal::TaskJ
             && step.status == crate::executor::StepExecutionStatus::Ok
             && step.error_excerpt.is_none()
     })
-}
-
-fn route_has_output_contract_marker(route_result: &AnswerContract) -> bool {
-    !route_result.output_contract.semantic_kind_is_unclassified()
 }
 
 fn evidence_policy_requires_observation(route_result: &AnswerContract) -> bool {
@@ -164,7 +153,7 @@ fn terminal_answer_only_can_skip_answer_verifier(
 ) -> bool {
     !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
-        && !route_has_output_contract_marker(route_result)
+        && !route_result.output_contract.requests_exact_command_output()
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
         && terminal_answer_has_no_tool_observations(journal)
@@ -212,14 +201,18 @@ pub(crate) fn structurally_satisfies_answer_contract(
     {
         return true;
     }
-    if raw_bounded_read_answer_is_exact_successful_observation(
+    if exact_bounded_read_answer_is_exact_successful_observation(
         route_result,
         journal,
         candidate_answer,
     ) {
         return true;
     }
-    if raw_command_answer_is_exact_successful_observation(journal, candidate_answer) {
+    if exact_observation_answer_is_exact_successful_observation(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
         return true;
     }
     scalar_answer_is_grounded_in_successful_observation(route_result, journal, candidate_answer)

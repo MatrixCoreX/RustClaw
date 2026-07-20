@@ -283,7 +283,6 @@ fn evidence_policy_preflight_does_not_reject_action_from_semantic_matrix_only() 
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
     });
@@ -304,7 +303,6 @@ fn evidence_policy_preflight_allows_runtime_async_job_start_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
         ..crate::IntentOutputContract::default()
@@ -328,7 +326,6 @@ fn evidence_policy_preflight_allows_bounded_planner_async_start_without_runtime_
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
         ..crate::IntentOutputContract::default()
@@ -351,7 +348,6 @@ fn evidence_policy_preflight_rejects_unbounded_async_start_without_runtime_marke
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
         ..crate::IntentOutputContract::default()
@@ -392,7 +388,6 @@ planner_capabilities = [
     );
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
     });
@@ -580,9 +575,13 @@ fn evidence_policy_preflight_allows_user_named_output_path_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+        response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::None,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
         ..crate::IntentOutputContract::default()
     });
     let args = serde_json::json!({
@@ -602,7 +601,6 @@ fn active_ops_recipe_preflight_allows_backing_mutation_despite_summary_contract(
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Scalar,
         ..crate::IntentOutputContract::default()
@@ -631,7 +629,6 @@ fn evidence_policy_preflight_allows_internal_synthesis_actions() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
     });
@@ -666,7 +663,6 @@ fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Strict,
         ..crate::IntentOutputContract::default()
@@ -721,7 +717,6 @@ fn evidence_policy_preflight_allows_virtual_find_entries_backing_action() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
         ..crate::IntentOutputContract::default()

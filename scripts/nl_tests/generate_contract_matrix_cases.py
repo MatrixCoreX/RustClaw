@@ -45,21 +45,12 @@ PROBE_ACTIONS = [
 ]
 
 
-NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
-    "none": "不用执行任何操作，直接用一句话解释 RustClaw 是一个什么样的本地助手。",
-    "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
-}
-
 NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
     "generic_path_content": f"看一下 {FIXTURE_DOC}，然后用一句适合新手的话说明它主要讲什么。",
     "generic_delivery": "生成一个 tmp/contract_matrix_generic_delivery.txt 文件，内容是 generic delivery case，然后把文件发给我。",
     "generic_exact_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
     "generic_path_inspection": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
-}
-
-EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
-    "none": "Do not run any operation. In one sentence, explain what kind of local assistant RustClaw is.",
-    "raw_command_output": "Run pwd and briefly tell me what the command printed.",
+    "generic_exact_command_output": "执行 pwd，只输出命令返回的原始内容。",
 }
 
 EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -67,6 +58,7 @@ EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
     "generic_delivery": "Create tmp/contract_matrix_generic_delivery.txt with the content generic delivery case, then send me the file.",
     "generic_exact_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
     "generic_path_inspection": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
+    "generic_exact_command_output": "Run pwd and output only the exact command result.",
 }
 
 JA_PROMPTS_BY_CONTRACT: dict[str, str] = {
@@ -187,30 +179,13 @@ def trace_policy_key(matrix: dict[str, Any]) -> str:
 
 
 def matrix_hash(matrix: dict[str, Any]) -> str:
-    contracts = matrix.get("contracts", {})
     profiles = matrix.get("generic_profiles", [])
     parts = [
         str(matrix.get("schema_version", 1)),
         str(matrix.get("matrix_version", "")),
-        str(len(contracts)),
         str(len(profiles)),
         trace_policy_key(matrix),
     ]
-    for key in sorted(contracts):
-        contract = contracts[key]
-        parts.append(
-            ":".join(
-                [
-                    key,
-                    ",".join(normalized_evidence(contract)),
-                    str(contract.get("final_answer_shape", "")),
-                    ",".join(normalized_list(contract.get("allowed_actions", []))),
-                    ",".join(normalized_list(contract.get("preferred_actions", []))),
-                    ",".join(normalized_list(contract.get("forbidden_actions", []))),
-                    evidence_expression_key(contract),
-                ]
-            )
-        )
     for profile in profiles:
         parts.append(
             ":".join(
@@ -259,7 +234,10 @@ def base_case(
         "matrix_hash": matrix_hash(matrix),
         "contract_type": contract_type,
         "contract_id": contract_id,
-        "semantic_kind": contract.get("semantic_kind"),
+        "response_shapes": normalized_list(contract.get("response_shapes", [])),
+        "structured_field_selectors": normalized_list(
+            contract.get("structured_field_selectors", [])
+        ),
         "phase": phase,
         "action_ref": action_ref,
         "expected_policy_decision": expected_decision,
@@ -277,7 +255,14 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
     lines = [
         f"contract_type={case.get('contract_type') or ''}",
         f"contract_id={case.get('contract_id') or ''}",
-        f"semantic_kind={case.get('semantic_kind') or ''}",
+        "response_shapes_json="
+        + json.dumps(case.get("response_shapes") or [], ensure_ascii=False, sort_keys=True),
+        "structured_field_selectors_json="
+        + json.dumps(
+            case.get("structured_field_selectors") or [],
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
         f"phase={case.get('phase') or ''}",
         f"final_answer_shape={case.get('final_answer_shape') or ''}",
         "required_evidence_json="
@@ -323,17 +308,11 @@ def base_prompt_and_source_for_case(
 ) -> tuple[str, str]:
     contract_id = str(case.get("contract_id") or "")
     if variant == "zh_cn":
-        if case.get("contract_type") == "generic":
-            prompt = NL_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
-        else:
-            prompt = NL_PROMPTS_BY_CONTRACT.get(contract_id)
+        prompt = NL_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
         if prompt:
             return prompt, "native_zh_cn"
     elif variant == "en_us":
-        if case.get("contract_type") == "generic":
-            prompt = EN_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
-        else:
-            prompt = EN_PROMPTS_BY_CONTRACT.get(contract_id)
+        prompt = EN_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
         if prompt:
             return prompt, "native_en_us"
     else:
@@ -504,9 +483,12 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
     else:
         row["contract_match"] = case["contract_id"]
         row["contract_final_answer_shape"] = case.get("final_answer_shape", "")
-    semantic_kind = case.get("semantic_kind")
-    if case.get("contract_type") == "semantic" and semantic_kind:
-        row["contract_semantic_kind"] = semantic_kind
+    response_shapes = case.get("response_shapes") or []
+    selectors = case.get("structured_field_selectors") or []
+    if len(response_shapes) == 1:
+        row["contract_response_shape"] = response_shapes[0]
+    if len(selectors) == 1 and selectors[0] != "*":
+        row["contract_structured_field_selector"] = selectors[0]
 
     required_evidence = case.get("required_evidence") or []
     if case.get("contract_type") == "generic" and contract_id == "generic_path_content":
@@ -551,10 +533,6 @@ def write_expectations(path: Path, cases: list[dict[str, Any]]) -> None:
 
 def generate_all_cases(matrix: dict[str, Any]) -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
-    contracts = matrix.get("contracts", {})
-    for contract_id in sorted(contracts):
-        contract = contracts[contract_id]
-        cases.extend(generate_contract_cases(matrix, "semantic", contract_id, contract))
     for profile in matrix.get("generic_profiles", []):
         contract_id = profile.get("name", "unnamed_generic")
         cases.extend(generate_contract_cases(matrix, "generic", contract_id, profile))
@@ -567,7 +545,8 @@ def generate_external_admission_cases(matrix: dict[str, Any]) -> list[dict[str, 
         "matrix_version": matrix.get("matrix_version"),
         "matrix_hash": matrix_hash(matrix),
         "contract_type": "external_admission",
-        "semantic_kind": "none",
+        "response_shapes": ["scalar"],
+        "structured_field_selectors": [],
         "action_ref": "smoke_ping_demo.ping",
         "required_evidence": ["field_value"],
         "evidence_expression": {
@@ -620,7 +599,8 @@ def generate_external_admission_cases(matrix: dict[str, Any]) -> list[dict[str, 
             **base,
             "case_id": "external_admission.admitted_extra_path",
             "contract_id": "admitted_extra_path",
-            "semantic_kind": "none",
+            "response_shapes": ["scalar"],
+            "structured_field_selectors": ["path"],
             "structured_field_selector": "path",
             "phase": "positive_extra_path",
             "expected_policy_decision": "allowed",
@@ -719,13 +699,6 @@ def choose_first_case(
 
 def coverage_anchor_cases(cases: list[dict[str, Any]], seen_case_ids: set[str]) -> list[dict[str, Any]]:
     anchors: list[dict[str, Any]] = []
-    semantic_ids = sorted(
-        {
-            case["contract_id"]
-            for case in cases
-            if case["contract_type"] == "semantic" and case.get("contract_id")
-        }
-    )
     generic_ids = sorted(
         {
             case["contract_id"]
@@ -745,15 +718,6 @@ def coverage_anchor_cases(cases: list[dict[str, Any]], seen_case_ids: set[str]) 
         {case["final_answer_shape"] for case in cases if case.get("final_answer_shape")}
     )
 
-    for contract_id in semantic_ids:
-        case = choose_first_case(
-            cases,
-            seen_case_ids,
-            lambda item, contract_id=contract_id: item["contract_type"] == "semantic"
-            and item["contract_id"] == contract_id,
-        )
-        if case:
-            anchors.append(case)
     for contract_id in generic_ids:
         case = choose_first_case(
             cases,
@@ -824,13 +788,6 @@ def select_cases(
 
 
 def coverage_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
-    semantics = sorted(
-        {
-            case["semantic_kind"]
-            for case in cases
-            if case["contract_type"] == "semantic" and case.get("semantic_kind")
-        }
-    )
     generic_profiles = sorted(
         {case["contract_id"] for case in cases if case["contract_type"] == "generic"}
     )
@@ -854,7 +811,6 @@ def coverage_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
                 if case.get("contract_type") and case.get("contract_id")
             }
         ),
-        "semantic_count": len(semantics),
         "generic_profile_count": len(generic_profiles),
         "final_answer_shape_count": len(final_shapes),
         "phase_count": len(phases),
@@ -900,24 +856,13 @@ def validate_selected_cases(
     if len(ids) != len(set(ids)):
         errors.append("generated duplicate case ids")
     report = coverage_report(cases)
-    if report["case_count"] >= 100 and report["semantic_count"] == 0:
-        errors.append("generated cases do not cover semantic contracts")
-    expected_semantics = set(matrix.get("contracts", {}))
     expected_generics = {
         profile.get("name", "unnamed_generic")
         for profile in matrix.get("generic_profiles", [])
     }
     expected_shapes = {
-        contract.get("final_answer_shape", "")
-        for contract in matrix.get("contracts", {}).values()
-    } | {
         profile.get("final_answer_shape", "")
         for profile in matrix.get("generic_profiles", [])
-    }
-    selected_semantics = {
-        case["contract_id"]
-        for case in cases
-        if case["contract_type"] == "semantic"
     }
     selected_generics = {
         case["contract_id"]
@@ -930,11 +875,8 @@ def validate_selected_cases(
         if case.get("final_answer_shape")
     }
     if report["case_count"] >= 100:
-        missing_semantics = sorted(expected_semantics - selected_semantics)
         missing_generics = sorted(expected_generics - selected_generics)
         missing_shapes = sorted(expected_shapes - selected_shapes)
-        if missing_semantics:
-            errors.append(f"generated cases miss semantic contracts: {missing_semantics}")
         if missing_generics:
             errors.append(f"generated cases miss generic profiles: {missing_generics}")
         if missing_shapes:

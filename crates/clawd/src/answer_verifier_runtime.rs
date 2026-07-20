@@ -477,7 +477,9 @@ fn non_path_status_observation_can_skip_path_content_gap(
 ) -> bool {
     if !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
-        || !route_result.output_contract.semantic_kind_is_unclassified()
+        || !route_result
+            .output_contract
+            .does_not_request_exact_command_output()
     {
         return false;
     }
