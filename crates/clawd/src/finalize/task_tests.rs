@@ -1095,7 +1095,7 @@ fn content_tail_read_failure_recovery_selects_observed_log_line() {
 #[test]
 fn config_guard_candidates_recovery_uses_nested_observed_evidence() {
     let mut route = route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
     route.requires_content_evidence = true;
     route.delivery_required = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -1165,7 +1165,7 @@ fn config_guard_candidates_recovery_uses_nested_observed_evidence() {
 #[test]
 fn config_guard_candidates_recovery_handles_truncated_output_excerpt() {
     let mut route = route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
     route.requires_content_evidence = true;
     route.delivery_required = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(

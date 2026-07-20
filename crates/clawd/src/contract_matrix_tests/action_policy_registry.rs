@@ -617,42 +617,6 @@ fn config_mutation_contract_allows_plan_apply_validate_and_read_back() {
 }
 
 #[test]
-fn config_risk_assessment_allows_preview_and_git_status_as_observations() {
-    let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ConfigRiskAssessment,
-        requires_content_evidence: true,
-        ..IntentOutputContract::default()
-    };
-    let preview_policy = action_policy_for_output_contract(
-        Some(&output_contract),
-        "config_edit",
-        &serde_json::json!({
-            "action": "plan_config_change",
-            "path": "configs/config.toml",
-            "field_path": "llm.selected_vendor",
-            "value": "minimax",
-        }),
-    )
-    .expect("preview policy decision");
-    assert_eq!(preview_policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(preview_policy.action_key, "config_edit.plan_config_change");
-    assert_eq!(preview_policy.contract_match, "config_risk_assessment");
-
-    let git_policy = action_policy_for_output_contract(
-        Some(&output_contract),
-        "git_basic",
-        &serde_json::json!({
-            "action": "status",
-            "path": ".",
-        }),
-    )
-    .expect("git policy decision");
-    assert_eq!(git_policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(git_policy.action_key, "git_basic.status");
-    assert_eq!(git_policy.contract_match, "config_risk_assessment");
-}
-
-#[test]
 fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
     let matrix = load_workspace_matrix();
     let cases = [
@@ -665,11 +629,6 @@ fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
             "config_mutation",
             OutputSemanticKind::ConfigMutation,
             "config_edit.plan_config_change",
-        ),
-        (
-            "config_risk_assessment",
-            OutputSemanticKind::ConfigRiskAssessment,
-            "config_basic.guard_rustclaw_config",
         ),
         (
             "filesystem_mutation_result",
@@ -989,7 +948,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 66);
+    let cases = generated_contract_cases(&matrix, 63);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

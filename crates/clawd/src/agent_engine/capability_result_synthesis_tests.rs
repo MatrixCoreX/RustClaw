@@ -217,6 +217,32 @@ fn config_field_results_use_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn config_risk_results_use_generic_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "config_edit",
+            Some("guard_config".to_string()),
+            json!({
+                "extra": {
+                    "action": "guard_config",
+                    "path": "configs/config.toml",
+                    "valid": false,
+                    "risk_count": 1,
+                    "count": 1,
+                    "candidates": ["tools.allow_sudo=true"]
+                }
+            }),
+        ));
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
 fn multiple_structured_fields_use_generic_synthesis_without_comparison_contract() {
     let mut loop_state = LoopState::default();
     for (path, field_path, value) in [

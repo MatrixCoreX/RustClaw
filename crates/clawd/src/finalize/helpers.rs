@@ -95,14 +95,6 @@ pub(crate) fn route_matches_validation_verdict_output_contract(
             == Some(crate::evidence_policy::FinalAnswerShape::ValidationVerdict)
 }
 
-pub(crate) fn route_matches_config_risk_output_contract(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::ConfigRiskAssessment)
-        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
-            == Some(crate::evidence_policy::FinalAnswerShape::RiskAssessment)
-}
-
 // Legacy scrub markers only. Production no longer builds user-visible
 // execution-summary prose; these prefixes are retained so old delivery/history
 // entries can be detected and removed before publishing final answers.

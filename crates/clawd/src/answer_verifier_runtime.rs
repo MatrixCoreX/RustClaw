@@ -583,10 +583,7 @@ fn config_guard_machine_payload_can_skip_answer_verifier(
 ) -> bool {
     let contract = route_result.effective_output_contract();
     if contract.delivery_required
-        || !route_result.output_contract_marker_is_any(&[
-            crate::OutputSemanticKind::ConfigRiskAssessment,
-            crate::OutputSemanticKind::ConfigValidation,
-        ])
+        || !route_result.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
     {
         return false;
     }

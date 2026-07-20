@@ -60,7 +60,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
     "config_validation": f"验证 {FIXTURE_CONFIG} 是否是可读配置，并简短说明结果。",
-    "config_risk_assessment": "检查 configs/config.toml 的风险配置项，简短说明是否有明显高风险设置。",
 }
 
 NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -83,7 +82,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
     "config_validation": f"Validate whether {FIXTURE_CONFIG} is a readable config file, and briefly explain the result.",
-    "config_risk_assessment": "Check the risk-related settings in configs/config.toml and briefly say whether there is any obvious high-risk setting.",
 }
 
 EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
@@ -527,11 +525,6 @@ def planned_action_equivalents(case: dict[str, Any]) -> list[str]:
     contract_id = str(case.get("contract_id") or "")
     action = normalize_token(action_ref).replace("-", "_")
     equivalents: dict[tuple[str, str], list[str]] = {
-        ("config_risk_assessment", "config_guard"): [
-            "config_guard",
-            "config_basic.guard_rustclaw_config",
-            "config_edit.guard_config",
-        ],
         ("config_validation", "config_guard"): [
             "config_guard",
             "config_basic.guard_rustclaw_config",

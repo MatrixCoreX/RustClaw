@@ -110,7 +110,7 @@ fn execution_summary_suppressed_for_grounded_content_answer() {
     );
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "prompts/schemas/agent_loop_decision_envelope.schema.json".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
@@ -357,7 +357,7 @@ fn execution_summary_drops_existing_summary_for_config_guard_delivery() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Free;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
