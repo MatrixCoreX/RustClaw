@@ -93,6 +93,38 @@ pub(crate) fn publish_event(
     event_kind: &str,
     payload: Value,
 ) -> anyhow::Result<Option<Value>> {
+    publish_event_internal(state, task_id, event_kind, payload, None)
+}
+
+fn publish_claimed_event(
+    state: &AppState,
+    task: &ClaimedTask,
+    event_kind: &str,
+    payload: Value,
+) -> anyhow::Result<Option<Value>> {
+    publish_event_internal(state, &task.task_id, event_kind, payload, Some(task))
+}
+
+fn publish_event_internal(
+    state: &AppState,
+    task_id: &str,
+    event_kind: &str,
+    payload: Value,
+    active_claim: Option<&ClaimedTask>,
+) -> anyhow::Result<Option<Value>> {
+    if let Some(task) = active_claim {
+        if !crate::repo::is_task_claim_active(state, task_id, task.claim_attempt)? {
+            let db = state.core.db.get().context("task event claim db pool")?;
+            return Err(crate::repo::worker_task_write_rejection(
+                &db,
+                state,
+                task_id,
+                task.claim_attempt,
+                "publish_claimed_task_event",
+                &["running"],
+            ));
+        }
+    }
     let event_kind = normalize_machine_token(event_kind).context("invalid task event kind")?;
     let mut payload = payload;
     let redacted_fields = redact_event_value(&mut payload, None, 0);
@@ -114,6 +146,32 @@ pub(crate) fn publish_event(
     let mut db = state.core.db.get().context("task event db pool")?;
     db.execute_batch(INIT_TASK_EVENT_SQL)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if let Some(task) = active_claim {
+        let claim_is_active = tx
+            .query_row(
+                "SELECT 1
+                 FROM tasks
+                 WHERE task_id = ?1
+                   AND status = 'running'
+                   AND lease_owner = ?2
+                   AND claim_attempt = ?3
+                 LIMIT 1",
+                params![task_id, state.worker.worker_id.as_str(), task.claim_attempt],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !claim_is_active {
+            return Err(crate::repo::worker_task_write_rejection(
+                &tx,
+                state,
+                task_id,
+                task.claim_attempt,
+                "publish_claimed_task_event",
+                &["running"],
+            ));
+        }
+    }
     if let Some(existing) = tx
         .query_row(
             "SELECT event_json FROM task_event_stream WHERE task_id = ?1 AND event_hash = ?2",
@@ -224,9 +282,26 @@ pub(crate) fn read_event_artifact(
     Ok(payload.and_then(|value| serde_json::from_str(&value).ok()))
 }
 
+#[cfg(test)]
 pub(crate) fn publish_journal_snapshot(
     state: &AppState,
     journal: &crate::task_journal::TaskJournal,
+) -> anyhow::Result<usize> {
+    publish_journal_snapshot_internal(state, journal, None)
+}
+
+fn publish_claimed_journal_snapshot(
+    state: &AppState,
+    task: &ClaimedTask,
+    journal: &crate::task_journal::TaskJournal,
+) -> anyhow::Result<usize> {
+    publish_journal_snapshot_internal(state, journal, Some(task))
+}
+
+fn publish_journal_snapshot_internal(
+    state: &AppState,
+    journal: &crate::task_journal::TaskJournal,
+    active_claim: Option<&ClaimedTask>,
 ) -> anyhow::Result<usize> {
     let Some(task_id) = journal.task_id.as_deref() else {
         return Ok(0);
@@ -240,7 +315,10 @@ pub(crate) fn publish_journal_snapshot(
         let before = replay_events_after(state, task_id, 0)?
             .newest_seq
             .unwrap_or(0);
-        let result = publish_event(state, task_id, kind, payload)?;
+        let result = match active_claim {
+            Some(task) => publish_claimed_event(state, task, kind, payload)?,
+            None => publish_event(state, task_id, kind, payload)?,
+        };
         let after = result
             .as_ref()
             .and_then(|value| value.get("seq"))
@@ -268,7 +346,7 @@ pub(crate) fn publish_loop_state_snapshot(
     if let Some(contract) = loop_state.output_contract.as_ref() {
         journal.record_output_contract(contract);
     }
-    if let Err(error) = publish_journal_snapshot(state, &journal) {
+    if let Err(error) = publish_claimed_journal_snapshot(state, task, &journal) {
         tracing::warn!(
             "task event snapshot publish failed task_id={} error={}",
             task.task_id,

@@ -65,7 +65,7 @@ fn demo_capability_contract() -> Value {
 
 fn claimed_run_skill_task(task_id: &str) -> crate::ClaimedTask {
     crate::ClaimedTask {
-        claim_attempt: 0,
+        claim_attempt: 1,
         task_id: task_id.to_string(),
         user_id: 42,
         chat_id: 7,
@@ -91,9 +91,13 @@ fn insert_running_task(state: &crate::AppState, task: &crate::ClaimedTask) {
     db.execute(
         "INSERT INTO tasks (
             task_id, user_id, chat_id, user_key, channel, kind, payload_json,
-            status, result_json, error_text, created_at, updated_at
+            status, result_json, error_text, created_at, updated_at,
+            lease_owner, lease_expires_at, claim_attempt, claimed_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running', NULL, NULL, ?8, ?8)",
+        VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running', NULL, NULL, ?8, ?8,
+            ?9, 9223372036854775807, ?10, ?8
+        )",
         rusqlite::params![
             task.task_id,
             task.user_id,
@@ -103,6 +107,8 @@ fn insert_running_task(state: &crate::AppState, task: &crate::ClaimedTask) {
             task.kind,
             task.payload_json,
             now,
+            state.worker.worker_id,
+            task.claim_attempt,
         ],
     )
     .expect("insert running task");
@@ -318,7 +324,7 @@ async fn direct_run_skill_confirmation_persists_and_consumes_exact_grant() {
     let state = state_with_runtime_registry();
     let task_id = "task-direct-skill-confirmation";
     let task = crate::ClaimedTask {
-        claim_attempt: 0,
+        claim_attempt: 1,
         task_id: task_id.to_string(),
         user_id: 42,
         chat_id: 7,

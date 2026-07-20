@@ -229,6 +229,36 @@ fn active_resume_dispatch_lease_renews_the_complete_claim_chain() {
 }
 
 #[test]
+fn stale_resume_generation_cannot_renew_same_worker_lease() {
+    let now = 15_000;
+    let (state, claimed) =
+        claimed_dispatch_fixture("stale-resume-generation", "ckpt-stale-generation", now);
+    let before = stored_result_json(&state, "stale-resume-generation");
+    set_task_lease(
+        &state,
+        "stale-resume-generation",
+        &state.worker.worker_id,
+        now + 120,
+        claimed.task.claim_attempt + 1,
+        now + 1,
+    );
+
+    assert!(
+        !renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_internal(
+            &state,
+            &claimed,
+            now + 20,
+            90,
+        )
+        .expect("stale generation renewal is a rejected claim")
+    );
+    assert_eq!(
+        stored_result_json(&state, "stale-resume-generation"),
+        before
+    );
+}
+
+#[test]
 fn resumed_agent_progress_cannot_erase_dispatch_coordination() {
     let now = 20_000;
     let (state, claimed) =
@@ -280,6 +310,7 @@ fn resumed_agent_progress_cannot_erase_dispatch_coordination() {
     assert!(
         record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
             &state,
+            claimed.task.claim_attempt,
             &claimed.task_id,
             &claimed.checkpoint_id,
             &claimed.executor_state,
@@ -327,6 +358,7 @@ fn deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease() {
     assert!(
         record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
             &state,
+            claimed.task.claim_attempt,
             &claimed.task_id,
             &claimed.checkpoint_id,
             &claimed.executor_state,
@@ -358,6 +390,7 @@ fn deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease() {
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            claimed.task.claim_attempt,
             &claimed.task_id,
             &claimed.checkpoint_id,
             &claimed.executor_state,

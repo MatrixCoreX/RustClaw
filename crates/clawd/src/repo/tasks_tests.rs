@@ -1669,6 +1669,7 @@ fn claim_due_paused_checkpoint_task_sets_machine_resume_lease() {
     assert!(
         !record_paused_checkpoint_resume_work_item_internal(
             &state,
+            claimed.claim_attempt,
             "claim-me",
             "ckpt-claim",
             &mismatched_work_item,
@@ -1688,6 +1689,7 @@ fn claim_due_paused_checkpoint_task_sets_machine_resume_lease() {
     assert!(
         record_paused_checkpoint_resume_work_item_internal(
             &state,
+            claimed.claim_attempt,
             "claim-me",
             "ckpt-claim",
             &work_item,
@@ -1704,6 +1706,7 @@ fn claim_due_paused_checkpoint_task_sets_machine_resume_lease() {
     assert!(
         !record_paused_checkpoint_resume_executor_state_internal(
             &state,
+            claimed.claim_attempt,
             "claim-me",
             "ckpt-claim",
             "ready_for_planner_resume",
@@ -1724,6 +1727,7 @@ fn claim_due_paused_checkpoint_task_sets_machine_resume_lease() {
     assert!(
         record_paused_checkpoint_resume_executor_state_internal(
             &state,
+            claimed.claim_attempt,
             "claim-me",
             "ckpt-claim",
             "ready_for_planner_resume",

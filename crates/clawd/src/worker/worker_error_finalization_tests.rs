@@ -3,7 +3,7 @@ use serde_json::json;
 
 fn running_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
-        claim_attempt: 0,
+        claim_attempt: 1,
         task_id: "worker-runtime-error-task".to_string(),
         user_id: 7,
         chat_id: 9,
@@ -29,14 +29,19 @@ fn worker_runtime_error_immediately_transitions_running_task_to_failed() {
                 result_json TEXT,
                 error_text TEXT,
                 updated_at TEXT NOT NULL,
-                lease_owner TEXT
+                lease_owner TEXT,
+                claim_attempt INTEGER NOT NULL DEFAULT 0
             );",
         )
         .expect("create tasks table");
         db.execute(
-            "INSERT INTO tasks (task_id, status, updated_at, lease_owner)
-             VALUES (?1, 'running', '0', ?2)",
-            params![task.task_id, state.worker.worker_id.as_str()],
+            "INSERT INTO tasks (task_id, status, updated_at, lease_owner, claim_attempt)
+             VALUES (?1, 'running', '0', ?2, ?3)",
+            params![
+                task.task_id,
+                state.worker.worker_id.as_str(),
+                task.claim_attempt
+            ],
         )
         .expect("insert running task");
     }

@@ -164,7 +164,7 @@ const PLANNER_ABORT_COMPACT_RETRY_PROMPT_LOGICAL_PATH: &str =
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
 
 fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), String> {
-    match repo::is_task_still_running(state, &task.task_id) {
+    match repo::is_task_claim_active(state, &task.task_id, task.claim_attempt) {
         Ok(true) => Ok(()),
         Ok(false) => Err(TASK_CANCELED_ERR.to_string()),
         Err(err) => Err(format!("check task running state failed: {err}")),

@@ -121,6 +121,9 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "update_task_checkpointed_result",
     ),
     "crates/clawd/src/repo/tasks.rs": (
+        "is_task_claim_active",
+        "worker_task_write_rejection",
+        "WORKER_LEASE_LOST_STATUS_CODE",
         "automatic_checkpoint_resume_allowed",
         "ResumeEntrypoint::AwaitUserInput",
         "paused_lifecycle_owned_by_other_executor",
@@ -132,6 +135,14 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "AND lease_expires_at <= ?3",
         "merge_progress_with_active_resume_coordination",
         "task_progress_cas_exhausted",
+        "AND claim_attempt = ?",
+    ),
+    "crates/clawd/src/repo/task_mutation_ledger.rs": (
+        "TaskMutationClaimRejected",
+        "require_active_task_claim",
+        "lease_owner",
+        "claim_attempt",
+        "WORKER_LEASE_LOST_STATUS_CODE",
     ),
     "crates/clawd/src/repo/task_resume_execution/resume_lease.rs": (
         "merge_progress_with_active_resume_coordination",
@@ -140,6 +151,13 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "active_claim_chain_matches",
         "resume_executor_dispatch_claim",
         "lease_expires_at > ?3",
+        "claimed.task.claim_attempt",
+    ),
+    "crates/clawd/src/task_event_transport.rs": (
+        "publish_claimed_event",
+        "publish_claimed_journal_snapshot",
+        "publish_claimed_task_event",
+        "task.claim_attempt",
     ),
     "crates/clawd/src/worker/runtime_support/resume_execution_lease.rs": (
         "run_with_renewable_resume_execution_lease",
@@ -180,6 +198,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "crates/clawd/src/repo/task_resume_execution_tests/resume_lease.rs": (
         "active_resume_dispatch_lease_renews_the_complete_claim_chain",
+        "stale_resume_generation_cannot_renew_same_worker_lease",
         "resumed_agent_progress_cannot_erase_dispatch_coordination",
         "deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease",
     ),
@@ -202,6 +221,8 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "`background`",
         "`needs_user`",
         "`resume_executor_claim.owner`",
+        "`worker_lease_lost`",
+        "`claim_attempt`",
         "`resume_entrypoint = \"poll_async_job\"`",
         "`clawcli resume-task <task_id>`",
         "`cargo test -p clawd task_lifecycle -- --quiet`",

@@ -890,6 +890,7 @@ fn paused_checkpoint_resume_work_item_is_machine_payload() {
         resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
     };
     let claimed = crate::repo::DuePausedCheckpointTask {
+        claim_attempt: 1,
         task_id: "task-work-item".to_string(),
         lifecycle_state: "waiting".to_string(),
         checkpoint_id: checkpoint.checkpoint_id.clone(),

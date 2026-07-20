@@ -18,6 +18,8 @@ use crate::repo::{
     record_planned_paused_checkpoint_resume_handoff_internal,
 };
 
+const CLAIM_ATTEMPT: i64 = 0;
+
 fn terminal_projection_seed(
     task_id: &str,
     checkpoint_id: &str,
@@ -188,6 +190,7 @@ fn record_paused_checkpoint_resume_execution_plan_requires_active_executor_claim
         "task_checkpoint": checkpoint_json("ckpt-plan", vec!["write_file:tmp/report.txt"])
     });
     insert_task(&state, "ready-plan", "running", Some(&ready_planner), 10);
+    activate_resume_owner(&state, "ready-plan", "ckpt-plan", now, now + 31);
 
     let claimed = claim_ready_paused_checkpoint_resume_executor_internal(
         &state,
@@ -212,6 +215,7 @@ fn record_paused_checkpoint_resume_execution_plan_requires_active_executor_claim
     assert!(
         !record_paused_checkpoint_resume_execution_plan_internal(
             &state,
+            CLAIM_ATTEMPT,
             "ready-plan",
             "ckpt-other",
             "executing_planner_resume",
@@ -224,6 +228,7 @@ fn record_paused_checkpoint_resume_execution_plan_requires_active_executor_claim
     assert!(
         record_paused_checkpoint_resume_execution_plan_internal(
             &state,
+            CLAIM_ATTEMPT,
             "ready-plan",
             "ckpt-plan",
             "executing_planner_resume",
@@ -368,6 +373,7 @@ fn list_planned_paused_checkpoint_resume_executions_requires_active_machine_plan
     });
     assert!(record_paused_checkpoint_resume_execution_plan_internal(
         &state,
+        CLAIM_ATTEMPT,
         "ready-planned",
         "ckpt-planned",
         "executing_planner_resume",
@@ -476,6 +482,7 @@ fn record_planned_paused_checkpoint_resume_handoff_requires_active_machine_plan(
     });
     assert!(record_paused_checkpoint_resume_execution_plan_internal(
         &state,
+        CLAIM_ATTEMPT,
         "ready-handoff",
         "ckpt-handoff",
         "executing_planner_resume",
@@ -494,6 +501,7 @@ fn record_planned_paused_checkpoint_resume_handoff_requires_active_machine_plan(
     assert!(
         !record_planned_paused_checkpoint_resume_handoff_internal(
             &state,
+            CLAIM_ATTEMPT,
             "ready-handoff",
             "ckpt-handoff",
             "executing_planner_resume",
@@ -515,6 +523,7 @@ fn record_planned_paused_checkpoint_resume_handoff_requires_active_machine_plan(
     assert!(
         record_planned_paused_checkpoint_resume_handoff_internal(
             &state,
+            CLAIM_ATTEMPT,
             "ready-handoff",
             "ckpt-handoff",
             "executing_planner_resume",
@@ -582,6 +591,7 @@ fn record_planned_paused_checkpoint_resume_handoff_requires_active_machine_plan(
     assert!(
         !record_planned_paused_checkpoint_resume_handoff_internal(
             &state,
+            CLAIM_ATTEMPT,
             "ready-handoff",
             "ckpt-handoff",
             "executing_planner_resume",
@@ -595,6 +605,7 @@ fn record_planned_paused_checkpoint_resume_handoff_requires_active_machine_plan(
     assert!(
         !record_planned_paused_checkpoint_resume_handoff_internal(
             &state,
+            CLAIM_ATTEMPT,
             "ready-handoff",
             "ckpt-handoff",
             "executing_planner_resume",
@@ -661,6 +672,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     });
     assert!(record_paused_checkpoint_resume_execution_plan_internal(
         &state,
+        CLAIM_ATTEMPT,
         "handoff-claim",
         "ckpt-handoff-claim",
         "executing_planner_resume",
@@ -677,6 +689,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     });
     assert!(record_planned_paused_checkpoint_resume_handoff_internal(
         &state,
+        CLAIM_ATTEMPT,
         "handoff-claim",
         "ckpt-handoff-claim",
         "executing_planner_resume",
@@ -728,6 +741,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     assert!(
         !record_claimed_handoff_paused_checkpoint_resume_dispatch_internal(
             &state,
+            CLAIM_ATTEMPT,
             "handoff-claim",
             "ckpt-handoff-claim",
             "executing_planner_resume",
@@ -792,6 +806,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     assert!(
         !record_claimed_handoff_paused_checkpoint_resume_dispatch_internal(
             &state,
+            CLAIM_ATTEMPT,
             "handoff-claim",
             "ckpt-handoff-claim",
             "executing_planner_resume",
@@ -813,6 +828,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     assert!(
         record_claimed_handoff_paused_checkpoint_resume_dispatch_internal(
             &state,
+            CLAIM_ATTEMPT,
             "handoff-claim",
             "ckpt-handoff-claim",
             "executing_planner_resume",
@@ -945,6 +961,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     assert!(
         !record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
             &state,
+            CLAIM_ATTEMPT,
             "handoff-claim",
             "ckpt-handoff-claim",
             "executing_planner_resume",
@@ -968,6 +985,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     assert!(
         record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
             &state,
+            CLAIM_ATTEMPT,
             "handoff-claim",
             "ckpt-handoff-claim",
             "executing_planner_resume",
@@ -1206,6 +1224,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     assert!(
         !record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             "handoff-claim",
             "ckpt-handoff-claim",
             "executing_planner_resume",
@@ -1232,6 +1251,7 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
     assert!(
         record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,
+            CLAIM_ATTEMPT,
             "handoff-claim",
             "ckpt-handoff-claim",
             "executing_planner_resume",

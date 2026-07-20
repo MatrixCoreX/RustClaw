@@ -5,7 +5,7 @@ use super::{
 
 fn task_fixture() -> crate::ClaimedTask {
     crate::ClaimedTask {
-        claim_attempt: 0,
+        claim_attempt: 1,
         task_id: "task-mutation-policy".to_string(),
         user_id: 1,
         chat_id: 2,
@@ -16,6 +16,32 @@ fn task_fixture() -> crate::ClaimedTask {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     }
+}
+
+fn insert_active_task_claim(state: &crate::AppState, task: &crate::ClaimedTask) {
+    let db = state.core.db.get().expect("test db");
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS tasks (
+            task_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            result_json TEXT,
+            updated_at INTEGER NOT NULL,
+            lease_owner TEXT,
+            claim_attempt INTEGER NOT NULL DEFAULT 0
+        );",
+    )
+    .expect("create task progress table");
+    db.execute(
+        "INSERT OR REPLACE INTO tasks (
+            task_id, status, result_json, updated_at, lease_owner, claim_attempt
+         ) VALUES (?1, 'running', NULL, 0, ?2, ?3)",
+        rusqlite::params![
+            task.task_id,
+            state.worker.worker_id.as_str(),
+            task.claim_attempt
+        ],
+    )
+    .expect("insert active task claim");
 }
 
 #[test]
@@ -36,9 +62,11 @@ fn observation_does_not_create_mutation_ledger_entry() {
 #[test]
 fn unclassified_mutation_fails_closed_into_ledger() {
     let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture();
+    insert_active_task_claim(&state, &task);
     let outcome = prepare_mutation_execution(
         &state,
-        &task_fixture(),
+        &task,
         "fs_basic",
         &serde_json::json!({"action": "append_text", "path": "notes.txt"}),
         "skill:fs_basic:append",
@@ -99,24 +127,7 @@ fn mutation_projection_keeps_async_resume_contract_and_drops_user_content() {
 fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture();
-    {
-        let db = state.core.db.get().expect("test db");
-        db.execute_batch(
-            "CREATE TABLE tasks (
-                task_id TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                result_json TEXT,
-                updated_at INTEGER NOT NULL
-             );",
-        )
-        .expect("create task progress table");
-        db.execute(
-            "INSERT INTO tasks (task_id, status, result_json, updated_at)
-             VALUES (?1, 'running', NULL, 0)",
-            rusqlite::params![task.task_id],
-        )
-        .expect("insert running task");
-    }
+    insert_active_task_claim(&state, &task);
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.round_no = 1;
     let record = crate::repo::TaskMutationRecord {

@@ -454,7 +454,7 @@ clawcli goal clear task-123
 - terminal async poll projection 会保留已有 ask 可见回复；如果 ask 任务只有机器 executor 输出，则补一个包含 `checkpoint_id`、`poll_ref`、`task_id` 和 `final_result_json` 的机器 JSON 回复。
 - seeded resume 会恢复 checkpoint 中的预算计数、observations、artifact refs、repair budget 字段和已完成 side-effect fingerprints，再重新进入 agent loop。
 - runtime recovery 和 projection 只移动 `status_code`、`message_key`、`executor_state`、`resume_directive`、`job_id`、artifact refs 等机器字段。用户可见 prose 由 finalizer、i18n、UI 或模型渲染。
-- Lease/heartbeat 模型见 `docs/task_lifecycle_lease_model.md`；当前 runtime 使用 `tasks.updated_at` 与 checkpoint `resume_executor` 机器字段，新的数据库 lease columns 会等到 multi-worker claim 真正需要时再加入。
+- Lease/heartbeat 模型见 `docs/task_lifecycle_lease_model.md`；foreground 与 resume-executor 的每次写入都由 task row 的精确 `(lease_owner, claim_attempt)` 隔离。heartbeat 只能续租当前 claim，checkpoint recovery 会推进 generation，旧 worker 不能再发布 claimed process event 或覆盖终态结果。
 
 CLI 任务操作流程：
 

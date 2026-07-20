@@ -53,7 +53,7 @@ pub(crate) use task_checkpoint_action::{
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_mutation_ledger::{
     begin_task_mutation, complete_task_mutation, mark_task_mutation_uncertain,
-    BeginTaskMutationOutcome, TaskMutationLease, TaskMutationRecord,
+    BeginTaskMutationOutcome, TaskMutationClaimRejected, TaskMutationLease, TaskMutationRecord,
 };
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;
 pub(crate) use task_resume_execution::{
@@ -74,7 +74,7 @@ pub(crate) use task_resume_execution::{
 pub(crate) use tasks::{
     check_task_view_access, claim_due_paused_checkpoint_task_internal, claim_next_task,
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
-    is_task_still_running, is_task_still_running_or_pending_ask_success_projection,
+    is_task_claim_active, is_task_claim_active_or_pending_ask_success_projection,
     list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_execution_plan_internal,
@@ -82,6 +82,7 @@ pub(crate) use tasks::{
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
     update_task_checkpointed_result, update_task_failure, update_task_failure_with_result,
     update_task_progress_result, update_task_success, update_task_timeout,
-    worker_task_lease_expires_at, ClaimedPausedCheckpointResumeExecutor, DuePausedCheckpointTask,
-    TaskViewerAccessError, WorkerTaskWriteRejected, WORKER_LEASE_LOST_STATUS_CODE,
+    worker_task_lease_expires_at, worker_task_write_rejection,
+    ClaimedPausedCheckpointResumeExecutor, DuePausedCheckpointTask, TaskViewerAccessError,
+    WorkerTaskWriteRejected, WORKER_LEASE_LOST_STATUS_CODE,
 };

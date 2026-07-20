@@ -559,8 +559,11 @@ pub(crate) async fn finalize_ask_result(
     }
     match result {
         Ok(answer) => {
-            if !repo::is_task_still_running_or_pending_ask_success_projection(state, &task.task_id)?
-            {
+            if !repo::is_task_claim_active_or_pending_ask_success_projection(
+                state,
+                &task.task_id,
+                task.claim_attempt,
+            )? {
                 state.clear_task_llm_call_count(&task.task_id);
                 info!(
                     "task_call_end task_id={} kind=ask status=canceled path=normal",
@@ -1133,7 +1136,7 @@ pub(crate) async fn finalize_ask_result(
             journal.record_output_contract(&effective_output_contract);
             let route_result = &effective_output_contract;
             if err_text == crate::agent_engine::TASK_CANCELED_ERR
-                || !repo::is_task_still_running(state, &task.task_id)?
+                || !repo::is_task_claim_active(state, &task.task_id, task.claim_attempt)?
             {
                 state.clear_task_llm_call_count(&task.task_id);
                 info!(

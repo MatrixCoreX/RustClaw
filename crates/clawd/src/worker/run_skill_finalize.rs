@@ -972,7 +972,7 @@ pub(super) async fn finalize_run_skill_result(
 ) -> Result<()> {
     match result {
         Ok(outcome) => {
-            if !repo::is_task_still_running(state, &task.task_id)? {
+            if !repo::is_task_claim_active(state, &task.task_id, task.claim_attempt)? {
                 state.clear_task_llm_call_count(&task.task_id);
                 return finalize_run_skill_canceled(task, skill_name).await;
             }
@@ -980,7 +980,7 @@ pub(super) async fn finalize_run_skill_result(
                 .await?;
         }
         Err(err_text) => {
-            if !repo::is_task_still_running(state, &task.task_id)? {
+            if !repo::is_task_claim_active(state, &task.task_id, task.claim_attempt)? {
                 state.clear_task_llm_call_count(&task.task_id);
                 return finalize_run_skill_canceled(task, skill_name).await;
             }
