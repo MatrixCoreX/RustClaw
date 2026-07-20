@@ -3,12 +3,15 @@ use std::path::Path;
 
 use super::*;
 
-pub(super) fn file_name_list_prefers_observed_projection(
+pub(super) fn route_requests_exact_name_list(route: &crate::IntentOutputContract) -> bool {
+    route.requests_exact_name_list()
+}
+
+pub(super) fn selected_name_list_prefers_observed_projection(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    if !route.semantic_kind_is(crate::OutputSemanticKind::FileNames)
-        || route.response_shape != crate::OutputResponseShape::Strict
+    if !route_requests_exact_name_list(route)
         || route
             .selection
             .list_selector
@@ -19,93 +22,7 @@ pub(super) fn file_name_list_prefers_observed_projection(
         return false;
     }
 
-    loop_state.executed_step_results.iter().any(|step| {
-        if !step.is_ok()
-            || matches!(
-                step.skill.as_str(),
-                "respond" | "synthesize_answer" | "think"
-            )
-        {
-            return false;
-        }
-        let Some(output) = step
-            .output
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-        else {
-            return false;
-        };
-        let output =
-            crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
-                output,
-            );
-        serde_json::from_str::<serde_json::Value>(&output)
-            .ok()
-            .is_some_and(|value| value_contains_observed_file_name_list(&value))
-    })
-}
-
-fn value_contains_observed_file_name_list(value: &serde_json::Value) -> bool {
-    if value
-        .get("sort_by")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(matrix_size_ranked_sort_token)
-    {
-        return false;
-    }
-    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
-        if value_contains_observed_file_name_list(extra) {
-            return true;
-        }
-    }
-    value_string_array_has_items(value, &["names", "results", "files", "paths"])
-        || value
-            .pointer("/names_by_kind/files")
-            .is_some_and(json_array_has_string_item)
-        || value
-            .get("entries")
-            .is_some_and(value_entries_include_file_name)
-}
-
-fn value_string_array_has_items(value: &serde_json::Value, keys: &[&str]) -> bool {
-    keys.iter()
-        .filter_map(|key| value.get(*key))
-        .any(json_array_has_string_item)
-}
-
-fn value_entries_include_file_name(value: &serde_json::Value) -> bool {
-    let Some(entries) = value.as_array() else {
-        return false;
-    };
-    entries.iter().any(|entry| {
-        let Some(map) = entry.as_object() else {
-            return false;
-        };
-        if map
-            .get("kind")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|kind| kind != "file")
-        {
-            return false;
-        }
-        ["name", "path", "resolved_path"].iter().any(|key| {
-            map.get(*key)
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .is_some_and(|text| !text.is_empty())
-        })
-    })
-}
-
-fn json_array_has_string_item(value: &serde_json::Value) -> bool {
-    value.as_array().is_some_and(|items| {
-        items.iter().any(|item| {
-            item.as_str()
-                .map(str::trim)
-                .is_some_and(|text| !text.is_empty())
-        })
-    })
+    matrix_strict_list_observed_answer(route, loop_state).is_some()
 }
 
 fn matrix_size_ranked_sort_token(sort_by: &str) -> bool {
@@ -548,17 +465,11 @@ fn grep_text_matches_answer_from_value(value: &serde_json::Value) -> Option<Stri
 fn route_supports_matrix_strict_list_observed_answer(route: &crate::IntentOutputContract) -> bool {
     route_requests_name_list(route)
         || route_requests_filesystem_path_list(route)
-        || matches!(
-            route.semantic_kind,
-            crate::OutputSemanticKind::FileNames
-                | crate::OutputSemanticKind::DirectoryNames
-                | crate::OutputSemanticKind::FilePaths
-        )
+        || route.semantic_kind_is(crate::OutputSemanticKind::FilePaths)
 }
 
 fn route_requests_name_list(route: &crate::IntentOutputContract) -> bool {
-    crate::evidence_policy::final_answer_shape_for_output_contract(route)
-        == Some(crate::evidence_policy::FinalAnswerShape::NameList)
+    route_requests_exact_name_list(route)
 }
 
 fn route_requests_filesystem_path_list(route: &crate::IntentOutputContract) -> bool {
@@ -667,7 +578,7 @@ fn matrix_ranked_size_list_observed_answer(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route.semantic_kind_is(crate::OutputSemanticKind::FileNames) {
+    if !route_requests_file_name_list(route) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -749,13 +660,13 @@ fn collect_matrix_strict_list_items(
 }
 
 fn route_requests_file_name_list(route: &crate::IntentOutputContract) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::FileNames)
-        || route.selection.list_selector.target_kind == crate::OutputScalarCountTargetKind::File
+    route.selection.list_selector.target_kind_specified
+        && route.selection.list_selector.target_kind == crate::OutputScalarCountTargetKind::File
 }
 
 fn route_requests_directory_name_list(route: &crate::IntentOutputContract) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::DirectoryNames)
-        || route.selection.list_selector.target_kind == crate::OutputScalarCountTargetKind::Dir
+    route.selection.list_selector.target_kind_specified
+        && route.selection.list_selector.target_kind == crate::OutputScalarCountTargetKind::Dir
 }
 
 fn collect_matrix_file_name_items(
@@ -938,12 +849,7 @@ fn matrix_list_display_item(route: &crate::IntentOutputContract, raw: &str) -> O
     if item.is_empty() {
         return None;
     }
-    if route_requests_name_list(route)
-        || matches!(
-            route.semantic_kind,
-            crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::DirectoryNames
-        )
-    {
+    if route_requests_name_list(route) {
         return std::path::Path::new(item)
             .file_name()
             .and_then(|value| value.to_str())

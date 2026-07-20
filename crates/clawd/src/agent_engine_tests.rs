@@ -145,7 +145,7 @@ fn quick_index_includes_planner_capability_metadata() {
         subprocess: Some(false),
         package_install: Some(false),
         privilege_escalation: Some(false),
-        output_semantic_kind: Some("file_names".to_string()),
+        output_semantic_kind: Some("file_paths".to_string()),
         final_answer_shape: Some("path_list".to_string()),
     }]);
     manifest.risk_level = Some(SkillRiskLevel::Medium);
@@ -177,7 +177,7 @@ fn quick_index_includes_planner_capability_metadata() {
     assert!(text.contains("filesystem_write=false"));
     assert!(text.contains("external_publish=false"));
     assert!(text.contains("credential_access=false"));
-    assert!(text.contains("output_semantic_kind=file_names"));
+    assert!(text.contains("output_semantic_kind=file_paths"));
     assert!(text.contains("final_answer_shape=path_list"));
     assert!(output_contract.contains("output_contract: kind=text"));
     assert!(output_contract.contains("required=text"));

@@ -730,10 +730,6 @@ crates/clawd/src/memory/service.rs	{role}: [safety_signal content omitted]	convo
 crates/clawd/src/memory/use_policy.rs	### MEMORY_USE_POLICY\nprofile: {}\nreason: {}	"### MEMORY_USE_POLICY\\nprofile: {}\\nreason: {}",
 crates/clawd/src/memory_recent.rs	[provider_unavailable_reply_omitted]	"[provider_unavailable_reply_omitted]"
 crates/clawd/src/observed_facts.rs	acquire db for observed facts clear: {err}	.map_err(|err| anyhow::anyhow!("acquire db for observed facts clear: {err}"))?;
-crates/clawd/src/output_contract_verifier.rs	directory_names: candidate contains file entries matching requested extension	"directory_names: candidate contains file entries matching requested extension",
-crates/clawd/src/output_contract_verifier.rs	directory_names: candidate mostly contains file-like entries	"directory_names: candidate mostly contains file-like entries",
-crates/clawd/src/output_contract_verifier.rs	directory_names: empty list candidate	"directory_names: empty list candidate",
-crates/clawd/src/output_contract_verifier.rs	directory_names: locator candidate is file-like	"directory_names: locator candidate is file-like",
 crates/clawd/src/output_contract_verifier.rs	scalar_count: candidate contains no integer literal	"scalar_count: candidate contains no integer literal",
 crates/clawd/src/output_contract_verifier.rs	scalar_count: empty candidate	"scalar_count: empty candidate",
 crates/clawd/src/output_contract_verifier.rs	scalar_count: extracted only unique integer from candidate	"scalar_count: extracted only unique integer from candidate",

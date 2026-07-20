@@ -76,8 +76,6 @@ pub(crate) enum OutputSemanticKind {
     #[default]
     None,
     RawCommandOutput,
-    FileNames,
-    DirectoryNames,
     FilePaths,
     ContentExcerptSummary,
     ContentExcerptWithSummary,
@@ -93,8 +91,6 @@ impl OutputSemanticKind {
     pub(crate) const ALL: &'static [Self] = &[
         Self::None,
         Self::RawCommandOutput,
-        Self::FileNames,
-        Self::DirectoryNames,
         Self::FilePaths,
         Self::ContentExcerptSummary,
         Self::ContentExcerptWithSummary,
@@ -110,8 +106,6 @@ impl OutputSemanticKind {
         match self {
             Self::None => "none",
             Self::RawCommandOutput => "raw_command_output",
-            Self::FileNames => "file_names",
-            Self::DirectoryNames => "directory_names",
             Self::FilePaths => "file_paths",
             Self::ContentExcerptSummary => "content_excerpt_summary",
             Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
@@ -184,6 +178,15 @@ impl IntentOutputContract {
 
     pub(crate) fn semantic_kind_is_unclassified(&self) -> bool {
         self.semantic_kind_is(OutputSemanticKind::None)
+    }
+
+    pub(crate) fn requests_exact_name_list(&self) -> bool {
+        self.response_shape == OutputResponseShape::Strict
+            && self.selection.list_selector.target_kind_specified
+            && matches!(
+                self.selection.list_selector.target_kind,
+                OutputScalarCountTargetKind::File | OutputScalarCountTargetKind::Dir
+            )
     }
 }
 

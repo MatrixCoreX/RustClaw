@@ -75,7 +75,9 @@ fn inventory_dir_file_names_contract_filters_names_by_kind() {
         "counts": {"files": 2, "dirs": 1, "total": 3}
     });
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FileNames;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
 
     let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
         .expect("file names answer");
@@ -99,7 +101,9 @@ fn inventory_dir_file_names_contract_uses_direct_semantic_kind() {
         "counts": {"files": 2, "dirs": 1, "total": 3}
     });
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::FileNames;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
 
     let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
         .expect("file names contract answer");

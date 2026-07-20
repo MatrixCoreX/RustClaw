@@ -425,7 +425,6 @@ pub(super) fn fs_search_output_direct_answer_candidate(
         .and_then(|route| {
             fs_search_route_filtered_listing_candidate(route, value, allow_multi_result_list)
         })
-        .or_else(|| route.and_then(|route| fs_search_contract_listing_candidate(route, value)))
         .or_else(|| {
             fs_search_direct_answer_candidate(
                 state,
@@ -544,12 +543,8 @@ fn inventory_dir_can_use_direct_names(
         && route.is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is_any(
                 route,
-                &[
-                    crate::OutputSemanticKind::FileNames,
-                    crate::OutputSemanticKind::DirectoryNames,
-                    crate::OutputSemanticKind::FilePaths,
-                ],
-            )
+                &[crate::OutputSemanticKind::FilePaths],
+            ) || route.requests_exact_name_list()
         })
     {
         return true;

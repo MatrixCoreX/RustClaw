@@ -481,8 +481,11 @@ fn exact_file_names_contract_prefers_observed_list_over_synthesized_sentence() {
     let state = test_state();
     let mut route = free_route_result();
     route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_hint = "document".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.selection.list_selector.target_kind_specified = true;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -491,7 +494,7 @@ fn exact_file_names_contract_prefers_observed_list_over_synthesized_sentence() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "list_dir",
-        "alpha.md\nbeta.md\n",
+        r#"{"action":"inventory_dir","path":"document","names":["alpha.md","beta.md"],"names_by_kind":{"dirs":[],"files":["alpha.md","beta.md"],"other":[]}}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -518,48 +521,6 @@ fn exact_file_names_contract_prefers_observed_list_over_synthesized_sentence() {
     assert!(finalizer_summary.is_some());
 }
 
-#[test]
-fn exact_directory_names_contract_replaces_file_list_synthesis_with_parent_dirs() {
-    let state = test_state();
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"find_ext","count":4,"ext":"sh","results":["build-all.sh","component_start/start-clawd.sh","scripts/check.sh","component_start/start-feishud.sh"],"root":""}"#,
-    ));
-    let file_list =
-        "1. build-all.sh\n2. component_start/start-clawd.sh\n3. scripts/check.sh".to_string();
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "synthesize_answer",
-        &file_list,
-    ));
-    loop_state.last_user_visible_respond = Some(file_list.clone());
-    loop_state.last_publishable_synthesis_output = Some(file_list.clone());
-    let mut delivery = vec![file_list];
-    let mut finalizer_summary = None;
-
-    prefer_observed_answer_for_exact_contract(
-        &state,
-        "task_test",
-        &mut loop_state,
-        Some(&ctx),
-        &mut delivery,
-        &mut finalizer_summary,
-    );
-
-    assert_eq!(delivery, vec![".\ncomponent_start\nscripts"]);
-    assert!(finalizer_summary.is_some());
-}
 #[test]
 fn preferred_route_clarify_question_does_not_reuse_route_text() {
     let route = scalar_route_result();

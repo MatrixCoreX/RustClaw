@@ -52,11 +52,7 @@ pub(super) fn run_cmd_contract_listing_text_candidate(
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is_any(
         route,
-        &[
-            crate::OutputSemanticKind::DirectoryNames,
-            crate::OutputSemanticKind::FileNames,
-            crate::OutputSemanticKind::FilePaths,
-        ],
+        &[crate::OutputSemanticKind::FilePaths],
     ) {
         return None;
     }

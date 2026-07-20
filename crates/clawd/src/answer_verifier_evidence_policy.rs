@@ -59,7 +59,7 @@ fn strict_list_selector_limit(route: &AnswerContract) -> Option<usize> {
 
 pub(super) fn strict_list_route_allows_observed_subset(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::FilePaths)
-        || route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
+        || route.output_contract.requests_exact_name_list()
 }
 
 fn route_contract_marker_is(
@@ -67,10 +67,6 @@ fn route_contract_marker_is(
     semantic_kind: crate::OutputSemanticKind,
 ) -> bool {
     route.output_contract_marker_is(semantic_kind)
-}
-
-fn route_contract_marker_is_directory_names(route: &AnswerContract) -> bool {
-    route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
 }
 
 pub(super) fn evidence_policy_single_path_answer_is_grounded_in_successful_observation(
@@ -309,14 +305,11 @@ pub(super) fn strip_list_marker(raw: &str) -> String {
 }
 
 pub(super) fn strict_list_item_variants_for_route(
-    route: &AnswerContract,
+    _route: &AnswerContract,
     item: &str,
-    observed_item: bool,
+    _observed_item: bool,
 ) -> Vec<String> {
     let mut variants = strict_list_item_variants(item);
-    if observed_item && route_contract_marker_is_directory_names(route) {
-        variants.extend(strict_list_parent_directory_variants(item));
-    }
     variants.sort();
     variants.dedup();
     variants
@@ -339,29 +332,6 @@ pub(super) fn strict_list_item_variants(item: &str) -> Vec<String> {
     variants.sort();
     variants.dedup();
     variants
-}
-
-pub(super) fn strict_list_parent_directory_variants(item: &str) -> Vec<String> {
-    let normalized = normalize_strict_list_item(item);
-    if normalized.is_empty() {
-        return Vec::new();
-    }
-    let path = std::path::Path::new(&normalized);
-    let parent = path
-        .parent()
-        .map(|value| {
-            let text = value.to_string_lossy();
-            if text.is_empty() {
-                ".".to_string()
-            } else {
-                text.to_string()
-            }
-        })
-        .unwrap_or_else(|| ".".to_string());
-    vec![normalize_strict_list_item(&parent)]
-        .into_iter()
-        .filter(|value| !value.is_empty())
-        .collect()
 }
 
 pub(super) fn strict_list_candidate_annotates_observed_item(

@@ -253,20 +253,7 @@ pub(super) fn route_prefers_plain_fs_search_paths(route: &crate::IntentOutputCon
                 crate::OutputSemanticKind::ExistenceWithPath,
             )
             && !route.delivery_required)
-        || (matches!(
-            route.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        ) && super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::FileNames,
-        ))
-        || (matches!(
-            route.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        ) && super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::DirectoryNames,
-        ))
+        || route.requests_exact_name_list()
         || (matches!(
             route.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
@@ -322,14 +309,11 @@ pub(super) fn route_allows_raw_listing_direct_answer(
         {
             return true;
         }
-        super::output_route_policy::route_contract_marker_is_any(
-            route,
-            &[
-                crate::OutputSemanticKind::FileNames,
-                crate::OutputSemanticKind::DirectoryNames,
+        route.requests_exact_name_list()
+            || super::output_route_policy::route_contract_marker_is(
+                route,
                 crate::OutputSemanticKind::FilePaths,
-            ],
-        )
+            )
     })
 }
 

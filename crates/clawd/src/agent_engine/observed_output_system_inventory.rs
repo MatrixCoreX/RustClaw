@@ -223,10 +223,8 @@ pub(super) fn inventory_dir_direct_answer_candidate(
 ) -> Option<String> {
     let value = inventory_dir_payload(value)?;
     if route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::FileNames,
-        )
+        route.requests_exact_name_list()
+            && route.selection.list_selector.target_kind == crate::OutputScalarCountTargetKind::File
     }) {
         let files = inventory_dir_names_by_kind(value, "files");
         if !files.is_empty() {
@@ -234,10 +232,8 @@ pub(super) fn inventory_dir_direct_answer_candidate(
         }
     }
     if route.is_some_and(|route| {
-        super::output_route_policy::route_contract_marker_is(
-            route,
-            crate::OutputSemanticKind::DirectoryNames,
-        )
+        route.requests_exact_name_list()
+            && route.selection.list_selector.target_kind == crate::OutputScalarCountTargetKind::Dir
     }) {
         let dirs = inventory_dir_names_by_kind(value, "dirs");
         if !dirs.is_empty() {

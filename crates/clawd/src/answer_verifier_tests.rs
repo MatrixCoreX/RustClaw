@@ -318,7 +318,7 @@ fn local_missing_evidence_gap_skips_non_path_status_observation() {
 #[test]
 fn local_missing_evidence_gap_skips_when_required_fields_are_observed() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap-ok", "ask", "list names");
@@ -380,7 +380,7 @@ fn local_missing_evidence_gap_does_not_block_on_negative_evidence_only() {
 fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "definitely_missing_dir_rustclaw_xyz/".to_string();
     let mut journal =
@@ -659,7 +659,14 @@ fn local_missing_evidence_gap_skips_crypto_account_access_terminal_finalizer() {
 fn local_missing_evidence_gap_keeps_gap_for_non_missing_terminal_error() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.list_selector.target_kind =
+        crate::OutputScalarCountTargetKind::File;
+    route
+        .output_contract
+        .selection
+        .list_selector
+        .target_kind_specified = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "maybe_dir/".to_string();
     let mut journal =

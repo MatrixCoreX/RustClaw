@@ -35,39 +35,6 @@ fn direct_answer_preserves_run_cmd_directory_entry_names() {
 }
 
 #[test]
-fn direct_answer_preserves_run_cmd_semantic_directory_path_list() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "run_cmd",
-            ".\n./scripts\n./scripts/nl_tests\n./crates/skills/browser_web/node_modules/playwright-core/bin\n",
-        ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::DirectoryNames,
-            locator_hint: String::new(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
-        ..AgentRunContext::default()
-    };
-    assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some(
-                ".\n./scripts\n./scripts/nl_tests\n./crates/skills/browser_web/node_modules/playwright-core/bin"
-            )
-        );
-}
-
-#[test]
 fn direct_answer_preserves_run_cmd_directory_entry_names_without_request_text_limit() {
     let temp_dir = std::env::temp_dir().join(format!(
         "clawd_observed_output_test_{}_run_cmd_limit",

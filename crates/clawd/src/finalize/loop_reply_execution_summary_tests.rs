@@ -191,7 +191,7 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_name_list_answer(
     ));
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1015,7 +1015,7 @@ fn execution_summary_sanitizes_log_excerpt_secrets_and_ansi() {
 fn execution_summary_suppressed_for_exact_file_names_contract() {
     let mut route = free_route_result();
     route.locator_hint = "document".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1139,7 +1139,7 @@ fn execution_summary_skips_for_strict_json_container_delivery() {
 #[test]
 fn execution_summary_suppressed_for_file_names_contract_even_with_original_user_request() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some("先列出 logs 目录下前 5 个文件名".to_string()),

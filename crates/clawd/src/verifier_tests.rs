@@ -1012,7 +1012,7 @@ fn external_fs_basic_mutation_requires_registry_confirmation() {
 fn observe_mode_does_not_reject_actions_from_semantic_matrix_only() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
     let result = verify_plan(
         &state,
         &task,
@@ -1238,7 +1238,7 @@ fn verifier_issue_kinds_expose_stable_machine_fields() {
 fn observe_mode_no_longer_records_semantic_matrix_preferred_action_hint() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
     let result = verify_plan(
         &state,
         &task,
@@ -1357,7 +1357,7 @@ fn enforce_mode_blocks_skill_switch_disabled_even_when_contract_allows_action() 
         ),
     })));
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
     let result = verify_plan(
         &state,
         &task,
@@ -1492,7 +1492,7 @@ fn enforce_mode_allows_internal_subagent_tool_visibility() {
 fn deterministic_subagent_boundary_plan_bypasses_misclassified_contract_rejection() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
     let mut plan = plan_result(vec![
         PlanStep {
             step_id: "s1".to_string(),
@@ -1578,7 +1578,7 @@ fn deterministic_subagent_boundary_plan_bypasses_misclassified_contract_rejectio
 fn deterministic_subagent_boundary_plan_defers_clarify_when_locator_is_structured() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 

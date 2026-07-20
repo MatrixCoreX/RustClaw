@@ -88,6 +88,13 @@ pub(crate) fn compact_prompt_line_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<String> {
     let matrix = bundled_contract_matrix()?;
+    if output_contract.requests_exact_name_list() {
+        return Some(format!(
+            "- evidence_policy source=validated_output_selector version={} hash={} match=exact_list_selector planner_authority=agent_loop_registry evidence_profile=selected_list required_evidence=candidates final_answer_shape=exact_list",
+            matrix.matrix_version,
+            matrix.matrix_version_hash(),
+        ));
+    }
     let matched = matrix.match_output_contract(output_contract)?;
     let required_evidence = matched.required_evidence();
     let required_evidence = if required_evidence.is_empty() {
@@ -112,6 +119,9 @@ pub(crate) fn compact_prompt_line_for_output_contract(
 pub(crate) fn required_evidence_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Vec<String>> {
+    if output_contract.requests_exact_name_list() {
+        return Some(vec!["candidates".to_string()]);
+    }
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     let mut fields = matched
@@ -131,9 +141,25 @@ pub(crate) fn required_evidence_for_output_contract(
     Some(fields.into_iter().collect())
 }
 
+fn evidence_expression_for_output_contract(
+    output_contract: &IntentOutputContract,
+    matched: &MatchedContract<'_>,
+) -> EvidenceExpression {
+    if output_contract.requests_exact_name_list() {
+        return EvidenceExpression {
+            all_of: vec!["candidates".to_string()],
+            ..Default::default()
+        };
+    }
+    matched.evidence_expression()
+}
+
 pub(crate) fn final_answer_shape_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<FinalAnswerShape> {
+    if output_contract.requests_exact_name_list() {
+        return Some(FinalAnswerShape::ExactList);
+    }
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     matched.final_answer_shape_kind()
@@ -188,7 +214,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
 ) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
-    let final_answer_shape_kind = matched.final_answer_shape_kind();
+    let final_answer_shape_kind = final_answer_shape_for_output_contract(output_contract);
     let observation_extractors = matched.observation_extractors();
     Some(json!({
         "evidence_policy_version": matrix.matrix_version,
@@ -214,8 +240,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
         "evidence_profile": matched.evidence_profile(),
         "required_evidence": required_evidence_for_output_contract(output_contract)
             .unwrap_or_else(|| matched.required_evidence()),
-        "evidence_expression": matched
-            .evidence_expression()
+        "evidence_expression": evidence_expression_for_output_contract(output_contract, &matched)
             .to_trace_json(&matched.required_evidence()),
         "observation_sources": matched.observation_sources(),
         "observation_extractors": observation_extractors_trace_json(&observation_extractors),
@@ -241,7 +266,7 @@ pub(crate) fn action_trace_for_output_contract(
     let action = ActionRef::parse(action_ref)?;
     let action_key = action.as_key();
     let observation_extractor = matched.observation_extractor_for_source(&action_key);
-    let final_answer_shape_kind = matched.final_answer_shape_kind();
+    let final_answer_shape_kind = final_answer_shape_for_output_contract(output_contract);
     Some(json!({
         "schema_version": 1,
         "action_ref": action_key,
@@ -252,8 +277,7 @@ pub(crate) fn action_trace_for_output_contract(
         "observation_extractor": observation_extractor.as_ref().map(ObservationExtractor::to_trace_json),
         "required_evidence": required_evidence_for_output_contract(output_contract)
             .unwrap_or_else(|| matched.required_evidence()),
-        "evidence_expression": matched
-            .evidence_expression()
+        "evidence_expression": evidence_expression_for_output_contract(output_contract, &matched)
             .to_trace_json(&matched.required_evidence()),
         "final_answer_shape": final_answer_shape_kind
             .map(FinalAnswerShape::as_str)
@@ -374,7 +398,7 @@ pub(crate) fn action_policy_for_output_contract(
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     let policy_action = policy_action_ref_for_match(&matched, normalized_skill, args)?;
-    let final_answer_shape_kind = matched.final_answer_shape_kind()?;
+    let final_answer_shape_kind = final_answer_shape_for_output_contract(output_contract)?;
     let decision = matched.action_policy(&policy_action.effective);
     Some(ContractActionPolicy {
         decision,
@@ -386,11 +410,12 @@ pub(crate) fn action_policy_for_output_contract(
             .replacement_reason_code
             .map(str::to_string),
         contract_match: matched.match_name().to_string(),
-        required_evidence: matched.required_evidence(),
+        required_evidence: required_evidence_for_output_contract(output_contract)
+            .unwrap_or_else(|| matched.required_evidence()),
         preferred_actions: normalized_tokens(matched.preferred_actions()),
         final_answer_shape_kind,
         final_answer_shape: final_answer_shape_kind.as_str().to_string(),
-        evidence_expression: matched.evidence_expression(),
+        evidence_expression: evidence_expression_for_output_contract(output_contract, &matched),
         policy_mode: matched.policy_mode(),
         evidence_scope: matched.evidence_scope(),
         freshness: matched.freshness(),

@@ -426,11 +426,19 @@ fn existence_contract_can_express_negative_evidence() {
 
 #[test]
 fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
-    let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::FileNames,
+    let mut output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
         ..IntentOutputContract::default()
-    })
-    .expect("trace snapshot");
+    };
+    output_contract.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    output_contract
+        .selection
+        .list_selector
+        .target_kind_specified = true;
+    let snapshot = trace_snapshot_for_output_contract(&output_contract).expect("trace snapshot");
 
     assert_eq!(
         snapshot
@@ -445,7 +453,7 @@ fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
     );
     assert_eq!(
         snapshot.get("contract_marker").and_then(Value::as_str),
-        Some("file_names")
+        Some("none")
     );
     assert!(snapshot.get("semantic_kind").is_none());
     assert_eq!(
@@ -599,20 +607,24 @@ fn generic_delivery_snapshot_defaults_to_file_artifact() {
 
 #[test]
 fn action_trace_records_contract_decision_and_shape() {
-    let trace = action_trace_for_output_contract(
-        &IntentOutputContract {
-            semantic_kind: OutputSemanticKind::FileNames,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        },
-        "fs_basic.list_dir",
-    )
-    .expect("action trace should resolve");
+    let mut output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        ..IntentOutputContract::default()
+    };
+    output_contract.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    output_contract
+        .selection
+        .list_selector
+        .target_kind_specified = true;
+    let trace = action_trace_for_output_contract(&output_contract, "fs_basic.list_dir")
+        .expect("action trace should resolve");
 
     assert_eq!(
         trace.get("contract_match").and_then(Value::as_str),
-        Some("file_names")
+        Some("generic_path_content")
     );
     assert_eq!(
         trace.get("decision").and_then(Value::as_str),
@@ -620,7 +632,7 @@ fn action_trace_records_contract_decision_and_shape() {
     );
     assert_eq!(
         trace.get("final_answer_shape").and_then(Value::as_str),
-        Some("name_list")
+        Some("exact_list")
     );
     assert_eq!(
         trace.get("evidence_profile").and_then(Value::as_str),

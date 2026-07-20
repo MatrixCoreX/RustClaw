@@ -70,12 +70,6 @@ fn route_allows_structured_listing_recovery(
     }) {
         return false;
     }
-    if route.output_contract_marker_is_any(&[
-        crate::OutputSemanticKind::DirectoryNames,
-        crate::OutputSemanticKind::FileNames,
-    ]) {
-        return true;
-    }
     if matches!(
         route.output_contract.delivery_intent,
         crate::OutputDeliveryIntent::DirectoryLookup

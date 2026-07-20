@@ -64,7 +64,8 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     if has_prior_step_error && !allow_prior_step_error_replacement {
         return;
     }
-    if route_expects_synthesis_over_raw_observation(route)
+    if !route.requests_exact_name_list()
+        && route_expects_synthesis_over_raw_observation(route)
         && delivery_matches_latest_publishable_synthesis(loop_state, delivery_messages)
     {
         info!(
@@ -91,6 +92,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     if current_delivery_is_publishable_synthesis
         && latest_publishable_synthesis_step_matches(loop_state)
         && route.semantic_kind_is_unclassified()
+        && !route.requests_exact_name_list()
         && delivery_messages.last().is_some_and(|message| {
             planned_delivery_is_publishable_model_language_answer(message)
                 && delivery_is_single_line_text(message)
@@ -703,6 +705,9 @@ fn planned_delivery_is_explicit_contractual_answer(
     route: &crate::IntentOutputContract,
     delivery: &str,
 ) -> bool {
+    if route.requests_exact_name_list() {
+        return false;
+    }
     let delivery = delivery.trim();
     if delivery.is_empty()
         || crate::finalize::is_execution_summary_message(delivery)
@@ -722,12 +727,7 @@ fn list_contract_candidate_is_line_list(
     route: &crate::IntentOutputContract,
     delivery: &str,
 ) -> bool {
-    if !matches!(
-        route.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::FilePaths
-    ) {
+    if !matches!(route.semantic_kind, crate::OutputSemanticKind::FilePaths) {
         return true;
     }
     let lines = delivery
@@ -796,8 +796,6 @@ fn route_allows_prior_step_error_observed_replacement(route: &crate::IntentOutpu
         return true;
     }
     route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::FileNames,
-        crate::OutputSemanticKind::DirectoryNames,
         crate::OutputSemanticKind::FilePaths,
         crate::OutputSemanticKind::ExistenceWithPath,
     ])

@@ -1205,7 +1205,13 @@ fn observed_output_route_policy_uses_direct_output_contract() {
     ));
 
     let mut file_names_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    file_names_route.semantic_kind = OutputSemanticKind::FileNames;
+    file_names_route.semantic_kind = OutputSemanticKind::None;
+    file_names_route.selection.list_selector.target_kind =
+        crate::OutputScalarCountTargetKind::File;
+    file_names_route
+        .selection
+        .list_selector
+        .target_kind_specified = true;
     assert!(route_prefers_plain_fs_search_paths(&file_names_route));
     assert!(route_allows_raw_listing_direct_answer(Some(
         &file_names_route

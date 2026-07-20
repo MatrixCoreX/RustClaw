@@ -305,7 +305,7 @@ fn matrix_scalar_shape_ignores_read_text_structured_fields() {
 fn matrix_strict_list_shape_ignores_read_text_list_fields() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-list-read-fields",
@@ -342,7 +342,14 @@ fn matrix_strict_list_shape_uses_observed_evidence_map_values() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.list_selector.target_kind =
+        crate::OutputScalarCountTargetKind::File;
+    route
+        .output_contract
+        .selection
+        .list_selector
+        .target_kind_specified = true;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-list-evidence",
         "ask",
@@ -460,7 +467,7 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
     let mut list_route = route_with_mode();
     list_route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     list_route.output_contract.requires_content_evidence = true;
-    list_route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    list_route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let mut list_journal =
         crate::task_journal::TaskJournal::for_task("task-synth-list", "ask", "list files");
     list_journal

@@ -538,12 +538,12 @@ impl ObservationExtractor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum FinalAnswerShape {
     DeliveryTokenOrPath,
+    ExactList,
     ExistenceVerdictWithPath,
     ExcerptPlusSummary,
     FailedStepWithEvidence,
     Free,
     LifecycleResult,
-    NameList,
     PathList,
     RawOutputOrShortSummary,
     Scalar,
@@ -595,12 +595,12 @@ impl FinalAnswerShape {
     #[cfg(test)]
     pub(crate) const ALL: &'static [Self] = &[
         Self::DeliveryTokenOrPath,
+        Self::ExactList,
         Self::ExistenceVerdictWithPath,
         Self::ExcerptPlusSummary,
         Self::FailedStepWithEvidence,
         Self::Free,
         Self::LifecycleResult,
-        Self::NameList,
         Self::PathList,
         Self::RawOutputOrShortSummary,
         Self::Scalar,
@@ -612,12 +612,12 @@ impl FinalAnswerShape {
     pub(crate) fn parse(raw: &str) -> Option<Self> {
         match raw.trim() {
             "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
+            "exact_list" => Some(Self::ExactList),
             "existence_verdict_with_path" => Some(Self::ExistenceVerdictWithPath),
             "excerpt_plus_summary" => Some(Self::ExcerptPlusSummary),
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
             "free" => Some(Self::Free),
             "lifecycle_result" => Some(Self::LifecycleResult),
-            "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
             "scalar" => Some(Self::Scalar),
@@ -631,12 +631,12 @@ impl FinalAnswerShape {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::DeliveryTokenOrPath => "delivery_token_or_path",
+            Self::ExactList => "exact_list",
             Self::ExistenceVerdictWithPath => "existence_verdict_with_path",
             Self::ExcerptPlusSummary => "excerpt_plus_summary",
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
             Self::Free => "free",
             Self::LifecycleResult => "lifecycle_result",
-            Self::NameList => "name_list",
             Self::PathList => "path_list",
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
             Self::Scalar => "scalar",
@@ -651,7 +651,7 @@ impl FinalAnswerShape {
             Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
             Self::SinglePath => FinalAnswerShapeClass::SinglePath,
             Self::Scalar => FinalAnswerShapeClass::ScalarValue,
-            Self::NameList | Self::PathList => FinalAnswerShapeClass::StrictList,
+            Self::ExactList | Self::PathList => FinalAnswerShapeClass::StrictList,
             Self::ExistenceVerdictWithPath | Self::LifecycleResult => {
                 FinalAnswerShapeClass::Verdict
             }
