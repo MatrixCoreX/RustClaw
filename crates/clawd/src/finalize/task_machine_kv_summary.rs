@@ -17,7 +17,7 @@ use path_request::{
 use web_service::web_search_candidate_title_sources_from_output;
 use web_service::{
     final_answer_preserves_service_control_status_summary,
-    final_answer_preserves_weather_query_machine_report, final_answer_preserves_web_search_listing,
+    final_answer_preserves_web_search_listing,
     web_search_candidate_listing_final_answer_from_journal,
 };
 
@@ -128,14 +128,6 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         return false;
     }
     if route_preserves_generated_file_machine_report(route_result, answer_text, answer_messages) {
-        journal.record_final_answer(answer_text.as_str());
-        return false;
-    }
-    if final_answer_preserves_weather_query_machine_report(
-        route_result,
-        answer_text,
-        answer_messages,
-    ) {
         journal.record_final_answer(answer_text.as_str());
         return false;
     }

@@ -390,41 +390,6 @@ fn requested_machine_kv_summary_final_guard_preserves_delivery_file_token() {
 }
 
 #[test]
-fn requested_machine_kv_summary_final_guard_preserves_weather_query_fields() {
-    let prompt = "查询北京当前天气，只返回 location、temperature、weather_code。";
-    let mut route = route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::WeatherQuery;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-weather-machine-kv", "ask", prompt);
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "weather",
-            r#"{"extra":{"location":"北京","temperature":25.4,"weather_code":"多云","weather_code_raw":3}}"#,
-        ));
-    let mut answer_text = "location=北京\ntemperature=25.4\nweather_code=多云".to_string();
-    let mut answer_messages = vec![answer_text.clone()];
-
-    assert!(!apply_requested_machine_kv_summary_to_final_answer(
-        prompt,
-        &route,
-        &mut journal,
-        &mut answer_text,
-        &mut answer_messages,
-    ));
-
-    assert_eq!(
-        answer_text,
-        "location=北京\ntemperature=25.4\nweather_code=多云"
-    );
-    assert_eq!(answer_messages, vec![answer_text.clone()]);
-    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
-}
-
-#[test]
 fn requested_machine_kv_summary_restores_search_path_listing_over_query_marker() {
     let prompt = "read missing plan file, then search plan for execution_intent md files and return only paths";
     let mut route = route_result();

@@ -675,26 +675,6 @@ fn web_search_summary_allows_followup_browser_extract() {
 }
 
 #[test]
-fn weather_query_allows_weather_query_without_locator() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::WeatherQuery,
-            requires_content_evidence: true,
-            response_shape: OutputResponseShape::OneSentence,
-            locator_kind: OutputLocatorKind::None,
-            ..IntentOutputContract::default()
-        }),
-        "weather",
-        &serde_json::json!({"action":"query","city":"Beijing"}),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "weather.query");
-    assert_eq!(policy.contract_match, "weather_query");
-}
-
-#[test]
 fn market_quote_allows_stock_quote_without_locator() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

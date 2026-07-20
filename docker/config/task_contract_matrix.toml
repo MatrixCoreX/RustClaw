@@ -271,17 +271,6 @@ required_evidence = ["candidates"]
 final_answer_shape = "summary_grounded_in_listing"
 failure_policy = "retry_with_alternatives"
 
-[contracts.weather_query]
-semantic_kind = "weather_query"
-operation = "summarize"
-target_object = "web"
-delivery_shape = "summary"
-allowed_actions = ["weather.query", "weather"]
-preferred_actions = ["weather", "weather.query"]
-required_evidence = ["content_excerpt"]
-final_answer_shape = "summary_grounded_in_excerpt"
-failure_policy = "retry_with_alternatives"
-
 [contracts.market_quote]
 semantic_kind = "market_quote"
 operation = "summarize"

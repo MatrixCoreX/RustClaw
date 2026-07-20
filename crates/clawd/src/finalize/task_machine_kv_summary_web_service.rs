@@ -1,40 +1,5 @@
 use super::*;
 
-pub(super) fn final_answer_preserves_weather_query_machine_report(
-    route_result: &crate::IntentOutputContract,
-    answer_text: &str,
-    answer_messages: &[String],
-) -> bool {
-    if !route_is_weather_query(route_result) {
-        return false;
-    }
-    std::iter::once(answer_text)
-        .chain(answer_messages.iter().map(String::as_str))
-        .any(weather_query_machine_fields_are_complete)
-}
-
-fn weather_query_machine_fields_are_complete(text: &str) -> bool {
-    ["location", "temperature", "weather_code"]
-        .into_iter()
-        .all(|field| text_has_clean_line_value_for_marker(text, field))
-}
-
-fn text_has_clean_line_value_for_marker(text: &str, marker: &str) -> bool {
-    text.lines().map(str::trim).any(|line| {
-        let value = line
-            .strip_prefix(format!("{marker}=").as_str())
-            .or_else(|| line.strip_prefix(format!("{marker}:").as_str()))
-            .map(str::trim);
-        value.is_some_and(|value| {
-            !value.is_empty()
-                && !value.contains('\n')
-                && !value.contains(" location=")
-                && !value.contains(" temperature=")
-                && !value.contains(" weather_code=")
-        })
-    })
-}
-
 pub(super) fn final_answer_preserves_web_search_listing(
     _route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
@@ -238,10 +203,6 @@ fn candidate_has_observed_status_value(candidate: &str, observed: &str) -> bool 
     candidate
         .to_ascii_lowercase()
         .contains(observed.to_ascii_lowercase().as_str())
-}
-
-fn route_is_weather_query(route: &crate::IntentOutputContract) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::WeatherQuery)
 }
 
 pub(super) fn web_search_candidate_title_sources_from_output(

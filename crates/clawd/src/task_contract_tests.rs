@@ -92,13 +92,6 @@ fn unclassified_contract_uses_machine_output_fields_only() {
 fn planner_semantic_matrix_drives_evidence_contract() {
     for (semantic_kind, target, operation, delivery_shape, evidence) in [
         (
-            OutputSemanticKind::WeatherQuery,
-            TaskTargetObject::Web,
-            TaskOperation::Summarize,
-            TaskDeliveryShape::Summary,
-            vec!["content_excerpt"],
-        ),
-        (
             OutputSemanticKind::PackageManagerDetection,
             TaskTargetObject::System,
             TaskOperation::Inspect,
