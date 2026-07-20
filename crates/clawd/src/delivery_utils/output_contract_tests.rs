@@ -193,7 +193,11 @@ fn scalar_count_contract_still_extracts_count_from_sentence() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::ScalarCount,
+        semantic_kind: OutputSemanticKind::None,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("count".to_string()),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let mut text = "共有 3 个文件。".to_string();
@@ -211,7 +215,11 @@ fn scalar_count_contract_does_not_extract_path_from_missing_result() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::ScalarCount,
+        semantic_kind: OutputSemanticKind::None,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("count".to_string()),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let expected = "`configs/config_copy` 不存在，无法统计匹配项数量。";
@@ -230,7 +238,11 @@ fn scalar_count_contract_ignores_digits_embedded_in_path_tokens() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::ScalarCount,
+        semantic_kind: OutputSemanticKind::None,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("count".to_string()),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let expected = "`configs/config_copy_2026` 不存在，无法统计匹配项数量。";

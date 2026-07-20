@@ -229,13 +229,12 @@ pub(super) fn deterministic_missing_observed_target_answer(
         return None;
     }
     let path = missing_file_path_from_loop(loop_state, agent_run_context)?;
-    let contract_marker = agent_run_context
-        .and_then(|ctx| ctx.output_contract())
-        .map(|contract| contract.semantic_kind);
     let final_answer_shape = agent_run_context
         .and_then(|ctx| ctx.output_contract())
         .and_then(crate::evidence_policy::final_answer_shape_for_output_contract);
-    let scalar_count = contract_marker == Some(crate::OutputSemanticKind::ScalarCount);
+    let exact_count = agent_run_context
+        .and_then(|ctx| ctx.output_contract())
+        .is_some_and(crate::IntentOutputContract::requests_exact_count);
     let concise_existence = agent_run_context
         .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
@@ -260,7 +259,7 @@ pub(super) fn deterministic_missing_observed_target_answer(
             final_answer_shape.as_str()
         ));
     }
-    if scalar_count {
+    if exact_count {
         lines.push("count_available=false".to_string());
     }
     if concise_existence {

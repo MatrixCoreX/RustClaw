@@ -774,7 +774,8 @@ fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
     let mut route_result = output_contract_for_test();
     route_result.requires_content_evidence = true;
     route_result.response_shape = crate::OutputResponseShape::Scalar;
-    route_result.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route_result.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.selection.structured_field_selector = Some("count".to_string());
 
     let prompt = next_last_primary_task_prompt(
         None,

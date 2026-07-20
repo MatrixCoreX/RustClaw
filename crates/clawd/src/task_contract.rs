@@ -64,6 +64,9 @@ pub(crate) fn operation_for_output_contract(
     if output_contract.requests_exact_list() {
         return TaskOperation::List;
     }
+    if output_contract.requests_exact_count() {
+        return TaskOperation::Count;
+    }
     let semantic_kind = output_contract.semantic_kind;
     if let Some(operation) = matrix_contract_for_output_contract(output_contract)
         .and_then(|contract| task_operation_from_token(&contract.operation))
@@ -72,7 +75,6 @@ pub(crate) fn operation_for_output_contract(
     }
     match semantic_kind {
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
-        OutputSemanticKind::ScalarCount => TaskOperation::Count,
         OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
     }
@@ -205,9 +207,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
     match output_contract.semantic_kind {
         OutputSemanticKind::RawCommandOutput => {
             fields.insert("command_output");
-        }
-        OutputSemanticKind::ScalarCount => {
-            fields.insert("count");
         }
         OutputSemanticKind::ExistenceWithPath => {
             fields.insert("exists");

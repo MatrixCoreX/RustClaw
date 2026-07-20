@@ -134,10 +134,7 @@ pub(super) fn current_turn_request_text<'a>(
 }
 
 pub(super) fn route_requests_scalar_count(route: &crate::IntentOutputContract) -> bool {
-    super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::ScalarCount,
-    )
+    route.requests_exact_count()
 }
 
 pub(super) fn route_requests_scalar_existence(route: &crate::IntentOutputContract) -> bool {

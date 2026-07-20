@@ -1,35 +1,5 @@
 use super::*;
 
-pub(super) fn parse_structured_count_finding(output: &str) -> Option<StructuredCountFinding> {
-    let value =
-        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(output)?;
-    let action = value
-        .get("action")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?
-        .to_ascii_lowercase();
-    if !matches!(action.as_str(), "count_inventory" | "inventory_dir") {
-        return None;
-    }
-    let counts = value.get("counts")?;
-    let total = counts.get("total").and_then(|value| value.as_u64())?;
-    Some(StructuredCountFinding {
-        path: value
-            .get("path")
-            .or_else(|| value.get("resolved_path"))
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string),
-        total,
-        files: counts.get("files").and_then(|value| value.as_u64()),
-        dirs: counts.get("dirs").and_then(|value| value.as_u64()),
-        hidden: counts.get("hidden").and_then(|value| value.as_u64()),
-        recursive: value.get("recursive").and_then(|value| value.as_bool()),
-    })
-}
-
 pub(super) fn parse_structured_search_finding(output: &str) -> Option<StructuredSearchFinding> {
     let value =
         crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(output)?;

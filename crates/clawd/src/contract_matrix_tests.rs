@@ -502,7 +502,12 @@ fn raw_command_observation_source_defaults_to_text_legacy_extractor() {
 #[test]
 fn archive_count_uses_structured_action_observation() {
     let scalar_snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ScalarCount,
+        response_shape: crate::OutputResponseShape::Scalar,
+        semantic_kind: OutputSemanticKind::None,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("count".to_string()),
+            ..Default::default()
+        },
         ..IntentOutputContract::default()
     })
     .expect("scalar trace snapshot");
@@ -516,7 +521,12 @@ fn archive_count_uses_structured_action_observation() {
     }));
 
     let scalar_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ScalarCount,
+        response_shape: crate::OutputResponseShape::Scalar,
+        semantic_kind: OutputSemanticKind::None,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("count".to_string()),
+            ..Default::default()
+        },
         requires_content_evidence: true,
         ..IntentOutputContract::default()
     };
@@ -538,7 +548,7 @@ fn archive_count_uses_structured_action_observation() {
     );
     assert_eq!(
         archive_trace.get("contract_match").and_then(Value::as_str),
-        Some("scalar_count")
+        Some("generic_exact_count")
     );
 }
 

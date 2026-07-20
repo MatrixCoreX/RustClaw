@@ -191,7 +191,8 @@ fn direct_scalar_count_uses_latest_fs_search_count() {
             r#"{"action":"find_name","count":10,"patterns":["clarify"],"results":["a.txt","b.txt"],"root":"scripts/nl_tests/cases"}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
 
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -870,13 +871,13 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("scalar_override=path_required"));
 
-    route_result.semantic_kind = OutputSemanticKind::ScalarCount;
+    route_result.semantic_kind = OutputSemanticKind::None;
+
+    route_result.selection.structured_field_selector = Some("count".to_string());
     route_result.response_shape = OutputResponseShape::OneSentence;
     agent_run_context.output_contract = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("style_policy=scalar_count"));
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("aggregate_only=explicit_request_only"));
+        .contains("style_policy=evidence_synthesis"));
 
     route_result.semantic_kind = OutputSemanticKind::None;
     route_result.response_shape = OutputResponseShape::Free;

@@ -8,7 +8,8 @@ fn requested_machine_kv_summary_final_guard_preserves_terminal_scalar_respond() 
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-scalar", "ask", prompt);
     journal

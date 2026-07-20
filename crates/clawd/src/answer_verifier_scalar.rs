@@ -13,7 +13,7 @@ pub(super) fn evidence_policy_scalar_answer_is_grounded_in_successful_observatio
     if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::ScalarValue {
         return false;
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
+    if route.output_contract.requests_exact_count()
         && (!scalar_answer_is_strict(candidate_answer)
             || route.output_contract.response_shape != crate::OutputResponseShape::Scalar)
     {

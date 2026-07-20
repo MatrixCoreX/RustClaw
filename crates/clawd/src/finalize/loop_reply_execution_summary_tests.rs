@@ -1066,7 +1066,8 @@ fn execution_summary_skips_for_exact_sentence_count_contract() {
 #[test]
 fn execution_summary_skips_for_scalar_count_contract() {
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {

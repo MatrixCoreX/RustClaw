@@ -925,7 +925,8 @@ fn loop_contract_observed_answer_requires_matrix_strict_extractor_when_route_is_
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
     loop_state.output_contract = Some(route.clone());
@@ -1148,7 +1149,8 @@ fn strict_scalar_count_keeps_planned_explanatory_answer() {
     let mut delivery_messages = vec!["55 个。当前范围内共有这么多普通文件。".to_string()];
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     route.exact_sentence_count = Some(1);
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

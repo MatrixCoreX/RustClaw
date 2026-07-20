@@ -110,11 +110,6 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
     if route_has_marker(crate::OutputSemanticKind::ExistenceWithPath) {
         return "style_policy=existence_with_path include=verdict,path scalar_override=path_required".to_string();
     }
-    if route_has_marker(crate::OutputSemanticKind::ScalarCount)
-        && response_shape != Some(crate::OutputResponseShape::Scalar)
-    {
-        return "style_policy=scalar_count include=count_dimensions aggregate_only=explicit_request_only".to_string();
-    }
     match response_shape {
         Some(crate::OutputResponseShape::Scalar) => "style_policy=scalar bare_value=true",
         Some(crate::OutputResponseShape::FileToken) => {

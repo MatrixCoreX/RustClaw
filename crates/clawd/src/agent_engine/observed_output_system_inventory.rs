@@ -660,20 +660,13 @@ pub(super) fn count_inventory_breakdown_value(
 }
 
 pub(super) fn count_inventory_direct_answer_candidate(
-    _state: Option<&AppState>,
     value: &serde_json::Value,
-    response_shape: Option<crate::OutputResponseShape>,
-    _prefer_english: bool,
+    route: Option<&crate::IntentOutputContract>,
 ) -> Option<String> {
-    let (count, count_key) = count_inventory_count_value(value)?;
-    let has_component_breakdown = count_inventory_breakdown_value(value).is_some();
-    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
-        return Some(count);
-    }
-    if response_shape.is_none() && count_key == "total" && has_component_breakdown {
+    if !route.is_some_and(crate::IntentOutputContract::requests_exact_count) {
         return None;
     }
-    Some(count_inventory_machine_answer(&count, count_key))
+    count_inventory_count_value(value).map(|(count, _)| count)
 }
 
 fn plan_requests_count_inventory_file_dir_breakdown(loop_state: &LoopState) -> bool {
@@ -744,17 +737,6 @@ fn tree_summary_empty_machine_answer() -> String {
         "empty=true".to_string(),
     ]
     .join("\n")
-}
-
-fn count_inventory_machine_answer(count: &str, count_key: &str) -> String {
-    let mut lines = vec![
-        "message_key=clawd.msg.count_inventory_direct_answer".to_string(),
-        "reason_code=count_inventory_observed".to_string(),
-        "final_answer_shape=count_inventory".to_string(),
-    ];
-    push_observed_machine_line(&mut lines, "count_key", count_key);
-    push_observed_machine_line(&mut lines, "count", count);
-    lines.join("\n")
 }
 
 fn count_inventory_file_dir_breakdown_machine_answer(files: &str, dirs: &str) -> String {

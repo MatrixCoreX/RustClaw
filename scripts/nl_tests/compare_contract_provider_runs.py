@@ -249,7 +249,7 @@ def write_minimal_run_case(
     run_dir: Path,
     case_id: int,
     *,
-    contract_match: str = "scalar_count",
+    contract_match: str = "generic_exact_count",
     final_shape: str = "scalar",
     executed_skill: str = "fs_basic",
     status: str = "succeeded",
@@ -350,7 +350,7 @@ def run_self_test() -> int:
             for line in min_repro.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        if not rows or rows[0]["left"]["contract"]["match"] != "scalar_count":
+        if not rows or rows[0]["left"]["contract"]["match"] != "generic_exact_count":
             raise AssertionError(f"min repro export missing contract context: {rows=}")
 
         unavailable = root / "unavailable"

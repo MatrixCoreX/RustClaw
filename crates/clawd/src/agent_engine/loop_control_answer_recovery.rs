@@ -453,16 +453,6 @@ pub(super) struct StructuredSearchFinding {
     pub(super) results: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct StructuredCountFinding {
-    pub(super) path: Option<String>,
-    pub(super) total: u64,
-    pub(super) files: Option<u64>,
-    pub(super) dirs: Option<u64>,
-    pub(super) hidden: Option<u64>,
-    pub(super) recursive: Option<bool>,
-}
-
 pub(super) fn try_recover_log_analyze_answer_verifier_gap(
     user_text: &str,
     reply: &mut AskReply,
@@ -484,36 +474,6 @@ pub(super) fn try_recover_log_analyze_answer_verifier_gap(
     info!(
         "answer_verifier_retry_exhausted_recovered_with_log_analyze_summary findings={}",
         findings.len()
-    );
-    true
-}
-
-pub(super) fn try_recover_structured_count_answer_verifier_gap(
-    route_result: Option<&crate::answer_verifier::AnswerContract>,
-    user_text: &str,
-    reply: &mut AskReply,
-) -> bool {
-    if !route_result.is_some_and(|route| {
-        route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
-    }) {
-        return false;
-    }
-    let Some(finding) = observed_structured_count_findings(reply).into_iter().next() else {
-        return false;
-    };
-    let answer = deterministic_structured_count_summary_text(user_text, &finding);
-    let messages = vec![answer.clone()];
-    if let Some(journal) = reply.task_journal.as_mut() {
-        mark_answer_verifier_recovery_success(journal, &answer);
-    }
-    reply.text = answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = false;
-    info!(
-        "answer_verifier_retry_exhausted_recovered_with_structured_count total={}",
-        finding.total
     );
     true
 }
@@ -1210,29 +1170,6 @@ pub(super) fn observed_log_analyze_findings(reply: &AskReply) -> Vec<LogAnalyzeF
             .cmp(&left.total_hits)
             .then_with(|| left.path.cmp(&right.path))
     });
-    findings
-}
-
-pub(super) fn observed_structured_count_findings(reply: &AskReply) -> Vec<StructuredCountFinding> {
-    let mut findings = Vec::new();
-    let Some(journal) = reply.task_journal.as_ref() else {
-        return findings;
-    };
-    for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok {
-            continue;
-        }
-        if !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        let Some(finding) = parse_structured_count_finding(output) else {
-            continue;
-        };
-        findings.push(finding);
-    }
     findings
 }
 

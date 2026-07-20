@@ -148,11 +148,13 @@ pub(crate) fn verify_output_contract(
         return OutputContractVerdict::Pass;
     }
 
+    if contract.requests_exact_count() {
+        return verify_scalar_count(contract, trimmed_candidate);
+    }
     match contract.semantic_kind {
         OutputSemanticKind::ExistenceWithPath => {
             verify_existence_with_path(contract, trimmed_candidate)
         }
-        OutputSemanticKind::ScalarCount => verify_scalar_count(contract, trimmed_candidate),
         _ => OutputContractVerdict::Pass,
     }
 }

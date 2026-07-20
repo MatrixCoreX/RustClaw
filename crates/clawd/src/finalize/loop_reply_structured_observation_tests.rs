@@ -94,7 +94,8 @@ fn direct_db_basic_observed_answer_counts_rows_for_scalar_count_contract() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();

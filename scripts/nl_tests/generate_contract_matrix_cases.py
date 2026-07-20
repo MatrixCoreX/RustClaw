@@ -48,42 +48,42 @@ PROBE_ACTIONS = [
 NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "不用执行任何操作，直接用一句话解释 RustClaw 是一个什么样的本地助手。",
     "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
-    "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
 }
 
 NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
     "generic_path_content": f"看一下 {FIXTURE_DOC}，然后用一句适合新手的话说明它主要讲什么。",
     "generic_delivery": "生成一个 tmp/contract_matrix_generic_delivery.txt 文件，内容是 generic delivery case，然后把文件发给我。",
+    "generic_exact_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
 }
 
 EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "none": "Do not run any operation. In one sentence, explain what kind of local assistant RustClaw is.",
     "raw_command_output": "Run pwd and briefly tell me what the command printed.",
-    "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
 }
 
 EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
     "generic_path_content": f"Inspect {FIXTURE_DOC}, then explain its main point in one beginner-friendly sentence.",
     "generic_delivery": "Create tmp/contract_matrix_generic_delivery.txt with the content generic delivery case, then send me the file.",
+    "generic_exact_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
 }
 
 JA_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"{FIXTURE_PACKAGE} が存在するか確認し、存在結果とパスだけを答えてください。",
-    "scalar_count": f"{FIXTURE_DOCS_DIR} の直下にある項目数を数え、数字だけを出力してください。",
+    "generic_exact_count": f"{FIXTURE_DOCS_DIR} の直下にある項目数を数え、数字だけを出力してください。",
     "structured_keys": f"{FIXTURE_CONFIG} のトップレベルキーを読み取り、キー名リストだけを出力してください。",
 }
 
 KO_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"{FIXTURE_PACKAGE} 파일이 존재하는지 확인하고, 존재 여부와 경로만 답하세요.",
-    "scalar_count": f"{FIXTURE_DOCS_DIR} 바로 아래 항목 수를 세고 숫자만 출력하세요.",
+    "generic_exact_count": f"{FIXTURE_DOCS_DIR} 바로 아래 항목 수를 세고 숫자만 출력하세요.",
     "structured_keys": f"{FIXTURE_CONFIG} 의 최상위 키를 읽고 키 이름 목록만 출력하세요.",
 }
 
 FR_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"Vérifie si {FIXTURE_PACKAGE} existe, puis réponds uniquement avec le résultat d'existence et le chemin.",
-    "scalar_count": f"Compte les éléments directement sous {FIXTURE_DOCS_DIR} et affiche uniquement le nombre.",
+    "generic_exact_count": f"Compte les éléments directement sous {FIXTURE_DOCS_DIR} et affiche uniquement le nombre.",
     "structured_keys": f"Lis les clés de premier niveau dans {FIXTURE_CONFIG}. Affiche uniquement la liste des clés.",
 }
 
@@ -98,7 +98,7 @@ LANGUAGE_VARIANTS = ("zh_cn", "en_us", "ja_jp", "ko_kr", "fr_fr", "mixed")
 STRICT_NATIVE_PROMPT_CONTRACTS = frozenset(
     {
         "existence_with_path",
-        "scalar_count",
+        "generic_exact_count",
         "structured_keys",
     }
 )
@@ -336,7 +336,7 @@ def base_prompt_and_source_for_case(
             prompt = EN_PROMPTS_BY_CONTRACT.get(contract_id)
         if prompt:
             return prompt, "native_en_us"
-    elif case.get("contract_type") != "generic":
+    else:
         prompt = NATIVE_PROMPTS_BY_VARIANT.get(variant, {}).get(contract_id)
         if prompt:
             return prompt, f"native_{variant}"
@@ -445,7 +445,7 @@ def live_nl_action_preference_applicable(case: dict[str, Any]) -> bool:
     if allowed_contracts is not None:
         return contract_id in allowed_contracts
     prompt_surface_action_contracts = {
-        "scalar_count": {"fs_basic.count_entries", "run_cmd"},
+        "generic_exact_count": {"fs_basic.count_entries", "run_cmd"},
         "structured_keys": {"config_basic.list_keys", "config_basic.read_fields"},
     }
     allowed_actions = prompt_surface_action_contracts.get(contract_id)
@@ -567,7 +567,7 @@ def generate_external_admission_cases(matrix: dict[str, Any]) -> list[dict[str, 
         "matrix_version": matrix.get("matrix_version"),
         "matrix_hash": matrix_hash(matrix),
         "contract_type": "external_admission",
-        "semantic_kind": "scalar_count",
+        "semantic_kind": "none",
         "action_ref": "smoke_ping_demo.ping",
         "required_evidence": ["field_value"],
         "evidence_expression": {

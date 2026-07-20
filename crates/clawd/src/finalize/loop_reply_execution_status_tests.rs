@@ -85,7 +85,8 @@ fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_pat
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "configs/config_copy".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {

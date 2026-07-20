@@ -1123,34 +1123,6 @@ fn observed_output_route_policy_uses_direct_output_contract() {
 
 }
 
-#[test]
-fn scalar_count_answer_detects_non_numeric_diagnostic_line() {
-    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::ScalarCount;
-    route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "configs/config_copy".to_string();
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "run_cmd",
-        "0\n\nfind: /workspace/configs/config_copy: No such file or directory\n",
-    ));
-
-    let diagnostic = scalar_count_diagnostic_line_for_answer("0", Some(&route), &loop_state);
-
-    assert_eq!(
-        diagnostic.as_deref(),
-        Some("find: /workspace/configs/config_copy: No such file or directory")
-    );
-    let answer = scalar_count_diagnostic_machine_answer(diagnostic.as_deref().unwrap());
-    assert!(answer.contains("message_key=clawd.msg.scalar_count.unreliable"));
-    assert!(answer.contains("reason_code=count_unreliable_diagnostic"));
-    assert!(answer.contains("final_answer_shape=scalar_count_unavailable"));
-    assert!(answer.contains(
-        "diagnostic=find: /workspace/configs/config_copy: No such file or directory"
-    ));
-}
-
 fn reuse_active_context(user_request: &str) -> AgentRunContext {
     AgentRunContext {
         turn_analysis: Some(crate::turn_context::TurnAnalysis {

@@ -176,8 +176,9 @@ fn command_not_found_text_counts_as_generic_command_evidence() {
 #[test]
 fn scalar_count_json_value_counts_as_count_evidence() {
     let mut journal = TaskJournal::for_task("task-scalar-count", "ask", "输出数量");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ScalarCount);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
     route.response_shape = crate::OutputResponseShape::Scalar;
+    route.selection.structured_field_selector = Some("count".to_string());
     journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),

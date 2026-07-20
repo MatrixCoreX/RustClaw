@@ -175,8 +175,8 @@ def compare_group(
 def fake_obs(**overrides: Any) -> Any:
     base = {
         "status": "succeeded",
-        "contract_match": "scalar_count",
-        "contract_semantic_kind": "scalar_count",
+        "contract_match": "generic_exact_count",
+        "contract_semantic_kind": "none",
         "contract_final_answer_shape": "scalar",
         "required_evidence": ["count"],
         "missing_evidence": [],

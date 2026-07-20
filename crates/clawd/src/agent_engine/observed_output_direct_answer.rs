@@ -232,12 +232,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             prefers_english_free_text,
                         )
                     } else if action == Some("count_inventory") {
-                        count_inventory_direct_answer_candidate(
-                            state,
-                            &value,
-                            response_shape,
-                            prefers_english_free_text,
-                        )
+                        count_inventory_direct_answer_candidate(&value, route)
                     } else if matches!(action, Some("extract_field" | "read_field")) {
                         extract_field_direct_answer_candidate(
                             state,
