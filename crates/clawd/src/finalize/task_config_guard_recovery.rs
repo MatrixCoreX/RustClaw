@@ -26,7 +26,6 @@ fn config_guard_route_allows_failure_recovery(route_result: &crate::IntentOutput
         return false;
     }
     crate::finalize::route_matches_validation_verdict_output_contract(route_result)
-        || crate::finalize::route_matches_config_risk_output_contract(route_result)
 }
 
 fn config_guard_action_matches(action: &str) -> bool {

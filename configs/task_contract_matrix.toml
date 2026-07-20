@@ -321,14 +321,3 @@ failure_policy = "retry_with_alternatives"
 [contracts.config_mutation.evidence_expression]
 all_of = ["path", "valid"]
 any_of = ["field_value"]
-
-[contracts.config_risk_assessment]
-semantic_kind = "config_risk_assessment"
-operation = "validate"
-target_object = "config_key"
-delivery_shape = "summary"
-allowed_actions = ["config_basic.guard_rustclaw_config", "config_edit.guard_config", "config_edit.plan_config_change", "config_guard", "git_basic"]
-preferred_actions = ["config_basic.guard_rustclaw_config", "config_edit.plan_config_change", "git_basic"]
-required_evidence = ["candidates", "count"]
-final_answer_shape = "risk_assessment"
-failure_policy = "retry_with_alternatives"

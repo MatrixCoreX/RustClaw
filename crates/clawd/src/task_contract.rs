@@ -250,10 +250,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
             fields.insert("path");
             fields.insert("valid");
         }
-        OutputSemanticKind::ConfigRiskAssessment => {
-            fields.insert("candidates");
-            fields.insert("count");
-        }
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult => {

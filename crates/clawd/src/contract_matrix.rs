@@ -551,7 +551,6 @@ pub(crate) enum FinalAnswerShape {
     NameList,
     PathList,
     RawOutputOrShortSummary,
-    RiskAssessment,
     Scalar,
     SinglePath,
     StatusWithSource,
@@ -612,7 +611,6 @@ impl FinalAnswerShape {
         Self::NameList,
         Self::PathList,
         Self::RawOutputOrShortSummary,
-        Self::RiskAssessment,
         Self::Scalar,
         Self::SinglePath,
         Self::StatusWithSource,
@@ -633,7 +631,6 @@ impl FinalAnswerShape {
             "name_list" => Some(Self::NameList),
             "path_list" => Some(Self::PathList),
             "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
-            "risk_assessment" => Some(Self::RiskAssessment),
             "scalar" => Some(Self::Scalar),
             "single_path" => Some(Self::SinglePath),
             "status_with_source" => Some(Self::StatusWithSource),
@@ -656,7 +653,6 @@ impl FinalAnswerShape {
             Self::NameList => "name_list",
             Self::PathList => "path_list",
             Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
-            Self::RiskAssessment => "risk_assessment",
             Self::Scalar => "scalar",
             Self::SinglePath => "single_path",
             Self::StatusWithSource => "status_with_source",
@@ -676,7 +672,6 @@ impl FinalAnswerShape {
             }
             Self::ExistenceVerdictWithPath
             | Self::LifecycleResult
-            | Self::RiskAssessment
             | Self::StatusWithSource
             | Self::ValidationVerdict => FinalAnswerShapeClass::Verdict,
             Self::ExcerptPlusSummary

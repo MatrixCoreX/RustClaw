@@ -57,7 +57,6 @@ pub(super) fn should_restore_config_guard_payload(
     if route.delivery_required
         || !route.semantic_kind_is_any(&[
             crate::OutputSemanticKind::ContentExcerptSummary,
-            crate::OutputSemanticKind::ConfigRiskAssessment,
             crate::OutputSemanticKind::ConfigValidation,
         ])
     {

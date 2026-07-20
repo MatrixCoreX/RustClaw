@@ -198,13 +198,16 @@ fn trace_json_reports_required_vs_observed_evidence_coverage() {
 }
 
 #[test]
-fn config_risk_evidence_coverage_accepts_guard_findings() {
+fn structured_selector_evidence_coverage_accepts_guard_findings() {
     let mut journal = TaskJournal::for_task("task-config-risk-evidence", "ask", "检查配置风险");
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ConfigRiskAssessment,
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "configs/config.toml".to_string(),
         requires_content_evidence: true,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("candidates,count".to_string()),
+            ..Default::default()
+        },
         ..Default::default()
     };
     journal.record_output_contract(&route.clone());
