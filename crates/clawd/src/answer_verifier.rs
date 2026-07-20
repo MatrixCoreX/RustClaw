@@ -5,8 +5,6 @@ use serde::Deserialize;
 
 const ANSWER_VERIFIER_PROMPT_LOGICAL_PATH: &str = "prompts/answer_verifier_prompt.md";
 const MAX_VERIFIER_STEPS: usize = 8;
-const DEFAULT_RETRY_INSTRUCTION: &str =
-    "retry_policy=use_observed_evidence_and_original_contract;repeat_rejected_answer=false";
 #[path = "answer_verifier_control_envelope.rs"]
 mod answer_verifier_control_envelope;
 #[path = "answer_verifier_delivery_exact.rs"]
@@ -83,21 +81,11 @@ impl AnswerVerifierOut {
             .collect();
         self.retry_instruction = self.retry_instruction.trim().to_string();
         self.answer_incomplete_reason = self.answer_incomplete_reason.trim().to_string();
-        if self.high_confidence_gap() {
-            self.should_retry = true;
-            if self.retry_instruction.is_empty() {
-                self.retry_instruction = DEFAULT_RETRY_INSTRUCTION.to_string();
-            }
-        }
         self
     }
 
     pub(crate) fn high_confidence_gap(&self) -> bool {
-        !self.pass
-            && (self.confidence >= 0.55
-                || (self.should_retry
-                    && (!self.answer_incomplete_reason.is_empty()
-                        || !self.missing_evidence_fields.is_empty())))
+        !self.pass && self.should_retry && self.confidence >= 0.55
     }
 }
 

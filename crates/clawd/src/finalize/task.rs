@@ -12,16 +12,12 @@ mod task_content_evidence_delivery;
 mod task_cost_wait;
 #[path = "task_delivery_guards.rs"]
 mod task_delivery_guards;
-#[path = "task_deterministic_recovery.rs"]
-mod task_deterministic_recovery;
+#[path = "task_exact_machine_delivery.rs"]
+mod task_exact_machine_delivery;
 #[path = "task_failure_lifecycle.rs"]
 mod task_failure_lifecycle;
-#[path = "task_machine_kv_summary.rs"]
-mod task_machine_kv_summary;
 #[path = "task_memory.rs"]
 mod task_memory;
-#[path = "task_observed_failure_recovery.rs"]
-mod task_observed_failure_recovery;
 #[path = "task_payload_helpers.rs"]
 mod task_payload_helpers;
 #[path = "task_provider_wait.rs"]
@@ -30,12 +26,10 @@ mod task_provider_wait;
 mod task_resume;
 #[path = "task_runtime_failure_payload.rs"]
 mod task_runtime_failure_payload;
-#[path = "task_structured_evidence_table.rs"]
-mod task_structured_evidence_table;
 #[path = "task_terminal_clarify.rs"]
 mod task_terminal_clarify;
-#[path = "task_tree_summary_recovery.rs"]
-mod task_tree_summary_recovery;
+#[path = "task_verified_terminal.rs"]
+mod task_verified_terminal;
 #[path = "task_verifier_retry_commit.rs"]
 mod task_verifier_retry_commit;
 
@@ -59,24 +53,16 @@ use task_delivery_guards::{
 use task_delivery_guards::{
     journal_has_missing_file_search_evidence, should_use_missing_file_delivery_reply,
 };
-use task_deterministic_recovery::{
-    mark_answer_verifier_recovered_by_deterministic_observed_evidence,
-    recover_answer_verifier_gap_with_deterministic_machine_evidence,
-    recover_exact_observation_machine_field_final_answer,
-};
+use task_exact_machine_delivery::apply_exact_observation_machine_field_delivery;
 use task_failure_lifecycle::failed_task_lifecycle_payload;
-#[cfg(test)]
-use task_machine_kv_summary::apply_requested_machine_kv_summary_to_final_answer;
-use task_machine_kv_summary::recover_requested_machine_kv_summary_final_answer;
 #[cfg(test)]
 use task_memory::assistant_memory_source_text;
 use task_memory::{insert_ask_memory_pair, insert_unfinished_goal_memory};
-use task_observed_failure_recovery::{
-    deterministic_exact_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
-};
+#[cfg(test)]
+use task_payload_helpers::answer_verifier_forces_task_failure;
 use task_payload_helpers::{
-    answer_verifier_forces_task_failure, answer_verifier_should_force_task_failure,
-    ask_result_payload, non_failure_final_status, normalize_existing_file_delivery_token_answer,
+    answer_verifier_should_force_task_failure, ask_result_payload, non_failure_final_status,
+    normalize_existing_file_delivery_token_answer,
 };
 use task_provider_wait::record_provider_wait_checkpoint;
 pub(crate) use task_resume::answer_verifier_retry_answer_has_required_machine_evidence;
@@ -86,15 +72,14 @@ use task_resume::{
     resume_failure_is_unbound_path_lookup_clarify_result, retry_answer_after_verifier,
 };
 use task_runtime_failure_payload::ask_runtime_failure_machine_payload;
-use task_structured_evidence_table::deterministic_structured_evidence_table_recovery;
-use task_structured_evidence_table::verified_terminal_answer_after_verifier_pass;
-use task_tree_summary_recovery::deterministic_tree_summary_rows_failure_recovery;
+use task_verified_terminal::verified_terminal_answer_after_verifier_pass;
 use task_verifier_retry_commit::try_commit_answer_verifier_retry_answer;
 
 pub(crate) async fn retry_loop_answer_after_verifier(
     state: &AppState,
     task: &crate::ClaimedTask,
     user_request: &str,
+    output_contract: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     rejected_answer: &str,
     verifier: &crate::answer_verifier::AnswerVerifierOut,
@@ -103,6 +88,7 @@ pub(crate) async fn retry_loop_answer_after_verifier(
         state,
         task,
         user_request,
+        output_contract,
         journal,
         rejected_answer,
         verifier,
@@ -112,8 +98,8 @@ pub(crate) async fn retry_loop_answer_after_verifier(
 
 #[cfg(test)]
 use task_resume::{
-    answer_verifier_retry_observed_trace, resume_context_has_directory_lookup_failure,
-    resume_context_path_batch_facts_are_missing_only,
+    answer_verifier_retry_observed_trace, bounded_answer_retry_prompt,
+    resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
 };
 
 fn record_answer_verifier_required_evidence_rollout_attribution(
@@ -484,19 +470,21 @@ fn route_allows_verified_terminal_answer_promotion(
         )
 }
 
-pub(super) fn promote_verified_terminal_answer_after_verifier_pass(
+pub(super) fn apply_verified_terminal_answer_after_verifier_pass(
     route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
+    replace_failed_candidate: bool,
 ) -> bool {
     if answer_verifier_recovery_already_terminal(journal) {
         return false;
     }
-    if journal
-        .final_answer
-        .as_deref()
-        .is_some_and(|recorded| recorded.trim() == answer_text.trim())
+    if !replace_failed_candidate
+        && journal
+            .final_answer
+            .as_deref()
+            .is_some_and(|recorded| recorded.trim() == answer_text.trim())
     {
         return false;
     }
@@ -671,7 +659,7 @@ pub(crate) async fn finalize_ask_result(
                 journal.answer_verifier_summary = None;
                 journal.record_final_answer(&answer_text);
             }
-            if recover_exact_observation_machine_field_final_answer(
+            if apply_exact_observation_machine_field_delivery(
                 route_result,
                 &mut journal,
                 &mut answer_text,
@@ -680,32 +668,10 @@ pub(crate) async fn finalize_ask_result(
                 failure_reply = false;
                 semantic_clarify = false;
                 info!(
-                    "finalize_exact_observation_machine_fields_recovered task_id={} answer={}",
+                    "finalize_exact_observation_machine_fields_applied task_id={} answer={}",
                     task.task_id,
                     crate::truncate_for_log(&answer_text)
                 );
-            }
-            if failure_reply {
-                if let Some(recovered_answer) = deterministic_exact_tail_read_failure_recovery(
-                    state,
-                    task,
-                    prompt,
-                    route_result,
-                    &journal,
-                ) {
-                    failure_reply = false;
-                    semantic_clarify = false;
-                    answer_text = recovered_answer;
-                    answer_messages.clear();
-                    answer_messages.push(answer_text.clone());
-                    journal.answer_verifier_summary = None;
-                    journal.record_final_answer(&answer_text);
-                    info!(
-                        "finalize_exact_tail_read_failure_recovered task_id={} answer={}",
-                        task.task_id,
-                        crate::truncate_for_log(&answer_text)
-                    );
-                }
             }
             let answer_is_existing_file_delivery_token = if let Some(token) =
                 normalize_existing_file_delivery_token_answer(state, &answer_text)
@@ -746,26 +712,11 @@ pub(crate) async fn finalize_ask_result(
                     let retry_verifier_input = answer_verifier.clone();
                     journal.record_answer_verifier_summary(answer_verifier);
                     if answer_verifier_retry {
-                        let recovered_by_machine_evidence =
-                            recover_answer_verifier_gap_with_deterministic_machine_evidence(
-                                prompt,
-                                route_result,
-                                &mut journal,
-                                &mut answer_text,
-                                &mut answer_messages,
-                            );
-                        if recovered_by_machine_evidence {
-                            failure_reply = false;
-                            semantic_clarify = false;
-                            info!(
-                                "finalize_answer_verifier_gap_recovered_before_llm_retry task_id={} answer={}",
-                                task.task_id,
-                                crate::truncate_for_log(&answer_text)
-                            );
-                        } else if let Some(retried_answer) = retry_answer_after_verifier(
+                        if let Some(retried_answer) = retry_answer_after_verifier(
                             state,
                             task,
                             prompt,
+                            route_result,
                             &journal,
                             &answer_text,
                             &retry_verifier_input,
@@ -791,92 +742,6 @@ pub(crate) async fn finalize_ask_result(
                     }
                 }
             }
-            if let Some(recovered_answer) = deterministic_structured_evidence_table_recovery(
-                route_result,
-                &journal,
-                failure_reply,
-            ) {
-                failure_reply = false;
-                semantic_clarify = false;
-                answer_text = recovered_answer;
-                answer_messages.clear();
-                answer_messages.push(answer_text.clone());
-                journal.record_final_answer(&answer_text);
-                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
-                info!(
-                    "finalize_structured_evidence_table_recovered task_id={} answer={}",
-                    task.task_id,
-                    crate::truncate_for_log(&answer_text)
-                );
-            }
-            if let Some(recovered_answer) = deterministic_filtered_log_entry_recovery(&journal) {
-                failure_reply = false;
-                answer_text = recovered_answer;
-                answer_messages.clear();
-                answer_messages.push(answer_text.clone());
-                journal.record_final_answer(&answer_text);
-                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
-            }
-            let mut recovered_structured_machine_rows = false;
-            if let Some(recovered_answer) =
-                deterministic_tree_summary_rows_failure_recovery(&journal)
-            {
-                failure_reply = false;
-                semantic_clarify = false;
-                recovered_structured_machine_rows = true;
-                answer_text = recovered_answer;
-                answer_messages.clear();
-                answer_messages.push(answer_text.clone());
-                journal.record_final_answer(&answer_text);
-                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
-                info!(
-                    "finalize_tree_summary_rows_failure_recovered task_id={} answer={}",
-                    task.task_id,
-                    crate::truncate_for_log(&answer_text)
-                );
-            }
-            let mut recovered_requested_machine_kv_summary = false;
-            let force_requested_machine_kv_summary =
-                failure_reply || answer_verifier_forces_task_failure(semantic_clarify, &journal);
-            if !semantic_clarify
-                && !recovered_structured_machine_rows
-                && recover_requested_machine_kv_summary_final_answer(
-                    prompt,
-                    route_result,
-                    &mut journal,
-                    &mut answer_text,
-                    &mut answer_messages,
-                    force_requested_machine_kv_summary,
-                )
-            {
-                failure_reply = false;
-                semantic_clarify = false;
-                recovered_requested_machine_kv_summary = true;
-                info!(
-                    "finalize_requested_machine_kv_summary_recovered task_id={} answer={}",
-                    task.task_id,
-                    crate::truncate_for_log(&answer_text)
-                );
-            }
-            if !failure_reply
-                && !semantic_clarify
-                && !recovered_structured_machine_rows
-                && !recovered_requested_machine_kv_summary
-                && recover_requested_machine_kv_summary_final_answer(
-                    prompt,
-                    route_result,
-                    &mut journal,
-                    &mut answer_text,
-                    &mut answer_messages,
-                    false,
-                )
-            {
-                info!(
-                    "finalize_requested_machine_kv_summary_recovered task_id={} answer={}",
-                    task.task_id,
-                    crate::truncate_for_log(&answer_text)
-                );
-            }
             if delivery_path_gap_should_finalize_as_clarify(
                 route_result,
                 &answer_text,
@@ -886,26 +751,13 @@ pub(crate) async fn finalize_ask_result(
                 semantic_clarify = true;
                 journal.answer_verifier_summary = None;
             }
-            if recover_exact_observation_machine_field_final_answer(
-                route_result,
-                &mut journal,
-                &mut answer_text,
-                &mut answer_messages,
-            ) {
-                failure_reply = false;
-                semantic_clarify = false;
-                info!(
-                    "finalize_exact_observation_machine_fields_recovered task_id={} answer={}",
-                    task.task_id,
-                    crate::truncate_for_log(&answer_text)
-                );
-            }
             if !semantic_clarify
-                && promote_verified_terminal_answer_after_verifier_pass(
+                && apply_verified_terminal_answer_after_verifier_pass(
                     route_result,
                     &mut journal,
                     &mut answer_text,
                     &mut answer_messages,
+                    failure_reply,
                 )
             {
                 failure_reply = false;
@@ -924,23 +776,6 @@ pub(crate) async fn finalize_ask_result(
             journal.record_final_answer(&answer_text);
             journal.record_runtime_llm_metrics(state, &task.task_id);
             crate::finalize::ensure_task_metrics(&mut journal, &answer_text, &answer_messages);
-            if failure_reply {
-                if let Some(recovered_answer) =
-                    verified_terminal_answer_after_verifier_pass(&journal)
-                {
-                    failure_reply = false;
-                    semantic_clarify = false;
-                    answer_text = recovered_answer;
-                    answer_messages.clear();
-                    answer_messages.push(answer_text.clone());
-                    journal.record_final_answer(&answer_text);
-                    info!(
-                        "finalize_verified_terminal_answer_recovered task_id={} answer={}",
-                        task.task_id,
-                        crate::truncate_for_log(&answer_text)
-                    );
-                }
-            }
             if !semantic_clarify && journal_has_checkpointed_nonterminal_lifecycle(&journal) {
                 finalize_ask_checkpointed(
                     state,

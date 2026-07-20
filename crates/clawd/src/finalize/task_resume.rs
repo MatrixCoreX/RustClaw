@@ -8,6 +8,7 @@ use crate::AppState;
 use super::task_content_evidence_delivery::route_has_file_delivery_contract;
 
 const ANSWER_VERIFIER_RETRY_TRACE_MAX_CHARS: usize = 64_000;
+const ANSWER_VERIFIER_RETRY_PROMPT_LOGICAL_PATH: &str = "prompts/answer_verifier_retry_prompt.md";
 
 fn resume_context_body(value: &Value) -> &Value {
     value.get("resume_context").unwrap_or(value)
@@ -386,12 +387,10 @@ pub(super) fn answer_verifier_retry_observed_trace(
 ) -> String {
     let trace = journal.to_trace_json();
     let compact = json!({
-        "structured_field_value_projection": answer_verifier_retry_structured_projection(journal),
         "step_results": trace.get("step_results").cloned().unwrap_or_else(|| json!([])),
         "task_observations": trace.get("task_observations").cloned().unwrap_or_else(|| json!([])),
         "evidence_coverage": trace.get("evidence_coverage").cloned().unwrap_or(Value::Null),
         "finalizer_summary": trace.get("finalizer_summary").cloned().unwrap_or(Value::Null),
-        "answer_verifier_summary": trace.get("answer_verifier_summary").cloned().unwrap_or(Value::Null),
     });
     let serialized = serde_json::to_string(&compact).unwrap_or_else(|_| "{}".to_string());
     if serialized.len() <= ANSWER_VERIFIER_RETRY_TRACE_MAX_CHARS {
@@ -403,114 +402,45 @@ pub(super) fn answer_verifier_retry_observed_trace(
     out
 }
 
-fn answer_verifier_retry_structured_projection(
-    journal: &crate::task_journal::TaskJournal,
-) -> Value {
-    let mut rows = Vec::new();
-    for step in journal.step_results.iter().filter(|step| {
-        step.status == crate::executor::StepExecutionStatus::Ok
-            && !matches!(
-                step.skill.as_str(),
-                "respond" | "synthesize_answer" | "think" | "answer_verifier"
-            )
-    }) {
-        let Some(evidence) = crate::task_journal::observed_evidence_for_step_trace(step) else {
-            continue;
-        };
-        collect_answer_verifier_retry_projection_rows(step, &evidence, &mut rows);
-    }
-    Value::Array(rows)
-}
-
-fn collect_answer_verifier_retry_projection_rows(
-    step: &crate::task_journal::TaskJournalStepTrace,
-    evidence: &Value,
-    rows: &mut Vec<Value>,
-) {
-    let Some(items) = evidence.get("items").and_then(Value::as_array) else {
-        return;
-    };
-    for item in items {
-        let Some(field) = item.get("field").and_then(Value::as_str) else {
-            continue;
-        };
-        if !answer_verifier_retry_projection_field_allowed(field) {
-            continue;
-        }
-        let Some(value) = answer_verifier_retry_projection_item_value(item) else {
-            continue;
-        };
-        rows.push(json!({
-            "step_id": &step.step_id,
-            "skill": &step.skill,
-            "field": answer_verifier_retry_projection_label(&step.skill, field),
-            "value": value,
-        }));
-    }
-}
-
-fn answer_verifier_retry_projection_field_allowed(field: &str) -> bool {
-    field.starts_with("extra.field_value.")
-        || matches!(
-            field,
-            "extra.archive"
-                | "extra.db_path"
-                | "extra.path"
-                | "extra.member"
-                | "extra.member_path"
-                | "extra.content_excerpt"
-                | "extra.schema_version"
-                | "extra.manager_type"
-                | "extra.post_state"
-                | "extra.pre_state"
-                | "extra.service_name"
-                | "extra.status"
-                | "extra.summary"
-                | "extra.target"
-                | "extra.verified"
-                | "path"
-        )
-}
-
-fn answer_verifier_retry_projection_label(skill: &str, field: &str) -> String {
-    let domain = skill.strip_suffix("_basic").unwrap_or(skill);
-    let field = field
-        .strip_prefix("extra.field_value.")
-        .or_else(|| field.strip_prefix("extra."))
-        .unwrap_or(field);
-    format!("{domain}.{field}")
-}
-
-fn answer_verifier_retry_projection_item_value(item: &Value) -> Option<String> {
-    if let Some(values) = item.get("sample_values").and_then(Value::as_array) {
-        let rendered = values
-            .iter()
-            .filter_map(answer_verifier_retry_projection_scalar)
-            .collect::<Vec<_>>();
-        if !rendered.is_empty() {
-            return Some(rendered.join(", "));
-        }
-    }
-    item.get("excerpt")
-        .and_then(answer_verifier_retry_projection_scalar)
-        .map(|value| value.replace(['\n', '\r'], " ").trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn answer_verifier_retry_projection_scalar(value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) => Some(value.trim().to_string()),
-        Value::Number(value) => Some(value.to_string()),
-        Value::Bool(value) => Some(value.to_string()),
-        Value::Null | Value::Array(_) | Value::Object(_) => None,
-    }
-    .filter(|value| !value.is_empty())
+pub(super) fn bounded_answer_retry_prompt(
+    template: &str,
+    fallback_locale: &str,
+    request_language_hint: &str,
+    user_request: &str,
+    output_contract: &crate::IntentOutputContract,
+    context: &str,
+    observed_trace: &str,
+    rejected_answer: &str,
+    verifier: &crate::answer_verifier::AnswerVerifierOut,
+) -> String {
+    let issue = json!({
+        "issue_kind": "answer_contract_gap",
+        "missing_evidence_fields": verifier.missing_evidence_fields,
+        "should_retry": verifier.should_retry,
+        "confidence": verifier.confidence,
+    });
+    let output_contract =
+        serde_json::to_string(output_contract).unwrap_or_else(|_| "{}".to_string());
+    crate::render_prompt_template(
+        template,
+        &[
+            ("__REQUEST_LANGUAGE_HINT__", request_language_hint),
+            ("__FALLBACK_LOCALE__", fallback_locale),
+            ("__USER_REQUEST__", user_request.trim()),
+            ("__OUTPUT_CONTRACT__", &output_contract),
+            ("__VERIFIER_ISSUE__", &issue.to_string()),
+            ("__TASK_CONTEXT__", context),
+            ("__OBSERVED_TRACE__", observed_trace),
+            ("__REJECTED_ANSWER__", rejected_answer.trim()),
+        ],
+    )
 }
 
 pub(super) async fn retry_answer_after_verifier(
     state: &AppState,
     task: &crate::ClaimedTask,
     user_request: &str,
+    output_contract: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     rejected_answer: &str,
     verifier: &crate::answer_verifier::AnswerVerifierOut,
@@ -524,29 +454,42 @@ pub(super) async fn retry_answer_after_verifier(
     let observed_trace = answer_verifier_retry_observed_trace(journal);
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
-    let prompt = format!(
-        "You are rewriting a direct chat answer after answer verification failed.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nCurrent user request:\n{}\n\nCurrent task context:\n{}\n\nObserved task trace JSON:\n{}\n\nRejected answer:\n{}\n\nVerifier reason:\n{}\n\nVerifier retry instruction:\n{}\n\nReturn only the corrected final answer. Use the request language. Use only observed evidence from Current task context and Observed task trace JSON. Do not re-run tools. Preserve the most recent generated output's factual scope and evidence boundary. If Observed task trace JSON contains structured_field_value_projection rows, treat them as the preferred compact field/value evidence for requested tables, summaries, and missing field_value gaps. Render those observed rows in the user's requested visible shape; do not return raw JSON unless the user explicitly requested JSON. If the rejected answer is a JSON object, message_key payload, or other machine-format evidence, treat its fields as evidence to render; do not explain the machine format and do not ask the user to clarify the format. Treat structured machine status and idempotency fields as authoritative over incidental counters; zero update counters are not a failure when the machine evidence explicitly reports successful or idempotent completion. If verifier missing_evidence_fields names output_format, keep the observed facts and correct only the visible answer shape. Treat the Verifier retry instruction as a mandatory shape contract: if it requires an exact number of sentences, lines, bullets, items, or words, silently count the corrected answer before returning it and rewrite until the count is exact. Do not return a shorter condensed answer when an exact count is requested. Do not add new setup categories, project-doc references, support/contact recommendations, usage claims, paths, commands, config keys, credentials, callbacks, or verification steps unless they are present in the observed evidence.",
-        state.policy.command_intent.default_locale,
-        user_request.trim(),
+    let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+        state,
+        ANSWER_VERIFIER_RETRY_PROMPT_LOGICAL_PATH,
+    ) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            warn!(
+                "answer_verifier_retry_prompt_unavailable task_id={} err={}",
+                task.task_id, err
+            );
+            return None;
+        }
+    };
+    let prompt = bounded_answer_retry_prompt(
+        &resolved.template,
+        &state.policy.command_intent.default_locale,
+        &request_language_hint,
+        user_request,
+        output_contract,
         context,
-        observed_trace,
-        rejected_answer.trim(),
-        verifier.answer_incomplete_reason.trim(),
-        verifier.retry_instruction.trim(),
+        &observed_trace,
+        rejected_answer,
+        verifier,
     );
-    const PROMPT_SOURCE: &str = "inline:answer_verifier_retry";
     crate::log_prompt_render(
         state,
         &task.task_id,
         "answer_verifier_retry",
-        PROMPT_SOURCE,
+        &resolved.source,
         None,
     );
     match crate::llm_gateway::run_with_fallback_with_prompt_source(
         state,
         task,
         &prompt,
-        PROMPT_SOURCE,
+        &resolved.source,
     )
     .await
     {

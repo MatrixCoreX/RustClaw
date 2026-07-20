@@ -45,6 +45,6 @@ fn answer_verifier_summary_serializes_repair_envelope() {
         trace
             .pointer("/answer_verifier_summary/repair_signal/next_recovery_kind")
             .and_then(Value::as_str),
-        Some("replan")
+        Some("synthesize_answer")
     );
 }

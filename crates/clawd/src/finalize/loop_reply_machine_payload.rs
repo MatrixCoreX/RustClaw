@@ -166,10 +166,15 @@ pub(super) async fn render_machine_payload_delivery_if_needed(
         confidence: 0.9,
     }
     .normalized();
+    let output_contract = agent_run_context
+        .and_then(AgentRunContext::output_contract)
+        .cloned()
+        .unwrap_or_default();
     let Some(rendered) = crate::finalize::retry_loop_answer_after_verifier(
         state,
         task,
         user_text,
+        &output_contract,
         &provisional_journal,
         &current,
         &verifier,

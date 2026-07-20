@@ -62,11 +62,12 @@ fn verifier_pass_promotes_latest_terminal_text_over_stale_machine_projection() {
     .to_string();
     let mut answer_messages = vec![answer_text.clone()];
 
-    assert!(promote_verified_terminal_answer_after_verifier_pass(
+    assert!(apply_verified_terminal_answer_after_verifier_pass(
         &route,
         &mut journal,
         &mut answer_text,
         &mut answer_messages,
+        false,
     ));
     assert_eq!(answer_text, latest_answer);
     assert!(answer_text.contains("nested/config.ini"));
@@ -102,11 +103,12 @@ fn verifier_pass_preserves_current_recorded_candidate_over_stale_terminal_step()
     let mut answer_text = current_candidate.to_string();
     let mut answer_messages = vec![answer_text.clone()];
 
-    assert!(!promote_verified_terminal_answer_after_verifier_pass(
+    assert!(!apply_verified_terminal_answer_after_verifier_pass(
         &route,
         &mut journal,
         &mut answer_text,
         &mut answer_messages,
+        false,
     ));
     assert_eq!(answer_text, current_candidate);
     assert_eq!(answer_messages, vec![current_candidate.to_string()]);
@@ -143,11 +145,12 @@ fn verifier_pass_promotes_terminal_json_over_machine_kv_projection() {
             .to_string();
     let mut answer_messages = vec![answer_text.clone()];
 
-    assert!(promote_verified_terminal_answer_after_verifier_pass(
+    assert!(apply_verified_terminal_answer_after_verifier_pass(
         &route,
         &mut journal,
         &mut answer_text,
         &mut answer_messages,
+        false,
     ));
     assert_eq!(answer_text, latest_answer);
     assert_eq!(answer_messages, vec![latest_answer.to_string()]);
@@ -172,11 +175,12 @@ fn verifier_pass_does_not_promote_internal_machine_json_payload() {
     let mut answer_text = "status=completed".to_string();
     let mut answer_messages = vec![answer_text.clone()];
 
-    assert!(!promote_verified_terminal_answer_after_verifier_pass(
+    assert!(!apply_verified_terminal_answer_after_verifier_pass(
         &route,
         &mut journal,
         &mut answer_text,
         &mut answer_messages,
+        false,
     ));
     assert_eq!(answer_text, "status=completed");
     assert_eq!(answer_messages, vec!["status=completed".to_string()]);
@@ -208,11 +212,12 @@ fn verifier_recovered_terminal_answer_is_not_overwritten_by_stale_step_answer() 
     let mut answer_text = "Service Notes".to_string();
     let mut answer_messages = vec![answer_text.clone()];
 
-    assert!(!promote_verified_terminal_answer_after_verifier_pass(
+    assert!(!apply_verified_terminal_answer_after_verifier_pass(
         &route,
         &mut journal,
         &mut answer_text,
         &mut answer_messages,
+        false,
     ));
     assert_eq!(answer_text, "Service Notes");
     assert_eq!(answer_messages, vec!["Service Notes".to_string()]);
@@ -245,11 +250,12 @@ fn verifier_pass_does_not_promote_terminal_text_when_machine_summary_is_required
     let mut answer_text = "branch=main".to_string();
     let mut answer_messages = vec![answer_text.clone()];
 
-    assert!(!promote_verified_terminal_answer_after_verifier_pass(
+    assert!(!apply_verified_terminal_answer_after_verifier_pass(
         &route,
         &mut journal,
         &mut answer_text,
         &mut answer_messages,
+        false,
     ));
     assert_eq!(answer_text, "branch=main");
     assert_eq!(answer_messages, vec!["branch=main".to_string()]);

@@ -12,8 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 CORE_RECOVERY_FILES = [
+    "crates/clawd/src/agent_engine/loop_control.rs",
     "crates/clawd/src/agent_engine/loop_control_answer_recovery.rs",
-    "crates/clawd/src/agent_engine/loop_control_local_health_recovery.rs",
     "crates/clawd/src/answer_verifier_runtime.rs",
     "crates/clawd/src/verifier.rs",
     "crates/clawd/src/repair_signal.rs",

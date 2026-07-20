@@ -23,8 +23,8 @@ SYNTHESIS_PROMPT = ROOT / "prompts/layers/overlays/capability_result_synthesis_p
 
 # These ceilings are the post-semantic-contract baseline. They prevent
 # unrelated growth while domain-specific branches are held at exactly zero.
-MAX_FINALIZER_PRODUCTION_MODULES = 66
-MAX_FINALIZER_PRODUCTION_LINES = 24_155
+MAX_FINALIZER_PRODUCTION_MODULES = 62
+MAX_FINALIZER_PRODUCTION_LINES = 21_965
 
 FORBIDDEN_RUNTIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("legacy_raw_output_type", re.compile(r"\bRawCommandOutput\b")),
@@ -47,6 +47,16 @@ FORBIDDEN_RUNTIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"route_requires_raw_tail_read_passthrough|"
             r"route_expects_synthesis_over_raw_observation)\w*\b"
         ),
+    ),
+    (
+        "answer_verifier_reason_prose_branch",
+        re.compile(
+            r"\banswer_incomplete_reason\s*\.\s*(?:contains|starts_with|ends_with)\s*\("
+        ),
+    ),
+    (
+        "answer_verifier_instruction_prose_branch",
+        re.compile(r"\bretry_instruction\s*\.\s*(?:contains|starts_with|ends_with)\s*\("),
     ),
 )
 
@@ -198,6 +208,8 @@ def run_self_test() -> int:
         'let kind = OutputSemanticKind::RawCommandOutput;\n'
         'let shape = RawOutputOrShortSummary;\n'
         'let helper = strict_raw_tail_read_answer();\n'
+        'let branch = answer_incomplete_reason.contains("missing");\n'
+        'let retry = retry_instruction.starts_with("collect");\n'
     )
     sample_findings: list[Finding] = []
     for line_no, line in enumerate(sample.splitlines(), start=1):
@@ -209,6 +221,8 @@ def run_self_test() -> int:
         "legacy_output_type",
         "legacy_raw_final_answer_shape",
         "legacy_raw_exact_helper",
+        "answer_verifier_reason_prose_branch",
+        "answer_verifier_instruction_prose_branch",
     }
     assert is_test_source(FINALIZE_DIR / "task_tests/final_status.rs", FINALIZE_DIR)
     assert not is_test_source(

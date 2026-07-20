@@ -91,15 +91,17 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         source_files: &[
             "crates/clawd/src/answer_verifier.rs",
             "crates/clawd/src/answer_verifier_runtime.rs",
+            "crates/clawd/src/agent_engine/loop_control.rs",
             "crates/clawd/src/agent_engine/loop_control_answer_recovery.rs",
-            "crates/clawd/src/agent_engine/loop_control_local_health_recovery.rs",
+            "crates/clawd/src/finalize/task_resume.rs",
             "crates/clawd/src/task_journal.rs",
         ],
         entrypoints: &[
             "verify_answer_observe_only",
             "local_missing_evidence_verifier_gap",
             "answer_verifier_retry_summary",
-            "try_recover_latest_synthesis_answer_verifier_gap",
+            "try_bounded_answer_verifier_synthesis_retry",
+            "retry_answer_after_verifier",
         ],
         allowed_input_fields: &[
             "missing_evidence_fields",
@@ -115,8 +117,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "error_text",
             "retry_reply_sentence",
         ],
-        migration_target: "repair_envelope_to_loop_recovery",
-        next_recovery_kind: "replan",
+        migration_target: "bounded_structured_final_answer_synthesis",
+        next_recovery_kind: "synthesize_answer",
         deletion_gate: "keep_loop_bounded_recovery",
     },
     RepairBoundaryInventoryItem {

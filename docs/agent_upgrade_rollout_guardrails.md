@@ -1,6 +1,6 @@
 # Agent Upgrade Rollout Guardrails
 
-Last updated: 2026-07-15
+Last updated: 2026-07-20
 
 This document is the P0 rollout guardrail for the agent generalization plan. It records what can be safely changed now, what is only planned, how to test each change, and how to roll it back.
 
@@ -29,7 +29,6 @@ These controls are read by current code and can be used for rollback after confi
 | `max_rounds` | `[agent.loop_guard]` | `4` | Maximum planner-execution rounds. | Lower to previous stable value and restart. |
 | `recoverable_failure_extra_rounds` | `[agent.loop_guard]` | `1` | Extra repair rounds for structured recoverable failures near round limit. | Set to `0` or previous stable value and restart. |
 | `multi_round_enabled` | `[agent.loop_guard]` | `true` | Enables controlled multi-round execution. | Set `false` to fall back toward single-round behavior. |
-| `answer_verifier_retry_limit` | `[agent.loop_guard]` | `2` | Max automatic answer-verifier repair attempts. | Reduce to `0` or previous value and restart. |
 | `repeat_action_limit` | `[agent.loop_guard]` | `4` | Cross-round repeat-action guard. | Restore previous value and restart. |
 | `no_progress_limit` | `[agent.loop_guard]` | `1` | Stops consecutive no-progress rounds. | Restore previous value and restart. |
 | `max_tool_calls` | `[agent.loop_guard]` | `12` | Maximum tool/skill calls per task. | Restore previous value and restart. |

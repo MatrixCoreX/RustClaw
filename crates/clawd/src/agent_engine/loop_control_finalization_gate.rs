@@ -129,13 +129,6 @@ pub(super) fn promote_local_code_projection_from_machine_evidence_for_verifier_c
     true
 }
 
-pub(super) fn answer_verifier_retry_budget_available(
-    policy: &AgentLoopGuardPolicy,
-    answer_verifier_retry_count: usize,
-) -> bool {
-    answer_verifier_retry_count < policy.answer_verifier_retry_limit
-}
-
 pub(super) fn retry_verifier_accepts_rewritten_answer(
     verifier: &crate::answer_verifier::AnswerVerifierOut,
     retried_answer: &str,

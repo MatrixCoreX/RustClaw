@@ -138,11 +138,13 @@ fn answer_verifier_prompt_preserves_compound_deliverables_on_retry() {
 fn answer_verifier_gap_is_high_confidence_only() {
     let low = AnswerVerifierOut {
         pass: false,
+        should_retry: true,
         confidence: 0.2,
         ..AnswerVerifierOut::default()
     };
     let high = AnswerVerifierOut {
         pass: false,
+        should_retry: true,
         confidence: 0.8,
         ..AnswerVerifierOut::default()
     };
@@ -151,7 +153,7 @@ fn answer_verifier_gap_is_high_confidence_only() {
 }
 
 #[test]
-fn answer_verifier_gap_respects_explicit_retry_flag() {
+fn answer_verifier_gap_requires_confidence_and_retry_flag() {
     let retry = AnswerVerifierOut {
         pass: false,
         should_retry: true,
@@ -160,11 +162,11 @@ fn answer_verifier_gap_respects_explicit_retry_flag() {
         ..AnswerVerifierOut::default()
     };
 
-    assert!(retry.high_confidence_gap());
+    assert!(!retry.high_confidence_gap());
 }
 
 #[test]
-fn answer_verifier_normalizes_high_confidence_gap_to_retry() {
+fn answer_verifier_normalization_does_not_infer_retry_control() {
     let normalized = AnswerVerifierOut {
         pass: false,
         confidence: 0.82,
@@ -172,8 +174,8 @@ fn answer_verifier_normalizes_high_confidence_gap_to_retry() {
         ..AnswerVerifierOut::default()
     }
     .normalized();
-    assert!(normalized.should_retry);
-    assert!(!normalized.retry_instruction.trim().is_empty());
+    assert!(!normalized.should_retry);
+    assert!(normalized.retry_instruction.is_empty());
 }
 
 #[test]
