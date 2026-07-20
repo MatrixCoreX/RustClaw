@@ -10,6 +10,10 @@ use crate::providers::client::ProviderErrorKind;
 use crate::runtime::TaskProviderBlocker;
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
 
+#[path = "llm_gateway_model_turn.rs"]
+mod model_turn;
+pub(crate) use model_turn::run_native_model_turn_with_fallback;
+
 const TASK_LLM_COST_POLICY_BLOCKED_ERR: &str = "llm_cost_policy_blocked";
 const NO_ELIGIBLE_LLM_PROVIDER_ERR: &str = "no_eligible_llm_provider";
 

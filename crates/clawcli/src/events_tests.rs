@@ -82,6 +82,34 @@ fn live_event_renderer_is_shared_across_compact_jsonl_and_quiet_modes() {
 }
 
 #[test]
+fn compact_model_turn_event_exposes_only_safe_lifecycle_fields() {
+    let raw = serde_json::json!({
+        "seq": 10,
+        "event_type": "model_turn",
+        "payload": {
+            "model_event_index": 3,
+            "provider": "vendor-minimax:MiniMax-M3",
+            "type": "tool_call_delta",
+            "tool_index": 0,
+            "tool_call_id": "call-1",
+            "tool_name": "call_capability",
+            "arguments_delta_bytes": 27
+        }
+    });
+
+    let line =
+        live_task_event_output_line(&raw, LiveEventOutputMode::Compact, &EventFilters::default())
+            .expect("compact render")
+            .expect("compact line");
+
+    assert!(line.contains("type=model_turn"));
+    assert!(line.contains("model_phase=tool_call_delta"));
+    assert!(line.contains("model_event_index=3"));
+    assert!(line.contains("tool_name=call_capability"));
+    assert!(line.contains("arguments_delta_bytes=27"));
+}
+
+#[test]
 fn agent_hook_events_preserve_handler_execution_fields() {
     let data = serde_json::json!({
         "result_json": {

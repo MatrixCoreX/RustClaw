@@ -44,6 +44,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "agent_tool_spec (agent_engine)",
     ),
     (
+        "prompts/native_action_protocol.md",
+        "native_action_protocol (agent_engine.planning)",
+    ),
+    (
         "prompts/single_plan_execution_prompt.md",
         "single_plan_execution (agent_engine.planning)",
     ),
@@ -54,10 +58,6 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
     (
         "prompts/plan_repair_prompt.md",
         "plan_repair (agent_engine.planning)",
-    ),
-    (
-        "prompts/planner_abort_compact_retry_prompt.md",
-        "planner_abort_compact_retry_agent_engine_planning",
     ),
     (
         "prompts/observed_answer_fallback_prompt.md",

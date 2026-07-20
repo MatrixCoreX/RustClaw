@@ -11,8 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use claw_core::model_turn::{ModelTurnEvent, ModelTurnRequest, ModelTurnResponse, ModelTurnUsage};
 
 pub(crate) use claw_core::provider_failure_policy::ProviderFailureClass as ProviderErrorKind;
 
@@ -48,18 +49,7 @@ pub(crate) fn build_llm_http_client(timeout_seconds: u64) -> reqwest::Result<Cli
         .build()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct LlmUsageSnapshot {
-    pub(crate) prompt_tokens: Option<u64>,
-    pub(crate) completion_tokens: Option<u64>,
-    pub(crate) total_tokens: Option<u64>,
-    pub(crate) input_tokens: Option<u64>,
-    pub(crate) output_tokens: Option<u64>,
-    pub(crate) reasoning_tokens: Option<u64>,
-    pub(crate) cached_tokens: Option<u64>,
-    pub(crate) cache_creation_input_tokens: Option<u64>,
-    pub(crate) cache_read_input_tokens: Option<u64>,
-}
+pub(crate) type LlmUsageSnapshot = ModelTurnUsage;
 
 #[derive(Debug, Clone)]
 pub(crate) struct LlmProviderResponse {
@@ -71,6 +61,18 @@ pub(crate) struct LlmProviderResponse {
     pub(crate) retryable_error_count: usize,
     pub(crate) last_retry_error_kind: Option<&'static str>,
 }
+
+#[derive(Debug, Clone)]
+pub(crate) struct ModelTurnProviderResponse {
+    pub(crate) turn: ModelTurnResponse,
+    pub(crate) request_payload: Value,
+    pub(crate) raw_response: String,
+    pub(crate) attempts: usize,
+    pub(crate) retryable_error_count: usize,
+    pub(crate) last_retry_error_kind: Option<&'static str>,
+}
+
+pub(crate) type ModelTurnEventSink = Arc<dyn Fn(ModelTurnEvent) + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderError {
@@ -266,6 +268,20 @@ impl LlmProviderResponse {
     }
 }
 
+impl ModelTurnProviderResponse {
+    fn with_retry_metadata(
+        mut self,
+        attempts: usize,
+        retryable_error_count: usize,
+        last_retry_error_kind: Option<&'static str>,
+    ) -> Self {
+        self.attempts = attempts.max(1);
+        self.retryable_error_count = retryable_error_count;
+        self.last_retry_error_kind = last_retry_error_kind;
+        self
+    }
+}
+
 pub(crate) fn is_quota_exhausted_response(body_text: &str) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(body_text) else {
         return false;
@@ -374,6 +390,57 @@ pub(crate) async fn call_provider_with_retry_with_hints(
     }
 }
 
+pub(crate) async fn call_model_turn_with_retry(
+    provider: Arc<LlmProviderRuntime>,
+    request: &ModelTurnRequest,
+    hints: &ChatRequestHints,
+    event_sink: Option<ModelTurnEventSink>,
+) -> Result<ModelTurnProviderResponse, ProviderError> {
+    let mut attempts = 0usize;
+    let mut retryable_error_count = 0usize;
+    let mut last_retry_error_kind = None;
+
+    loop {
+        attempts += 1;
+        if let Some(sink) = event_sink.as_ref() {
+            sink(ModelTurnEvent::Started { attempt: attempts });
+        }
+        match call_model_turn(provider.clone(), request, hints, event_sink.clone()).await {
+            Ok(output) => {
+                return Ok(output.with_retry_metadata(
+                    attempts,
+                    retryable_error_count,
+                    last_retry_error_kind,
+                ))
+            }
+            Err(err) if err.retryable => {
+                if let Some(sink) = event_sink.as_ref() {
+                    sink(ModelTurnEvent::Interrupted {
+                        code: err.observability_kind().to_string(),
+                        retryable: true,
+                    });
+                }
+                retryable_error_count += 1;
+                last_retry_error_kind = Some(err.observability_kind());
+                let retry_limit = retry_limit_for_provider_error(&err);
+                if attempts > retry_limit {
+                    return Err(err.with_retry_metadata(attempts, retryable_error_count));
+                }
+                tokio::time::sleep(retry_delay_for_provider_error(&err, attempts)).await;
+            }
+            Err(err) => {
+                if let Some(sink) = event_sink.as_ref() {
+                    sink(ModelTurnEvent::Interrupted {
+                        code: err.observability_kind().to_string(),
+                        retryable: false,
+                    });
+                }
+                return Err(err.with_retry_metadata(attempts, retryable_error_count));
+            }
+        }
+    }
+}
+
 fn retry_limit_for_provider_error(err: &ProviderError) -> usize {
     retry_limit_for_provider_error_with_rate_limit_retries(err, configured_rate_limit_retry_times())
 }
@@ -438,6 +505,10 @@ pub(crate) type ProviderCallFuture = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<LlmProviderResponse, ProviderError>> + Send>,
 >;
 
+pub(crate) type ModelTurnProviderCallFuture = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<ModelTurnProviderResponse, ProviderError>> + Send>,
+>;
+
 pub(crate) trait LlmProvider: Send + Sync + 'static {
     /// 与 toml 里 `[[llm_providers]].type` / 内部 `LlmProviderConfig::provider_type`
     /// 完全一致的协议短名。dispatcher 用它做选择。
@@ -451,6 +522,22 @@ pub(crate) trait LlmProvider: Send + Sync + 'static {
         prompt: String,
         hints: ChatRequestHints,
     ) -> ProviderCallFuture;
+
+    fn call_turn(
+        &self,
+        _provider: Arc<LlmProviderRuntime>,
+        _request: ModelTurnRequest,
+        _hints: ChatRequestHints,
+        _event_sink: Option<ModelTurnEventSink>,
+    ) -> ModelTurnProviderCallFuture {
+        let provider_type = self.name();
+        Box::pin(async move {
+            Err(ProviderError::non_retryable(
+                format!("native_model_turn_unsupported provider_type={provider_type}"),
+                Value::Null,
+            ))
+        })
+    }
 }
 
 pub(crate) struct OpenAiCompatProvider;
@@ -474,6 +561,19 @@ impl LlmProvider for OpenAiCompatProvider {
     ) -> ProviderCallFuture {
         Box::pin(async move {
             super::openai_compat::call_openai_compat(provider, &prompt, &hints).await
+        })
+    }
+
+    fn call_turn(
+        &self,
+        provider: Arc<LlmProviderRuntime>,
+        request: ModelTurnRequest,
+        hints: ChatRequestHints,
+        event_sink: Option<ModelTurnEventSink>,
+    ) -> ModelTurnProviderCallFuture {
+        Box::pin(async move {
+            super::openai_model_turn::call_openai_model_turn(provider, &request, &hints, event_sink)
+                .await
         })
     }
 }
@@ -543,6 +643,30 @@ async fn call_provider(
     ))
 }
 
+async fn call_model_turn(
+    provider: Arc<LlmProviderRuntime>,
+    request: &ModelTurnRequest,
+    hints: &ChatRequestHints,
+    event_sink: Option<ModelTurnEventSink>,
+) -> Result<ModelTurnProviderResponse, ProviderError> {
+    let provider_type = provider.config.provider_type.as_str();
+    for impl_ref in PROVIDER_IMPLS {
+        if impl_ref.name() == provider_type {
+            let timeout_seconds = provider.config.timeout_seconds.max(1);
+            return await_model_turn_call_with_timeout(
+                provider_type,
+                timeout_seconds,
+                impl_ref.call_turn(provider.clone(), request.clone(), hints.clone(), event_sink),
+            )
+            .await;
+        }
+    }
+    Err(ProviderError::non_retryable(
+        format!("unsupported provider type: {provider_type}"),
+        Value::Null,
+    ))
+}
+
 async fn await_provider_call_with_timeout(
     provider_type: &str,
     timeout_seconds: u64,
@@ -553,6 +677,23 @@ async fn await_provider_call_with_timeout(
         Err(_) => Err(ProviderError::timeout(
             format!(
                 "provider_call_timeout provider_type={provider_type} timeout_seconds={}",
+                timeout_seconds.max(1)
+            ),
+            Value::Null,
+        )),
+    }
+}
+
+async fn await_model_turn_call_with_timeout(
+    provider_type: &str,
+    timeout_seconds: u64,
+    call: ModelTurnProviderCallFuture,
+) -> Result<ModelTurnProviderResponse, ProviderError> {
+    match tokio::time::timeout(Duration::from_secs(timeout_seconds.max(1)), call).await {
+        Ok(result) => result,
+        Err(_) => Err(ProviderError::timeout(
+            format!(
+                "provider_model_turn_timeout provider_type={provider_type} timeout_seconds={}",
                 timeout_seconds.max(1)
             ),
             Value::Null,

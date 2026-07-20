@@ -71,7 +71,7 @@ config = "0.15"
 hmac = "0.12"
 regex = "1"
 # 使用 rustls 替代 native-tls，交叉编译 aarch64 时无需目标平台 OpenSSL
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 reqwest-mcp = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls"] }
 rmcp = { version = "2.2.0", default-features = false, features = ["auth", "client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
 # bundled：从源码编译 SQLite，交叉编译 aarch64 时无需目标平台 libsqlite3

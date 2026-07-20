@@ -10,7 +10,6 @@
   * `single_plan_execution_prompt.md`
   * `loop_incremental_plan_prompt.md`
   * `plan_repair_prompt.md`
-  * `planner_abort_compact_retry_prompt.md`
   * `delivery_text_classifier_prompt.md`
   * `observed_answer_fallback_prompt.md`
 * **建议**带版本号的 prompt：
