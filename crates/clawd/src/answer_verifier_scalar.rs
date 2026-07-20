@@ -323,29 +323,6 @@ pub(super) fn directory_purpose_summary_answer_is_grounded_in_successful_observa
     path_size_answer_mentions_observed_largest(candidate, &largest)
 }
 
-pub(super) fn workspace_project_summary_answer_is_grounded_in_successful_observation(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-    candidate_answer: &str,
-) -> bool {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
-        return false;
-    }
-    let candidate = candidate_answer.trim();
-    if candidate.is_empty() {
-        return false;
-    }
-    let Some(names) = latest_observed_directory_structure_names(journal) else {
-        return false;
-    };
-    let mentioned = names
-        .iter()
-        .filter(|name| observed_name_is_mentioned(candidate, name))
-        .take(2)
-        .count();
-    mentioned >= 2
-}
-
 pub(super) fn recent_artifacts_judgment_answer_is_grounded_in_successful_observation(
     route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,

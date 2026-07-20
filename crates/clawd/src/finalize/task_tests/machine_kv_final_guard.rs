@@ -183,7 +183,7 @@ fn requested_machine_kv_summary_final_guard_preserves_workspace_grounded_summary
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "logs/clawd.run.log".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-workspace-grounded-final", "ask", prompt);

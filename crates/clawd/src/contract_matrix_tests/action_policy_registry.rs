@@ -244,57 +244,6 @@ fn recent_artifacts_judgment_allows_bounded_content_evidence() {
 }
 
 #[test]
-fn workspace_project_summary_allows_structure_and_bounded_content_evidence() {
-    let tree_policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        }),
-        "system_basic",
-        &serde_json::json!({"action":"tree_summary","path":"/workspace","max_depth":1}),
-    )
-    .expect("policy decision");
-    assert!(tree_policy.is_allowed(), "{tree_policy:?}");
-    assert_eq!(tree_policy.action_key, "system_basic.tree_summary");
-    assert_eq!(tree_policy.contract_match, "workspace_project_summary");
-    assert_eq!(tree_policy.evidence_profile, "workspace_user_docs_first");
-
-    let read_policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        }),
-        "fs_basic",
-        &serde_json::json!({"action":"read_text_range","path":"README.md","mode":"head","n":80}),
-    )
-    .expect("policy decision");
-    assert!(read_policy.is_allowed(), "{read_policy:?}");
-    assert_eq!(read_policy.action_key, "fs_basic.read_text_range");
-    assert_eq!(read_policy.contract_match, "workspace_project_summary");
-    assert_eq!(read_policy.evidence_profile, "workspace_user_docs_first");
-
-    let list_policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        }),
-        "fs_basic",
-        &serde_json::json!({"action":"list_dir","path":"/workspace","names_only":true}),
-    )
-    .expect("policy decision");
-    assert!(list_policy.is_allowed(), "{list_policy:?}");
-    assert_eq!(list_policy.action_key, "fs_basic.list_dir");
-    assert_eq!(list_policy.contract_match, "workspace_project_summary");
-    assert_eq!(list_policy.evidence_profile, "workspace_user_docs_first");
-}
-
-#[test]
 fn generic_delivery_allows_directory_listing_for_selection() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -1201,7 +1150,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 87);
+    let cases = generated_contract_cases(&matrix, 84);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

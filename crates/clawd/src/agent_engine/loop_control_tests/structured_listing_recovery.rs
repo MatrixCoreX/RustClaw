@@ -41,37 +41,6 @@ fn push_inventory_step_result(journal: &mut crate::task_journal::TaskJournal, ou
 }
 
 #[test]
-fn structured_listing_recovery_projects_complete_names_by_kind_for_workspace_summary() {
-    let mut journal = verifier_gap_journal();
-    push_inventory_trace(
-        &mut journal,
-        r#"{"action":"inventory_dir","counts":{"dirs":2,"files":3,"total":5},"names_by_kind":{"dirs":["crates","prompts"],"files":["AGENTS.md","Cargo.toml","README.md"],"other":[]},"path":"."}"#,
-    );
-    let mut reply =
-        AskReply::non_llm("crates and README.md".to_string()).with_task_journal(journal);
-    let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
-
-    assert!(try_recover_structured_listing_answer_verifier_gap(
-        Some(&answer_contract(&route)),
-        &mut reply
-    ));
-
-    assert!(!reply.should_fail_task);
-    assert!(reply.text.contains("dirs.count=2"));
-    assert!(reply.text.contains("- crates"));
-    assert!(reply.text.contains("- prompts"));
-    assert!(reply.text.contains("files.count=3"));
-    assert!(reply.text.contains("- AGENTS.md"));
-    assert!(reply.text.contains("- Cargo.toml"));
-    assert!(reply.text.contains("- README.md"));
-    assert!(reply.task_journal.as_ref().is_some_and(|journal| {
-        journal.final_status == Some(crate::task_journal::TaskJournalFinalStatus::Success)
-            && journal.answer_verifier_summary.is_none()
-    }));
-}
-
-#[test]
 fn structured_listing_recovery_uses_planner_listing_evidence_without_route_semantic_marker() {
     let mut journal = verifier_gap_journal();
     push_inventory_trace(
@@ -173,7 +142,7 @@ fn structured_listing_recovery_does_not_override_workspace_summary_with_content_
     let mut reply = AskReply::non_llm("RustClaw is a local agent runtime.".to_string())
         .with_task_journal(journal);
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.semantic_kind = OutputSemanticKind::None;
 
     assert!(!try_recover_structured_listing_answer_verifier_gap(
         Some(&answer_contract(&route)),

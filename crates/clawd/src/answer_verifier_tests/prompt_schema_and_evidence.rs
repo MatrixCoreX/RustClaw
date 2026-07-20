@@ -3,8 +3,7 @@ use std::collections::BTreeSet;
 use serde_json::json;
 
 use super::super::{
-    answer_verifier_user_request_for_prompt, execution_evidence_prompt_block,
-    output_contract_prompt_block, AnswerVerifierOut,
+    answer_verifier_user_request_for_prompt, execution_evidence_prompt_block, AnswerVerifierOut,
 };
 use super::*;
 
@@ -134,40 +133,6 @@ fn answer_verifier_prompt_preserves_compound_deliverables_on_retry() {
     assert!(PROMPT_RAW.contains("preserve the already required deliverable"));
     assert!(PROMPT_RAW.contains("combined final answer"));
     assert!(PROMPT_RAW.contains("include the observed listed items and the synthesis"));
-}
-
-#[test]
-fn answer_verifier_output_contract_exposes_evidence_profile() {
-    let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.requires_content_evidence = true;
-
-    let block = output_contract_prompt_block(&route);
-    let output_contract: serde_json::Value =
-        serde_json::from_str(&block).expect("output contract prompt block should be JSON");
-
-    assert!(block.contains("\"evidence_policy\""));
-    assert!(block.contains("\"compact_line\""));
-    assert!(block.contains("\"evidence_profile\""));
-    assert!(block.contains("\"workspace_user_docs_first\""));
-    assert!(!block.contains("\"contract_marker\""));
-    assert!(output_contract.get("contract_marker").is_none());
-    assert_eq!(
-        output_contract
-            .get("final_answer_shape")
-            .and_then(serde_json::Value::as_str),
-        Some("project_summary_grounded_in_files")
-    );
-    assert_eq!(
-        output_contract
-            .get("final_answer_shape_class")
-            .and_then(serde_json::Value::as_str),
-        Some("grounded_summary")
-    );
-    assert!(output_contract.get("semantic_kind").is_none());
-    assert!(!block.contains("\"observation_extractors\""));
-    assert!(!block.contains("\"observation_sources\""));
 }
 
 #[test]

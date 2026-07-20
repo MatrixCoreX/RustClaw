@@ -259,7 +259,10 @@ pub(crate) fn route_allows_observed_bound_target(
 }
 
 fn route_uses_non_binding_workspace_evidence(route_result: &crate::IntentOutputContract) -> bool {
-    route_result.semantic_kind_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
+    route_result.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && route_result.requires_content_evidence
+        && !route_result.delivery_required
+        && route_result.semantic_kind_is_unclassified()
 }
 
 fn route_contract_can_publish_ordered_entries(route_result: &crate::IntentOutputContract) -> bool {

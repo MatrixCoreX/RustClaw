@@ -92,8 +92,6 @@ mod directory_purpose;
 use directory_purpose::direct_directory_purpose_summary_from_size_facts;
 use directory_purpose::{
     compose_recent_artifacts_machine_field_delivery,
-    direct_current_workspace_top_level_dirs_overview_answer,
-    replace_delivery_with_deterministic_current_workspace_dirs_overview_answer,
     replace_delivery_with_deterministic_directory_purpose_answer,
     replace_delivery_with_deterministic_recent_artifacts_judgment_answer,
 };
@@ -1038,27 +1036,10 @@ pub(crate) async fn finalize_loop_reply(
         } else {
             false
         };
-    let replaced_current_workspace_dirs = if !replaced_grounded_answer
-        && !replaced_service_status
-        && !replaced_quantity_comparison
-        && !replaced_directory_purpose
-    {
-        replace_delivery_with_deterministic_current_workspace_dirs_overview_answer(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
-            agent_run_context,
-            &mut finalizer_summary,
-        )
-    } else {
-        false
-    };
     let replaced_recent_artifacts = if !replaced_grounded_answer
         && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
-        && !replaced_current_workspace_dirs
     {
         replace_delivery_with_deterministic_recent_artifacts_judgment_answer(
             task,
@@ -1073,7 +1054,6 @@ pub(crate) async fn finalize_loop_reply(
         && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
-        && !replaced_current_workspace_dirs
         && !replaced_recent_artifacts
     {
         replace_delivery_with_direct_scalar_observed_answer(
@@ -1090,7 +1070,6 @@ pub(crate) async fn finalize_loop_reply(
         && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
-        && !replaced_current_workspace_dirs
         && !replaced_recent_artifacts
         && !replaced_direct_scalar
     {
@@ -1108,7 +1087,6 @@ pub(crate) async fn finalize_loop_reply(
         && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
-        && !replaced_current_workspace_dirs
         && !replaced_recent_artifacts
         && !replaced_direct_scalar
         && !replaced_direct_structured
@@ -1126,7 +1104,6 @@ pub(crate) async fn finalize_loop_reply(
         && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
-        && !replaced_current_workspace_dirs
         && !replaced_recent_artifacts
         && !replaced_direct_scalar
         && !replaced_direct_structured
@@ -1147,7 +1124,6 @@ pub(crate) async fn finalize_loop_reply(
         && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
-        && !replaced_current_workspace_dirs
         && !replaced_recent_artifacts
         && !replaced_direct_scalar
         && !replaced_direct_structured
@@ -1174,7 +1150,6 @@ pub(crate) async fn finalize_loop_reply(
         && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
-        && !replaced_current_workspace_dirs
         && !replaced_recent_artifacts
         && !replaced_direct_scalar
         && !replaced_direct_structured

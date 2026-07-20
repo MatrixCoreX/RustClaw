@@ -113,31 +113,6 @@ fn trace_json_includes_round_decision_envelope() {
 }
 
 #[test]
-fn output_contract_ref_uses_evidence_policy_shape() {
-    let plan = crate::PlanResult {
-        goal: "summarize workspace".to_string(),
-        missing_slots: Vec::new(),
-        needs_confirmation: false,
-        output_contract: Some(crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::WorkspaceProjectSummary,
-            ..Default::default()
-        }),
-        steps: Vec::new(),
-        planner_notes: String::new(),
-        plan_kind: crate::PlanKind::Single,
-        raw_plan_text: String::new(),
-    };
-    let envelope = super::decision_envelope::agent_loop_round_plan_contract_envelope_json(&plan);
-    let output_contract_ref = envelope
-        .get("output_contract_ref")
-        .and_then(Value::as_str)
-        .expect("output contract ref");
-
-    assert!(output_contract_ref.contains("final_answer_shape=project_summary_grounded_in_files"));
-    assert!(output_contract_ref.contains("final_answer_shape_class=grounded_summary"));
-}
-
-#[test]
 fn planner_contract_envelope_uses_plan_slots_and_contract_evidence_without_route() {
     let plan = crate::PlanResult {
         goal: "count matching entries".to_string(),

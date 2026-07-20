@@ -321,7 +321,7 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
 }
 
 #[test]
-fn workspace_project_summary_is_not_hard_summarized_by_observed_output() {
+fn generic_workspace_summary_is_not_hard_summarized_by_observed_output() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -335,7 +335,7 @@ fn workspace_project_summary_is_not_hard_summarized_by_observed_output() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };

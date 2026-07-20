@@ -1075,7 +1075,6 @@ pub(super) fn route_allows_synthesis_recovery(
     if route.output_contract_marker_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
-        crate::OutputSemanticKind::WorkspaceProjectSummary,
     ]) {
         return true;
     }
