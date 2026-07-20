@@ -152,7 +152,7 @@
   - `comparison` structured comparison fields such as `same_path`, `same_kind`, `same_name`, `same_size`, `size_delta_bytes`, `left_newer`, and `same_content`.
   - `field_value` mirrors the machine comparison facts needed by scalar/verdict contracts, including `same_path`, `left_exists`, and `right_exists`; evidence roles `path`, `status`, and `field_value`.
 - `path_batch_facts` success `extra` fields:
-  - structured path fact objects with `exists`, `kind`, `size`, modified time, and requested fields; missing facts include `error_code="path_not_found"`; evidence roles `path`, `status`, `field_value`, and `count`.
+  - structured path fact objects with `exists`, `kind`, `size`, modified time, and requested fields; a single result also exposes top-level `basename` (or `null` when missing); missing facts include `error_code="path_not_found"`; evidence roles `path`, `status`, `field_value`, and `count`.
 - `diagnose_runtime` success `extra` fields:
   - selected process, port, and environment summary fields; evidence roles `status`, `entries`, and `count`.
 - Sensitive fields: excerpts, process snapshots, environment summaries, and structured values may include user data. Provider-facing traces should prefer keys, counts, paths, excerpts, or hashes rather than full values unless the user requested the value.

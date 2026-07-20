@@ -99,6 +99,28 @@ fn read_range_result_preserves_explicit_title_field() {
 }
 
 #[test]
+fn path_facts_result_preserves_single_basename_field() {
+    let extra = json!({
+        "action": "path_batch_facts",
+        "basename": "release_checklist.md",
+        "count": 1,
+        "facts": [{"exists": true, "path": "docs/release_checklist.md"}]
+    });
+    let envelope = super::successful_execution_envelope(
+        "system_basic",
+        "step_2",
+        &json!({"action": "path_batch_facts"}),
+        "untrusted fallback",
+        Some(&extra),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/basename"),
+        Some(&json!("release_checklist.md"))
+    );
+}
+
+#[test]
 fn rss_result_preserves_items_and_sources_for_generic_synthesis() {
     let output = json!({
         "text": "machine fallback",

@@ -125,12 +125,30 @@ pub(super) fn path_batch_facts(
         }
     }
 
+    let single_basename = (facts.len() == 1).then(|| {
+        facts
+            .first()
+            .filter(|fact| fact.get("exists").and_then(Value::as_bool) == Some(true))
+            .and_then(|fact| {
+                fact.pointer("/fact/resolved_path")
+                    .or_else(|| fact.pointer("/fact/path"))
+                    .and_then(Value::as_str)
+            })
+            .and_then(|path| Path::new(path).file_name())
+            .and_then(OsStr::to_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    });
     let mut response = json!({
         "action": "path_batch_facts",
         "count": facts.len(),
         "include_missing": include_missing,
         "facts": facts,
     });
+    if let Some(basename) = single_basename {
+        response["basename"] = basename.map(Value::String).unwrap_or(Value::Null);
+    }
     if !fields.is_empty() {
         response["fields"] = json!(fields);
     }

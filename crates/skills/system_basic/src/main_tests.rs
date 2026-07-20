@@ -130,6 +130,10 @@ fn path_batch_facts_resolves_case_insensitive_leaf() {
         .and_then(|inner| inner.get("resolved_path"))
         .and_then(Value::as_str)
         .is_some_and(|path| path.ends_with("reports/Report.MD")));
+    assert_eq!(
+        value.get("basename").and_then(Value::as_str),
+        Some("Report.MD")
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -317,6 +321,7 @@ fn path_batch_facts_keeps_ambiguous_stem_missing() {
         Some("path_not_found")
     );
     assert_eq!(fact.get("error").and_then(Value::as_str), Some("not found"));
+    assert!(value.get("basename").is_some_and(Value::is_null));
     let _ = std::fs::remove_dir_all(root);
 }
 

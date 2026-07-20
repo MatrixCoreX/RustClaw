@@ -630,11 +630,11 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_terminal_pat
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_extracts_file_basename_from_path_facts() {
+async fn finalize_loop_reply_projects_file_basename_from_capability_result() {
     let state = test_state();
     let task = claimed_task("task-file-basename-path-facts");
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::FileBasename;
+    route.selection.structured_field_selector = Some("basename".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
@@ -643,14 +643,43 @@ async fn finalize_loop_reply_extracts_file_basename_from_path_facts() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let wrapped = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","resolved_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","size_bytes":120},"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"file\",\"path\":\"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\",\"resolved_path\":\"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\",\"size_bytes\":120},\"path\":\"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\"}],\"include_missing\":true}"}"#;
+    let extra = serde_json::json!({
+        "action": "path_batch_facts",
+        "basename": "release_checklist.md",
+        "count": 1,
+        "facts": [{
+            "exists": true,
+            "fact": {
+                "kind": "file",
+                "path": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+                "resolved_path": "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+                "size_bytes": 120
+            },
+            "path": "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        }],
+        "include_missing": true
+    });
+    let wrapped = serde_json::json!({
+        "extra": extra.clone(),
+        "text": "untrusted fallback"
+    })
+    .to_string();
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
-        .push(ok_step_result("step_1", "system_basic", wrapped));
-    loop_state.delivery_messages.push(wrapped.to_string());
-    loop_state.last_user_visible_respond = Some(wrapped.to_string());
+        .push(ok_step_result("step_1", "system_basic", &wrapped));
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "system_basic",
+            "step_1",
+            &serde_json::json!({"action": "path_batch_facts"}),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+    loop_state.delivery_messages.push(wrapped.clone());
+    loop_state.last_user_visible_respond = Some(wrapped);
 
     let reply = finalize_loop_reply(
         &state,
