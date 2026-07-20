@@ -88,7 +88,7 @@ fn route_requires_artifact_delivery(route: &crate::answer_verifier::AnswerContra
     ) || matches!(
         route.output_contract.delivery_intent,
         crate::OutputDeliveryIntent::FileSingle | crate::OutputDeliveryIntent::DirectoryBatchFiles
-    ) || route.output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
+    ) || route.output_contract.requests_exact_scalar_path()
 }
 
 #[derive(Debug, Clone, Default)]

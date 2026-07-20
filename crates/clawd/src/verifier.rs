@@ -14,10 +14,7 @@ mod risk_policy;
 #[path = "verifier_templates.rs"]
 mod templates;
 
-use creation_targets::{
-    apply_default_creation_targets, apply_generated_file_path_report_write_repair,
-    safe_autonomous_creation_step,
-};
+use creation_targets::{apply_default_creation_targets, safe_autonomous_creation_step};
 use permission::{
     audit_permission_decision, context_bundle_has_redacted_workspace_child_locator,
     push_unbound_locator_boundary_clarify_issue, step_reads_path_content_under_unbound_locator,
@@ -1011,11 +1008,6 @@ pub(crate) fn verify_plan(
     let capability_resolutions = resolve_capability_plan_steps(state, &mut effective_plan_result);
     let mut issues = Vec::new();
     apply_default_creation_targets(state, task, &mut effective_plan_result, &mut issues);
-    apply_generated_file_path_report_write_repair(
-        state,
-        input.output_contract,
-        &mut effective_plan_result,
-    );
     let visible_skills: HashSet<String> = state
         .planner_available_skills_for_task(task)
         .into_iter()

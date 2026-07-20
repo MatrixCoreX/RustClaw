@@ -20,8 +20,7 @@ use runtime::{
     validate_contract_runtime_fields, validate_observation_extractors,
 };
 pub(crate) use runtime::{
-    action_matches_policy_tokens, action_policy_for_output_contract,
-    action_trace_for_output_contract, bundled_contract_matrix,
+    action_policy_for_output_contract, action_trace_for_output_contract, bundled_contract_matrix,
     compact_prompt_line_for_output_contract, final_answer_shape_for_output_contract, fnv1a_hex,
     required_evidence_for_output_contract, runtime_contract_snapshot_for_output_contract,
     trace_snapshot_for_output_contract,
@@ -390,6 +389,7 @@ pub(crate) struct GenericProfile {
     pub(crate) delivery_required: Option<bool>,
     pub(crate) response_shapes: Vec<String>,
     pub(crate) locator_kinds: Vec<String>,
+    pub(crate) structured_field_selectors: Vec<String>,
     pub(crate) policy_mode: String,
     pub(crate) evidence_scope: String,
     pub(crate) freshness: String,
@@ -432,6 +432,22 @@ impl GenericProfile {
             && !contains_token(&self.locator_kinds, output.locator_kind.as_str())
         {
             return false;
+        }
+        if !self.structured_field_selectors.is_empty() {
+            let Some(fields) = output
+                .selection
+                .structured_field_selector
+                .as_deref()
+                .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+            else {
+                return false;
+            };
+            if !matches!(
+                fields.as_slice(),
+                [field] if contains_token(&self.structured_field_selectors, field)
+            ) {
+                return false;
+            }
         }
         true
     }

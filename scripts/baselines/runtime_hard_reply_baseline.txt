@@ -1006,8 +1006,6 @@ crates/clawd/src/verifier.rs	skill `{normalized_skill}` may require explicit con
 crates/clawd/src/verifier.rs	skill `{normalized_skill}` missing required arg `{key}`	detail: format!("skill `{normalized_skill}` missing required arg `{key}`"),
 crates/clawd/src/verifier.rs	unresolved runtime capability before execution	why: "unresolved runtime capability before execution".to_string(),
 crates/clawd/src/verifier.rs	unresolved template placeholder in executable step args	why: "unresolved template placeholder in executable step args".to_string(),
-crates/clawd/src/verifier_creation_targets.rs	contract generated_file_path_report requires a final single path answer	why: "contract generated_file_path_report requires a final single path answer"
-crates/clawd/src/verifier_creation_targets.rs	contract generated_file_path_report requires writing the observed content to the requested file before reporting its path	why: "contract generated_file_path_report requires writing the observed content to the requested file before reporting its path".to_string(),
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`	"skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`"
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` relative creation target anchored to `{anchored}`	"skill `{normalized_skill}` relative creation target anchored to `{anchored}`"
 crates/clawd/src/verifier_creation_targets.rs	unbounded unique step id search	unreachable!("unbounded unique step id search")

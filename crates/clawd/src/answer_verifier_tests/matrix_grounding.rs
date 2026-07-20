@@ -493,7 +493,10 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
 
     let mut path_route = route_with_mode();
     path_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    path_route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    path_route
+        .output_contract
+        .selection
+        .structured_field_selector = Some("path".to_string());
     let mut path_journal =
         crate::task_journal::TaskJournal::for_task("task-synth-path", "ask", "write report");
     path_journal
@@ -532,7 +535,7 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
 fn matrix_single_path_shape_uses_observed_evidence_map_paths() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-path-evidence",
         "ask",

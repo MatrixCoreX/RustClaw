@@ -16,11 +16,11 @@ use crate::finalize::build_from_loop_state;
 use crate::{AppState, ClaimedTask};
 
 use super::{
+    direct_exact_scalar_path_from_dry_run_payload, direct_exact_scalar_path_from_written_path,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
-    direct_generated_file_path_report_from_dry_run_payload,
-    direct_generated_file_path_report_from_written_path, direct_path_from_active_bound_inventory,
-    direct_scalar_observed_answer, direct_scalar_path_candidate_list_from_observed_outputs,
+    direct_path_from_active_bound_inventory, direct_scalar_observed_answer,
+    direct_scalar_path_candidate_list_from_observed_outputs,
     direct_structured_observed_answer_allowing_implicit_metadata_path_facts,
     final_answer_text_from_delivery, inventory_ranked_size_list_answer,
     latest_bounded_read_range_answer_from_loop, latest_plan_requested_synthesis,

@@ -1,11 +1,12 @@
 use super::*;
 
 #[test]
-fn generated_file_path_report_does_not_repair_media_artifact_output_with_text_write() {
+fn exact_scalar_path_does_not_repair_media_artifact_output_with_text_write() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
+    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
     route.response_shape = crate::OutputResponseShape::Scalar;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
     route.locator_hint = "document/skill_audio_smoke.mp3".to_string();
     let result = verify_plan(
@@ -53,7 +54,9 @@ fn generated_file_path_report_does_not_repair_media_artifact_output_with_text_wr
 fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
+    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.selection.structured_field_selector = Some("path".to_string());
     let result = verify_plan(
         &state,
         &task,
@@ -91,11 +94,12 @@ fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
 }
 
 #[test]
-fn generated_file_path_report_does_not_write_stat_json_over_media_path() {
+fn exact_scalar_path_does_not_write_stat_json_over_media_path() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
+    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
     route.response_shape = crate::OutputResponseShape::Scalar;
+    route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
     route.locator_hint = "document/rust_icon_pixel_smoke.png".to_string();
     let result = verify_plan(

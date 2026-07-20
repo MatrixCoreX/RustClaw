@@ -605,14 +605,13 @@ pub(super) fn direct_path_from_active_bound_inventory(
     None
 }
 
-fn route_requests_generated_file_path_report(agent_run_context: Option<&AgentRunContext>) -> bool {
+fn route_requests_exact_scalar_path(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
         .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
             let contract = route.clone();
             !contract.delivery_required
-                && contract.response_shape == crate::OutputResponseShape::Scalar
-                && route.semantic_kind_is(crate::OutputSemanticKind::GeneratedFilePathReport)
+                && contract.requests_exact_scalar_path()
                 && crate::evidence_policy::final_answer_shape_for_output_contract(&contract)
                     == Some(crate::evidence_policy::FinalAnswerShape::SinglePath)
         })
@@ -642,11 +641,11 @@ fn single_written_file_alias_path(loop_state: &LoopState) -> Option<String> {
         .flatten()
 }
 
-pub(super) fn direct_generated_file_path_report_from_written_path(
+pub(super) fn direct_exact_scalar_path_from_written_path(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route_requests_generated_file_path_report(agent_run_context) {
+    if !route_requests_exact_scalar_path(agent_run_context) {
         return None;
     }
     let path = loop_state
@@ -673,104 +672,27 @@ fn clean_machine_field_value(value: &serde_json::Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn clean_machine_scalar_value(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(_) => clean_machine_field_value(value),
-        serde_json::Value::Number(number) => Some(number.to_string()),
-        serde_json::Value::Bool(flag) => Some(flag.to_string()),
-        _ => None,
-    }
-}
-
-fn machine_bool_true(value: Option<&serde_json::Value>) -> bool {
-    value.and_then(|value| value.as_bool()) == Some(true)
-}
-
-fn projected_planned_outputs(value: Option<&serde_json::Value>) -> Vec<serde_json::Value> {
-    let Some(items) = value.and_then(|value| value.as_array()) else {
-        return Vec::new();
-    };
-    items
-        .iter()
-        .filter_map(|item| {
-            let path = item
-                .get("path")
-                .and_then(clean_machine_field_value)
-                .and_then(|path| clean_machine_path_payload(&path))?;
-            let mut projected = serde_json::Map::new();
-            projected.insert("path".to_string(), serde_json::Value::String(path));
-            if let Some(kind) = item.get("type").and_then(clean_machine_field_value) {
-                projected.insert("type".to_string(), serde_json::Value::String(kind));
-            }
-            Some(serde_json::Value::Object(projected))
-        })
-        .collect()
-}
-
-fn first_projected_output_path(projected: &[serde_json::Value]) -> Option<String> {
-    projected.iter().find_map(|item| {
-        item.get("path")
-            .and_then(|value| value.as_str())
-            .map(ToOwned::to_owned)
-    })
-}
-
-fn generated_file_path_report_from_dry_run_value(value: &serde_json::Value) -> Option<String> {
+fn exact_scalar_path_from_dry_run_value(value: &serde_json::Value) -> Option<String> {
     let extra = value.get("extra").unwrap_or(value);
-    if !machine_bool_true(extra.get("dry_run")) {
+    if extra.get("dry_run").and_then(serde_json::Value::as_bool) != Some(true) {
         return None;
     }
-    let mut planned_outputs = projected_planned_outputs(extra.get("planned_outputs"));
-    let output_path = extra
+    extra
         .get("output_path")
         .and_then(clean_machine_field_value)
         .and_then(|path| clean_machine_path_payload(&path))
-        .or_else(|| first_projected_output_path(&planned_outputs))?;
-    if planned_outputs.is_empty() {
-        let mut projected = serde_json::Map::new();
-        projected.insert(
-            "path".to_string(),
-            serde_json::Value::String(output_path.clone()),
-        );
-        planned_outputs.push(serde_json::Value::Object(projected));
-    }
-
-    let mut fields = vec!["dry_run=true".to_string()];
-    if let Some(provider) = extra.get("provider").and_then(clean_machine_field_value) {
-        fields.push(format!("provider={provider}"));
-    }
-    if let Some(model) = extra.get("model").and_then(clean_machine_field_value) {
-        fields.push(format!("model={model}"));
-    }
-    if let Some(duration) = extra.get("duration").and_then(clean_machine_scalar_value) {
-        fields.push(format!("duration={duration}"));
-    }
-    if let Some(resolution) = extra.get("resolution").and_then(clean_machine_field_value) {
-        fields.push(format!("resolution={resolution}"));
-    }
-    if let Some(model_kind) = extra.get("model_kind").and_then(clean_machine_field_value) {
-        fields.push(format!("model_kind={model_kind}"));
-    }
-    if let Some(adapter_kind) = extra
-        .get("adapter_kind")
-        .and_then(clean_machine_field_value)
-    {
-        fields.push(format!("adapter_kind={adapter_kind}"));
-    }
-    fields.push(format!("output_path={output_path}"));
-    if let Some(planned_outputs_json) =
-        compact_machine_json(&serde_json::Value::Array(planned_outputs))
-    {
-        fields.push(format!("planned_outputs={planned_outputs_json}"));
-    }
-    if let Some(pending_contract) = extra
-        .get("pending_async_job_contract")
-        .filter(|value| value.is_object())
-        .and_then(compact_machine_json)
-    {
-        fields.push(format!("pending_async_job_contract={pending_contract}"));
-    }
-    Some(fields.join("\n"))
+        .or_else(|| {
+            extra
+                .get("planned_outputs")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .find_map(|item| {
+                    item.get("path")
+                        .and_then(clean_machine_field_value)
+                        .and_then(|path| clean_machine_path_payload(&path))
+                })
+        })
 }
 
 pub(super) fn async_adapter_result_report_from_value(value: &serde_json::Value) -> Option<String> {
@@ -878,10 +800,13 @@ pub(super) fn direct_async_poll_result_report_from_payload(
     None
 }
 
-pub(super) fn direct_generated_file_path_report_from_dry_run_payload(
+pub(super) fn direct_exact_scalar_path_from_dry_run_payload(
     loop_state: &LoopState,
-    _agent_run_context: Option<&AgentRunContext>,
+    agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !route_requests_exact_scalar_path(agent_run_context) {
+        return None;
+    }
     for step in loop_state.executed_step_results.iter().rev() {
         if !step.is_ok()
             || matches!(
@@ -902,7 +827,7 @@ pub(super) fn direct_generated_file_path_report_from_dry_run_payload(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
             continue;
         };
-        if let Some(answer) = generated_file_path_report_from_dry_run_value(&value) {
+        if let Some(answer) = exact_scalar_path_from_dry_run_value(&value) {
             return Some((answer, matrix_observed_shape_summary(loop_state)));
         }
     }

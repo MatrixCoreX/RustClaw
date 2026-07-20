@@ -166,7 +166,7 @@ fn matrix_strict_list_shape_rejects_unobserved_items() {
 fn matrix_single_path_shape_requires_plain_grounded_path() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.output_contract.selection.structured_field_selector = Some("path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-matrix-path", "ask", "write report");
     journal

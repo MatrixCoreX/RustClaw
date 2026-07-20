@@ -120,12 +120,11 @@ mod file_delivery;
 #[cfg(test)]
 use file_delivery::resolve_file_token_from_auto_locator_answer;
 use file_delivery::{
-    direct_async_poll_result_report_from_payload,
+    direct_async_poll_result_report_from_payload, direct_exact_scalar_path_from_dry_run_payload,
+    direct_exact_scalar_path_from_written_path,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
-    direct_file_token_from_observed_path_batch_facts,
-    direct_generated_file_path_report_from_dry_run_payload,
-    direct_generated_file_path_report_from_written_path, direct_path_from_active_bound_inventory,
+    direct_file_token_from_observed_path_batch_facts, direct_path_from_active_bound_inventory,
     direct_scalar_path_candidate_list_from_observed_outputs,
     normalize_file_token_delivery_from_auto_locator,
 };
@@ -571,7 +570,7 @@ pub(crate) async fn finalize_loop_reply(
 
     if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
-            direct_generated_file_path_report_from_dry_run_payload(&loop_state, agent_run_context)
+            direct_exact_scalar_path_from_dry_run_payload(&loop_state, agent_run_context)
         {
             finalizer_summary = Some(summary);
             loop_state.last_user_visible_respond = Some(answer.clone());
@@ -1239,7 +1238,7 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if let Some((answer, summary)) =
-        direct_generated_file_path_report_from_dry_run_payload(&loop_state, agent_run_context)
+        direct_exact_scalar_path_from_dry_run_payload(&loop_state, agent_run_context)
     {
         let current = delivery_deduped.last().map(|message| message.trim());
         if current != Some(answer.as_str()) {
@@ -1248,7 +1247,7 @@ pub(crate) async fn finalize_loop_reply(
             finalizer_summary = Some(summary);
             log_deterministic_delivery_record(
                 &task.task_id,
-                "generated_file_path_report_dry_run_payload",
+                "exact_scalar_path_dry_run_payload",
                 "replaced",
                 agent_run_context,
                 loop_state.executed_step_results.len(),

@@ -6,8 +6,7 @@ use path_request::{
     latest_path_batch_fact_answer_for_requested_summary,
     request_surfaces_explicitly_request_kv_summary,
     requested_machine_kv_summary_from_task_final_answer_with_surfaces,
-    route_preserves_generated_file_machine_report, task_machine_kv_request_surfaces,
-    text_has_compare_paths_existence_fields,
+    task_machine_kv_request_surfaces, text_has_compare_paths_existence_fields,
 };
 
 pub(super) fn recover_requested_machine_kv_summary_final_answer(
@@ -113,10 +112,6 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
     force_structured: bool,
 ) -> bool {
     if final_answer_preserves_delivery_artifact(route_result, answer_text, answer_messages) {
-        journal.record_final_answer(answer_text.as_str());
-        return false;
-    }
-    if route_preserves_generated_file_machine_report(route_result, answer_text, answer_messages) {
         journal.record_final_answer(answer_text.as_str());
         return false;
     }

@@ -49,6 +49,24 @@ failure_policy = "retry_with_alternatives"
 any_of = ["field_value", "content_excerpt"]
 
 [[generic_profiles]]
+name = "generic_exact_scalar_path"
+semantic_kind = "none"
+delivery_required = false
+response_shapes = ["scalar"]
+structured_field_selectors = ["path", "resolved_path"]
+policy_mode = "enforce"
+evidence_scope = "current_task"
+freshness = "current_task"
+artifact_kind = "file"
+channel_visibility = "user_visible"
+evidence_profile = "generic"
+allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "run_cmd", "doc_parse", "transform", "audio_synthesize", "audio_synthesize.synthesize", "audio_synthesize.poll", "audio_synthesize.cancel", "image_generate", "image_generate.generate", "image_generate.poll", "image_generate.cancel", "image_edit", "image_edit.edit", "image_edit.outpaint", "image_edit.restyle", "video_generate", "video_generate.generate", "video_generate.poll", "video_generate.cancel", "music_generate", "music_generate.generate", "music_generate.poll", "music_generate.cancel"]
+preferred_actions = ["fs_basic.write_text", "audio_synthesize", "audio_synthesize.synthesize", "image_generate", "image_generate.generate", "image_generate.poll", "image_edit", "image_edit.edit", "video_generate", "video_generate.generate", "music_generate", "music_generate.generate"]
+required_evidence = ["path"]
+final_answer_shape = "single_path"
+failure_policy = "retry_with_alternatives"
+
+[[generic_profiles]]
 name = "generic_path_content"
 semantic_kind = "none"
 requires_content_evidence = true
@@ -175,17 +193,6 @@ observation_sources = ["run_cmd", "log_analyze", "health_check", "service_contro
 
 [contracts.execution_failed_step.evidence_expression]
 any_of = ["command_output", "field_value"]
-
-[contracts.generated_file_path_report]
-semantic_kind = "generated_file_path_report"
-operation = "write"
-target_object = "path"
-delivery_shape = "raw"
-allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "run_cmd", "doc_parse", "transform", "audio_synthesize", "audio_synthesize.synthesize", "audio_synthesize.poll", "audio_synthesize.cancel", "image_generate", "image_generate.generate", "image_generate.poll", "image_generate.cancel", "image_edit", "image_edit.edit", "image_edit.outpaint", "image_edit.restyle", "video_generate", "video_generate.generate", "video_generate.poll", "video_generate.cancel", "music_generate", "music_generate.generate", "music_generate.poll", "music_generate.cancel"]
-preferred_actions = ["fs_basic.write_text", "audio_synthesize", "audio_synthesize.synthesize", "image_generate", "image_generate.generate", "image_generate.poll", "image_edit", "image_edit.edit", "video_generate", "video_generate.generate", "music_generate", "music_generate.generate"]
-required_evidence = ["path"]
-final_answer_shape = "single_path"
-failure_policy = "retry_with_alternatives"
 
 [contracts.filesystem_mutation_result]
 semantic_kind = "filesystem_mutation_result"

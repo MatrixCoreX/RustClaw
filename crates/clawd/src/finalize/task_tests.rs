@@ -422,13 +422,12 @@ fn requested_machine_kv_summary_final_guard_preserves_content_evidence_synthesis
 }
 
 #[test]
-fn requested_machine_kv_summary_final_guard_preserves_generated_file_report_fields() {
+fn requested_machine_kv_summary_final_guard_preserves_requested_report_fields() {
     let prompt = "return dry_run=true provider/model planned_outputs and output_path";
     let mut route = route_result();
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-generated-file-report-final",
         "ask",
@@ -464,7 +463,6 @@ fn requested_machine_kv_summary_final_guard_preserves_async_poll_report_fields()
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-async-poll-report-final", "ask", prompt);
     let mut answer_text = concat!(

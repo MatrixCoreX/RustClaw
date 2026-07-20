@@ -432,9 +432,12 @@ fn evidence_policy_preflight_rejects_generated_media_run_cmd() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::GeneratedFilePathReport,
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Scalar,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("path".to_string()),
+            ..Default::default()
+        },
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "document/rust_icon_pixel_smoke.png".to_string(),
         ..crate::IntentOutputContract::default()
@@ -504,9 +507,12 @@ fn evidence_policy_preflight_does_not_block_literal_media_run_cmd() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::GeneratedFilePathReport,
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Scalar,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("path".to_string()),
+            ..Default::default()
+        },
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "document/rust_icon_pixel_smoke.png".to_string(),
         ..crate::IntentOutputContract::default()
