@@ -1,4 +1,3 @@
-use regex::Regex;
 use rusqlite::params;
 use serde_json::Value;
 
@@ -7,12 +6,22 @@ use crate::{AppState, ClaimedTask};
 #[derive(Debug, Clone)]
 struct ExecutionAnchor {
     ts: String,
-    skill: String,
-    domain: String,
-    subject: Option<String>,
-    symbol: Option<String>,
+    capability: String,
+    action: Option<String>,
+    data: Option<Value>,
+    evidence_locators: Vec<String>,
+    artifact_refs: Vec<String>,
     request: String,
     result: String,
+}
+
+#[derive(Debug)]
+struct CapabilityAnchorProjection {
+    capability: String,
+    action: Option<String>,
+    data: Option<Value>,
+    evidence_locators: Vec<String>,
+    artifact_refs: Vec<String>,
 }
 
 fn query_recent_execution_rows(
@@ -195,14 +204,42 @@ fn render_recent_execution_anchor_context(rows: &[(String, String, String, Strin
 
     let mut lines = vec![
         format!("- latest_succeeded_ts={}", anchor.ts),
-        format!("- latest_succeeded_skill={}", anchor.skill),
-        format!("- latest_domain={}", anchor.domain),
+        format!("- latest_capability={}", anchor.capability),
     ];
-    if let Some(subject) = anchor.subject.as_deref().filter(|v| !v.is_empty()) {
-        lines.push(format!("- latest_subject={subject}"));
+    if let Some(action) = anchor.action.as_deref() {
+        lines.push(format!("- latest_action={action}"));
     }
-    if let Some(symbol) = anchor.symbol.as_deref().filter(|v| !v.is_empty()) {
-        lines.push(format!("- latest_symbol={symbol}"));
+    if let Some(data) = anchor.data.as_ref() {
+        lines.push(format!(
+            "- latest_capability_data={}",
+            truncate_snippet(&data.to_string(), 320)
+        ));
+    }
+    if !anchor.evidence_locators.is_empty() {
+        lines.push(format!(
+            "- latest_evidence_locators={}",
+            Value::Array(
+                anchor
+                    .evidence_locators
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect()
+            )
+        ));
+    }
+    if !anchor.artifact_refs.is_empty() {
+        lines.push(format!(
+            "- latest_artifact_refs={}",
+            Value::Array(
+                anchor
+                    .artifact_refs
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect()
+            )
+        ));
     }
     lines.push(format!(
         "- latest_request={}",
@@ -228,136 +265,125 @@ fn extract_execution_anchor(
     let result = task_result_summary(result_json);
     let payload = serde_json::from_str::<Value>(payload_json).ok();
     let result_value = serde_json::from_str::<Value>(result_json).ok();
-
-    let skill_from_payload = payload
+    let projection = result_value
         .as_ref()
-        .and_then(|v| v.get("skill_name"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-    let skill_from_result = extract_skill_from_result(&result);
-    let skill = skill_from_payload
-        .or(skill_from_result)
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let symbol = extract_symbol_from_payload(payload.as_ref())
-        .or_else(|| {
-            result_value
-                .as_ref()
-                .and_then(extract_symbol_from_result_value)
-        })
-        .or_else(|| extract_symbol_from_text(&result));
-    let subject = result_value
-        .as_ref()
-        .and_then(extract_subject_from_result_value);
-    let domain = infer_domain(&skill, symbol.as_deref());
-
-    if skill == "unknown" && symbol.is_none() && subject.is_none() {
-        return None;
-    }
+        .and_then(capability_anchor_from_result)
+        .or_else(|| capability_anchor_from_run_skill_payload(kind, payload.as_ref()))?;
 
     Some(ExecutionAnchor {
         ts: updated_at.to_string(),
-        skill,
-        domain,
-        subject,
-        symbol,
+        capability: projection.capability,
+        action: projection.action,
+        data: projection.data,
+        evidence_locators: projection.evidence_locators,
+        artifact_refs: projection.artifact_refs,
         request,
         result,
     })
 }
 
-fn extract_skill_from_result(result: &str) -> Option<String> {
-    let re = Regex::new(r"skill\(([^)]+)\)").ok()?;
-    re.captures(result)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().trim().to_string())
-        .filter(|v| !v.is_empty())
+fn capability_anchor_from_result(result: &Value) -> Option<CapabilityAnchorProjection> {
+    const POINTERS: [&str; 3] = [
+        "/task_journal/trace/capability_results",
+        "/final_result_json/task_journal/trace/capability_results",
+        "/result/task_journal/trace/capability_results",
+    ];
+    POINTERS
+        .iter()
+        .filter_map(|pointer| result.pointer(pointer).and_then(Value::as_array))
+        .flat_map(|items| items.iter().rev())
+        .find_map(capability_anchor_from_envelope)
 }
 
-fn extract_symbol_from_payload(payload: Option<&Value>) -> Option<String> {
-    payload
-        .and_then(|v| v.get("args"))
-        .and_then(|args| {
-            args.get("symbol")
-                .or_else(|| args.get("code"))
-                .and_then(|v| v.as_str())
-        })
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
-fn market_quote_value_from_result(value: &Value) -> Option<&Value> {
-    if let Some(quote) = value
-        .get("quote")
-        .or_else(|| value.pointer("/extra/quote"))
-        .filter(|quote| quote.is_object())
-    {
-        return Some(quote);
+fn capability_anchor_from_envelope(value: &Value) -> Option<CapabilityAnchorProjection> {
+    if value.get("status").and_then(Value::as_str) != Some("ok") {
+        return None;
     }
-    value.get("extra").filter(|extra| {
-        extra.is_object()
-            && (extra
-                .get("source_skill")
-                .and_then(Value::as_str)
-                .is_some_and(|source| source == "stock")
-                || extra
-                    .get("action")
-                    .and_then(Value::as_str)
-                    .is_some_and(|action| action == "quote"))
+    let capability = machine_ref(value.get("capability")?.as_str()?)?.to_string();
+    let action = value
+        .get("action")
+        .and_then(Value::as_str)
+        .and_then(machine_ref)
+        .map(ToString::to_string);
+    let data = value
+        .get("data")
+        .filter(|data| !data.is_null() && !data.as_object().is_some_and(|map| map.is_empty()))
+        .map(redacted_context_value);
+    let evidence_locators = value
+        .get("evidence")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("locator").and_then(Value::as_str))
+        .filter_map(redacted_reference)
+        .collect();
+    let artifact_refs = value
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            ["path", "uri", "id"]
+                .into_iter()
+                .find_map(|field| item.get(field).and_then(Value::as_str))
+        })
+        .filter_map(redacted_reference)
+        .collect();
+    Some(CapabilityAnchorProjection {
+        capability,
+        action,
+        data,
+        evidence_locators,
+        artifact_refs,
     })
 }
 
-fn extract_symbol_from_result_value(value: &Value) -> Option<String> {
-    let quote = market_quote_value_from_result(value)?;
-    quote
-        .get("symbol")
-        .or_else(|| quote.get("code"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-fn extract_subject_from_result_value(value: &Value) -> Option<String> {
-    market_quote_value_from_result(value)?
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-fn extract_symbol_from_text(text: &str) -> Option<String> {
-    let stock_re = Regex::new(r"\[(?:SH|SZ)?(\d{6})\]").ok()?;
-    if let Some(symbol) = stock_re
-        .captures(text)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
-    {
-        return Some(symbol);
+fn capability_anchor_from_run_skill_payload(
+    kind: &str,
+    payload: Option<&Value>,
+) -> Option<CapabilityAnchorProjection> {
+    if kind != "run_skill" {
+        return None;
     }
-    let crypto_re = Regex::new(r"\b([A-Z]{2,12}(?:USDT|USD))\b").ok()?;
-    crypto_re
-        .captures(text)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
+    let payload = payload?;
+    let capability = machine_ref(payload.get("skill_name")?.as_str()?)?.to_string();
+    let args = payload
+        .get("args")
+        .filter(|args| args.is_object())
+        .map(redacted_context_value);
+    let action = args
+        .as_ref()
+        .and_then(|args| args.get("action"))
+        .and_then(Value::as_str)
+        .and_then(machine_ref)
+        .map(ToString::to_string);
+    Some(CapabilityAnchorProjection {
+        capability,
+        action,
+        data: args,
+        evidence_locators: Vec::new(),
+        artifact_refs: Vec::new(),
+    })
 }
 
-fn infer_domain(skill: &str, symbol: Option<&str>) -> String {
-    let skill_lower = skill.to_ascii_lowercase();
-    if skill_lower.contains("crypto")
-        || symbol.is_some_and(|v| v.ends_with("USDT") || v.ends_with("USD"))
-    {
-        "crypto".to_string()
-    } else if skill_lower.contains("stock")
-        || skill_lower.contains("a_stock")
-        || symbol.is_some_and(|v| v.len() == 6 && v.chars().all(|ch| ch.is_ascii_digit()))
-    {
-        "cn_stock".to_string()
-    } else {
-        "general".to_string()
-    }
+fn machine_ref(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+    .then_some(value)
+}
+
+fn redacted_reference(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| crate::visible_text::redact_sensitive_text(value))
+}
+
+fn redacted_context_value(value: &Value) -> Value {
+    let redacted = crate::visible_text::sanitize_user_visible_text(&value.to_string());
+    serde_json::from_str(&redacted).unwrap_or(Value::String(redacted))
 }
 
 fn task_payload_summary(kind: &str, payload_json: &str) -> String {
@@ -375,10 +401,11 @@ fn task_payload_summary(kind: &str, payload_json: &str) -> String {
                 .get("skill_name")
                 .and_then(|x| x.as_str())
                 .unwrap_or("unknown");
-            format!(
-                "run_skill:{skill} args={}",
-                v.get("args").cloned().unwrap_or(Value::Null)
-            )
+            let args = v
+                .get("args")
+                .map(redacted_context_value)
+                .unwrap_or(Value::Null);
+            format!("run_skill:{skill} args={}", args)
         }
         _ => payload_json.to_string(),
     }
