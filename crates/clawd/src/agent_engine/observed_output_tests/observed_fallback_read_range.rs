@@ -267,10 +267,9 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
 
 #[test]
 fn observed_fallback_prompt_uses_compact_template_for_short_listing_and_scalar_contracts() {
-    for (semantic_kind, structured_field_selector) in [
-        (OutputSemanticKind::None, Some("path")),
-        (OutputSemanticKind::ExistenceWithPath, None),
-    ] {
+    for (semantic_kind, structured_field_selector) in
+        [(OutputSemanticKind::None, Some("path"))]
+    {
         let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
         route_result.semantic_kind = semantic_kind;
         route_result.selection.structured_field_selector =
@@ -754,7 +753,7 @@ fn direct_answer_defers_read_range_passthrough_when_language_conflicts() {
 }
 
 #[test]
-fn direct_answer_does_not_passthrough_read_range_for_existence_with_path_contract() {
+fn path_inspection_contract_does_not_passthrough_read_range() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -763,14 +762,17 @@ fn direct_answer_does_not_passthrough_read_range_for_existence_with_path_contrac
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -781,7 +783,7 @@ fn direct_answer_does_not_passthrough_read_range_for_existence_with_path_contrac
     assert!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .is_none(),
-            "existence/path contracts with read_range evidence need synthesis, not raw file passthrough"
+            "path inspection contracts need synthesis, not raw file passthrough"
         );
 }
 

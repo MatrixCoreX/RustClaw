@@ -394,11 +394,20 @@ matrix_version = "broken"
 }
 
 #[test]
-fn existence_contract_can_express_negative_evidence() {
+fn generic_path_inspection_can_express_negative_evidence() {
     let matrix = load_workspace_matrix();
     let contract = matrix
-        .semantic_contract(OutputSemanticKind::ExistenceWithPath)
-        .expect("existence contract");
+        .match_output_contract(&IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: false,
+            locator_kind: OutputLocatorKind::Path,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .expect("generic path inspection contract");
     let expression = contract.evidence_expression();
 
     assert_eq!(expression.all_of, vec!["kind", "path"]);

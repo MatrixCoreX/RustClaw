@@ -388,7 +388,7 @@ fn direct_answer_preserves_list_dir_entries_without_request_text_limit() {
 }
 
 #[test]
-fn direct_answer_formats_existence_with_path_from_system_basic_path_batch_facts() {
+fn ordinary_path_inspection_defers_system_basic_path_facts_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -402,24 +402,24 @@ fn direct_answer_formats_existence_with_path_from_system_basic_path_batch_facts(
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("path fact answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains("path=/tmp/rustclaw-workspace/rustclaw.service"));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
 }
 
 #[test]
-fn direct_answer_prefers_path_batch_facts_over_prior_find_entries_without_semantic_marker() {
+fn ordinary_path_inspection_defers_multiple_path_observations_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -431,87 +431,74 @@ fn direct_answer_prefers_path_batch_facts_over_prior_find_entries_without_semant
         "fs_basic",
         r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":769},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}"#,
     ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     route_result.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route_result.locator_hint.clear();
     route_result.semantic_kind = OutputSemanticKind::None;
     route_result.requires_content_evidence = false;
+    route_result.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("path facts should win over weaker basename search result");
-
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains("path=/home/guagua/rustclaw/rustclaw.service"));
-    assert_ne!(answer.trim(), "rustclaw.service");
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
 }
 
 #[test]
-fn direct_answer_formats_strict_path_kind_from_fs_basic_path_batch_facts() {
+fn ordinary_path_kind_inspection_defers_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"configs/channels","resolved_path":"/tmp/repo/configs/channels","size_bytes":4096},"path":"/tmp/repo/configs/channels"}],"include_missing":true}"#,
         ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.locator_kind = OutputLocatorKind::Path;
     route_result.locator_hint = "/tmp/repo/configs/channels".to_string();
+    route_result.selection.structured_field_selector =
+        Some("exists,kind,path".to_string());
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("path kind fact answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains("path=/tmp/repo/configs/channels"));
-    assert!(answer.contains("kind=dir"));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
     assert!(observed_output_entries(&loop_state)
         .join("\n")
         .contains("kind=dir"));
 }
 
 #[test]
-fn direct_answer_formats_multi_path_facts_without_llm_synthesis() {
+fn ordinary_multi_path_inspection_defers_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
             r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"package.json","resolved_path":"/tmp/repo/package.json","size_bytes":120},"path":"package.json"},{"exists":false,"path":"nope.json","error":"not found"}],"include_missing":true}"#,
         ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route_result.locator_hint = "/tmp/repo".to_string();
+    route_result.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("multi path facts answer");
-    assert!(answer.contains("message_key=clawd.msg.path_batch_facts.observed"));
-    assert!(answer.contains("reason_code=path_batch_facts_observed"));
-    assert!(answer.contains("count=2"));
-    assert!(answer.contains("fact.1.exists=true"));
-    assert!(answer.contains("fact.1.path=/tmp/repo/package.json"));
-    assert!(answer.contains("fact.1.kind=file"));
-    assert!(answer.contains("fact.2.exists=false"));
-    assert!(answer.contains("fact.2.path=nope.json"));
-    assert!(answer.contains("fact.2.kind=missing"));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
 }
 
 #[test]
-fn direct_answer_formats_scalar_existence_without_path_from_system_basic_path_batch_facts() {
+fn ordinary_scalar_like_existence_request_uses_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -520,54 +507,52 @@ fn direct_answer_formats_scalar_existence_without_path_from_system_basic_path_ba
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
-            requires_content_evidence: true,
+            response_shape: OutputResponseShape::OneSentence,
+            requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "configs/config.toml".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("scalar path existence answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
 }
 
 #[test]
-fn direct_answer_formats_path_batch_facts_requested_size() {
+fn ordinary_path_metadata_observation_does_not_use_fixed_runtime_reply() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
             r#"{"action":"path_batch_facts","count":1,"fields":["exists","size"],"facts":[{"exists":true,"fact":{"kind":"file","path":"data/rustclaw.db","resolved_path":"/tmp/repo/data/rustclaw.db","size_bytes":55226368},"path":"/tmp/repo/data/rustclaw.db"}],"include_missing":true}"#,
         ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.locator_kind = OutputLocatorKind::Path;
     route_result.locator_hint = "data/rustclaw.db".to_string();
+    route_result.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("path size fact answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains("path=/tmp/repo/data/rustclaw.db"));
-    assert!(answer.contains("size_bytes=55226368"));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
 }
 
 #[test]
-fn direct_answer_formats_missing_path_batch_facts_with_reason() {
+fn ordinary_missing_path_observation_defers_to_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -576,33 +561,30 @@ fn direct_answer_formats_missing_path_batch_facts_with_reason() {
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
+            response_shape: OutputResponseShape::OneSentence,
+            requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/missing.txt".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("missing path answer");
-
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=false"));
-    assert!(answer.contains("kind=missing"));
-    assert!(answer.contains("error_code=path_not_found"));
-    assert!(answer.contains("/tmp/missing.txt"));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
 }
 
 #[test]
-fn direct_answer_formats_existence_with_path_from_run_cmd_yes_output() {
+fn run_cmd_yes_text_is_not_parsed_into_a_path_verdict() {
     let temp_dir = std::env::temp_dir().join(format!(
         "clawd_observed_exists_yes_{}_{}",
         std::process::id(),
@@ -628,26 +610,27 @@ fn direct_answer_formats_existence_with_path_from_run_cmd_yes_output() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
         ..AgentRunContext::default()
     };
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("run_cmd yes path fact answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains(&format!("path={expected_path}")));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
+    assert!(!expected_path.is_empty());
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
-fn direct_answer_formats_existence_with_path_from_run_cmd_exists_output() {
+fn run_cmd_exists_text_is_not_parsed_into_a_path_verdict() {
     let temp_dir = std::env::temp_dir().join(format!(
         "clawd_observed_exists_lower_{}_{}",
         std::process::id(),
@@ -673,26 +656,27 @@ fn direct_answer_formats_existence_with_path_from_run_cmd_exists_output() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
         ..AgentRunContext::default()
     };
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("run_cmd exists path fact answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains(&format!("path={expected_path}")));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
+    assert!(!expected_path.is_empty());
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
-fn direct_answer_formats_existence_with_path_from_system_basic_find_name_output() {
+fn ordinary_find_name_path_observation_defers_to_model_synthesis() {
     let temp_dir = std::env::temp_dir().join(format!(
         "clawd_observed_exists_find_name_{}_{}",
         std::process::id(),
@@ -715,25 +699,26 @@ fn direct_answer_formats_existence_with_path_from_system_basic_find_name_output(
     ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
+            response_shape: OutputResponseShape::Free,
             requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
         ..AgentRunContext::default()
     };
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("find_name path fact answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains(&format!("path={resolved}")));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
+    assert!(!resolved.is_empty());
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

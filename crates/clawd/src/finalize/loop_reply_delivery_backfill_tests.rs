@@ -833,7 +833,7 @@ async fn finalize_loop_reply_keeps_strict_raw_tail_read_delivery_over_synthesis(
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
+async fn finalize_loop_reply_preserves_model_synthesis_after_path_observation() {
     let state = test_state();
     let task = claimed_task("task-path-fact-after-repair");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -848,12 +848,16 @@ async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
         "fs_basic",
         r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"configs/channels","resolved_path":"/tmp/repo/configs/channels","size_bytes":4096},"path":"/tmp/repo/configs/channels"}],"include_missing":true}"#,
     ));
+    let planned = "已找到该目录：`/tmp/repo/configs/channels`，类型为目录。".to_string();
+    loop_state.last_user_visible_respond = Some(planned.clone());
+    loop_state.last_publishable_synthesis_output = Some(planned.clone());
     let mut route = free_route_result();
-    route.response_shape = OutputResponseShape::Strict;
-    route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = false;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/tmp/repo/configs/channels".to_string();
+    route.selection.structured_field_selector = Some("exists,kind,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -869,13 +873,7 @@ async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
     .await
     .expect("finalize should succeed");
 
-    assert!(reply
-        .text
-        .contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(reply.text.contains("reason_code=path_fact_observed"));
-    assert!(reply.text.contains("exists=true"));
-    assert!(reply.text.contains("path=/tmp/repo/configs/channels"));
-    assert!(reply.text.contains("kind=dir"));
+    assert_eq!(reply.text, planned);
     assert!(!reply.text.contains("没能整理成可靠结论"));
     assert!(reply
         .messages
@@ -886,7 +884,6 @@ async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
         Some(reply.text.as_str())
     );
     assert!(!reply.should_fail_task);
-    assert!(!reply.is_llm_reply);
 }
 
 #[tokio::test]

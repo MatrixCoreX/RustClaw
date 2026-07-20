@@ -308,8 +308,8 @@ pub(crate) struct LoopState {
     pub(crate) recipe_scope_ready_hint_sent: bool,
     /// §7.1 output_contract 贯穿全链：IntentOutputContract 里的 output_contract 与 route marker
     /// 合并成 effective machine contract 后挂到 LoopState 上。下游 synthesis/finalize
-    /// 和无 IntentOutputContract 入参的 preflight 必须看见这些字段，否则容易把结构化
-    /// existence_with_path / scalar / file_token 契约答成自由段落。
+    /// 和无 IntentOutputContract 入参的 preflight 必须看见这些字段，否则容易把精确
+    /// scalar / file_token 契约答成自由段落。
     /// 默认 None：测试与不走 IntentOutputContract 的 ad-hoc 路径保持向后兼容。
     pub(crate) output_contract: Option<crate::IntentOutputContract>,
     /// True only while executing the current round's verifier-approved actions.

@@ -69,7 +69,7 @@ fn direct_answer_preserves_run_cmd_directory_entry_names_without_request_text_li
 }
 
 #[test]
-fn direct_answer_formats_run_cmd_exists_probe_with_resolved_path() {
+fn run_cmd_exists_token_is_not_interpreted_as_a_path_verdict() {
     let temp_dir = std::env::temp_dir().join(format!(
         "clawd_observed_output_test_{}_run_cmd_exists",
         std::process::id()
@@ -88,57 +88,56 @@ fn direct_answer_formats_run_cmd_exists_probe_with_resolved_path() {
         .push(ok_step("step_1", "run_cmd", "EXISTS\n"));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
+            response_shape: OutputResponseShape::Free,
             requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "rustclaw.service".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         auto_locator_path: Some(resolved.clone()),
         ..AgentRunContext::default()
     };
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("path fact answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=true"));
-    assert!(answer.contains(&format!("path={resolved}")));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
-fn direct_answer_formats_run_cmd_not_found_probe_as_no() {
+fn run_cmd_not_found_token_is_not_interpreted_as_a_path_verdict() {
     let mut loop_state = LoopState::new(2);
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "NOT_FOUND\n"));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
+            response_shape: OutputResponseShape::Free,
             requires_content_evidence: false,
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
             semantic_kind: Default::default(),
             locator_hint: "rustclaw.service".to_string(),
-            selection: crate::OutputSelectionContract::default(),
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("exists,path".to_string()),
+                ..Default::default()
+            },
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("missing path fact answer");
-    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
-    assert!(answer.contains("reason_code=path_fact_observed"));
-    assert!(answer.contains("exists=false"));
-    assert!(answer.contains("kind=missing"));
-    assert!(answer.contains("path=rustclaw.service"));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
+    );
 }
 
 #[test]

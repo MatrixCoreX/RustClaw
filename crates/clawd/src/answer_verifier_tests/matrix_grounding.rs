@@ -518,7 +518,10 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
     let mut scalar_route = route_with_mode();
     scalar_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     scalar_route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    scalar_route.output_contract.selection.structured_field_selector = Some("count".to_string());
+    scalar_route
+        .output_contract
+        .selection
+        .structured_field_selector = Some("count".to_string());
     let mut scalar_journal =
         crate::task_journal::TaskJournal::for_task("task-synth-scalar", "ask", "count files");
     scalar_journal
@@ -568,10 +571,13 @@ fn matrix_single_path_shape_uses_observed_evidence_map_paths() {
 }
 
 #[test]
-fn existence_with_path_answer_grounded_by_existing_path_fact_skips_llm_verifier() {
+fn path_inspection_answer_still_uses_model_verifier_after_existing_path_fact() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-exists", "ask", "check path");
     journal
@@ -593,7 +599,7 @@ fn existence_with_path_answer_grounded_by_existing_path_fact_skips_llm_verifier(
             .to_string(),
         ));
 
-    assert!(structurally_satisfies_answer_contract(
+    assert!(!structurally_satisfies_answer_contract(
         &route,
         &journal,
         "有，路径：/repo/README.md"
@@ -601,10 +607,13 @@ fn existence_with_path_answer_grounded_by_existing_path_fact_skips_llm_verifier(
 }
 
 #[test]
-fn existence_with_path_answer_grounded_by_missing_path_fact_skips_llm_verifier() {
+fn path_inspection_answer_still_uses_model_verifier_after_missing_path_fact() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-missing", "ask", "check path");
     journal
@@ -623,7 +632,7 @@ fn existence_with_path_answer_grounded_by_missing_path_fact_skips_llm_verifier()
             .to_string(),
         ));
 
-    assert!(structurally_satisfies_answer_contract(
+    assert!(!structurally_satisfies_answer_contract(
         &route,
         &journal,
         "未找到 `missing.txt`，请确认路径后再继续。"
@@ -631,11 +640,13 @@ fn existence_with_path_answer_grounded_by_missing_path_fact_skips_llm_verifier()
 }
 
 #[test]
-fn existence_with_path_answer_ignores_doc_parse_path_facts() {
+fn path_inspection_answer_ignores_doc_parse_path_facts() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-exists-doc-parse", "ask", "check path");
     journal
@@ -666,11 +677,13 @@ fn existence_with_path_answer_ignores_doc_parse_path_facts() {
 }
 
 #[test]
-fn existence_with_path_answer_ignores_read_text_path_facts() {
+fn path_inspection_answer_ignores_read_text_path_facts() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-exists-read-text", "ask", "check path");
     journal

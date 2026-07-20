@@ -12,7 +12,7 @@
 //! - Reject 由调用方接 §7.2 [`crate::fallback::ClarifyFallbackSource::VerifyRejected`]
 //!   兜底，外加 tracing 事件保留判定原因，便于 inspect_task.sh 关联。
 
-use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
+use crate::{IntentOutputContract, OutputResponseShape};
 
 /// §7.1 verifier 判定结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,15 +70,6 @@ impl OutputContractVerdict {
             }
         }
     }
-}
-
-/// existence_with_path 的正/否、路径是否必须出现，都是语义判断。
-/// 不再用本地 yes/no 词表或描述词硬裁决；prompt/composer 负责按 contract 输出。
-fn verify_existence_with_path(
-    _contract: &IntentOutputContract,
-    _text: &str,
-) -> OutputContractVerdict {
-    OutputContractVerdict::Pass
 }
 
 /// scalar_count：回答里至少要有一个整数字面（或纯数字 candidate）。
@@ -151,12 +142,7 @@ pub(crate) fn verify_output_contract(
     if contract.requests_exact_count() {
         return verify_scalar_count(contract, trimmed_candidate);
     }
-    match contract.semantic_kind {
-        OutputSemanticKind::ExistenceWithPath => {
-            verify_existence_with_path(contract, trimmed_candidate)
-        }
-        _ => OutputContractVerdict::Pass,
-    }
+    OutputContractVerdict::Pass
 }
 
 #[cfg(test)]

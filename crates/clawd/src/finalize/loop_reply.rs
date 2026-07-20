@@ -149,9 +149,8 @@ use file_missing::{
 mod tail_read;
 use tail_read::{
     current_user_visible_delivery_text, latest_bounded_read_range_answer_from_loop,
-    latest_path_batch_facts_has_implicit_metadata_fields, latest_plan_requested_synthesis,
-    latest_tail_read_range_answer_from_loop, latest_tail_read_range_observed_answer,
-    replace_delivery_with_latest_tail_read_range_answer,
+    latest_plan_requested_synthesis, latest_tail_read_range_answer_from_loop,
+    latest_tail_read_range_observed_answer, replace_delivery_with_latest_tail_read_range_answer,
     route_allows_latest_tail_read_range_delivery, route_requires_raw_tail_read_passthrough,
     tail_read_directory_inventory_projection_available,
 };
@@ -280,8 +279,7 @@ use missing_delivery::{
 use missing_delivery::{
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
-    pre_execution_confirmation_checkpoint_seed,
-    verify_summary_requires_resume_confirmation,
+    pre_execution_confirmation_checkpoint_seed, verify_summary_requires_resume_confirmation,
 };
 
 #[path = "loop_reply_route_helpers.rs"]

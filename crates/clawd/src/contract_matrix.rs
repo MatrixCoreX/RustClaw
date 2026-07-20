@@ -438,7 +438,7 @@ impl GenericProfile {
             return false;
         }
         if !self.structured_field_selectors.is_empty() {
-            let Some(fields) = output
+            let Some(mut fields) = output
                 .selection
                 .structured_field_selector
                 .as_deref()
@@ -446,10 +446,18 @@ impl GenericProfile {
             else {
                 return false;
             };
-            if !matches!(
-                fields.as_slice(),
-                [field] if contains_token(&self.structured_field_selectors, field)
-            ) {
+            fields.sort();
+            let matches_configured_selector =
+                self.structured_field_selectors.iter().any(|selector| {
+                    let Some(mut configured) =
+                        crate::machine_kv_projection::exact_machine_field_selector(selector)
+                    else {
+                        return false;
+                    };
+                    configured.sort();
+                    configured == fields
+                });
+            if !matches_configured_selector {
                 return false;
             }
         }
@@ -559,7 +567,6 @@ impl ObservationExtractor {
 pub(crate) enum FinalAnswerShape {
     DeliveryTokenOrPath,
     ExactList,
-    ExistenceVerdictWithPath,
     FailedStepWithEvidence,
     Free,
     LifecycleResult,
@@ -613,7 +620,6 @@ impl FinalAnswerShape {
     pub(crate) const ALL: &'static [Self] = &[
         Self::DeliveryTokenOrPath,
         Self::ExactList,
-        Self::ExistenceVerdictWithPath,
         Self::FailedStepWithEvidence,
         Self::Free,
         Self::LifecycleResult,
@@ -627,7 +633,6 @@ impl FinalAnswerShape {
         match raw.trim() {
             "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
             "exact_list" => Some(Self::ExactList),
-            "existence_verdict_with_path" => Some(Self::ExistenceVerdictWithPath),
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
             "free" => Some(Self::Free),
             "lifecycle_result" => Some(Self::LifecycleResult),
@@ -643,7 +648,6 @@ impl FinalAnswerShape {
         match self {
             Self::DeliveryTokenOrPath => "delivery_token_or_path",
             Self::ExactList => "exact_list",
-            Self::ExistenceVerdictWithPath => "existence_verdict_with_path",
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
             Self::Free => "free",
             Self::LifecycleResult => "lifecycle_result",
@@ -660,9 +664,7 @@ impl FinalAnswerShape {
             Self::SinglePath => FinalAnswerShapeClass::SinglePath,
             Self::Scalar => FinalAnswerShapeClass::ScalarValue,
             Self::ExactList => FinalAnswerShapeClass::StrictList,
-            Self::ExistenceVerdictWithPath | Self::LifecycleResult => {
-                FinalAnswerShapeClass::Verdict
-            }
+            Self::LifecycleResult => FinalAnswerShapeClass::Verdict,
             Self::FailedStepWithEvidence
             | Self::RawOutputOrShortSummary
             | Self::SummaryWithEvidence => FinalAnswerShapeClass::GroundedSummary,

@@ -89,6 +89,31 @@ observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list
 all_of = ["count"]
 
 [[generic_profiles]]
+name = "generic_path_inspection"
+semantic_kind = "none"
+requires_content_evidence = false
+delivery_required = false
+response_shapes = ["free", "one_sentence"]
+locator_kinds = ["path", "current_workspace", "filename"]
+structured_field_selectors = ["exists,path", "exists,kind,path"]
+policy_mode = "enforce"
+evidence_scope = "current_task"
+freshness = "current_task"
+artifact_kind = "text"
+channel_visibility = "user_visible"
+evidence_profile = "generic"
+allowed_actions = ["fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.read_text_range"]
+preferred_actions = ["fs_basic.stat_paths"]
+required_evidence = ["exists", "kind", "path"]
+final_answer_shape = "summary_with_evidence"
+failure_policy = "retry_with_alternatives"
+
+[generic_profiles.evidence_expression]
+all_of = ["path", "kind"]
+one_of = ["exists_true", "exists_false"]
+negative_evidence = ["exists_false"]
+
+[[generic_profiles]]
 name = "generic_path_content"
 semantic_kind = "none"
 requires_content_evidence = true
@@ -163,19 +188,3 @@ failure_policy = "retry_with_alternatives"
 
 [contracts.raw_command_output.evidence_expression]
 any_of = ["command_output", "field_value", "content_excerpt"]
-
-[contracts.existence_with_path]
-semantic_kind = "existence_with_path"
-operation = "inspect"
-target_object = "path"
-delivery_shape = "summary"
-allowed_actions = ["fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.read_text_range"]
-preferred_actions = ["fs_basic.stat_paths"]
-required_evidence = ["exists", "kind", "path"]
-final_answer_shape = "existence_verdict_with_path"
-failure_policy = "retry_with_alternatives"
-
-[contracts.existence_with_path.evidence_expression]
-all_of = ["path", "kind"]
-one_of = ["exists_true", "exists_false"]
-negative_evidence = ["exists_false"]

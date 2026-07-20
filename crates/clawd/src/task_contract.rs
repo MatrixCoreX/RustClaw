@@ -75,7 +75,6 @@ pub(crate) fn operation_for_output_contract(
     }
     match semantic_kind {
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
-        OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
     }
 }
@@ -170,13 +169,15 @@ fn task_delivery_shape_from_token(value: &str) -> Option<TaskDeliveryShape> {
 pub(crate) fn required_evidence_fields_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> Vec<String> {
-    if let Some(fields) = output_contract
-        .selection
-        .structured_field_selector
-        .as_deref()
-        .and_then(crate::machine_kv_projection::exact_machine_field_selector)
-    {
-        return fields;
+    if output_contract.requests_exact_structured_fields() {
+        if let Some(fields) = output_contract
+            .selection
+            .structured_field_selector
+            .as_deref()
+            .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+        {
+            return fields;
+        }
     }
     let fallback = fallback_required_evidence_fields_for_output_contract(output_contract);
     match crate::evidence_policy::required_evidence_for_output_contract(output_contract) {
@@ -207,11 +208,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
     match output_contract.semantic_kind {
         OutputSemanticKind::RawCommandOutput => {
             fields.insert("command_output");
-        }
-        OutputSemanticKind::ExistenceWithPath => {
-            fields.insert("exists");
-            fields.insert("kind");
-            fields.insert("path");
         }
         _ => {}
     }

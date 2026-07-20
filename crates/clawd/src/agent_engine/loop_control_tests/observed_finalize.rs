@@ -462,7 +462,7 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
 }
 
 #[test]
-fn existence_with_path_free_output_can_stop_before_second_round() {
+fn path_inspection_waits_for_model_synthesis_after_observation() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
@@ -473,13 +473,14 @@ fn existence_with_path_free_output_can_stop_before_second_round() {
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "rustclaw.service".to_string();
+    route.selection.structured_field_selector = Some("exists,path".to_string());
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"path_batch_facts","paths":["/home/guagua/rustclaw/rustclaw.service"]}),
     }];
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route.clone()),
             ..Default::default()
@@ -490,7 +491,7 @@ fn existence_with_path_free_output_can_stop_before_second_round() {
 }
 
 #[test]
-fn missing_path_batch_facts_existence_contract_stops_before_second_round() {
+fn missing_path_inspection_waits_for_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
@@ -501,13 +502,14 @@ fn missing_path_batch_facts_existence_contract_stops_before_second_round() {
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "plan/missing.md".to_string();
+    route.selection.structured_field_selector = Some("exists,path".to_string());
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"path_batch_facts","paths":["plan/missing.md"]}),
     }];
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route.clone()),
             ..Default::default()

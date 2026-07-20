@@ -123,12 +123,12 @@ fn planner_capability_hint_includes_structured_contract() {
         subprocess: None,
         package_install: None,
         privilege_escalation: None,
-        output_semantic_kind: Some("existence_with_path".to_string()),
-        final_answer_shape: Some("existence_verdict_with_path".to_string()),
+        output_semantic_kind: Some("path_inspection".to_string()),
+        final_answer_shape: Some("summary_with_evidence".to_string()),
     });
     assert_eq!(
         hint,
-        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll,isolation_profile=read_only,network_access=false,filesystem_write=false,external_publish=false,credential_access=false,output_semantic_kind=existence_with_path,final_answer_shape=existence_verdict_with_path)"
+        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll,isolation_profile=read_only,network_access=false,filesystem_write=false,external_publish=false,credential_access=false,output_semantic_kind=path_inspection,final_answer_shape=summary_with_evidence)"
     );
 }
 

@@ -221,9 +221,7 @@ pub(super) fn structured_scalar_candidate(
             structured_scalar_observation_from_value(&value).map(|observation| observation.text)
         }
         "path_batch_facts" => {
-            if route.is_some_and(route_requests_scalar_existence) {
-                system_basic_scalar_existence_candidate(state, value, prefer_english)
-            } else if let Some(field) = route.and_then(exact_scalar_path_selector) {
+            if let Some(field) = route.and_then(exact_scalar_path_selector) {
                 system_basic_path_batch_scalar_path_candidate(value, &field)
             } else {
                 None

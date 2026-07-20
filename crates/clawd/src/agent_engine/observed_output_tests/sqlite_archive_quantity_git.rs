@@ -148,24 +148,6 @@ fn direct_scalar_defers_compare_paths_result_to_synthesis() {
 }
 
 #[test]
-fn unclassified_compare_paths_contract_does_not_force_direct_scalar_answer() {
-    let route = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "Cargo.lock|Cargo.toml".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    assert!(!super::route_prefers_direct_observed_answer_for_scalar(
-        &route
-    ));
-}
-
-#[test]
 fn direct_answer_defers_git_status_dirty_worktree_to_llm() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

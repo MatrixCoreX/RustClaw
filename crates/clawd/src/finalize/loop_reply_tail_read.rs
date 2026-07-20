@@ -14,38 +14,6 @@ pub(super) fn latest_plan_requested_synthesis(loop_state: &LoopState) -> bool {
     })
 }
 
-pub(super) fn latest_path_batch_facts_has_implicit_metadata_fields(loop_state: &LoopState) -> bool {
-    let Some(observed) =
-        crate::agent_engine::observed_output::extract_latest_generic_successful_output(loop_state)
-    else {
-        return false;
-    };
-    if !matches!(observed.skill.as_str(), "fs_basic" | "system_basic") {
-        return false;
-    }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&observed.body) else {
-        return false;
-    };
-    if value.get("action").and_then(|value| value.as_str()) != Some("path_batch_facts")
-        || value.get("fields").is_some()
-    {
-        return false;
-    }
-    value
-        .get("facts")
-        .and_then(|value| value.as_array())
-        .is_some_and(|facts| {
-            facts.iter().any(|entry| {
-                entry
-                    .get("fact")
-                    .and_then(|value| value.as_object())
-                    .is_some_and(|fact| {
-                        fact.get("size_bytes").is_some() || fact.get("modified_ts").is_some()
-                    })
-            })
-        })
-}
-
 pub(super) fn route_allows_latest_tail_read_range_delivery(
     route: &crate::IntentOutputContract,
 ) -> bool {

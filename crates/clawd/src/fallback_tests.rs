@@ -257,7 +257,7 @@ fn structured_clarify_default_returns_missing_search_locator_machine_payload() {
         ClarifyFallbackSource::IntentUnresolved,
         "看看那个脚本在不在",
         "semantic_contract_requires_evidence",
-        Some("clarify_case: missing_search_locator\nresolved_user_intent: 检查脚本是否存在\nsemantic_kind: existence_with_path"),
+        Some("clarify_case: missing_search_locator\nresolved_user_intent: 检查脚本是否存在\nsemantic_kind: none"),
         "zh-CN",
     );
 

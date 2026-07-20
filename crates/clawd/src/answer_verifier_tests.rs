@@ -214,8 +214,11 @@ fn clarify_final_status_skips_answer_verifier() {
 #[test]
 fn local_missing_evidence_gap_reports_required_fields() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap", "ask", "exists?");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -237,8 +240,11 @@ fn local_missing_evidence_gap_reports_required_fields() {
 #[test]
 fn local_missing_evidence_gap_uses_contract_not_route_trace() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap-trace", "ask", "exists?");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -707,10 +713,13 @@ fn local_missing_evidence_gap_keeps_gap_for_non_missing_terminal_error() {
 }
 
 #[test]
-fn structural_satisfaction_does_not_skip_missing_contract_evidence() {
+fn path_inspection_does_not_use_structural_shortcut_or_skip_missing_evidence() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.selection.structured_field_selector = Some("exists,path".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-structural-gap", "ask", "exists?");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -732,7 +741,7 @@ fn structural_satisfaction_does_not_skip_missing_contract_evidence() {
         finished_at: 2,
     });
 
-    assert!(structurally_satisfies_answer_contract(
+    assert!(!structurally_satisfies_answer_contract(
         &route,
         &journal,
         "/tmp/a.txt exists"

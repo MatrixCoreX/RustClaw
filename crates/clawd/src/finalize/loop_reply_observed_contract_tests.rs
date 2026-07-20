@@ -97,7 +97,7 @@ fn exact_path_observed_answer_replaces_step_status_after_fallback_success() {
 }
 
 #[test]
-fn path_locator_observed_answer_replaces_step_status_after_fallback_success() {
+fn non_exact_path_locator_does_not_replace_model_output_with_observed_listing() {
     let state = test_state();
     let mut route = free_route_result();
     route.requires_content_evidence = true;
@@ -136,25 +136,17 @@ fn path_locator_observed_answer_replaces_step_status_after_fallback_success() {
 
     assert_eq!(
         delivery_messages,
-        vec![
-            "plan/execution_intent_route_trace_cases.txt\nplan/execution_intent_routing_repair_plan_20260509.md"
-                .to_string()
-        ]
-    );
-    assert!(
-        !delivery_messages[0].contains("第 1 步"),
-        "answer: {}",
-        delivery_messages[0]
+        vec!["第 1 步 `read_file` 失败。第 2 步 `fs_search` 成功。".to_string()]
     );
 }
 
 #[test]
-fn strict_existence_path_observed_answer_replaces_step_status_after_fallback_success() {
+fn non_exact_strict_path_locator_does_not_replace_model_output() {
     let state = test_state();
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "plan/extra_missing_repair_probe.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -188,12 +180,7 @@ fn strict_existence_path_observed_answer_replaces_step_status_after_fallback_suc
 
     assert_eq!(
         delivery_messages,
-        vec!["plan/execution_intent_routing_repair_plan_20260509.md".to_string()]
-    );
-    assert!(
-        !delivery_messages[0].contains("第 1 步"),
-        "answer: {}",
-        delivery_messages[0]
+        vec!["第 1 步 `read_file` 失败。第 2 步 `fs_search` 成功。".to_string()]
     );
 }
 

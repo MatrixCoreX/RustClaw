@@ -1253,10 +1253,14 @@ fn execution_summary_suppressed_for_successful_file_token_delivery() {
 }
 
 #[test]
-fn execution_summary_suppressed_for_existence_with_path_contract() {
+fn execution_summary_suppressed_for_path_inspection_contract() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "rustclaw.service".to_string();
+    route.selection.structured_field_selector = Some("exists,path".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

@@ -185,9 +185,7 @@ pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
             contract.response_shape,
             crate::OutputResponseShape::FileToken
         )
-        && (route_result.semantic_kind_is_unclassified()
-            || route_result.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
-            || route_result.requests_exact_path_list())
+        && (route_result.semantic_kind_is_unclassified() || route_result.requests_exact_path_list())
         && resume_context_failed_step_skill(resume_ctx).as_deref() == Some("fs_search")
         && (resume_context_path_batch_facts_are_missing_only(resume_ctx)
             || resume_context_has_directory_lookup_failure(resume_ctx))

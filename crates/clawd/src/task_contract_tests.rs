@@ -30,12 +30,17 @@ fn file_path_search_maps_to_directory_list_evidence() {
 }
 
 #[test]
-fn existence_contract_requires_structural_path_evidence() {
+fn generic_path_inspection_requires_structural_path_evidence() {
     let output_contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
         locator_kind: OutputLocatorKind::Path,
         locator_hint: "README.md".to_string(),
-        semantic_kind: OutputSemanticKind::ExistenceWithPath,
-        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::None,
+        requires_content_evidence: false,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("exists,path".to_string()),
+            ..Default::default()
+        },
         ..IntentOutputContract::default()
     };
 

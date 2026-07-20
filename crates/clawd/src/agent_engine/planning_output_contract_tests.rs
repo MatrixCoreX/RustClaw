@@ -8,12 +8,12 @@ fn parses_complete_machine_output_contract() {
           "output_contract": {
             "response_shape": "one_sentence",
             "exact_sentence_count": 1,
-            "requires_content_evidence": true,
+            "requires_content_evidence": false,
             "delivery_required": false,
             "locator_kind": "path",
             "delivery_intent": "none",
-            "result_kind": "existence_with_path",
-            "structured_field_selector": "path,exists"
+            "result_kind": "none",
+            "structured_field_selector": "exists,path"
           },
           "steps": [{"type":"call_capability","capability":"filesystem.stat_paths","args":{}}]
         }"#,
@@ -22,17 +22,14 @@ fn parses_complete_machine_output_contract() {
 
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert_eq!(contract.exact_sentence_count, Some(1));
-    assert!(contract.requires_content_evidence);
+    assert!(!contract.requires_content_evidence);
     assert!(!contract.delivery_required);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
-    assert_eq!(
-        contract.semantic_kind,
-        OutputSemanticKind::ExistenceWithPath
-    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
     assert_eq!(
         contract.selection.structured_field_selector.as_deref(),
-        Some("path,exists")
+        Some("exists,path")
     );
 }
 
