@@ -184,7 +184,7 @@ async fn schedule_compile_only_create_returns_preview_without_insert() {
             .expect("preview reply");
     assert!(serde_json::from_str::<serde_json::Value>(&reply).is_err());
     assert!(reply.contains("message_key=schedule.intent.preview"));
-    assert!(reply.contains("final_answer_shape=validation_verdict"));
+    assert!(reply.contains("final_answer_shape=summary_with_evidence"));
     assert!(reply.contains("status=ok"));
     assert!(reply.contains("mode=compile_only"));
     assert!(reply.contains("kind=create"));

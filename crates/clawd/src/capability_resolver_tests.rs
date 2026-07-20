@@ -212,6 +212,27 @@ fn config_mutation_resolves_without_domain_output_contract() {
 }
 
 #[test]
+fn config_validation_resolves_without_domain_output_contract() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "config.validate",
+        json!({"path": "configs/config.toml"}),
+    );
+
+    assert_eq!(record.output_semantic_kind, None);
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected config validation tool action");
+    };
+    assert_eq!(tool, "config_basic");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("validate"));
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("configs/config.toml")
+    );
+}
+
+#[test]
 fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

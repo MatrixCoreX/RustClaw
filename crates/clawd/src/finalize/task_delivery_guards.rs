@@ -12,8 +12,7 @@ pub(super) fn should_reinsert_execution_summaries_for_delivery(
     answer_text: &str,
 ) -> bool {
     let output_contract = route_result.clone();
-    if (output_contract.response_shape == crate::OutputResponseShape::Scalar
-        || route_requests_config_validation(route_result))
+    if output_contract.response_shape == crate::OutputResponseShape::Scalar
         && !answer_text.trim().is_empty()
         && !crate::finalize::is_execution_summary_message(answer_text)
     {
@@ -23,10 +22,6 @@ pub(super) fn should_reinsert_execution_summaries_for_delivery(
         return false;
     }
     true
-}
-
-fn route_requests_config_validation(route_result: &crate::IntentOutputContract) -> bool {
-    crate::finalize::route_matches_validation_verdict_output_contract(route_result)
 }
 
 pub(super) fn drop_execution_summaries_when_delivery_is_scalar(

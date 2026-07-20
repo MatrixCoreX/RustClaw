@@ -87,14 +87,6 @@ pub(crate) fn route_matches_single_path_output_contract(
         )
 }
 
-pub(crate) fn route_matches_validation_verdict_output_contract(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
-            == Some(crate::evidence_policy::FinalAnswerShape::ValidationVerdict)
-}
-
 // Legacy scrub markers only. Production no longer builds user-visible
 // execution-summary prose; these prefixes are retained so old delivery/history
 // entries can be detected and removed before publishing final answers.

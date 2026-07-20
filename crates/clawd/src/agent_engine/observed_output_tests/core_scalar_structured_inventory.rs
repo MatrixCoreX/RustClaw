@@ -259,6 +259,54 @@ fn config_mutation_exact_field_uses_generic_capability_result_selector() {
 }
 
 #[test]
+fn config_validation_exact_field_uses_generic_capability_result_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "config_basic"
+        enabled = true
+        kind = "builtin"
+        semantic_tags = []
+        "#,
+        &["config_basic"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("valid".to_string());
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "validate_structured",
+        "path": "configs/config.toml",
+        "format": "toml",
+        "valid": true,
+        "root_type": "object",
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "config_basic",
+            "step_1",
+            &serde_json::json!({"action": "validate"}),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+
+    assert_eq!(
+        extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &state,
+            Some(&agent_run_context)
+        )
+        .as_deref(),
+        Some("true")
+    );
+}
+
+#[test]
 fn document_title_uses_generic_capability_result_selector() {
     let state = test_state_with_registry(
         r#"
@@ -1561,60 +1609,6 @@ fn direct_answer_formats_schema_enum_extract_field_with_resolved_path() {
     assert!(answer.contains("properties.reference_resolution.properties.target"));
     assert!(answer.contains("`none`"));
     assert!(answer.contains("`current_turn_locator`"));
-}
-
-#[test]
-fn direct_answer_formats_config_basic_validate_result_as_pass_fail() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "config_basic",
-            r#"{"action":"validate_structured","path":"configs/config.toml","resolved_path":"/tmp/configs/config.toml","format":"toml","valid":true,"root_type":"object"}"#,
-        ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route_result.locator_kind = OutputLocatorKind::Path;
-    route_result.locator_hint = "configs/config.toml".to_string();
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        original_user_request: Some(
-            "Validate configs/config.toml and answer pass or fail.".to_string(),
-        ),
-        ..AgentRunContext::default()
-    };
-
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("message_key=clawd.msg.validate_structured_pass\nreason_code=validate_structured_pass\nfinal_answer_shape=structured_validation\nvalid=true\nformat=toml")
-    );
-}
-
-#[test]
-fn direct_scalar_formats_config_validation_result_in_request_language() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "config_basic",
-            r#"{"action":"validate_structured","path":"configs/config.toml","resolved_path":"/tmp/configs/config.toml","format":"toml","valid":true,"root_type":"object"}"#,
-        ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.semantic_kind = OutputSemanticKind::ConfigValidation;
-    route_result.locator_kind = OutputLocatorKind::Path;
-    route_result.locator_hint = "configs/config.toml".to_string();
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        original_user_request: Some("只检查 configs/config.toml 是否是合法 TOML。".to_string()),
-        ..AgentRunContext::default()
-    };
-
-    assert_eq!(
-        extract_direct_scalar_from_generic_output_i18n(
-            &loop_state,
-            &AppState::test_default_with_fixture_provider(),
-            Some(&agent_run_context)
-        )
-        .as_deref(),
-        Some("message_key=clawd.msg.validate_structured_pass\nreason_code=validate_structured_pass\nfinal_answer_shape=structured_validation\nvalid=true\nformat=toml")
-    );
 }
 
 #[test]

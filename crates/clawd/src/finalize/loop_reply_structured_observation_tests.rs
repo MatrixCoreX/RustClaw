@@ -373,8 +373,7 @@ fn direct_structured_observed_answer_keeps_passthrough_without_synthesis_plan() 
 }
 
 #[test]
-fn broad_structured_read_drops_separator_and_validates_file() {
-    let state = test_state();
+fn broad_structured_read_drops_separator() {
     let path = std::env::temp_dir().join(format!(
         "rustclaw_structured_validation_{}.toml",
         std::process::id()
@@ -410,71 +409,5 @@ fn broad_structured_read_drops_separator_and_validates_file() {
     assert!(loop_state.delivery_messages.is_empty());
     assert!(loop_state.last_user_visible_respond.is_none());
 
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let (answer, summary) = deterministic_structured_file_validation_from_read_range(
-        &state,
-        "Vérifie seulement si ce fichier est un TOML valide.",
-        &loop_state,
-        Some(&ctx),
-    )
-    .expect("structured validation fallback");
-    assert!(
-        answer.contains("format=toml") && answer.contains("validation_status=pass"),
-        "answer: {answer}"
-    );
-    assert_eq!(
-        summary.disposition,
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
-
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let (answer, _) = deterministic_structured_file_validation_from_read_range(
-        &state,
-        "Vérifie seulement si ce fichier est un TOML valide.",
-        &loop_state,
-        Some(&ctx),
-    )
-    .expect("config validation contract fallback");
-    assert!(
-        answer.contains("format=toml") && answer.contains("validation_status=pass"),
-        "answer: {answer}"
-    );
-
     let _ = std::fs::remove_file(path);
-}
-
-#[test]
-fn broad_structured_read_validation_does_not_replace_directory_summary() {
-    let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"read_range","mode":"head","path":"UI/package.json","resolved_path":"UI/package.json","excerpt":"1|{\n2|  \"name\": \"react-example\"\n3|}"}"#,
-    ));
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-
-    assert!(deterministic_structured_file_validation_from_read_range(
-        &state,
-        "Summarize the directory and use the package name as context.",
-        &loop_state,
-        Some(&ctx),
-    )
-    .is_none());
 }

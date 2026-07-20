@@ -855,8 +855,7 @@ fn seed_loop_state_extracts_default_main_config_contract_boundary_observation() 
             "contract": "rustclaw_main_config",
             "logical_path": "configs/config.toml",
             "workspace_path": "/tmp/rustclaw/configs/config.toml",
-            "exists": true,
-            "route_markers": ["config_validation"]
+            "exists": true
         }
     });
     let block = format!(

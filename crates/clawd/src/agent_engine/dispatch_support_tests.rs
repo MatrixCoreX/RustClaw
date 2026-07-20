@@ -1386,42 +1386,6 @@ fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
 }
 
 #[test]
-fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
-    let route = crate::IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: crate::OutputResponseShape::OneSentence,
-        requires_content_evidence: true,
-        delivery_required: false,
-        locator_kind: crate::OutputLocatorKind::Path,
-        delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::ConfigValidation,
-        locator_hint: "configs/config.toml".to_string(),
-        selection: crate::OutputSelectionContract::default(),
-    };
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        original_user_request: Some(
-            "Validate only the TOML syntax of configs/config.toml and answer pass or fail."
-                .to_string(),
-        ),
-        ..AgentRunContext::default()
-    };
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "config_basic",
-        r#"{"action":"validate_structured","format":"toml","path":"configs/config.toml","resolved_path":"/tmp/config.toml","valid":true}"#,
-    ));
-    let state = test_state_with_registry();
-
-    assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
-    assert_eq!(
-        synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).as_deref(),
-        Some("message_key=clawd.msg.validate_structured_pass\nreason_code=validate_structured_pass\nfinal_answer_shape=structured_validation\nvalid=true\nformat=toml")
-    );
-}
-
-#[test]
 fn synthesize_route_allows_observed_fallback_for_unclassified_delivery() {
     let route = crate::IntentOutputContract {
         exact_sentence_count: None,

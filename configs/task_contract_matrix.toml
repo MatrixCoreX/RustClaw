@@ -295,14 +295,3 @@ failure_policy = "retry_with_alternatives"
 all_of = ["path", "kind"]
 one_of = ["exists_true", "exists_false"]
 negative_evidence = ["exists_false"]
-
-[contracts.config_validation]
-semantic_kind = "config_validation"
-operation = "validate"
-target_object = "config_key"
-delivery_shape = "summary"
-allowed_actions = ["config_basic.validate", "config_basic.read_fields", "config_basic.guard_rustclaw_config", "config_edit.validate_config", "config_guard"]
-preferred_actions = ["config_basic.validate", "config_basic.read_fields"]
-required_evidence = ["valid"]
-final_answer_shape = "validation_verdict"
-failure_policy = "retry_with_alternatives"

@@ -74,10 +74,7 @@ use compare_paths_metadata::replace_final_delivery_with_compare_paths_required_m
 
 #[path = "loop_reply_structured_observation.rs"]
 mod structured_observation;
-#[cfg(test)]
-use structured_observation::deterministic_structured_file_validation_from_read_range;
 use structured_observation::{
-    attach_deterministic_structured_file_validation_from_read_range,
     deterministic_structured_container_summary_answer, direct_db_basic_observed_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
     message_is_non_answer_separator,
@@ -1051,17 +1048,6 @@ pub(crate) async fn finalize_loop_reply(
     }
     append_compound_file_delivery_token_from_route(state, task, &mut loop_state, agent_run_context);
     discard_non_answer_separator_delivery_for_broad_structured_read(&task.task_id, &mut loop_state);
-    if loop_state.delivery_messages.is_empty() {
-        attach_deterministic_structured_file_validation_from_read_range(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
-            agent_run_context,
-            &mut finalizer_summary,
-        );
-    }
-
     if let Some(reply) = content_evidence_step_failure_reply_from_loop(
         state,
         task,

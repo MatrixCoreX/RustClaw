@@ -448,29 +448,6 @@ fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contrac
 }
 
 #[test]
-fn action_policy_allows_runtime_equivalent_for_virtual_config_validation() {
-    let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ConfigValidation,
-        requires_content_evidence: true,
-        ..IntentOutputContract::default()
-    };
-    let policy = action_policy_for_output_contract(
-        Some(&output_contract),
-        "system_basic",
-        &serde_json::json!({
-            "action": "validate_structured",
-            "path": "configs/config.toml",
-            "format": "toml",
-        }),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "config_basic.validate");
-    assert_eq!(policy.contract_match, "config_validation");
-}
-
-#[test]
 fn command_output_summary_allows_structured_config_validation_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -565,37 +542,9 @@ fn command_output_summary_allows_task_control_get_observation() {
 }
 
 #[test]
-fn action_policy_allows_runtime_equivalent_for_virtual_config_guard() {
-    let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ConfigValidation,
-        requires_content_evidence: true,
-        ..IntentOutputContract::default()
-    };
-    let policy = action_policy_for_output_contract(
-        Some(&output_contract),
-        "config_edit",
-        &serde_json::json!({
-            "action": "guard_config",
-            "path": "configs/app_config.toml",
-            "format": "toml",
-        }),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "config_basic.guard_rustclaw_config");
-    assert_eq!(policy.contract_match, "config_validation");
-}
-
-#[test]
 fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
     let matrix = load_workspace_matrix();
     let cases = [
-        (
-            "config_validation",
-            OutputSemanticKind::ConfigValidation,
-            "config_basic.validate",
-        ),
         (
             "filesystem_mutation_result",
             OutputSemanticKind::FilesystemMutationResult,
@@ -914,7 +863,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 60);
+    let cases = generated_contract_cases(&matrix, 57);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();
