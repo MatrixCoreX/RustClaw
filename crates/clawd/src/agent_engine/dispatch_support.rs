@@ -19,16 +19,12 @@ mod dispatch_local_code_projection_gate;
 mod dispatch_synthesis;
 #[path = "dispatch_synthesis_bounded_read.rs"]
 mod dispatch_synthesis_bounded_read;
-#[path = "dispatch_support/execution_status.rs"]
-mod execution_status;
 #[path = "dispatch_support/failure_recovery.rs"]
 mod failure_recovery;
 #[path = "dispatch_support/respond_template_guard.rs"]
 mod respond_template_guard;
 #[path = "dispatch_support/skill_call_args.rs"]
 mod skill_call_args;
-#[path = "dispatch_support/status_answer.rs"]
-mod status_answer;
 
 use dispatch_local_code_projection_gate::{
     local_code_strict_json_projection_should_defer_observed_synthesis as gate_defer_observed_synthesis,
@@ -43,10 +39,8 @@ use dispatch_synthesis::{
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
-    synthesize_route_prefers_model_language_failure_answer,
 };
 use dispatch_synthesis_bounded_read::synthesize_bounded_read_range_direct_answer;
-pub(super) use execution_status::deterministic_observed_execution_status_answer;
 #[cfg(test)]
 pub(super) use failure_recovery::active_recipe_terminal_discussion_should_replan;
 #[cfg(not(test))]
@@ -885,17 +879,6 @@ pub(super) async fn handle_synthesize_answer_action(
                 )
             {
                 return Ok(answer);
-            }
-            if !synthesize_route_prefers_model_language_failure_answer(agent_run_context) {
-                if let Some(answer) = deterministic_observed_execution_status_answer(
-                    state,
-                    task,
-                    user_text,
-                    loop_state,
-                    agent_run_context,
-                ) {
-                    return Ok(answer);
-                }
             }
             if let Some((answer, _summary)) =
                 crate::finalize::deterministic_matrix_observed_shape_answer(

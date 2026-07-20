@@ -1,5 +1,6 @@
 use claw_core::capability_result::{
-    CapabilityDelivery, CapabilityDeliveryIntent, CapabilityResultEnvelope,
+    CapabilityDelivery, CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus,
+    Continuation, ContinuationKind, StructuredError,
 };
 use serde_json::json;
 
@@ -66,6 +67,84 @@ fn filesystem_mutation_receipt_uses_generic_synthesis_without_domain_contract() 
         ));
 
     assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
+fn structured_failure_uses_generic_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::failed(
+            "system.run_command",
+            Some("run".to_string()),
+            StructuredError {
+                code: "command_failed".to_string(),
+                message_key: "system.command_failed".to_string(),
+                retryable: false,
+                details: json!({"step_id": "step_2", "exit_code": 7}),
+            },
+        ));
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
+fn mixed_success_failure_and_later_success_use_generic_synthesis() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "system.run_command",
+            Some("run".to_string()),
+            json!({"step_id": "step_1", "stdout": "before"}),
+        ));
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::failed(
+            "system.run_command",
+            Some("run".to_string()),
+            StructuredError {
+                code: "command_failed".to_string(),
+                message_key: "system.command_failed".to_string(),
+                retryable: false,
+                details: json!({"step_id": "step_2", "exit_code": 127}),
+            },
+        ));
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "system.run_command",
+            Some("run".to_string()),
+            json!({"step_id": "step_3", "stdout": "after"}),
+        ));
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
+fn continuation_status_does_not_enter_terminal_synthesis() {
+    let mut result =
+        CapabilityResultEnvelope::ok("system.run_command", Some("run".to_string()), json!({}));
+    result.status = CapabilityResultStatus::Waiting;
+    result.continuation = Some(Continuation {
+        kind: ContinuationKind::Poll,
+        reference: Some("job-1".to_string()),
+        poll_after_ms: Some(1_000),
+        state: json!({}),
+    });
+    let mut loop_state = LoopState::default();
+    loop_state.capability_results.push(result);
+
+    assert!(!eligible_for_capability_result_synthesis(
         &loop_state,
         Some(&AgentRunContext::default())
     ));

@@ -522,17 +522,9 @@ fn deterministic_observed_execution_status_keeps_planned_failed_step_answer() {
 }
 
 #[test]
-fn deterministic_execution_failed_step_contract_replaces_verbose_status() {
+fn model_failure_delivery_is_not_replaced_by_generic_status() {
     let state = test_state();
     let task = claimed_task("task-deterministic-failed-step-only");
-    let mut route = free_route_result();
-    route.response_shape = OutputResponseShape::Strict;
-    route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state
         .round_traces
@@ -566,6 +558,7 @@ fn deterministic_execution_failed_step_contract_replaces_verbose_status() {
         "第 1 步 `run_cmd` 成功。第 2 步 `run_cmd` 失败：Command failed with exit code 127。"
             .to_string(),
     );
+    loop_state.last_publishable_synthesis_output = loop_state.delivery_messages.last().cloned();
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", "BEFORE_BREAK\n"));
@@ -576,58 +569,17 @@ fn deterministic_execution_failed_step_contract_replaces_verbose_status() {
     ));
     let mut finalizer_summary = None;
 
-    assert!(route_prefers_language_rendered_execution_failed_step(Some(
-        &ctx
-    )));
-    let answer = deterministic_execution_failed_step_answer(
-	        &state,
-	        "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
-	        &loop_state,
-	        Some(&ctx),
-	    )
-	    .expect("execution failed-step payload");
-    assert!(!replace_delivery_with_deterministic_execution_failed_step_answer(
-	        &state,
-	        &task,
-	        "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
-	        &mut loop_state,
-	        Some(&ctx),
-	        &mut finalizer_summary,
-	    ));
+    assert!(
+        !replace_delivery_with_deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
+            &mut loop_state,
+            &mut finalizer_summary,
+        )
+    );
 
     assert_eq!(loop_state.delivery_messages.len(), 1);
-    let payload: serde_json::Value =
-        serde_json::from_str(&answer).expect("execution failed-step payload");
-    assert_eq!(
-        payload
-            .pointer("/message_key")
-            .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.execution.failed_step_status")
-    );
-    assert_eq!(
-        payload
-            .pointer("/reason_code")
-            .and_then(serde_json::Value::as_str),
-        Some("execution_failed_step_status")
-    );
-    assert_eq!(
-        payload
-            .pointer("/failed_steps/0/step_index")
-            .and_then(serde_json::Value::as_u64),
-        Some(2)
-    );
-    assert_eq!(
-        payload
-            .pointer("/failed_steps/0/command")
-            .and_then(serde_json::Value::as_str),
-        Some("definitely_missing_command_rustclaw_user_ops_13579")
-    );
-    assert_eq!(
-        payload
-            .pointer("/failed_steps/1")
-            .and_then(serde_json::Value::as_object),
-        None
-    );
     assert_eq!(
         loop_state.delivery_messages[0],
         "第 1 步 `run_cmd` 成功。第 2 步 `run_cmd` 失败：Command failed with exit code 127。"
@@ -636,45 +588,12 @@ fn deterministic_execution_failed_step_contract_replaces_verbose_status() {
 }
 
 #[test]
-fn failed_step_language_contract_rejects_success_stdout_backfill() {
-    let task = claimed_task("task-failed-step-no-success-stdout-backfill");
-    let mut route = free_route_result();
-    route.response_shape = OutputResponseShape::Strict;
-    route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.last_user_visible_respond = Some("RC_RENDER_ZH_OK".to_string());
-    loop_state.last_publishable_synthesis_output = Some("RC_RENDER_ZH_OK".to_string());
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_1", "run_cmd", "RC_RENDER_ZH_OK\n"));
-    loop_state.executed_step_results.push(err_step_result(
-        "step_2",
-        "run_cmd",
-        "Command failed with exit code 127\nstderr:\nmissing command",
-    ));
-
-    backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
-
-    assert!(loop_state.delivery_messages.is_empty());
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some("RC_RENDER_ZH_OK")
-    );
-}
-
-#[test]
-fn failed_step_language_contract_prefers_final_respond_over_synthesis_stdout() {
+fn structured_failure_request_prefers_final_respond_over_synthesis_stdout() {
     let task = claimed_task("task-failed-step-final-respond-over-synthesis");
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -707,25 +626,18 @@ fn failed_step_language_contract_prefers_final_respond_over_synthesis_stdout() {
 }
 
 #[test]
-fn deterministic_execution_failed_step_ignores_contract_gap_errors() {
+fn generic_execution_status_ignores_contract_gap_errors() {
     let state = test_state();
     let task = claimed_task("task-deterministic-failed-step-contract-gap");
-    let mut route = free_route_result();
-    route.response_shape = OutputResponseShape::Strict;
-    route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
     let mut loop_state = crate::agent_engine::LoopState::new(4);
     loop_state
         .delivery_messages
         .push("Step 1 failed. Step 3 failed: `exit0=$?`.".to_string());
+    loop_state.last_publishable_synthesis_output = loop_state.delivery_messages.last().cloned();
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "system_basic",
-        r#"__RC_SKILL_ERROR__:{"error_kind":"contract_action_rejected","error_text":"action `system_basic.read_range` is rejected by contract `execution_failed_step`","extra":{"failure_attribution":"contract_gap"},"skill":"system_basic"}"#,
+        r#"__RC_SKILL_ERROR__:{"error_kind":"contract_action_rejected","error_text":"action rejected by the current output contract","extra":{"failure_attribution":"contract_gap"},"skill":"system_basic"}"#,
     ));
     loop_state
         .executed_step_results
@@ -746,52 +658,25 @@ fn deterministic_execution_failed_step_ignores_contract_gap_errors() {
             })),
         ),
     ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_4",
-        "run_cmd",
-        "AFTER_BREAK_67890\n",
-    ));
     let mut finalizer_summary = None;
 
-    let answer = deterministic_execution_failed_step_answer(
+    let answer = deterministic_observed_execution_status_answer(
         &state,
         "Execute the command sequence and identify the failed command.",
         &loop_state,
-        Some(&ctx),
     )
-    .expect("execution failed-step payload");
+    .expect("generic execution status payload");
     assert!(
-        !replace_delivery_with_deterministic_execution_failed_step_answer(
+        !replace_delivery_with_deterministic_observed_execution_status_answer(
             &state,
             &task,
             "Execute the command sequence and identify the failed command.",
             &mut loop_state,
-            Some(&ctx),
             &mut finalizer_summary,
         )
     );
 
     assert_eq!(loop_state.delivery_messages.len(), 1);
-    let payload: serde_json::Value =
-        serde_json::from_str(&answer).expect("execution failed-step payload");
-    assert_eq!(
-        payload
-            .pointer("/reason_code")
-            .and_then(serde_json::Value::as_str),
-        Some("execution_failed_step_status")
-    );
-    assert_eq!(
-        payload
-            .pointer("/failed_step_count")
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        payload
-            .pointer("/failed_steps/0/command")
-            .and_then(serde_json::Value::as_str),
-        Some("definitely_missing_command_rustclaw_67890")
-    );
     assert!(
         !answer.contains("contract_action_rejected"),
         "contract-gap errors should remain excluded: {answer}"

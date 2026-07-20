@@ -639,64 +639,6 @@ fn resume_context_extra_i64(error: &crate::skills::StructuredSkillError, key: &s
         .and_then(|value| value.as_i64())
 }
 
-fn compact_resume_error_text(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn structured_error_detail(error: &crate::skills::StructuredSkillError) -> Option<String> {
-    resume_context_extra_string(error, "stderr")
-        .or_else(|| resume_context_extra_string(error, "stdout"))
-        .or_else(|| resume_context_extra_string(error, "message_key"))
-        .or_else(|| resume_context_extra_string(error, "error_code"))
-        .or_else(|| resume_context_extra_string(error, "status_code"))
-        .map(compact_resume_error_text)
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            (!error.error_kind.trim().is_empty())
-                .then(|| format!("error_kind={}", error.error_kind))
-        })
-}
-
-pub(super) fn resume_failure_execution_failed_step_answer(
-    route_result: &crate::IntentOutputContract,
-    resume_ctx: &Value,
-    _prefer_english: bool,
-) -> Option<String> {
-    if !route_result.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep) {
-        return None;
-    }
-    let body = resume_context_body(resume_ctx);
-    let failed_step = body.get("failed_step")?;
-    let action = failed_step
-        .get("action")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("step");
-    let structured = resume_context_failed_structured_skill_error(resume_ctx);
-    let command = structured
-        .as_ref()
-        .and_then(|error| resume_context_extra_string(error, "command"));
-    let exit_code = structured
-        .as_ref()
-        .and_then(|error| resume_context_extra_i64(error, "exit_code"));
-    let detail = structured.as_ref().and_then(structured_error_detail)?;
-
-    let mut payload = serde_json::json!({
-        "message_key": "clawd.msg.execution.failed_step",
-        "reason_code": "execution_failed_step",
-        "action": action,
-        "detail": detail,
-    });
-    if let Some(command) = command {
-        payload["command"] = serde_json::json!(command);
-    }
-    if let Some(exit_code) = exit_code {
-        payload["exit_code"] = serde_json::json!(exit_code);
-    }
-    Some(payload.to_string())
-}
-
 fn resume_context_user_visible_step_error(error: &str) -> String {
     crate::skills::parse_structured_skill_error(error)
         .and_then(|structured| {

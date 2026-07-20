@@ -33,24 +33,6 @@ fn content_excerpt_summary_allows_runtime_equivalent_config_guard() {
     assert_eq!(policy.contract_match, "content_excerpt_summary");
 }
 
-#[test]
-fn execution_failed_step_contract_accepts_command_output_evidence() {
-    let matrix = load_workspace_matrix();
-    let contract = matrix
-        .semantic_contract(OutputSemanticKind::ExecutionFailedStep)
-        .expect("execution failed step contract");
-    let matched = MatchedContract::Semantic(contract);
-    let evidence_expression = matched.evidence_expression();
-
-    assert_eq!(matched.required_evidence(), vec!["command_output"]);
-    for token in ["command_output", "field_value"] {
-        assert!(
-            evidence_expression.any_of.contains(&token.to_string()),
-            "missing {token} in {evidence_expression:?}"
-        );
-    }
-}
-
 fn load_registry_from_text(raw: &str) -> SkillsRegistry {
     let path = std::env::temp_dir().join(format!(
         "contract_matrix_test_registry_{}_{}.toml",

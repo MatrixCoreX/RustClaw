@@ -76,7 +76,6 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary => TaskOperation::Summarize,
         OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
-        OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
         OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
     }
 }
@@ -220,9 +219,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary => {
             fields.insert("content_excerpt");
-        }
-        OutputSemanticKind::ExecutionFailedStep => {
-            fields.insert("command_output");
         }
         _ => {}
     }

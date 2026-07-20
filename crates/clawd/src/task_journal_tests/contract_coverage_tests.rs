@@ -331,14 +331,13 @@ fn wrapped_machine_read_action_counts_as_text_content_read_without_skill_branch(
 }
 
 #[test]
-fn raw_command_output_error_step_supplies_command_output_evidence() {
+fn structured_run_command_error_records_machine_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-run-cmd-failure-evidence",
         "ask",
         "cat /definitely_missing_rustclaw_contract_case",
     );
     let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
@@ -363,10 +362,6 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
         started_at: 1,
         finished_at: 2,
     });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
 
     let trace = journal.to_trace_json();
     let items = trace

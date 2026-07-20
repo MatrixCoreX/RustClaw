@@ -179,21 +179,6 @@ final_answer_shape = "scalar"
 failure_policy = "retry_with_alternatives"
 observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "run_cmd"]
 
-[contracts.execution_failed_step]
-semantic_kind = "execution_failed_step"
-operation = "validate"
-target_object = "system"
-delivery_shape = "summary"
-allowed_actions = ["run_cmd", "log_analyze", "health_check", "service_control.status", "process_basic", "system_basic.runtime_status", "system_basic.info", "http_basic"]
-preferred_actions = ["run_cmd", "health_check", "service_control.status", "process_basic", "system_basic.runtime_status", "http_basic", "log_analyze"]
-required_evidence = ["command_output"]
-final_answer_shape = "failed_step_with_evidence"
-failure_policy = "retry_with_alternatives"
-observation_sources = ["run_cmd", "log_analyze", "health_check", "service_control", "process_basic", "system_basic.runtime_status", "system_basic.info", "http_basic"]
-
-[contracts.execution_failed_step.evidence_expression]
-any_of = ["command_output", "field_value"]
-
 [contracts.existence_with_path]
 semantic_kind = "existence_with_path"
 operation = "inspect"

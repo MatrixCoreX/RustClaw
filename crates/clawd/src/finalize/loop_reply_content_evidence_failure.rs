@@ -62,15 +62,6 @@ fn crypto_recoverable_i18n_failure_answer(
     ))
 }
 
-pub(super) fn structured_extra_string(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| crate::truncate_for_agent_trace(&compact_observed_stream(value)))
-}
-
 fn content_evidence_failed_step_locator(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,

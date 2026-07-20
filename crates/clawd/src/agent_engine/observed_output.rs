@@ -76,7 +76,7 @@ pub(crate) use output_entries::has_observed_answer_candidates;
 use output_entries::recent_generated_output_from_user_request;
 use output_entries::{
     compound_listing_content_delivery_guard_entry, cross_turn_observed_output_entries,
-    execution_failed_step_guard_entry, observed_output_entries,
+    observed_output_entries,
 };
 
 #[path = "observed_output_direct_scalar.rs"]
@@ -733,21 +733,14 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     }
 
     let mut observed_entries = observed_output_entries(loop_state);
-    if let Some(guard) = execution_failed_step_guard_entry(
+    if let Some(guard) = multi_count_observation_guard_entry(loop_state) {
+        observed_entries.insert(0, guard);
+    }
+    if let Some(guard) = compound_listing_content_delivery_guard_entry(
         loop_state,
         agent_run_context.and_then(|ctx| ctx.output_contract()),
     ) {
-        observed_entries = vec![guard];
-    } else {
-        if let Some(guard) = multi_count_observation_guard_entry(loop_state) {
-            observed_entries.insert(0, guard);
-        }
-        if let Some(guard) = compound_listing_content_delivery_guard_entry(
-            loop_state,
-            agent_run_context.and_then(|ctx| ctx.output_contract()),
-        ) {
-            observed_entries.insert(0, guard);
-        }
+        observed_entries.insert(0, guard);
     }
     if observed_entries.is_empty() {
         observed_entries = cross_turn_observed_output_entries(loop_state, agent_run_context);

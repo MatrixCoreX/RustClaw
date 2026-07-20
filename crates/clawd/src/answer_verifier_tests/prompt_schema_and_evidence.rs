@@ -5,7 +5,6 @@ use serde_json::json;
 use super::super::{
     answer_verifier_user_request_for_prompt, execution_evidence_prompt_block, AnswerVerifierOut,
 };
-use super::*;
 
 #[test]
 fn answer_verifier_prompt_request_preserves_original_language_over_resolved_intent() {
@@ -316,83 +315,6 @@ fn execution_evidence_prompt_includes_error_step_observed_evidence() {
         !block.contains("definitely_missing_command_rustclaw_english_67890"),
         "block: {block}"
     );
-}
-
-#[test]
-fn execution_failed_step_answer_uses_failed_machine_tokens_not_success_stdout() {
-    let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
-    route.output_contract.requires_content_evidence = true;
-
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-failed-step-structural",
-        "ask",
-        "run two commands and report only the failed step",
-    );
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("RC_RENDER_OK\n".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    let err = format!(
-        "__RC_SKILL_ERROR__:{}",
-        json!({
-            "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
-            "error_text": "Command failed with exit code 127",
-            "platform": "linux",
-            "extra": {
-                "command": "definitely_missing_command_rustclaw_render_ko_0605",
-                "exit_code": 127,
-                "exit_category": "command_not_found",
-                "stderr": "bash: line 1: definitely_missing_command_rustclaw_render_ko_0605: command not found\n",
-                "output_truncated": false
-            }
-        })
-    );
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Error,
-        output: None,
-        error: Some(err),
-        started_at: 3,
-        finished_at: 4,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_3".to_string(),
-        skill: "synthesize_answer".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("RC_RENDER_OK".to_string()),
-        error: None,
-        started_at: 5,
-        finished_at: 6,
-    });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "step_2: definitely_missing_command_rustclaw_render_ko_0605 failed with exit code 127",
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "RC_RENDER_OK",
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        r#"{"message_key":"clawd.msg.execution.failed_step_status"}"#,
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "completed",
-    ));
 }
 
 #[test]

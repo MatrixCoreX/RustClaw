@@ -83,7 +83,7 @@ use task_provider_wait::record_provider_wait_checkpoint;
 pub(crate) use task_resume::answer_verifier_retry_answer_has_required_machine_evidence;
 use task_resume::{
     answer_verifier_retry_applicable, resume_context_execution_summary_messages,
-    resume_failure_execution_failed_step_answer, resume_failure_is_missing_file_delivery_result,
+    resume_failure_is_missing_file_delivery_result,
     resume_failure_is_unbound_path_lookup_clarify_result, retry_answer_after_verifier,
 };
 use task_runtime_failure_payload::ask_runtime_failure_machine_payload;
@@ -1250,12 +1250,6 @@ pub(crate) async fn finalize_ask_result(
                     &resume_payload,
                 ) {
                     Some(("missing_file_delivery", user_error.clone()))
-                } else if let Some(answer) = resume_failure_execution_failed_step_answer(
-                    route_result,
-                    &resume_payload,
-                    prefer_english,
-                ) {
-                    Some(("execution_failed_step", answer))
                 } else {
                     None
                 };

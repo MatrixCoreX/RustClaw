@@ -5,8 +5,7 @@ use super::{
     log_deterministic_delivery_record, missing_file_path_from_loop,
     output_excerpt_has_missing_file_evidence, output_text_from_execution_result,
     plan_step_for_execution, planned_delivery_is_publishable_model_language_answer,
-    raw_command_arg_from_plan_step, route_prefers_language_rendered_execution_failed_step,
-    step_error_has_missing_file_evidence, structured_extra_string, truncate_with_ellipsis,
+    raw_command_arg_from_plan_step, step_error_has_missing_file_evidence, truncate_with_ellipsis,
 };
 
 fn observed_execution_status_steps<'a>(
@@ -55,10 +54,7 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     if !route.requires_content_evidence && !agent_loop_rich_content {
         return false;
     }
-    if route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::ExecutionFailedStep,
-        crate::OutputSemanticKind::RawCommandOutput,
-    ]) {
+    if route.semantic_kind_is_any(&[crate::OutputSemanticKind::RawCommandOutput]) {
         return false;
     }
     successful_content_observation_count(loop_state) > 0
@@ -273,83 +269,6 @@ pub(super) fn deterministic_missing_observed_target_answer(
     Some(lines.join("\n"))
 }
 
-fn route_requests_execution_failed_step_answer(
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    agent_run_context
-        .and_then(|ctx| ctx.output_contract())
-        .is_some_and(|route| route.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep))
-}
-
-fn command_label_for_execution_step(
-    loop_state: &crate::agent_engine::LoopState,
-    step: &crate::executor::StepExecutionResult,
-) -> Option<String> {
-    plan_step_for_execution(loop_state, step)
-        .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
-        .map(ToOwned::to_owned)
-        .or_else(|| raw_command_arg_from_step_error(step))
-        .map(|value| truncate_with_ellipsis(&value.replace('`', "'"), 180))
-}
-
-fn raw_command_arg_from_step_error(step: &crate::executor::StepExecutionResult) -> Option<String> {
-    if step.skill != "run_cmd" {
-        return None;
-    }
-    let error = step.error.as_deref()?.trim();
-    let structured = crate::skills::parse_structured_skill_error(error)?;
-    let extra = structured.extra.as_ref()?;
-    ["command", "cmd"]
-        .iter()
-        .find_map(|key| structured_extra_string(extra, key))
-        .filter(|command| !command.is_empty())
-}
-
-pub(super) fn deterministic_execution_failed_step_answer(
-    _state: &AppState,
-    _user_text: &str,
-    loop_state: &crate::agent_engine::LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<String> {
-    if !route_requests_execution_failed_step_answer(agent_run_context) {
-        return None;
-    }
-    let steps = observed_execution_status_steps(loop_state);
-    if steps.len() < 2 {
-        return None;
-    }
-    let failed_count = steps.iter().filter(|step| !step.is_ok()).count();
-    let failed_steps = steps
-        .iter()
-        .enumerate()
-        .filter(|(_, step)| !step.is_ok())
-        .take(6)
-        .map(|(idx, step)| {
-            let command = command_label_for_execution_step(loop_state, step);
-            let observed_error = output_text_from_execution_result(step).map(|value| {
-                truncate_with_ellipsis(&value.replace('\n', " ").replace('`', "'"), 180)
-            });
-            serde_json::json!({
-                "step_index": idx + 1,
-                "skill": step.skill.trim(),
-                "command": command,
-                "observed_error": observed_error,
-            })
-        })
-        .collect::<Vec<_>>();
-    Some(
-        serde_json::json!({
-            "schema_version": 1,
-            "message_key": "clawd.msg.execution.failed_step_status",
-            "reason_code": "execution_failed_step_status",
-            "failed_step_count": failed_count,
-            "failed_steps": failed_steps,
-            "remaining_unexecuted_command_steps": 0,
-        })
-        .to_string(),
-    )
-}
-
 pub(super) fn deterministic_observed_execution_status_summary(
     loop_state: &crate::agent_engine::LoopState,
 ) -> crate::task_journal::TaskJournalFinalizerSummary {
@@ -425,35 +344,6 @@ pub(super) fn attach_deterministic_observed_execution_status_answer(
     true
 }
 
-pub(super) fn attach_deterministic_execution_failed_step_answer(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut crate::agent_engine::LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    if route_prefers_language_rendered_execution_failed_step(agent_run_context) {
-        return false;
-    }
-    let Some(answer) =
-        deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
-    else {
-        return false;
-    };
-    *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
-    loop_state.last_user_visible_respond = Some(answer.clone());
-    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-    log_deterministic_delivery_record(
-        &task.task_id,
-        "fallback_from_deterministic_execution_failed_step",
-        "attached",
-        agent_run_context,
-        loop_state.executed_step_results.len(),
-    );
-    true
-}
-
 pub(super) fn replace_delivery_with_deterministic_observed_execution_status_answer(
     state: &AppState,
     task: &ClaimedTask,
@@ -489,43 +379,6 @@ pub(super) fn replace_delivery_with_deterministic_observed_execution_status_answ
             "replace_with_deterministic_observed_status",
             "replaced",
             None,
-            loop_state.executed_step_results.len(),
-        );
-    }
-    true
-}
-
-pub(super) fn replace_delivery_with_deterministic_execution_failed_step_answer(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut crate::agent_engine::LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    if route_prefers_language_rendered_execution_failed_step(agent_run_context) {
-        return false;
-    }
-    let Some(answer) =
-        deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
-    else {
-        return false;
-    };
-    let unchanged = loop_state
-        .delivery_messages
-        .last()
-        .map(|message| message.trim() == answer.trim())
-        .unwrap_or(false);
-    *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
-    loop_state.last_user_visible_respond = Some(answer.clone());
-    loop_state.delivery_messages.clear();
-    if !unchanged {
-        append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "replace_with_deterministic_execution_failed_step",
-            "replaced",
-            agent_run_context,
             loop_state.executed_step_results.len(),
         );
     }
