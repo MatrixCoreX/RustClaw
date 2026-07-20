@@ -457,36 +457,6 @@ required_evidence = ["field_value"]
 final_answer_shape = "scalar_equality_verdict"
 failure_policy = "retry_with_alternatives"
 
-[contracts.git_commit_subject]
-semantic_kind = "git_commit_subject"
-operation = "inspect"
-target_object = "system"
-delivery_shape = "raw"
-allowed_actions = ["git_basic", "run_cmd"]
-preferred_actions = ["git_basic"]
-required_evidence = ["field_value"]
-final_answer_shape = "single_commit_subject"
-failure_policy = "retry_with_alternatives"
-
-[[contracts.git_commit_subject.observation_extractors]]
-source = "git_basic"
-extractor_kind = "text_legacy"
-
-[contracts.git_repository_state]
-semantic_kind = "git_repository_state"
-operation = "inspect"
-target_object = "system"
-delivery_shape = "summary"
-allowed_actions = ["git_basic", "run_cmd"]
-preferred_actions = ["git_basic"]
-required_evidence = ["field_value"]
-final_answer_shape = "git_state_summary"
-failure_policy = "retry_with_alternatives"
-
-[[contracts.git_repository_state.observation_extractors]]
-source = "git_basic"
-extractor_kind = "text_legacy"
-
 [contracts.structured_keys]
 semantic_kind = "structured_keys"
 operation = "inspect"

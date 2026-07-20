@@ -560,7 +560,6 @@ pub(crate) enum FinalAnswerShape {
     ExcerptPlusSummary,
     FailedStepWithEvidence,
     Free,
-    GitStateSummary,
     GroupedNameList,
     JudgmentWithExcerptBasis,
     KeyListOrKeySummary,
@@ -575,7 +574,6 @@ pub(crate) enum FinalAnswerShape {
     RiskAssessment,
     Scalar,
     ScalarEqualityVerdict,
-    SingleCommitSubject,
     SinglePath,
     StatusWithSource,
     SummaryGroundedInExcerpt,
@@ -633,7 +631,6 @@ impl FinalAnswerShape {
         Self::ExcerptPlusSummary,
         Self::FailedStepWithEvidence,
         Self::Free,
-        Self::GitStateSummary,
         Self::GroupedNameList,
         Self::JudgmentWithExcerptBasis,
         Self::KeyListOrKeySummary,
@@ -648,7 +645,6 @@ impl FinalAnswerShape {
         Self::RiskAssessment,
         Self::Scalar,
         Self::ScalarEqualityVerdict,
-        Self::SingleCommitSubject,
         Self::SinglePath,
         Self::StatusWithSource,
         Self::SummaryGroundedInExcerpt,
@@ -666,7 +662,6 @@ impl FinalAnswerShape {
             "excerpt_plus_summary" => Some(Self::ExcerptPlusSummary),
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
             "free" => Some(Self::Free),
-            "git_state_summary" => Some(Self::GitStateSummary),
             "grouped_name_list" => Some(Self::GroupedNameList),
             "judgment_with_excerpt_basis" => Some(Self::JudgmentWithExcerptBasis),
             "key_list_or_key_summary" => Some(Self::KeyListOrKeySummary),
@@ -681,7 +676,6 @@ impl FinalAnswerShape {
             "risk_assessment" => Some(Self::RiskAssessment),
             "scalar" => Some(Self::Scalar),
             "scalar_equality_verdict" => Some(Self::ScalarEqualityVerdict),
-            "single_commit_subject" => Some(Self::SingleCommitSubject),
             "single_path" => Some(Self::SinglePath),
             "status_with_source" => Some(Self::StatusWithSource),
             "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
@@ -701,7 +695,6 @@ impl FinalAnswerShape {
             Self::ExcerptPlusSummary => "excerpt_plus_summary",
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
             Self::Free => "free",
-            Self::GitStateSummary => "git_state_summary",
             Self::GroupedNameList => "grouped_name_list",
             Self::JudgmentWithExcerptBasis => "judgment_with_excerpt_basis",
             Self::KeyListOrKeySummary => "key_list_or_key_summary",
@@ -716,7 +709,6 @@ impl FinalAnswerShape {
             Self::RiskAssessment => "risk_assessment",
             Self::Scalar => "scalar",
             Self::ScalarEqualityVerdict => "scalar_equality_verdict",
-            Self::SingleCommitSubject => "single_commit_subject",
             Self::SinglePath => "single_path",
             Self::StatusWithSource => "status_with_source",
             Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
@@ -730,7 +722,7 @@ impl FinalAnswerShape {
         match self {
             Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
             Self::SinglePath => FinalAnswerShapeClass::SinglePath,
-            Self::Scalar | Self::SingleCommitSubject => FinalAnswerShapeClass::ScalarValue,
+            Self::Scalar => FinalAnswerShapeClass::ScalarValue,
             Self::GroupedNameList
             | Self::KeyListOrKeySummary
             | Self::ListOrEmptyStatement
@@ -749,7 +741,6 @@ impl FinalAnswerShape {
             Self::ExistenceSummaryWithPath
             | Self::ExcerptPlusSummary
             | Self::FailedStepWithEvidence
-            | Self::GitStateSummary
             | Self::ProjectSummaryGroundedInFiles
             | Self::RawOutputOrShortSummary
             | Self::SummaryGroundedInExcerpt

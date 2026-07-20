@@ -63,7 +63,6 @@ use super::{
     replace_delivery_with_latest_tail_read_range_answer,
     replace_delivery_with_observed_markdown_heading_scalar,
     replace_delivery_with_requested_machine_kv_summary,
-    replace_git_repository_state_delivery_with_requested_machine_fields,
     replace_raw_observation_delivery_with_synthesis, resolve_file_token_from_auto_locator_answer,
     route_allows_file_token_only_fallback, route_prefers_language_rendered_execution_failed_step,
     route_structured_clarify_context, run_deterministic_fallback_renderer_registry,
@@ -285,9 +284,6 @@ mod delivery_backfill_tests;
 
 #[path = "loop_reply_content_evidence_passthrough_tests.rs"]
 mod content_evidence_passthrough_tests;
-
-#[path = "loop_reply_git_state_tests.rs"]
-mod git_state_tests;
 
 #[path = "loop_reply_markdown_scalar_tests.rs"]
 mod markdown_scalar_tests;

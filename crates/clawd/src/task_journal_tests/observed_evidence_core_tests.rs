@@ -786,38 +786,6 @@ fn text_observed_evidence_extracts_count_path_and_candidates() {
                 == Some("/home/guagua/rustclaw/tmp/bundle.zip")
     }));
 
-    let mut git_journal =
-        TaskJournal::for_task("task-text-git-subject", "ask", "latest git subject");
-    git_journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "git_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("exit=0\n09342a6a fix: expose nl execution and locator flows\n".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    let observed = git_journal
-        .to_trace_json()
-        .pointer("/step_results/0/observed_evidence")
-        .cloned()
-        .expect("git subject evidence should be present");
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("git_basic.text_legacy_v1")
-    );
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("git subject evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("subject")
-            && item.get("excerpt").and_then(Value::as_str)
-                == Some("fix: expose nl execution and locator flows")
-    }));
-
     let mut git_json_journal =
         TaskJournal::for_task("task-json-git-subjects", "ask", "write a release note");
     git_json_journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -831,7 +799,16 @@ fn text_observed_evidence_extracts_count_path_and_candidates() {
                     "exit_code": 0,
                     "output": "exit=0\nf77577da Tighten NL verifier recovery\na30c49fb Tighten grounded channel setup rewrites\n",
                     "raw_action": "log",
-                    "subcommand": "log"
+                    "subcommand": "log",
+                    "subject": "Tighten NL verifier recovery",
+                    "subjects": [
+                        "Tighten NL verifier recovery",
+                        "Tighten grounded channel setup rewrites"
+                    ],
+                    "field_value": {
+                        "subject": "Tighten NL verifier recovery",
+                        "commit_count": 2
+                    }
                 },
                 "text": "exit=0\nf77577da Tighten NL verifier recovery\na30c49fb Tighten grounded channel setup rewrites\n"
             })
@@ -856,24 +833,13 @@ fn text_observed_evidence_extracts_count_path_and_candidates() {
         .get("items")
         .and_then(Value::as_array)
         .expect("structured git log evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("content_excerpt")
-            && item
-                .get("excerpt")
-                .and_then(Value::as_str)
-                .is_some_and(|excerpt| excerpt.contains("Tighten NL verifier recovery"))
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("subject")
-            && item.get("excerpt").and_then(Value::as_str) == Some("Tighten NL verifier recovery")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("git_subjects")
-            && item
-                .get("excerpt")
-                .and_then(Value::as_str)
-                .is_some_and(|excerpt| excerpt.contains("Tighten grounded channel setup rewrites"))
-    }));
+    assert!(
+        items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("extra.field_value.subject")
+                && item.get("redacted").and_then(Value::as_bool) == Some(true)
+        }),
+        "items: {items:#?}"
+    );
 
     let mut journal = TaskJournal::for_task("task-text-candidates", "ask", "列出文件名");
     let route = crate::IntentOutputContract {

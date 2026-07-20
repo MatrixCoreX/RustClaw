@@ -395,13 +395,6 @@ fn should_collapse_to_single_output(
     ) || response_has_any_delivery_token(text, messages)
 }
 
-fn should_preserve_execution_summary_messages(output_contract: &IntentOutputContract) -> bool {
-    !matches!(
-        output_contract.semantic_kind,
-        crate::OutputSemanticKind::GitRepositoryState
-    )
-}
-
 pub(crate) fn sync_output_payload(
     output_contract: &IntentOutputContract,
     normalized_text: &mut String,
@@ -446,18 +439,16 @@ pub(crate) fn sync_output_payload(
         return;
     }
     if should_collapse_to_single_output(output_contract, normalized_text, normalized_messages) {
-        if should_preserve_execution_summary_messages(output_contract) {
-            let execution_summaries = normalized_messages
-                .iter()
-                .filter(|message| crate::finalize::is_execution_summary_message(message))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !execution_summaries.is_empty() {
-                normalized_messages.clear();
-                normalized_messages.extend(execution_summaries);
-                normalized_messages.push(canonical);
-                return;
-            }
+        let execution_summaries = normalized_messages
+            .iter()
+            .filter(|message| crate::finalize::is_execution_summary_message(message))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !execution_summaries.is_empty() {
+            normalized_messages.clear();
+            normalized_messages.extend(execution_summaries);
+            normalized_messages.push(canonical);
+            return;
         }
         normalized_messages.clear();
         normalized_messages.push(canonical);

@@ -21,7 +21,7 @@ pub(in crate::answer_verifier) fn scalar_field_value_gap_is_grounded_in_structur
         return false;
     };
     if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
-        || !scalar_answer_is_strict_for_shape(shape, candidate_answer)
+        || !scalar_answer_is_strict(candidate_answer)
     {
         return false;
     }

@@ -137,52 +137,6 @@ pub(super) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn git_repository_state_facts_entry(
-    loop_state: &LoopState,
-    route: Option<&crate::IntentOutputContract>,
-) -> Option<String> {
-    let route = route?;
-    if !super::output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::GitRepositoryState,
-    ) {
-        return None;
-    }
-    let idx = latest_successful_step_index(loop_state, |step| step.skill == "git_basic")?;
-    let body = loop_state.executed_step_results[idx]
-        .output
-        .as_deref()
-        .map(str::trim)
-        .filter(|body| !body.is_empty())?;
-    let branch = latest_git_current_branch(loop_state);
-    let observation = git_basic_observation_text_candidates(body)
-        .into_iter()
-        .find_map(|candidate| {
-            git_repository_state_observation_from_status_output(&candidate, branch.as_deref())
-        })?;
-    let mut fields = Vec::new();
-    if let Some(branch) = observation
-        .branch
-        .as_deref()
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty())
-    {
-        fields.push(format!("git.branch={branch}"));
-    }
-    fields.push(format!(
-        "git.worktree={}",
-        if observation.dirty { "dirty" } else { "clean" }
-    ));
-    fields.push(format!(
-        "git.changed.count={}",
-        observation.changed_entries.len()
-    ));
-    Some(format!(
-        "### git_repository_state_facts\n{}",
-        fields.join("\n")
-    ))
-}
-
 pub(super) fn compound_listing_content_delivery_guard_entry(
     loop_state: &LoopState,
     route: Option<&crate::IntentOutputContract>,

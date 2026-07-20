@@ -7,80 +7,6 @@ fn answer_contract_from_route(
 }
 
 #[test]
-fn git_status_text_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-git-state", "ask", "检查仓库状态");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "git_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            "exit=0\n## main...origin/main\n M crates/clawd/src/task_journal.rs\n".to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-
-    let trace = journal.to_trace_json();
-    let items = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .and_then(|observed| observed.get("items"))
-        .and_then(Value::as_array)
-        .expect("observed evidence items should be present");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("state")
-            && item.get("excerpt").and_then(Value::as_str) == Some("dirty")
-    }));
-}
-
-#[test]
-fn git_subject_plain_text_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-git-subject", "ask", "最近一次 git 提交标题");
-    let route = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::GitCommitSubject,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("Harden contract matrix execution coverage\n".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn git_status_text_ignores_non_ascii_summary_without_panic() {
-    assert_eq!(
-        super::super::text_git_state_evidence(
-            "exit=0\n## main...origin/main\n执行 cat /definitely_missing_rustclaw_contract_case 失败\n"
-        ),
-        Some("clean")
-    );
-}
-
-#[test]
 fn config_validation_evidence_coverage_accepts_valid_flag() {
     let mut journal = TaskJournal::for_task("task-config-validation", "ask", "验证配置");
     let route = crate::IntentOutputContract {
@@ -955,35 +881,6 @@ fn content_presence_accepts_structured_not_found_as_negative_match_evidence() {
     assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage.observed_canonical.contains("exists"));
     assert!(coverage.observed_canonical.contains("path"));
-}
-
-#[test]
-fn git_subject_contract_ignores_read_text_observation_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-non-content-read-evidence",
-        "ask",
-        "current git commit subject",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::GitCommitSubject);
-    route.requires_content_evidence = false;
-    journal.record_output_contract(&route.clone());
-    journal.step_results.push(TaskJournalStepTrace::ok(
-        "step_read",
-        "fs_basic",
-        json!({
-            "action": "read_text_range",
-            "path": "/tmp/commit-message.txt",
-            "content": "abc1234 add contract matrix tests"
-        })
-        .to_string(),
-    ));
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-
-    assert!(!coverage.is_complete(), "coverage: {coverage:?}");
-    assert_eq!(coverage.missing_evidence, vec!["field_value"]);
-    assert!(!coverage.observed_canonical.contains("field_value"));
-    assert!(!coverage.observed_canonical.contains("content_excerpt"));
 }
 
 #[test]

@@ -68,8 +68,6 @@ NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
     "existence_with_path_summary": f"检查 {FIXTURE_PACKAGE} 是否存在，如果存在就一句话说明它大概是什么文件。",
     "recent_scalar_equality_check": "检查当前 git 分支名是否等于 main，只回答判断结果和依据。",
-    "git_commit_subject": "只告诉我最近一次 git 提交标题，不要解释。",
-    "git_repository_state": "检查这个仓库当前是否有未提交改动，用一句话说明。",
     "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
     "config_validation": f"验证 {FIXTURE_CONFIG} 是否是可读配置，并简短说明结果。",
     "config_risk_assessment": "检查 configs/config.toml 的风险配置项，简短说明是否有明显高风险设置。",
@@ -103,8 +101,6 @@ EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
     "existence_with_path_summary": f"Check whether {FIXTURE_PACKAGE} exists. If it does, explain in one sentence what kind of file it is.",
     "recent_scalar_equality_check": "Check whether the current git branch name equals main. Answer only with the judgment and evidence.",
-    "git_commit_subject": "Tell me only the latest git commit subject. Do not explain.",
-    "git_repository_state": "Check whether this repository currently has uncommitted changes, and explain in one sentence.",
     "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
     "config_validation": f"Validate whether {FIXTURE_CONFIG} is a readable config file, and briefly explain the result.",
     "config_risk_assessment": "Check the risk-related settings in configs/config.toml and briefly say whether there is any obvious high-risk setting.",
@@ -122,7 +118,6 @@ JA_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "file_names": f"{FIXTURE_DOCS_DIR} のファイル名を列挙し、ファイル名リストだけを出力してください。",
     "structured_keys": f"{FIXTURE_CONFIG} のトップレベルキーを読み取り、キー名リストだけを出力してください。",
     "generated_file_delivery": "tmp/contract_matrix_generated_note.txt に RustClaw contract matrix test という内容のテキストファイルを作成し、そのファイルパスを送ってください。",
-    "git_repository_state": "このリポジトリに未コミットの変更があるか確認し、一文で答えてください。",
 }
 
 KO_PROMPTS_BY_CONTRACT: dict[str, str] = {
@@ -132,7 +127,6 @@ KO_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "file_names": f"{FIXTURE_DOCS_DIR} 디렉터리의 파일명을 나열하고 파일명 목록만 출력하세요.",
     "structured_keys": f"{FIXTURE_CONFIG} 의 최상위 키를 읽고 키 이름 목록만 출력하세요.",
     "generated_file_delivery": "tmp/contract_matrix_generated_note.txt 파일을 만들고 내용은 RustClaw contract matrix test 로 넣은 뒤, 생성된 파일 경로를 보내세요.",
-    "git_repository_state": "이 저장소에 커밋되지 않은 변경 사항이 있는지 확인하고 한 문장으로 답하세요.",
 }
 
 FR_PROMPTS_BY_CONTRACT: dict[str, str] = {
@@ -142,7 +136,6 @@ FR_PROMPTS_BY_CONTRACT: dict[str, str] = {
     "file_names": f"Liste les noms de fichiers dans {FIXTURE_DOCS_DIR}. Affiche uniquement la liste des noms.",
     "structured_keys": f"Lis les clés de premier niveau dans {FIXTURE_CONFIG}. Affiche uniquement la liste des clés.",
     "generated_file_delivery": "Crée le fichier tmp/contract_matrix_generated_note.txt avec le contenu RustClaw contract matrix test, puis envoie-moi le chemin du fichier.",
-    "git_repository_state": "Vérifie si ce dépôt contient des modifications non validées et réponds en une phrase.",
 }
 
 LOCALIZED_TASK_WRAPPERS: dict[str, str] = {
@@ -161,7 +154,6 @@ STRICT_NATIVE_PROMPT_CONTRACTS = frozenset(
         "file_names",
         "structured_keys",
         "generated_file_delivery",
-        "git_repository_state",
     }
 )
 STRICT_NATIVE_PROMPT_VARIANTS = ("ja_jp", "ko_kr", "fr_fr")
@@ -595,8 +587,6 @@ def planned_action_equivalents(case: dict[str, Any]) -> list[str]:
             "fs_basic.find_entries",
         ): ["fs_basic.find_entries", "fs_basic.stat_paths", "fs_basic.read_text_range"],
         ("generated_file_delivery", "transform"): ["transform", "fs_basic.write_text"],
-        ("git_repository_state", "run_cmd"): ["run_cmd", "git_basic"],
-        ("git_commit_subject", "run_cmd"): ["run_cmd", "git_basic"],
         ("recent_scalar_equality_check", "run_cmd"): ["run_cmd", "git_basic"],
     }
     return equivalents.get((contract_id, action), [action])

@@ -315,13 +315,6 @@ use observed_contract::{
 mod exact_contract;
 use exact_contract::{prefer_observed_answer_for_exact_contract, route_prefers_observed_answer};
 
-#[path = "loop_reply_git_state.rs"]
-mod git_state;
-use git_state::{
-    replace_git_repository_state_delivery_with_requested_machine_fields,
-    replace_git_repository_state_machine_delivery_with_observed_synthesis,
-};
-
 #[path = "loop_reply_language_closeout.rs"]
 mod language_closeout;
 #[cfg(test)]
@@ -1244,21 +1237,6 @@ pub(crate) async fn finalize_loop_reply(
         &mut finalizer_summary,
     );
     append_compound_file_delivery_token_from_route(state, task, &mut loop_state, agent_run_context);
-    replace_git_repository_state_delivery_with_requested_machine_fields(
-        task,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    );
-    replace_git_repository_state_machine_delivery_with_observed_synthesis(
-        state,
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    )
-    .await;
     discard_non_answer_separator_delivery_for_broad_structured_read(&task.task_id, &mut loop_state);
     if loop_state.delivery_messages.is_empty() {
         attach_deterministic_structured_file_validation_from_read_range(

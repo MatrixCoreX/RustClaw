@@ -77,10 +77,6 @@ fn route_contract_marker_is_service_status(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ServiceStatus)
 }
 
-fn route_contract_marker_is_git_repository_state(route: &AnswerContract) -> bool {
-    route_contract_marker_is(route, crate::OutputSemanticKind::GitRepositoryState)
-}
-
 fn route_contract_marker_is_hidden_entries_check(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::HiddenEntriesCheck)
 }
@@ -139,75 +135,6 @@ pub(super) fn candidate_answer_has_grounded_existing_plain_path(
         return false;
     };
     file_token_path_is_grounded_in_observations(journal, &canonical_candidate_path)
-}
-
-pub(super) fn git_repository_state_answer_is_grounded_in_successful_observation(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-    candidate_answer: &str,
-) -> bool {
-    if !route_contract_marker_is_git_repository_state(route) {
-        return false;
-    }
-    let candidate = candidate_answer.trim();
-    if candidate.is_empty() {
-        return false;
-    }
-    journal.step_results.iter().any(|step| {
-        step_can_supply_verifier_observation_for_route(route, step)
-            && step.skill == "git_basic"
-            && step.output_excerpt.as_deref().is_some_and(|output| {
-                let Some(observed) =
-                    crate::agent_engine::observed_output::git_repository_state_observation_from_status_output(
-                        output,
-                        None,
-                    )
-                else {
-                    return false;
-                };
-                let worktree = if observed.dirty { "dirty" } else { "clean" };
-                if !candidate.contains(&format!("git.worktree={worktree}")) {
-                    return false;
-                }
-                if let Some(branch) = observed
-                    .branch
-                    .as_deref()
-                    .filter(|branch| !branch.is_empty())
-                {
-                    if !candidate.contains(&format!("git.branch={branch}")) {
-                        return false;
-                    }
-                }
-                if route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
-                    || route.output_contract.exact_sentence_count == Some(1)
-                {
-                    return true;
-                }
-                if schema_field_value(candidate, "git.changed.count=")
-                    .and_then(|value| value.parse::<usize>().ok())
-                    != Some(observed.changed_entries.len())
-                {
-                    return false;
-                }
-                observed
-                    .changed_entries
-                    .iter()
-                    .all(|entry| candidate.contains(entry.path.as_str()))
-            })
-    })
-}
-
-pub(super) fn schema_field_value<'a>(candidate: &'a str, prefix: &str) -> Option<&'a str> {
-    candidate
-        .lines()
-        .map(str::trim)
-        .find_map(|line| line.strip_prefix(prefix).map(str::trim))
-        .or_else(|| {
-            candidate
-                .split_whitespace()
-                .find_map(|part| part.strip_prefix(prefix).map(str::trim))
-        })
-        .filter(|value| !value.is_empty())
 }
 
 pub(super) fn service_status_port_answer_is_grounded_in_successful_observation(

@@ -766,11 +766,6 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["datetime", "timezone", "title"],
     ),
     step_text_extractor(
-        "git_basic",
-        "git_basic.text_legacy_v1",
-        &["field_value", "legacy_machine_tokens", "subject"],
-    ),
-    step_text_extractor(
         "http_basic",
         "http_basic.text_legacy_v1",
         &["command_output", "content_excerpt", "field_value", "status"],
@@ -981,9 +976,6 @@ pub(super) fn observed_evidence_from_step_output(step: &TaskJournalStepTrace) ->
             let extractor =
                 explicit_step_output_extractor_spec(step, output, fallback_extractor.kind)
                     .unwrap_or(fallback_extractor);
-            if extractor.extractor_ref == "git_basic.structured_json_v1" {
-                collect_git_json_observed_evidence_fields(&mut collector, &value);
-            }
             return observed_evidence_from_collector(collector, extractor);
         }
         Err(_) => evidence_extractor_spec(

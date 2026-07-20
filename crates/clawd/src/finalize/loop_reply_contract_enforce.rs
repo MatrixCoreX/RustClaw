@@ -461,7 +461,6 @@ pub(super) fn route_prefers_content_evidence_synthesis(
                 crate::OutputSemanticKind::WorkspaceProjectSummary,
                 crate::OutputSemanticKind::CommandOutputSummary,
                 crate::OutputSemanticKind::DirectoryPurposeSummary,
-                crate::OutputSemanticKind::GitRepositoryState,
             ]));
     if !contract.requires_content_evidence
         || contract.delivery_required
