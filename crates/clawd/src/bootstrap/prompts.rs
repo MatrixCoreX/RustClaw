@@ -48,6 +48,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "native_action_protocol (agent_engine.planning)",
     ),
     (
+        "prompts/native_turn_context.md",
+        "native_turn_context (agent_engine.planning)",
+    ),
+    (
         "prompts/single_plan_execution_prompt.md",
         "single_plan_execution (agent_engine.planning)",
     ),

@@ -13,7 +13,7 @@ use crate::{
     LlmProviderRuntime,
 };
 
-fn strip_think_blocks(raw: &str) -> String {
+pub(super) fn strip_think_blocks(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut rest = raw;
     loop {
@@ -51,6 +51,63 @@ fn sanitize_llm_text_output(raw: &str) -> String {
     strip_markdown_json_fence(&without_think_tags)
         .trim()
         .to_string()
+}
+
+fn sanitize_provider_raw_response(raw: &str) -> (String, bool) {
+    if let Ok(mut value) = serde_json::from_str::<Value>(raw) {
+        sanitize_provider_raw_value(&mut value);
+        let safe = value.to_string();
+        return (safe.clone(), safe != raw.trim());
+    }
+
+    let mut values = Vec::new();
+    let mut saw_record = false;
+    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(mut value) = serde_json::from_str::<Value>(line) else {
+            let safe = strip_think_blocks(raw)
+                .replace("<think>", "")
+                .replace("</think>", "");
+            return (safe.clone(), safe != raw);
+        };
+        saw_record = true;
+        sanitize_provider_raw_value(&mut value);
+        values.push(value.to_string());
+    }
+    if saw_record {
+        let safe = values.join("\n");
+        return (safe.clone(), safe != raw.trim());
+    }
+    (raw.to_string(), false)
+}
+
+fn sanitize_provider_raw_value(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for key in [
+                "reasoning",
+                "reasoning_content",
+                "reasoning_details",
+                "reasoning_text",
+                "thinking",
+            ] {
+                map.remove(key);
+            }
+            if let Some(Value::String(content)) = map.get_mut("content") {
+                *content = strip_think_blocks(content)
+                    .replace("<think>", "")
+                    .replace("</think>", "");
+            }
+            for child in map.values_mut() {
+                sanitize_provider_raw_value(child);
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                sanitize_provider_raw_value(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn maybe_sanitize_llm_text_output(vendor: &str, raw: &str) -> (String, bool) {
@@ -99,6 +156,11 @@ pub(crate) fn append_model_io_log(
             return;
         }
     };
+    let (safe_raw_response, raw_response_sanitized) = raw_response
+        .map(sanitize_provider_raw_response)
+        .map(|(safe, changed)| (Some(safe), changed))
+        .unwrap_or((None, false));
+    let sanitized = sanitized || raw_response_sanitized;
 
     let line = if verbose {
         json!({
@@ -129,7 +191,7 @@ pub(crate) fn append_model_io_log(
             "prompt": truncate_for_log(prompt),
             "request_payload": request_payload,
             "response": clean_response.map(truncate_for_log),
-            "raw_response": raw_response.map(truncate_for_log),
+            "raw_response": safe_raw_response.as_deref().map(truncate_for_log),
             "clean_response": clean_response.map(truncate_for_log),
             "usage": usage,
             "sanitized": sanitized,
@@ -165,6 +227,10 @@ pub(crate) fn append_model_io_log(
     // `spawn_cleanup_worker`（默认 300s 一次）调用 `rotate_model_io_log_daily`
     // 完成"按日归档 + 旧档过期"，append 侧保持 O(1)。
 }
+
+#[cfg(test)]
+#[path = "output_tests.rs"]
+mod tests;
 
 /// 默认保留多少天的 `model_io.log` 归档（含当天）。
 pub(crate) const MODEL_IO_LOG_KEEP_DAYS: u64 = 7;

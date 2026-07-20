@@ -195,19 +195,75 @@ enum SseFrame {
     Done,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum StreamWireMode {
+    #[default]
+    Unknown,
+    Sse,
+    Ndjson,
+}
+
 #[derive(Default)]
 struct SseDecoder {
     buffer: Vec<u8>,
+    mode: StreamWireMode,
 }
 
 impl SseDecoder {
     fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseFrame>, String> {
         self.buffer.extend_from_slice(bytes);
+        if self.mode == StreamWireMode::Unknown {
+            self.mode = detect_stream_wire_mode(&self.buffer);
+        }
+        match self.mode {
+            StreamWireMode::Sse => self.decode_sse_records(),
+            StreamWireMode::Ndjson => self.decode_ndjson_records(false),
+            StreamWireMode::Unknown => Ok(Vec::new()),
+        }
+    }
+
+    fn finish(&mut self) -> Result<Vec<SseFrame>, String> {
+        if self.mode == StreamWireMode::Unknown {
+            self.mode = detect_stream_wire_mode(&self.buffer);
+        }
+        match self.mode {
+            StreamWireMode::Sse => self.decode_sse_records(),
+            StreamWireMode::Ndjson => self.decode_ndjson_records(true),
+            StreamWireMode::Unknown if self.buffer.iter().all(u8::is_ascii_whitespace) => {
+                self.buffer.clear();
+                Ok(Vec::new())
+            }
+            StreamWireMode::Unknown => Err("model_turn_stream_framing_unknown".to_string()),
+        }
+    }
+
+    fn decode_sse_records(&mut self) -> Result<Vec<SseFrame>, String> {
         let mut frames = Vec::new();
         while let Some((end, separator_len)) = sse_record_end(&self.buffer) {
             let record = self.buffer.drain(..end).collect::<Vec<_>>();
             self.buffer.drain(..separator_len);
             if let Some(frame) = decode_sse_record(&record)? {
+                frames.push(frame);
+            }
+        }
+        Ok(frames)
+    }
+
+    fn decode_ndjson_records(&mut self, flush_tail: bool) -> Result<Vec<SseFrame>, String> {
+        let mut frames = Vec::new();
+        while let Some(end) = self.buffer.iter().position(|byte| *byte == b'\n') {
+            let mut record = self.buffer.drain(..=end).collect::<Vec<_>>();
+            record.pop();
+            if record.last() == Some(&b'\r') {
+                record.pop();
+            }
+            if let Some(frame) = decode_ndjson_record(&record)? {
+                frames.push(frame);
+            }
+        }
+        if flush_tail && !self.buffer.is_empty() {
+            let record = std::mem::take(&mut self.buffer);
+            if let Some(frame) = decode_ndjson_record(&record)? {
                 frames.push(frame);
             }
         }
@@ -229,7 +285,8 @@ struct OpenAiStreamAccumulator {
     usage: Option<super::client::LlmUsageSnapshot>,
     finish_reason: ModelFinishReason,
     events: Vec<ModelTurnEvent>,
-    raw_response: String,
+    raw_frames: Vec<Value>,
+    raw_response_bytes: usize,
     done: bool,
 }
 
@@ -241,7 +298,7 @@ impl OpenAiStreamAccumulator {
                 Ok(())
             }
             SseFrame::Data(value) => {
-                append_bounded_raw_response(&mut self.raw_response, &value);
+                self.record_raw_response(&value);
                 if let Some(usage) = openai_usage_snapshot(&value) {
                     self.usage = Some(usage.clone());
                     self.emit(ModelTurnEvent::Usage { usage }, sink);
@@ -357,7 +414,7 @@ impl OpenAiStreamAccumulator {
             sink,
         );
         let turn = ModelTurnResponse {
-            text: self.text,
+            text: self.text.clone(),
             tool_calls: completed_calls,
             usage: self.usage,
             finish_reason: self.finish_reason,
@@ -367,7 +424,7 @@ impl OpenAiStreamAccumulator {
         Ok(ModelTurnProviderResponse {
             turn,
             request_payload: Value::Null,
-            raw_response: self.raw_response,
+            raw_response: provider_safe_stream_raw_response(&self.raw_frames, &self.text),
             attempts: 1,
             retryable_error_count: 0,
             last_retry_error_kind: None,
@@ -379,6 +436,31 @@ impl OpenAiStreamAccumulator {
             sink(event.clone());
         }
         self.events.push(event);
+    }
+
+    fn complete_terminal_eof(&mut self) {
+        if self.finish_reason != ModelFinishReason::Unknown {
+            self.done = true;
+        }
+    }
+
+    fn record_raw_response(&mut self, value: &Value) {
+        const RAW_RESPONSE_LIMIT: usize = 1024 * 1024;
+        if self.raw_response_bytes >= RAW_RESPONSE_LIMIT {
+            return;
+        }
+        let mut safe = value.clone();
+        remove_hidden_reasoning_fields(&mut safe);
+        let encoded_len = safe.to_string().len();
+        if self.raw_response_bytes.saturating_add(encoded_len) > RAW_RESPONSE_LIMIT {
+            return;
+        }
+        self.raw_response_bytes = self.raw_response_bytes.saturating_add(encoded_len);
+        self.raw_frames.push(safe);
+    }
+
+    fn safe_raw_response(&self) -> String {
+        provider_safe_stream_raw_response(&self.raw_frames, &self.text)
     }
 }
 
@@ -398,7 +480,7 @@ async fn read_openai_stream(
             ProviderError::retryable_with_response(
                 format!("model_turn_stream_read_failed:{error}"),
                 request_payload.clone(),
-                accumulator.raw_response.clone(),
+                accumulator.safe_raw_response(),
                 accumulator.usage.clone(),
             )
         })?;
@@ -406,7 +488,7 @@ async fn read_openai_stream(
             ProviderError::non_retryable_with_response(
                 code,
                 request_payload.clone(),
-                accumulator.raw_response.clone(),
+                accumulator.safe_raw_response(),
                 accumulator.usage.clone(),
             )
         })?;
@@ -417,21 +499,42 @@ async fn read_openai_stream(
                     ProviderError::non_retryable_with_response(
                         code,
                         request_payload.clone(),
-                        accumulator.raw_response.clone(),
+                        accumulator.safe_raw_response(),
                         accumulator.usage.clone(),
                     )
                 })?;
         }
     }
+    let tail_frames = decoder.finish().map_err(|code| {
+        ProviderError::non_retryable_with_response(
+            code,
+            request_payload.clone(),
+            accumulator.safe_raw_response(),
+            accumulator.usage.clone(),
+        )
+    })?;
+    for frame in tail_frames {
+        accumulator
+            .apply(frame, event_sink.as_ref())
+            .map_err(|code| {
+                ProviderError::non_retryable_with_response(
+                    code,
+                    request_payload.clone(),
+                    accumulator.safe_raw_response(),
+                    accumulator.usage.clone(),
+                )
+            })?;
+    }
+    accumulator.complete_terminal_eof();
     if !accumulator.done {
         return Err(ProviderError::retryable_with_response(
             "model_turn_stream_disconnected".to_string(),
             request_payload,
-            accumulator.raw_response,
+            accumulator.safe_raw_response(),
             accumulator.usage,
         ));
     }
-    let finish_raw_response = accumulator.raw_response.clone();
+    let finish_raw_response = accumulator.safe_raw_response();
     let finish_usage = accumulator.usage.clone();
     let mut output = accumulator.finish(event_sink.as_ref()).map_err(|code| {
         ProviderError::non_retryable_with_response(
@@ -478,25 +581,98 @@ fn decode_sse_record(record: &[u8]) -> Result<Option<SseFrame>, String> {
         .map_err(|_| "model_turn_stream_json_invalid".to_string())
 }
 
-fn append_bounded_raw_response(raw: &mut String, value: &Value) {
-    const RAW_RESPONSE_LIMIT: usize = 1024 * 1024;
-    if raw.len() >= RAW_RESPONSE_LIMIT {
+fn detect_stream_wire_mode(buffer: &[u8]) -> StreamWireMode {
+    let first = buffer
+        .iter()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace());
+    match first {
+        Some(b'{') | Some(b'[') => StreamWireMode::Ndjson,
+        Some(_)
+            if buffer.starts_with(b"data:")
+                || buffer.starts_with(b"event:")
+                || buffer.starts_with(b":") =>
+        {
+            StreamWireMode::Sse
+        }
+        _ => StreamWireMode::Unknown,
+    }
+}
+
+fn decode_ndjson_record(record: &[u8]) -> Result<Option<SseFrame>, String> {
+    let text = std::str::from_utf8(record)
+        .map_err(|_| "model_turn_stream_utf8_invalid".to_string())?
+        .trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    if text == "[DONE]" {
+        return Ok(Some(SseFrame::Done));
+    }
+    serde_json::from_str(text)
+        .map(SseFrame::Data)
+        .map(Some)
+        .map_err(|_| "model_turn_stream_json_invalid".to_string())
+}
+
+fn provider_safe_stream_raw_response(frames: &[Value], full_text: &str) -> String {
+    let visible_text = super::output::strip_think_blocks(full_text)
+        .replace("<think>", "")
+        .replace("</think>", "");
+    let mut wrote_visible_text = false;
+    frames
+        .iter()
+        .map(|frame| {
+            let mut safe = frame.clone();
+            remove_hidden_reasoning_fields(&mut safe);
+            rewrite_stream_content(&mut safe, &visible_text, &mut wrote_visible_text);
+            safe.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn rewrite_stream_content(value: &mut Value, visible_text: &str, wrote_visible_text: &mut bool) {
+    let Some(content) = value.pointer_mut("/choices/0/delta/content") else {
+        return;
+    };
+    if !content.is_string() {
         return;
     }
-    let encoded = provider_safe_raw_response(value);
-    let remaining = RAW_RESPONSE_LIMIT.saturating_sub(raw.len());
-    let mut end = encoded.len().min(remaining);
-    while end > 0 && !encoded.is_char_boundary(end) {
-        end -= 1;
+    if *wrote_visible_text {
+        *content = Value::String(String::new());
+    } else {
+        *content = Value::String(visible_text.to_string());
+        *wrote_visible_text = true;
     }
-    raw.push_str(&encoded[..end]);
-    raw.push('\n');
 }
 
 fn provider_safe_raw_response(value: &Value) -> String {
     let mut safe = value.clone();
     remove_hidden_reasoning_fields(&mut safe);
+    sanitize_complete_content_fields(&mut safe);
     safe.to_string()
+}
+
+fn sanitize_complete_content_fields(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::String(content)) = map.get_mut("content") {
+                *content = super::output::strip_think_blocks(content)
+                    .replace("<think>", "")
+                    .replace("</think>", "");
+            }
+            for child in map.values_mut() {
+                sanitize_complete_content_fields(child);
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                sanitize_complete_content_fields(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn remove_hidden_reasoning_fields(value: &mut Value) {
