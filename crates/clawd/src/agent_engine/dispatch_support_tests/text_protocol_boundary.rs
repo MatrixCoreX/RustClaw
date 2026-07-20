@@ -17,7 +17,6 @@ fn multiline_read_range_passthrough_guard_ignores_visible_text_json_payload() {
             delivery_required: false,
             locator_kind: crate::OutputLocatorKind::Path,
             delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "/tmp/notes.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         }),

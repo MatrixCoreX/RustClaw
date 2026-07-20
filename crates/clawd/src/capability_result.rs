@@ -68,6 +68,51 @@ pub(crate) fn failed_execution_envelope(
     envelope
 }
 
+pub(crate) fn selected_exact_machine_result(
+    results: &[CapabilityResultEnvelope],
+    selector: &str,
+) -> Option<String> {
+    results.iter().rev().find_map(|result| {
+        if result.status != CapabilityResultStatus::Ok {
+            return None;
+        }
+        selected_result_value(&result.data, selector).and_then(exact_value_text)
+    })
+}
+
+fn selected_result_value<'a>(data: &'a Value, selector: &str) -> Option<&'a Value> {
+    structured_value_at_path(data, selector)
+        .or_else(|| {
+            data.get("extra")
+                .and_then(|extra| structured_value_at_path(extra, selector))
+        })
+        .or_else(|| {
+            data.get("output")
+                .and_then(|output| structured_value_at_path(output, selector))
+        })
+        .or_else(|| {
+            (selector == "command_output")
+                .then(|| data.get("output"))
+                .flatten()
+        })
+}
+
+fn structured_value_at_path<'a>(value: &'a Value, selector: &str) -> Option<&'a Value> {
+    selector
+        .split('.')
+        .try_fold(value, |current, segment| current.as_object()?.get(segment))
+}
+
+fn exact_value_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(value) => (!value.trim().is_empty()).then(|| value.clone()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).ok(),
+    }
+}
+
 fn machine_action(args: &Value) -> Option<String> {
     args.get("action")
         .and_then(Value::as_str)

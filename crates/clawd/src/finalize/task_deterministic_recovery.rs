@@ -50,15 +50,16 @@ pub(super) fn recover_answer_verifier_gap_with_deterministic_machine_evidence(
     )
 }
 
-pub(super) fn recover_raw_command_machine_field_final_answer(
+pub(super) fn recover_exact_observation_machine_field_final_answer(
     route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
 ) -> bool {
-    let Some(answer) =
-        crate::finalize::raw_command_machine_field_projection_from_journal(route_result, journal)
-    else {
+    let Some(answer) = crate::finalize::exact_observation_machine_field_projection_from_journal(
+        route_result,
+        journal,
+    ) else {
         return false;
     };
     if answer.trim() == answer_text.trim() {

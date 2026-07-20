@@ -113,7 +113,7 @@ fn output_contract_exact_path_list_uses_structured_selector() {
 
     assert!(contract.requests_exact_path_list());
     assert!(contract.requests_exact_list());
-    assert!(contract.semantic_kind_is_unclassified());
+    assert!(contract.does_not_request_exact_command_output());
 }
 
 #[test]
@@ -146,11 +146,10 @@ fn single_file_delivery_requires_all_machine_fields() {
 }
 
 #[test]
-fn default_output_contract_is_unclassified() {
+fn default_output_contract_does_not_request_exact_command_output() {
     let contract = output_contract();
 
-    assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::None);
-    assert!(contract.semantic_kind_is_unclassified());
+    assert!(contract.does_not_request_exact_command_output());
 }
 
 #[test]

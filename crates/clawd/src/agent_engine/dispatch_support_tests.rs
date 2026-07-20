@@ -953,7 +953,6 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("resolved_path".to_string()),
@@ -992,7 +991,6 @@ fn contract_matrix_synthesis_defers_multiple_count_observations_to_model() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "docs | logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1030,7 +1028,6 @@ fn synthesize_direct_fallback_defers_multiple_count_observations_to_model() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "docs | logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1063,7 +1060,6 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1097,7 +1093,6 @@ fn generic_content_synthesis_defers_multiline_excerpt_to_model() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "/tmp/model_io.log".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1132,7 +1127,6 @@ fn unclassified_strict_evidence_contract_defers_direct_fallback_to_synthesis() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::None,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1160,7 +1154,6 @@ fn synthesize_route_blocks_direct_fallback_for_plain_content_read() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Filename,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "README.md".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1181,7 +1174,6 @@ fn synthesize_route_blocks_direct_fallback_for_grounded_listing() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "document".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1202,7 +1194,6 @@ fn synthesize_route_blocks_observed_fallback_for_workspace_content() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1223,7 +1214,6 @@ fn synthesize_route_blocks_direct_fallback_for_unclassified_strict_evidence() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -1244,9 +1234,11 @@ fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
         locator_hint: String::new(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1257,7 +1249,7 @@ fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
 }
 
 #[test]
-fn strict_raw_tail_read_uses_direct_observed_fallback_before_composer() {
+fn strict_exact_tail_read_uses_direct_observed_fallback_before_composer() {
     let state = test_state_with_registry();
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -1272,9 +1264,11 @@ fn strict_raw_tail_read_uses_direct_observed_fallback_before_composer() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
         locator_hint: "/tmp/clawd-dev.log".to_string(),
-        selection: crate::OutputSelectionContract::default(),
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
     };
     let ctx = AgentRunContext {
         output_contract: Some(route.clone()),

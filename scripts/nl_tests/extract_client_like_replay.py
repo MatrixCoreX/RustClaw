@@ -196,7 +196,8 @@ class ExtractedCase:
     route_gate: str
     routed_mode: str
     contract_match: str
-    contract_semantic_kind: str
+    contract_response_shape: str
+    contract_structured_field_selector: str
     contract_final_answer_shape: str
     required_evidence: list[str]
     observed_evidence: list[str]
@@ -239,7 +240,12 @@ def extract_file(path: Path) -> ExtractedCase | None:
         route_gate=str(route.get("route_gate_kind") or "") if isinstance(route, dict) else "",
         routed_mode=str(route.get("routed_mode") or "") if isinstance(route, dict) else "",
         contract_match=str(contract_matrix.get("contract_match") or "") if isinstance(contract_matrix, dict) else "",
-        contract_semantic_kind=str(contract_matrix.get("semantic_kind") or "")
+        contract_response_shape=str(contract_matrix.get("response_shape") or "")
+        if isinstance(contract_matrix, dict)
+        else "",
+        contract_structured_field_selector=str(
+            contract_matrix.get("structured_field_selector") or ""
+        )
         if isinstance(contract_matrix, dict)
         else "",
         contract_final_answer_shape=str(contract_matrix.get("final_answer_shape") or "")
@@ -314,7 +320,8 @@ def min_repro_for_case(index: int, item: ExtractedCase) -> dict[str, Any]:
         },
         "route_contract": {
             "contract_match": item.contract_match,
-            "semantic_kind": item.contract_semantic_kind,
+            "response_shape": item.contract_response_shape,
+            "structured_field_selector": item.contract_structured_field_selector,
             "final_answer_shape": item.contract_final_answer_shape,
             "required_evidence": item.required_evidence,
         },

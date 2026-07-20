@@ -251,9 +251,6 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(privilege_escalation) = mapping.privilege_escalation {
         parts.push(format!("privilege_escalation={privilege_escalation}"));
     }
-    if let Some(output_semantic_kind) = mapping.output_semantic_kind.as_deref() {
-        parts.push(format!("output_semantic_kind={output_semantic_kind}"));
-    }
     if let Some(final_answer_shape) = mapping.final_answer_shape.as_deref() {
         parts.push(format!("final_answer_shape={final_answer_shape}"));
     }

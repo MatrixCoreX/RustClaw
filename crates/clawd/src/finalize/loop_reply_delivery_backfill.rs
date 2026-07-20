@@ -8,13 +8,12 @@ use crate::delivery_utils::trim_path_token;
 use crate::ClaimedTask;
 
 use super::{
-    current_user_visible_delivery_text, latest_bounded_read_range_answer_from_loop,
-    latest_publishable_synthesis_step_matches, latest_successful_observation_body,
-    latest_successful_raw_observation_body, log_deterministic_delivery_record,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
+    current_user_visible_delivery_text, exact_observation_output_needs_structural_projection,
+    latest_bounded_read_range_answer_from_loop, latest_publishable_synthesis_step_matches,
+    latest_successful_observation_body, latest_successful_step_output,
+    log_deterministic_delivery_record, looks_like_structured_machine_output,
     message_is_non_answer_separator, planned_delivery_is_publishable_model_language_answer,
-    raw_command_output_needs_structural_projection, route_allows_latest_tail_read_range_delivery,
-    structured_json_values_from_output,
+    route_allows_latest_tail_read_range_delivery, structured_json_values_from_output,
 };
 
 fn contractual_last_respond_delivery_value(
@@ -28,12 +27,12 @@ fn contractual_last_respond_delivery_value(
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())?;
-    if raw_command_output_needs_structural_projection(route, loop_state) {
+    if exact_observation_output_needs_structural_projection(route, loop_state) {
         return None;
     }
     let exact_single_line_observation =
         last_respond_matches_single_line_observation(loop_state, answer);
-    if strict_raw_command_output_exact_observation_answer(route, loop_state, answer) {
+    if strict_exact_observation_output_exact_observation_answer(route, loop_state, answer) {
         return Some(answer.to_string());
     }
     if crate::agent_engine::observed_output::route_requires_synthesized_delivery(route)
@@ -42,7 +41,7 @@ fn contractual_last_respond_delivery_value(
         return None;
     }
     let has_explicit_answer_contract = contract.delivery_required
-        || !contract.semantic_kind_is_unclassified()
+        || !contract.does_not_request_exact_command_output()
         || matches!(
             contract.response_shape,
             crate::OutputResponseShape::Scalar
@@ -59,7 +58,6 @@ fn contractual_last_respond_delivery_value(
         || crate::finalize::looks_like_internal_trace_artifact(answer)
         || crate::finalize::is_execution_summary_message(answer)
         || looks_like_structured_machine_output(answer)
-        || looks_like_raw_command_snapshot(answer)
     {
         return None;
     }
@@ -85,7 +83,7 @@ fn last_respond_should_defer_to_publishable_evidence_summary(
     }
     let summary = valid_publishable_synthesis_output(loop_state)
         .or_else(|| latest_publishable_respond_step_output(loop_state));
-    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    if route.requests_exact_command_output()
         && !publishable_summary_has_multi_source_observation(loop_state)
     {
         return false;
@@ -98,7 +96,7 @@ fn last_respond_should_defer_to_publishable_evidence_summary(
             publishable_evidence_summary_should_own_delivery(summary)
         }
         (
-            Some(crate::evidence_policy::FinalAnswerShape::RawOutputOrShortSummary),
+            Some(crate::evidence_policy::FinalAnswerShape::ExactObservationOrShortSummary),
             Some(summary),
         ) => publishable_evidence_summary_strictly_richer_than_answer(summary, answer),
         _ => false,
@@ -166,7 +164,7 @@ fn free_answer_route_allows_terminal_respond_delivery(
     !contract.delivery_required
         && !contract.requires_content_evidence
         && contract.response_shape == crate::OutputResponseShape::Free
-        && route.semantic_kind_is_unclassified()
+        && route.does_not_request_exact_command_output()
 }
 
 pub(crate) fn latest_publishable_respond_step_output(loop_state: &LoopState) -> Option<&str> {
@@ -226,22 +224,21 @@ pub(super) fn last_respond_matches_single_line_observation(
         return false;
     }
     !looks_like_structured_machine_output(line)
-        && !looks_like_raw_command_snapshot(line)
         && !crate::finalize::looks_like_planner_artifact(line)
         && !crate::finalize::looks_like_internal_trace_artifact(line)
 }
 
-pub(super) fn strict_raw_command_output_exact_observation_answer(
+pub(super) fn strict_exact_observation_output_exact_observation_answer(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
     let contract = route.clone();
-    if !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    if !route.requests_exact_command_output()
         || contract.response_shape != crate::OutputResponseShape::Strict
         || !contract.requires_content_evidence
         || contract.delivery_required
-        || raw_command_output_needs_structural_projection(route, loop_state)
+        || exact_observation_output_needs_structural_projection(route, loop_state)
     {
         return false;
     }
@@ -253,7 +250,7 @@ pub(super) fn strict_raw_command_output_exact_observation_answer(
     {
         return false;
     }
-    latest_successful_raw_observation_body(loop_state)
+    latest_successful_step_output(loop_state)
         .map(str::trim)
         .is_some_and(|body| !body.is_empty() && body == answer)
         || latest_successful_observation_body(loop_state)
@@ -459,7 +456,7 @@ pub(super) fn backfill_delivery_from_last_outputs(
     if loop_state.delivery_messages.is_empty() {
         if agent_run_context
             .and_then(|ctx| ctx.output_contract())
-            .is_some_and(|route| raw_command_output_needs_structural_projection(route, loop_state))
+            .is_some_and(|route| exact_observation_output_needs_structural_projection(route, loop_state))
             && loop_state
                 .last_user_visible_respond
                 .as_deref()
@@ -541,7 +538,7 @@ fn backfill_synthesis_for_content_evidence_delivery(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if !route_expects_synthesis_over_raw_observation(route) {
+    if !route_expects_synthesis_over_direct_observation(route) {
         return false;
     }
     let Some(answer) = valid_publishable_synthesis_output(loop_state)
@@ -641,7 +638,7 @@ pub(super) fn replace_placeholder_delivery_with_synthesis(
     loop_state.last_user_visible_respond = Some(synthesis);
 }
 
-pub(super) fn replace_raw_read_delivery_with_synthesis(
+pub(super) fn replace_direct_read_observation_with_synthesis(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -656,7 +653,7 @@ pub(super) fn replace_raw_read_delivery_with_synthesis(
             contract.response_shape,
             crate::OutputResponseShape::FileToken
         )
-        || (route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        || (route.requests_exact_command_output()
             && contract.response_shape == crate::OutputResponseShape::Strict)
     {
         return false;
@@ -674,13 +671,13 @@ pub(super) fn replace_raw_read_delivery_with_synthesis(
         return false;
     };
     if current_delivery == synthesis
-        || !delivery_is_raw_read_observation(current_delivery, loop_state)
+        || !delivery_is_direct_read_observation(current_delivery, loop_state)
     {
         return false;
     }
 
     info!(
-        "final_result_replace_raw_read_delivery_with_synthesis task_id={} raw={}",
+        "final_result_replace_direct_read_observation_with_synthesis task_id={} raw={}",
         task.task_id,
         crate::truncate_for_log(current_delivery)
     );
@@ -694,7 +691,7 @@ pub(super) fn replace_raw_read_delivery_with_synthesis(
     true
 }
 
-pub(super) fn replace_raw_observation_delivery_with_synthesis(
+pub(super) fn replace_direct_observation_delivery_with_synthesis(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -706,7 +703,7 @@ pub(super) fn replace_raw_observation_delivery_with_synthesis(
     if !contract.requires_content_evidence || contract.delivery_required {
         return false;
     }
-    if !route_expects_synthesis_over_raw_observation(route) {
+    if !route_expects_synthesis_over_direct_observation(route) {
         return false;
     }
     let Some(synthesis) = valid_publishable_synthesis_output(loop_state).map(str::to_string) else {
@@ -731,7 +728,7 @@ pub(super) fn replace_raw_observation_delivery_with_synthesis(
     }
 
     info!(
-        "final_result_replace_raw_observation_delivery_with_synthesis task_id={} raw={}",
+        "final_result_replace_direct_observation_delivery_with_synthesis task_id={} raw={}",
         task.task_id,
         crate::truncate_for_log(current_delivery)
     );
@@ -887,7 +884,7 @@ pub(super) fn current_delivery_is_latest_publishable_synthesis(
         && crate::finalize::parse_delivery_token(synthesis).is_none()
 }
 
-pub(crate) fn route_expects_synthesis_over_raw_observation(
+pub(crate) fn route_expects_synthesis_over_direct_observation(
     route: &crate::IntentOutputContract,
 ) -> bool {
     let contract = route.clone();
@@ -903,7 +900,7 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(
         return true;
     }
     if contract.requires_content_evidence
-        && route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        && route.requests_exact_command_output()
         && contract.response_shape == crate::OutputResponseShape::Free
         && crate::evidence_policy::final_answer_shape_for_output_contract(&contract)
             .is_some_and(|shape| shape.allows_model_language())
@@ -916,11 +913,10 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(
     if !contract.requires_content_evidence || !constrained_sentence_delivery {
         return false;
     }
-    route.semantic_kind_is_unclassified()
-        || route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    route.does_not_request_exact_command_output() || route.requests_exact_command_output()
 }
 
-pub(super) fn delivery_is_raw_read_observation(delivery: &str, loop_state: &LoopState) -> bool {
+pub(super) fn delivery_is_direct_read_observation(delivery: &str, loop_state: &LoopState) -> bool {
     let delivery = delivery.trim();
     if delivery.is_empty()
         || crate::finalize::is_execution_summary_message(delivery)
@@ -940,7 +936,7 @@ pub(super) fn delivery_is_raw_read_observation(delivery: &str, loop_state: &Loop
 }
 
 pub(super) fn step_output_is_read_range(step: &crate::executor::StepExecutionResult) -> bool {
-    if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+    if !step.is_ok() {
         return false;
     }
     step.output.as_deref().map(str::trim).is_some_and(|output| {

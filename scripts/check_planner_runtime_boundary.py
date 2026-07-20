@@ -1,30 +1,15 @@
 #!/usr/bin/env python3
-"""Guard the planner-owned runtime against legacy semantic routing regressions."""
+"""Guard the planner-owned runtime against legacy pre-loop routing regressions."""
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import re
 import sys
 from pathlib import Path
 
-from runtime_semantic_rewrite_core_guards import (
-    Finding,
-    production_rust_files,
-    rel,
-    scan_journal_output_contract_ref_boundary,
-    scan_legacy_json_semantic_fields,
-    scan_legacy_runtime_semantic_outputs,
-    scan_repo_text,
-    scan_route_result_raw_semantic_access,
-    scan_static_capability_compat_boundary,
-    scan_text,
-)
-from runtime_semantic_rewrite_registry_bridge_guards import (
-    scan_removed_lightweight_preclassification,
-    scan_task_context_builder_registry_bridge_budget,
-    scan_task_contract_registry_bridge_semantic_defaults,
-)
-from runtime_semantic_rewrite_user_text_guards import (
+from planner_runtime_user_text_guards import (
     scan_async_job_start_user_text_command_selection,
     scan_config_change_preview_user_text_selection,
     scan_git_deterministic_user_text_action_selection,
@@ -38,6 +23,136 @@ from runtime_semantic_rewrite_user_text_guards import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
+
+FORBIDDEN_CONTROL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("legacy_migration_debt", re.compile(r"\blegacy_migration_debt\b")),
+    ("legacy_semantic_reroute", re.compile(r"\blegacy_semantic_reroute\b")),
+    ("agent_loop_semantic_defer", re.compile(r"\bagent_loop_semantic_defer\b")),
+    (
+        "post_route_semantic_clarify_deferred",
+        re.compile(r"\bpost_route_semantic_clarify_deferred_to_agent_loop\b"),
+    ),
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class Finding:
+    path: str
+    line: int
+    kind: str
+    text: str
+
+
+def rel(path: Path) -> str:
+    return path.resolve().relative_to(ROOT).as_posix()
+
+
+def is_test_path(path: Path) -> bool:
+    rel_path = rel(path)
+    parts = Path(rel_path).parts
+    return rel_path.endswith(("_tests.rs", "tests.rs")) or any(
+        part == "tests" or part.endswith("_tests") for part in parts
+    )
+
+
+def production_rust_files() -> list[Path]:
+    return sorted(
+        path
+        for path in SRC_ROOT.rglob("*.rs")
+        if path.is_file() and not is_test_path(path)
+    )
+
+
+def scan_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for kind, pattern in FORBIDDEN_CONTROL_PATTERNS:
+            if pattern.search(line):
+                findings.append(Finding(rel_path, line_no, kind, line.strip()))
+    return findings
+
+
+def scan_journal_plan_contract_boundary() -> list[Finding]:
+    path = SRC_ROOT / "task_journal_decision_envelope.rs"
+    text = path.read_text(encoding="utf-8")
+    required = (
+        "fn agent_loop_round_plan_contract_envelope_json(",
+        "let output_contract = plan.output_contract.clone().unwrap_or_default();",
+        "output_contract_ref(&output_contract)",
+    )
+    if all(token in text for token in required) and "output_contract_ref_for_route" not in text:
+        return []
+    return [
+        Finding(
+            rel(path),
+            1,
+            "journal_output_contract_not_planner_owned",
+            "decision envelopes must consume PlanResult.output_contract directly",
+        )
+    ]
+
+
+def scan_static_capability_compat_boundary() -> list[Finding]:
+    paths = (
+        SRC_ROOT / "capability_resolver.rs",
+        SRC_ROOT / "capability_resolver_tests.rs",
+        SRC_ROOT / "agent_engine" / "dispatch_support.rs",
+    )
+    forbidden_tokens = (
+        "resolve_static_capability",
+        "resolve_static_capability_action_for_state",
+        "static_capability_compat_enabled",
+        "static_capabilities",
+        "capability_resolver_static_compat_resolved",
+        '"static_compat"',
+    )
+    findings: list[Finding] = []
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            for token in forbidden_tokens:
+                if token in line:
+                    findings.append(
+                        Finding(
+                            rel(path),
+                            line_no,
+                            "static_capability_compat_forbidden",
+                            line.strip(),
+                        )
+                    )
+    return findings
+
+
+def scan_removed_lightweight_preclassification() -> list[Finding]:
+    targets = (
+        ROOT / "prompts/layers/overlays/agent_planning.md",
+        SRC_ROOT / "agent_engine/planning.rs",
+        SRC_ROOT / "agent_engine.rs",
+        ROOT / "prompts/layers/manifest.toml",
+        SRC_ROOT / "bootstrap/prompts.rs",
+    )
+    forbidden_tokens = (
+        "PlanningPromptClass",
+        "build_lightweight_tool_spec",
+        "lightweight_execution_prompt",
+        "lightweight_incremental_plan_prompt",
+    )
+    findings: list[Finding] = []
+    for path in targets:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for token in forbidden_tokens:
+            if token in text:
+                findings.append(
+                    Finding(
+                        rel(path),
+                        1,
+                        "removed_lightweight_preclassification_present",
+                        f"obsolete pre-planner classification token remains: {token}",
+                    )
+                )
+    return findings
 
 REQUIRED_PLANNER_FRONTDOOR_FILES: tuple[Path, ...] = (
     SRC_ROOT / "turn_boundary_envelope.rs",
@@ -225,19 +340,14 @@ def scan_repo() -> list[Finding]:
     for path in production_rust_files():
         rel_path = rel(path)
         text = path.read_text(encoding="utf-8")
-        findings.extend(scan_repo_text(rel_path, text))
-        findings.extend(scan_route_result_raw_semantic_access(rel_path, text))
-        findings.extend(scan_legacy_json_semantic_fields(rel_path, text))
-        findings.extend(scan_legacy_runtime_semantic_outputs(rel_path, text))
+        findings.extend(scan_text(rel_path, text))
 
     findings.extend(scan_planner_frontdoor_terminal_shape())
     findings.extend(scan_removed_semantic_resources())
     findings.extend(scan_removed_semantic_production_tokens())
     findings.extend(scan_removed_lightweight_preclassification())
-    findings.extend(scan_journal_output_contract_ref_boundary())
+    findings.extend(scan_journal_plan_contract_boundary())
     findings.extend(scan_static_capability_compat_boundary())
-    findings.extend(scan_task_context_builder_registry_bridge_budget())
-    findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
     findings.extend(scan_git_deterministic_user_text_action_selection())
     findings.extend(scan_sqlite_route_request_semantic_fallback())
     findings.extend(scan_task_control_task_id_user_text_selection())
@@ -250,7 +360,7 @@ def scan_repo() -> list[Finding]:
 
 
 def print_report(findings: list[Finding]) -> int:
-    print(f"RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings={len(findings)}")
+    print(f"PLANNER_RUNTIME_BOUNDARY_CHECK findings={len(findings)}")
     for item in findings:
         print(f"  - {item.path}:{item.line} [{item.kind}] {item.text}")
     return 1 if findings else 0
@@ -259,9 +369,9 @@ def print_report(findings: list[Finding]) -> int:
 def run_self_test() -> int:
     blocked = scan_text(
         "crates/clawd/src/agent_engine/planning.rs",
-        '"decision_source": "semantic_rewrite",\n',
+        '"decision_source": "legacy_migration_debt",\n',
     )
-    assert blocked and blocked[0].kind == "semantic_rewrite"
+    assert blocked and blocked[0].kind == "legacy_migration_debt"
 
     blocked_file = removed_frontdoor_finding(
         SRC_ROOT / "intent_router_self_test.rs", "intent_router*.rs"

@@ -70,9 +70,7 @@ fn latest_read_range_evidence_from_journal(
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<ReadRangeEvidence> {
     journal.step_results.iter().rev().find_map(|step| {
-        if step.status != crate::executor::StepExecutionStatus::Ok
-            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
-        {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
             return None;
         }
         let value = serde_json::from_str::<Value>(step.output_excerpt.as_deref()?.trim()).ok()?;

@@ -30,7 +30,7 @@ fn backfill_delivery_prefers_contractual_last_respond_over_synthesis() {
 }
 
 #[test]
-fn backfill_delivery_accepts_exact_multiline_raw_command_respond() {
+fn backfill_delivery_accepts_exact_multiline_exact_observation_respond() {
     let task = claimed_task("task-contractual-multiline-raw-command");
     let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -40,7 +40,7 @@ fn backfill_delivery_accepts_exact_multiline_raw_command_respond() {
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", observed));
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.response_shape = OutputResponseShape::Free;
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -71,7 +71,6 @@ fn backfill_delivery_uses_free_answer_respond_step() {
     route.delivery_required = false;
     route.requires_content_evidence = false;
     route.response_shape = OutputResponseShape::Free;
-    route.semantic_kind = OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -181,7 +180,6 @@ fn backfill_delivery_uses_terminal_contract_respond_without_observed_execution()
     route.delivery_required = false;
     route.requires_content_evidence = false;
     route.response_shape = OutputResponseShape::Free;
-    route.semantic_kind = OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -210,7 +208,6 @@ fn backfill_delivery_does_not_use_respond_step_for_content_evidence_route() {
     route.delivery_required = false;
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -240,7 +237,6 @@ fn backfill_delivery_prefers_content_evidence_synthesis_over_locator_respond() {
     route.delivery_required = false;
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Free;
-    route.semantic_kind = OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -305,7 +301,7 @@ async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_keeps_exact_multiline_raw_command_observed_respond() {
+async fn finalize_loop_reply_keeps_exact_multiline_exact_observation_observed_respond() {
     let state = test_state();
     let task = claimed_task("task-multiline-raw-command-observed-respond");
     let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
@@ -316,7 +312,7 @@ async fn finalize_loop_reply_keeps_exact_multiline_raw_command_observed_respond(
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", observed));
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.response_shape = OutputResponseShape::Strict;
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -419,7 +415,6 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_delivery_listing() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -469,7 +464,6 @@ async fn finalize_loop_reply_prefers_latest_synthesis_for_compound_observations(
         .push(ok_step_result("step_4", "respond", partial_table));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -511,7 +505,6 @@ async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delive
         .push(ok_step_result("step_2", "synthesize_answer", synthesis));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     route.delivery_required = false;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -523,7 +516,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delive
         Some(synthesis)
     );
     assert!(
-        crate::finalize::loop_reply::route_expects_synthesis_over_raw_observation(
+        crate::finalize::loop_reply::route_expects_synthesis_over_direct_observation(
             ctx.output_contract.as_ref().expect("output contract")
         )
     );
@@ -563,7 +556,6 @@ async fn finalize_loop_reply_prefers_content_excerpt_respond_synthesis_over_titl
         .push(ok_step_result("step_2", "respond", synthesis));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     route.delivery_required = false;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -615,7 +607,6 @@ async fn finalize_loop_reply_prefers_db_rows_synthesis_over_locator_title_delive
         .push(ok_step_result("step_4", "respond", synthesis));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Free;
     route.delivery_required = false;
     route.locator_kind = OutputLocatorKind::Path;
@@ -660,7 +651,6 @@ async fn finalize_loop_reply_uses_multi_locator_route_for_compound_synthesis() {
         .push(ok_step_result("step_3", "respond", partial_table));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Free;
     route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
@@ -684,7 +674,7 @@ async fn finalize_loop_reply_uses_multi_locator_route_for_compound_synthesis() {
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_replaces_raw_read_delivery_with_latest_synthesis() {
+async fn finalize_loop_reply_replaces_direct_read_observation_delivery_with_latest_synthesis() {
     let state = test_state();
     let task = claimed_task("task-raw-read-delivery-synthesis");
     let raw_read = r#"{"action":"read_range","mode":"head","excerpt":"1|alpha\n2|beta\n3|gamma","path":"/tmp/app.log"}"#;
@@ -752,7 +742,6 @@ async fn finalize_loop_reply_prefers_exact_sentence_synthesis_over_raw_read() {
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
     route.exact_sentence_count = Some(3);
-    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -774,10 +763,11 @@ async fn finalize_loop_reply_prefers_exact_sentence_synthesis_over_raw_read() {
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_keeps_strict_raw_tail_read_delivery_over_synthesis() {
+async fn finalize_loop_reply_keeps_strict_exact_tail_read_delivery_over_synthesis() {
     let state = test_state();
     let task = claimed_task("task-strict-raw-tail-keeps-observed");
     let observed = "98|first observed line\n99|second observed line";
+    let exact_output = "first observed line\nsecond observed line";
     let raw_read = serde_json::json!({
         "extra": {
             "action": "read_range",
@@ -802,6 +792,19 @@ async fn finalize_loop_reply_keeps_strict_raw_tail_read_delivery_over_synthesis(
         .executed_step_results
         .push(ok_step_result("step_1", "fs_basic", &raw_read));
     loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "fs_basic",
+            "step_1",
+            &serde_json::json!({"action": "read_range"}),
+            &raw_read,
+            Some(&serde_json::json!({
+                "action": "read_range",
+                "command_output": exact_output,
+                "path": "/tmp/app.log"
+            })),
+        ));
+    loop_state
         .executed_step_results
         .push(ok_step_result("step_2", "synthesize_answer", synthesis));
     loop_state.delivery_messages.push(observed.to_string());
@@ -809,7 +812,7 @@ async fn finalize_loop_reply_keeps_strict_raw_tail_read_delivery_over_synthesis(
     loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.response_shape = OutputResponseShape::Strict;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -826,9 +829,8 @@ async fn finalize_loop_reply_keeps_strict_raw_tail_read_delivery_over_synthesis(
     .await
     .expect("finalize should preserve strict raw read output");
 
-    let normalized_observed = "first observed line\nsecond observed line";
-    assert_eq!(reply.text, normalized_observed);
-    assert_eq!(reply.messages, vec![normalized_observed.to_string()]);
+    assert_eq!(reply.text, exact_output);
+    assert_eq!(reply.messages, vec![exact_output.to_string()]);
     assert!(!reply.should_fail_task);
 }
 
@@ -854,7 +856,6 @@ async fn finalize_loop_reply_preserves_model_synthesis_after_path_observation() 
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = false;
-    route.semantic_kind = OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/tmp/repo/configs/channels".to_string();
     route.selection.structured_field_selector = Some("exists,kind,path".to_string());

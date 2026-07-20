@@ -153,55 +153,6 @@ pub(super) fn record_latest_run_cmd_command_output_vars(
     }
 }
 
-pub(crate) fn record_successful_run_cmd_command_output_var(
-    loop_state: &mut LoopState,
-    normalized_skill: &str,
-    step_id: &str,
-    args: &Value,
-) {
-    if normalized_skill != "run_cmd" {
-        return;
-    }
-    let Some(command) = args
-        .get("command")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|command| !command.is_empty())
-    else {
-        return;
-    };
-    let mut commands = loop_state
-        .output_vars
-        .get("agent_loop.successful_run_cmd_commands_by_step")
-        .and_then(|raw| serde_json::from_str::<serde_json::Map<String, Value>>(raw).ok())
-        .unwrap_or_default();
-    commands.insert(step_id.to_string(), Value::String(command.to_string()));
-    if let Ok(serialized) = serde_json::to_string(&commands) {
-        loop_state.output_vars.insert(
-            "agent_loop.successful_run_cmd_commands_by_step".to_string(),
-            serialized,
-        );
-    }
-}
-
-pub(crate) fn successful_run_cmd_command_for_step(
-    loop_state: &LoopState,
-    step_id: &str,
-) -> Option<String> {
-    loop_state
-        .output_vars
-        .get("agent_loop.successful_run_cmd_commands_by_step")
-        .and_then(|raw| serde_json::from_str::<serde_json::Map<String, Value>>(raw).ok())
-        .and_then(|commands| {
-            commands
-                .get(step_id)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .map(ToOwned::to_owned)
-        })
-        .filter(|command| !command.is_empty())
-}
-
 fn record_run_cmd_command_list_output_var(loop_state: &mut LoopState, command: &str) {
     let mut commands = loop_state
         .output_vars

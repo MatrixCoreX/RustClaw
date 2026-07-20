@@ -26,7 +26,7 @@ pub(super) fn route_allows_latest_tail_read_range_delivery(
     }
     !contract.delivery_required
         && contract.requires_content_evidence
-        && route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        && route.requests_exact_command_output()
 }
 
 pub(super) fn latest_tail_read_range_observed_answer(
@@ -226,34 +226,22 @@ fn planned_tail_read_request_from_args(
     })
 }
 
-fn planned_args_are_read_range(skill: &str, args: &serde_json::Value) -> bool {
-    let skill = skill.trim().to_ascii_lowercase();
+fn planned_args_are_read_range(_skill: &str, args: &serde_json::Value) -> bool {
     let action = args
         .get("action")
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase());
     matches!(action.as_deref(), Some("read_range" | "read_text_range"))
-        || matches!(
-            skill.as_str(),
-            "filesystem.read_range"
-                | "filesystem.read_text_range"
-                | "fs_basic.read_range"
-                | "fs_basic.read_text_range"
-                | "system_basic.read_range"
-                | "system_basic.read_text_range"
-        )
-        || (matches!(skill.as_str(), "fs_basic" | "system_basic")
-            && args.get("path").is_some()
+        || (args.get("path").is_some()
             && args.get("mode").is_some()
             && tail_read_requested_n(args).is_some())
 }
 
 fn loop_has_directory_read_error(loop_state: &LoopState) -> bool {
-    loop_state.executed_step_results.iter().any(|step| {
-        matches!(step.skill.as_str(), "fs_basic" | "system_basic")
-            && !step.is_ok()
-            && step_error_kind(step).as_deref() == Some("is_directory")
-    })
+    loop_state
+        .executed_step_results
+        .iter()
+        .any(|step| !step.is_ok() && step_error_kind(step).as_deref() == Some("is_directory"))
 }
 
 fn step_error_kind(step: &crate::executor::StepExecutionResult) -> Option<String> {
@@ -275,7 +263,7 @@ fn latest_inventory_dir_value_for_path(
         .executed_step_results
         .iter()
         .rev()
-        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "fs_basic" | "system_basic"))
+        .filter(|step| step.is_ok())
         .find_map(|step| {
             let output = step.output.as_deref()?.trim();
             let body =
@@ -397,7 +385,7 @@ pub(super) fn latest_tail_read_range_answer_from_loop(
         .iter()
         .rev()
         .find_map(|step| {
-            if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+            if !step.is_ok() {
                 return None;
             }
             let output = step.output.as_deref()?.trim();
@@ -415,7 +403,7 @@ pub(super) fn latest_bounded_read_range_answer_from_loop(
         .iter()
         .rev()
         .find_map(|step| {
-            if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+            if !step.is_ok() {
                 return None;
             }
             let output = step.output.as_deref()?.trim();
@@ -425,7 +413,7 @@ pub(super) fn latest_bounded_read_range_answer_from_loop(
 }
 
 fn step_output_is_bounded_read_range(step: &crate::executor::StepExecutionResult) -> bool {
-    if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+    if !step.is_ok() {
         return false;
     }
     let Some(output) = step
@@ -606,7 +594,7 @@ fn route_prefers_publishable_summary_over_tail_read(
             contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
-        || route_requires_raw_tail_read_passthrough(Some(route))
+        || route_requires_exact_tail_read_delivery(Some(route))
         || !matches!(
             crate::evidence_policy::final_answer_shape_for_output_contract(route),
             Some(crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence)
@@ -694,7 +682,7 @@ fn latest_tail_read_range_should_preserve_current_delivery(
     if latest_tail_replacement_can_recover_stale_synthesis(loop_state, current_delivery) {
         return false;
     }
-    if route_requires_raw_tail_read_passthrough(route) {
+    if route_requires_exact_tail_read_delivery(route) {
         return false;
     }
     if latest_tail_replacement_was_synthesized_after_tail(loop_state, current_delivery) {
@@ -726,13 +714,13 @@ fn finalizer_summary_rejects_current_delivery(
         || summary.format_ok == Some(false)
 }
 
-pub(super) fn route_requires_raw_tail_read_passthrough(
+pub(super) fn route_requires_exact_tail_read_delivery(
     route: Option<&crate::IntentOutputContract>,
 ) -> bool {
     route
         .map(|route| {
             let contract = route.clone();
-            route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+            route.requests_exact_command_output()
                 && contract.response_shape == crate::OutputResponseShape::Strict
                 && contract.requires_content_evidence
                 && !contract.delivery_required

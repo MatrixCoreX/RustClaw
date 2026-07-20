@@ -16,22 +16,8 @@ pub(super) fn observed_language_supports_bilingual_template(language_hint: &str)
     hint == "config_default" || hint.starts_with("en") || hint.starts_with("zh")
 }
 
-pub(super) fn route_contract_marker_is(
-    route: &crate::IntentOutputContract,
-    semantic_kind: crate::OutputSemanticKind,
-) -> bool {
-    route.semantic_kind_is(semantic_kind)
-}
-
-pub(super) fn route_contract_marker_is_any(
-    route: &crate::IntentOutputContract,
-    semantic_kinds: &[crate::OutputSemanticKind],
-) -> bool {
-    route.semantic_kind_is_any(semantic_kinds)
-}
-
 pub(super) fn route_is_unclassified_contract(route: &crate::IntentOutputContract) -> bool {
-    route.semantic_kind_is_unclassified()
+    route.does_not_request_exact_command_output()
 }
 
 pub(super) fn observed_request_prefers_english_template(
@@ -66,12 +52,10 @@ pub(super) fn observed_request_prefers_english_template(
 pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> String {
     let route = agent_run_context.and_then(|ctx| ctx.output_contract());
     let response_shape = route.map(|route| route.response_shape);
-    let route_has_marker =
-        |semantic_kind| route.is_some_and(|route| route_contract_marker_is(route, semantic_kind));
-    if route_has_marker(crate::OutputSemanticKind::RawCommandOutput)
+    if route.is_some_and(crate::IntentOutputContract::requests_exact_command_output)
         && response_shape == Some(crate::OutputResponseShape::Strict)
     {
-        return "style_policy=exact_observed_value observed_source=command_output requested_format=preserve raw_passthrough=conditional".to_string();
+        return "style_policy=exact_observed_value observed_source=command_output requested_format=preserve observed_passthrough=conditional".to_string();
     }
     if let Some(route) = route {
         if route_disallows_direct_observation_passthrough(route) {
@@ -120,10 +104,10 @@ pub(crate) fn route_disallows_direct_observation_passthrough(
     if route_requires_synthesized_delivery(route) {
         return true;
     }
-    if false || !route.requires_content_evidence || route.delivery_required {
+    if !route.requires_content_evidence || route.delivery_required {
         return false;
     }
-    if route_contract_marker_is(route, crate::OutputSemanticKind::RawCommandOutput)
+    if route.requests_exact_command_output()
         && route.response_shape == crate::OutputResponseShape::Strict
         && route.locator_kind == crate::OutputLocatorKind::None
         && crate::evidence_policy::final_answer_shape_for_output_contract(route)

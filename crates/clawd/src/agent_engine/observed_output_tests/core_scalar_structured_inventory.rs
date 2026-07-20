@@ -1074,7 +1074,6 @@ fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> Inten
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/workspace/project".to_string(),
             selection: crate::OutputSelectionContract::default(),
         }
@@ -1109,7 +1108,6 @@ fn observed_output_route_policy_uses_direct_output_contract() {
     ));
 
     let mut file_names_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    file_names_route.semantic_kind = OutputSemanticKind::None;
     file_names_route.selection.list_selector.target_kind =
         crate::OutputScalarCountTargetKind::File;
     file_names_route
@@ -1188,7 +1186,7 @@ fn direct_scalar_ignores_exit_zero_prefix() {
 #[test]
 fn direct_scalar_extracts_system_basic_runtime_status_value() {
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route_result.configure_exact_command_output();
     route_result.locator_kind = OutputLocatorKind::None;
     route_result.locator_hint.clear();
     let agent_run_context = AgentRunContext {
@@ -1544,7 +1542,6 @@ version.workspace = true
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::Path,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: crate::OutputSemanticKind::None,
                 locator_hint: String::new(),
                 selection: crate::OutputSelectionContract::default(),
             };
@@ -1619,7 +1616,6 @@ fn direct_scalar_missing_field_language_uses_original_request_before_resolved_pr
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "package.json".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };

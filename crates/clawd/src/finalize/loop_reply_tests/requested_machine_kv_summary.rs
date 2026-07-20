@@ -11,21 +11,21 @@ fn requested_machine_kv_summary_replaces_raw_observed_delivery() {
             "extra": {
                 "action": "read_range",
                 "path": "AGENTS.md",
-                "excerpt": "248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes"
+                "excerpt": "248|must run `python3 scripts/check_planner_runtime_boundary.py` after boundary changes"
             },
-            "text": "{\"action\":\"read_range\",\"excerpt\":\"248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes\"}"
+            "text": "{\"action\":\"read_range\",\"excerpt\":\"248|must run `python3 scripts/check_planner_runtime_boundary.py` after boundary changes\"}"
         })
         .to_string(),
     ));
     let mut delivery_messages = vec![
-        "248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes"
+        "248|must run `python3 scripts/check_planner_runtime_boundary.py` after boundary changes"
             .to_string(),
     ];
     let mut finalizer_summary = None;
 
     assert!(replace_delivery_with_requested_machine_kv_summary(
         &task,
-        "Use read_range only. Answer exactly as machine summary: required=yes script=check_runtime_semantic_rewrite_boundary.py.",
+        "Use read_range only. Answer exactly as machine summary: required=yes script=check_planner_runtime_boundary.py.",
         &mut loop_state,
         None,
         &mut finalizer_summary,
@@ -34,11 +34,11 @@ fn requested_machine_kv_summary_replaces_raw_observed_delivery() {
 
     assert_eq!(
         delivery_messages,
-        vec!["required=yes script=check_runtime_semantic_rewrite_boundary.py"]
+        vec!["required=yes script=check_planner_runtime_boundary.py"]
     );
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some("required=yes script=check_runtime_semantic_rewrite_boundary.py")
+        Some("required=yes script=check_planner_runtime_boundary.py")
     );
     assert_eq!(
         finalizer_summary
@@ -138,7 +138,6 @@ fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
     ];
     loop_state.last_user_visible_respond = delivery_messages.last().cloned();
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Strict;
     route.delivery_required = false;
     route.requires_content_evidence = true;
@@ -268,7 +267,6 @@ fn grounded_compound_delivery_preserves_latest_terminal_language_over_observed_p
     let task = claimed_task("task-grounded-compound-terminal");
     let mut route = free_route_result();
     route.requires_content_evidence = false;
-    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -483,7 +481,7 @@ fn requested_machine_kv_summary_preserves_publishable_command_summary() {
     let mut delivery_messages = vec![full_answer.to_string()];
     loop_state.last_user_visible_respond = Some(full_answer.to_string());
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.response_shape = OutputResponseShape::Scalar;
     route.delivery_required = false;
     route.requires_content_evidence = true;
@@ -562,7 +560,6 @@ fn requested_machine_kv_summary_preserves_colon_field_value_delivery() {
     loop_state.last_user_visible_respond = Some(answer.to_string());
     let mut delivery_messages = vec![answer.to_string()];
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Free;
     route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -617,7 +614,7 @@ fn requested_machine_kv_summary_uses_state_patch_required_field() {
     let task = claimed_task("task-machine-kv-summary-state-patch");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     loop_state.last_user_visible_respond = Some(
-        "After boundary changes, run `python3 scripts/check_runtime_semantic_rewrite_boundary.py`."
+        "After boundary changes, run `python3 scripts/check_planner_runtime_boundary.py`."
             .to_string(),
     );
     let mut delivery_messages = Vec::new();
@@ -629,7 +626,7 @@ fn requested_machine_kv_summary_uses_state_patch_required_field() {
             should_interrupt_active_run: false,
             state_patch: Some(serde_json::json!({
                 "output_format": "machine_summary",
-                "required_field": "required=yes script=check_runtime_semantic_rewrite_boundary.py"
+                "required_field": "required=yes script=check_planner_runtime_boundary.py"
             })),
             attachment_processing_required: false,
         }),
@@ -647,11 +644,11 @@ fn requested_machine_kv_summary_uses_state_patch_required_field() {
 
     assert_eq!(
         delivery_messages,
-        vec!["required=yes script=check_runtime_semantic_rewrite_boundary.py"]
+        vec!["required=yes script=check_planner_runtime_boundary.py"]
     );
     assert_eq!(
         loop_state.delivery_messages,
-        vec!["required=yes script=check_runtime_semantic_rewrite_boundary.py"]
+        vec!["required=yes script=check_planner_runtime_boundary.py"]
     );
 }
 
@@ -1201,8 +1198,7 @@ fn requested_machine_kv_summary_restores_count_after_listing_render() {
     loop_state.last_user_visible_respond = Some(grouped.to_string());
     let mut delivery_messages = vec![grouped.to_string()];
     let mut finalizer_summary = None;
-    let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::None;
+    let route = free_route_result();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route),
         ..Default::default()

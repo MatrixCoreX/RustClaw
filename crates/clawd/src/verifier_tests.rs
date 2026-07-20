@@ -34,7 +34,7 @@ input_schema = { type = "object", required = ["command"], properties = { action 
 planner_capabilities = [
   { name = "system.preview_command_permission", action = "preview_command_permission", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
   { name = "system.inspect_cli_help", action = "inspect_cli_help", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
-  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", output_semantic_kind = "raw_command_output" },
+  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
 
 [[skills]]
@@ -316,14 +316,14 @@ pub(super) fn route_result() -> IntentOutputContract {
     crate::IntentOutputContract::default()
 }
 
-pub(super) fn route_result_with_semantic(
-    semantic_kind: crate::OutputSemanticKind,
-) -> IntentOutputContract {
-    let route = crate::IntentOutputContract {
-        semantic_kind,
+pub(super) fn route_result_with_contract(exact_command_output: bool) -> IntentOutputContract {
+    let mut route = crate::IntentOutputContract {
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
+    if exact_command_output {
+        route.configure_exact_command_output();
+    }
     route
 }
 
@@ -341,7 +341,7 @@ pub(super) fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
 }
 
 #[test]
-fn checkpoint_action_plan_resolves_capability_before_replay() {
+fn checkpoint_action_plan_preserves_planner_output_contract() {
     let state = test_state();
     let task = test_task();
     let mut stored_contract = crate::IntentOutputContract::default();
@@ -356,15 +356,10 @@ fn checkpoint_action_plan_resolves_capability_before_replay() {
         Vec::new(),
     );
 
-    let output_contract =
-        crate::capability_resolver::bind_unclassified_output_contract_from_capabilities(
-            &state, &plan,
-        )
+    let output_contract = plan
+        .output_contract
+        .as_ref()
         .expect("checkpoint output contract");
-    assert_eq!(
-        output_contract.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput
-    );
     assert_eq!(
         output_contract
             .selection
@@ -376,7 +371,7 @@ fn checkpoint_action_plan_resolves_capability_before_replay() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&output_contract),
+            output_contract: Some(output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan,
@@ -1012,7 +1007,7 @@ fn external_fs_basic_mutation_requires_registry_confirmation() {
 fn observe_mode_does_not_reject_actions_from_semantic_matrix_only() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let route = route_result_with_contract(false);
     let result = verify_plan(
         &state,
         &task,
@@ -1045,7 +1040,7 @@ fn observe_mode_does_not_reject_actions_from_semantic_matrix_only() {
 fn observe_mode_allows_user_named_output_path_marker_without_contract_rejection() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::RawCommandOutput);
+    let mut route = route_result_with_contract(true);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::None;
     let result = verify_plan(
@@ -1083,7 +1078,7 @@ fn observe_mode_allows_user_named_output_path_marker_without_contract_rejection(
 fn summary_contract_allows_registry_observe_config_preview_without_confirmation() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let route = route_result_with_contract(false);
     let result = verify_plan(
         &state,
         &task,
@@ -1125,7 +1120,7 @@ fn summary_contract_allows_registry_observe_config_preview_without_confirmation(
 fn summary_contract_does_not_reject_registry_config_apply_by_semantic_matrix() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let route = route_result_with_contract(false);
     let result = verify_plan(
         &state,
         &task,
@@ -1238,7 +1233,7 @@ fn verifier_issue_kinds_expose_stable_machine_fields() {
 fn observe_mode_no_longer_records_semantic_matrix_preferred_action_hint() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let route = route_result_with_contract(false);
     let result = verify_plan(
         &state,
         &task,
@@ -1271,7 +1266,7 @@ fn observe_mode_no_longer_records_semantic_matrix_preferred_action_hint() {
 fn exact_scalar_path_does_not_insert_domain_write_repair() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_result_with_contract(false);
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
@@ -1333,7 +1328,7 @@ fn enforce_mode_blocks_skill_switch_disabled_even_when_contract_allows_action() 
         ),
     })));
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let route = route_result_with_contract(false);
     let result = verify_plan(
         &state,
         &task,
@@ -1468,7 +1463,7 @@ fn enforce_mode_allows_internal_subagent_tool_visibility() {
 fn deterministic_subagent_boundary_plan_bypasses_misclassified_contract_rejection() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let route = route_result_with_contract(false);
     let mut plan = plan_result(vec![
         PlanStep {
             step_id: "s1".to_string(),
@@ -1554,7 +1549,7 @@ fn deterministic_subagent_boundary_plan_bypasses_misclassified_contract_rejectio
 fn deterministic_subagent_boundary_plan_defers_clarify_when_locator_is_structured() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_result_with_contract(false);
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 

@@ -45,7 +45,6 @@ FORBIDDEN_FIELDS: frozenset[str] = frozenset(
         "planner_execute",
         "route_authority",
         "semantic_route_authority",
-        "semantic_kind",
         "output_contract",
         "capability_ref",
     }

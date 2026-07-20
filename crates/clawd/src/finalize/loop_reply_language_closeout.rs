@@ -2,8 +2,8 @@ use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
 use crate::{AppState, ClaimedTask};
 
 use super::{
-    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, message_is_non_answer_separator,
+    log_deterministic_delivery_record, looks_like_structured_machine_output,
+    message_is_non_answer_separator,
 };
 
 pub(super) fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
@@ -18,35 +18,6 @@ pub(super) fn prefer_english_for_user_text(state: &AppState, user_text: &str) ->
             .starts_with("en"),
         _ => true,
     }
-}
-
-pub(super) fn prefer_english_for_agent_contextual_user_text(
-    state: &AppState,
-    user_text: &str,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    for candidate in [
-        agent_run_context.and_then(|ctx| ctx.original_user_request.as_deref()),
-        agent_run_context.and_then(|ctx| ctx.user_request.as_deref()),
-        Some(user_text),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let candidate = candidate.trim();
-        if candidate.is_empty() {
-            continue;
-        }
-        let hint = crate::language_policy::request_language_hint(candidate);
-        if hint != "config_default" {
-            return match hint {
-                "zh-CN" => false,
-                "mixed" => !crate::language_policy::mixed_language_prefers_cjk_response(candidate),
-                _ => true,
-            };
-        }
-    }
-    prefer_english_for_user_text(state, user_text)
 }
 
 pub(super) fn final_reply_language_hint(
@@ -364,7 +335,6 @@ fn can_attach_execution_recipe_closeout(
     if trimmed.is_empty()
         || crate::finalize::parse_delivery_token(trimmed).is_some()
         || looks_like_structured_machine_output(trimmed)
-        || looks_like_raw_command_snapshot(trimmed)
     {
         return false;
     }
@@ -488,6 +458,5 @@ pub(crate) fn planned_delivery_is_publishable_model_language_answer(delivery: &s
         && !crate::finalize::looks_like_planner_artifact(delivery)
         && !crate::finalize::looks_like_internal_trace_artifact(delivery)
         && !looks_like_structured_machine_output(delivery)
-        && !looks_like_raw_command_snapshot(delivery)
         && !message_is_non_answer_separator(delivery)
 }

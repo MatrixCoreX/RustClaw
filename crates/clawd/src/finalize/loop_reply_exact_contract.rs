@@ -4,20 +4,20 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::AppState;
 
 use super::{
-    current_synthesis_satisfies_evidence_policy_shape, delivery_is_raw_read_observation,
+    current_synthesis_satisfies_evidence_policy_shape, delivery_is_direct_read_observation,
     delivery_is_single_line_text, delivery_matches_latest_publishable_synthesis,
     delivery_message_is_json_object, deterministic_matrix_observed_shape_answer,
-    direct_exact_scalar_path_from_dry_run_payload, direct_exact_scalar_path_from_written_path,
-    direct_raw_command_output_projection, direct_scalar_observed_answer,
+    direct_exact_observation_output_projection, direct_exact_scalar_path_from_dry_run_payload,
+    direct_exact_scalar_path_from_written_path, direct_scalar_observed_answer,
     direct_structured_observed_answer, evidence_policy_candidate_satisfies_final_shape,
-    latest_publishable_respond_step_output, latest_publishable_synthesis_matches_written_file_path,
+    exact_observation_output_needs_structural_projection, latest_publishable_respond_step_output,
+    latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, latest_successful_observation_body,
-    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, matrix_observed_shape_summary,
-    output_contract_requests_exact_delivery, planned_delivery_is_publishable_model_language_answer,
-    publishable_summary_has_multi_source_observation,
-    raw_command_output_needs_structural_projection, route_allows_model_language_final_answer,
-    route_expects_synthesis_over_raw_observation, route_requires_file_token,
+    log_deterministic_delivery_record, looks_like_structured_machine_output,
+    matrix_observed_shape_summary, output_contract_requests_exact_delivery,
+    planned_delivery_is_publishable_model_language_answer,
+    publishable_summary_has_multi_source_observation, route_allows_model_language_final_answer,
+    route_expects_synthesis_over_direct_observation, route_requires_file_token,
     route_requires_observed_output_projection, scalar_answer_from_json,
     synthetic_task_for_evidence_policy_shape_check,
 };
@@ -133,7 +133,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         }
     }
     if !route.requests_exact_list()
-        && route_expects_synthesis_over_raw_observation(route)
+        && route_expects_synthesis_over_direct_observation(route)
         && delivery_matches_latest_publishable_synthesis(loop_state, delivery_messages)
     {
         info!(
@@ -159,7 +159,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         });
     if current_delivery_is_publishable_synthesis
         && latest_publishable_synthesis_step_matches(loop_state)
-        && route.semantic_kind_is_unclassified()
+        && route.does_not_request_exact_command_output()
         && !route.requests_exact_list()
         && delivery_messages.last().is_some_and(|message| {
             planned_delivery_is_publishable_model_language_answer(message)
@@ -167,7 +167,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         })
     {
         info!(
-            "delivery exact_contract_keep_semantic_none_synthesis task_id={} answer={}",
+            "delivery exact_contract_keep_generic_synthesis task_id={} answer={}",
             task_id,
             crate::truncate_for_log(
                 delivery_messages
@@ -178,7 +178,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         );
         log_deterministic_delivery_record(
             task_id,
-            "exact_contract_keep_semantic_none_synthesis",
+            "exact_contract_keep_generic_synthesis",
             "preserved",
             agent_run_context,
             loop_state.executed_step_results.len(),
@@ -207,10 +207,11 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         );
         return;
     }
-    if let Some((answer, summary)) = direct_raw_command_output_projection(state, route, loop_state)
+    if let Some((answer, summary)) =
+        direct_exact_observation_output_projection(state, route, loop_state)
     {
         if delivery_messages.last().is_some_and(|delivery| {
-            should_keep_publishable_summary_over_raw_command_projection(
+            should_keep_publishable_summary_over_exact_observation_projection(
                 route, loop_state, delivery, &answer,
             )
         }) {
@@ -242,7 +243,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
             return;
         }
         info!(
-            "delivery exact_contract_raw_command_projection task_id={} previous={} observed={}",
+            "delivery exact_contract_exact_observation_projection task_id={} previous={} observed={}",
             task_id,
             crate::truncate_for_log(
                 delivery_messages
@@ -254,7 +255,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         );
         log_deterministic_delivery_record(
             task_id,
-            "exact_contract_raw_command_projection",
+            "exact_contract_exact_observation_projection",
             "replaced",
             agent_run_context,
             loop_state.executed_step_results.len(),
@@ -266,7 +267,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         return;
     }
     if !route.requests_exact_scalar_path()
-        && raw_command_output_needs_structural_projection(route, loop_state)
+        && exact_observation_output_needs_structural_projection(route, loop_state)
         && delivery_messages.last().is_some_and(|message| {
             let message = message.trim();
             !message.is_empty()
@@ -316,7 +317,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
             .unwrap_or(false)
             && !(has_prior_step_error && allow_prior_step_error_replacement)
             && !scalar_value_contract
-            && !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+            && !route.requests_exact_command_output()
             && planned_delivery_is_explicit_contractual_answer(route, synthesis)
         {
             info!(
@@ -339,7 +340,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         && latest_publishable_synthesis_step_matches(loop_state)
         && !(has_prior_step_error && allow_prior_step_error_replacement)
         && !scalar_value_contract
-        && !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        && !route.requests_exact_command_output()
         && !route_requires_observed_output_projection(route)
         && current_synthesis_satisfies_evidence_policy_shape(
             task_id,
@@ -350,7 +351,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
             delivery_messages,
         )
         && delivery_messages.last().is_some_and(|message| {
-            !delivery_is_raw_read_observation(message, loop_state)
+            !delivery_is_direct_read_observation(message, loop_state)
                 && !crate::finalize::looks_like_planner_artifact(message)
                 && !crate::finalize::looks_like_internal_trace_artifact(message)
                 && crate::finalize::parse_delivery_token(message).is_none()
@@ -377,7 +378,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     }
     if !current_delivery_is_publishable_synthesis
         && !scalar_value_contract
-        && !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        && !route.requests_exact_command_output()
         && delivery_messages
             .last()
             .is_some_and(|message| planned_delivery_is_explicit_contractual_answer(route, message))
@@ -518,7 +519,7 @@ fn should_keep_latest_publishable_terminal_delivery_over_observed_projection(
             route.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
-        || route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        || route.requests_exact_command_output()
         || route_requires_observed_output_projection(route)
     {
         return false;
@@ -569,7 +570,7 @@ fn exact_contract_fallback_observed_answer(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if raw_command_output_needs_structural_projection(route, loop_state) {
+    if exact_observation_output_needs_structural_projection(route, loop_state) {
         return None;
     }
     let body_string = latest_successful_observation_body(loop_state)?;
@@ -577,14 +578,15 @@ fn exact_contract_fallback_observed_answer(
     if body.is_empty()
         || crate::finalize::looks_like_planner_artifact(body)
         || crate::finalize::looks_like_internal_trace_artifact(body)
-        || looks_like_raw_command_snapshot(body)
     {
         return None;
     }
     let candidate = serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|value| exact_contract_answer_from_json(route, &value))
-        .or_else(|| raw_command_exact_observation_fallback_allowed(route).then(|| body.to_string()))
+        .or_else(|| {
+            exact_observation_exact_observation_fallback_allowed(route).then(|| body.to_string())
+        })
         .or_else(|| single_line_observation_answer(route, body))?;
     let candidate =
         match crate::output_contract_verifier::verify_output_contract(route, &candidate, "") {
@@ -616,9 +618,10 @@ fn exact_contract_fallback_observed_answer(
     ))
 }
 
-fn raw_command_exact_observation_fallback_allowed(route: &crate::IntentOutputContract) -> bool {
-    route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
-        && !route_expects_synthesis_over_raw_observation(route)
+fn exact_observation_exact_observation_fallback_allowed(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    route.requests_exact_command_output() && !route_expects_synthesis_over_direct_observation(route)
 }
 
 fn exact_fallback_candidate_is_machine_grounded(
@@ -631,7 +634,6 @@ fn exact_fallback_candidate_is_machine_grounded(
         || crate::finalize::looks_like_planner_artifact(candidate)
         || crate::finalize::looks_like_internal_trace_artifact(candidate)
         || looks_like_structured_machine_output(candidate)
-        || looks_like_raw_command_snapshot(candidate)
     {
         return false;
     }
@@ -732,7 +734,7 @@ pub(super) fn route_prefers_observed_answer(route: &crate::IntentOutputContract)
     if output_contract_requests_exact_delivery(route) {
         return true;
     }
-    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput) {
+    if route.requests_exact_command_output() {
         return true;
     }
     if route_path_locator_allows_observed_listing(route) {
@@ -805,7 +807,7 @@ pub(super) fn should_keep_planned_delivery_over_observed_answer(
     if crate::finalize::is_execution_summary_message(delivery) {
         return false;
     }
-    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput) {
+    if route.requests_exact_command_output() {
         return false;
     }
     if route.requests_exact_list() && exact_list_delivery_is_observed_subset(delivery, observed) {
@@ -886,7 +888,7 @@ fn delivery_is_structurally_richer_than_observed_projection(
     delivery_lines > 1 && delivery_chars > observed_chars.saturating_add(32)
 }
 
-fn should_keep_publishable_summary_over_raw_command_projection(
+fn should_keep_publishable_summary_over_exact_observation_projection(
     route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     delivery: &str,
@@ -896,12 +898,12 @@ fn should_keep_publishable_summary_over_raw_command_projection(
         crate::evidence_policy::final_answer_shape_for_output_contract(route),
         Some(
             crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence
-                | crate::evidence_policy::FinalAnswerShape::RawOutputOrShortSummary
+                | crate::evidence_policy::FinalAnswerShape::ExactObservationOrShortSummary
         )
     ) {
         return false;
     }
-    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    if route.requests_exact_command_output()
         && !publishable_summary_has_multi_source_observation(loop_state)
     {
         return false;

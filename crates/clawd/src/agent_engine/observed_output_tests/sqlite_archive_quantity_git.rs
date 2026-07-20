@@ -129,7 +129,6 @@ fn direct_scalar_defers_compare_paths_result_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             locator_hint: "Cargo.lock|Cargo.toml".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -162,7 +161,6 @@ fn direct_answer_defers_git_status_dirty_worktree_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -201,7 +199,6 @@ fn direct_answer_defers_git_log_release_note_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "RustClaw".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -229,7 +226,6 @@ fn direct_answer_defers_git_status_clean_when_exit_only_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -258,7 +254,6 @@ fn direct_answer_defers_git_status_dirty_without_branch_header_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };

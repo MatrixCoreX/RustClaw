@@ -65,7 +65,7 @@ async fn finalize_loop_reply_treats_structured_run_cmd_failure_as_user_result() 
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -119,7 +119,6 @@ async fn finalize_loop_reply_sanitizes_contract_rejection_error() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "docs/release_checklist.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

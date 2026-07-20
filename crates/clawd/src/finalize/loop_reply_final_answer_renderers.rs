@@ -43,7 +43,7 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     rendered
 }
 
-pub(super) fn replace_final_delivery_with_raw_command_machine_field_projection(
+pub(super) fn replace_final_delivery_with_exact_observation_machine_field_projection(
     state: &AppState,
     task: &ClaimedTask,
     loop_state: &mut LoopState,
@@ -52,7 +52,7 @@ pub(super) fn replace_final_delivery_with_raw_command_machine_field_projection(
     delivery_messages: &mut Vec<String>,
 ) -> bool {
     let rendered =
-        super::raw_command::replace_final_delivery_with_raw_command_machine_field_projection(
+        super::exact_observation::replace_final_delivery_with_exact_observation_machine_field_projection(
             state,
             task,
             loop_state,
@@ -63,7 +63,7 @@ pub(super) fn replace_final_delivery_with_raw_command_machine_field_projection(
     record_final_answer_renderer_trace(
         task,
         loop_state,
-        "raw_command_machine_field_projection",
+        "exact_observation_machine_field_projection",
         rendered,
     );
     rendered

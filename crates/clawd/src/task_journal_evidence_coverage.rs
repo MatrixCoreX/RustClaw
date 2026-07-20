@@ -442,7 +442,7 @@ pub(super) fn augment_output_contract_canonical_evidence(
             observed_canonical.insert(required.clone());
         }
     }
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    if output_contract.requests_exact_command_output()
         && (observed_canonical.contains("content_excerpt")
             || observed_canonical.contains("field_value")
             || observed_fields.contains("excerpt")

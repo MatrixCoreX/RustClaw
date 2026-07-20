@@ -37,7 +37,6 @@ fn verifier_evidence_policy_prompt_trace(
         crate::evidence_policy::trace_snapshot_for_output_contract(&route_result.output_contract)?;
     if let Some(obj) = trace.as_object_mut() {
         obj.remove("contract_marker");
-        obj.remove("semantic_kind");
         obj.remove("trace_policy");
         obj.remove("observation_extractors");
         obj.remove("observation_sources");

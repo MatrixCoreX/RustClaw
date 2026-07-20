@@ -13,7 +13,7 @@ use crate::execution_recipe::{
 };
 use crate::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, SkillViewsSnapshot,
+    SkillViewsSnapshot,
 };
 use claw_core::skill_registry::SkillsRegistry;
 use std::sync::{Arc, RwLock};
@@ -1610,10 +1610,7 @@ fn registry_idempotency_guard_scope_all_token_is_enabled() {
     assert!(policy.registry_idempotency_guard_enabled());
 }
 
-fn route_with_contract(
-    semantic_kind: OutputSemanticKind,
-    locator_kind: OutputLocatorKind,
-) -> IntentOutputContract {
+fn route_with_contract(locator_kind: OutputLocatorKind) -> IntentOutputContract {
     IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Free,
@@ -1621,7 +1618,6 @@ fn route_with_contract(
         delivery_required: false,
         locator_kind,
         delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     }
@@ -1658,7 +1654,7 @@ fn ops_closed_loop_policy_uses_override_budget() {
 fn planner_contract_selects_grounded_summary_budget() {
     let policy = base_policy();
     let recipe = ExecutionRecipeRuntimeState::default();
-    let route = route_with_contract(OutputSemanticKind::None, OutputLocatorKind::None);
+    let route = route_with_contract(OutputLocatorKind::None);
 
     assert_eq!(
         AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
@@ -1673,7 +1669,7 @@ fn planner_contract_selects_grounded_summary_budget() {
 #[test]
 fn planner_contract_budget_does_not_depend_on_legacy_route_trace() {
     let recipe = ExecutionRecipeRuntimeState::default();
-    let route = route_with_contract(OutputSemanticKind::None, OutputLocatorKind::None);
+    let route = route_with_contract(OutputLocatorKind::None);
 
     assert_eq!(
         AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
@@ -1685,7 +1681,7 @@ fn planner_contract_budget_does_not_depend_on_legacy_route_trace() {
 fn workspace_delivery_contract_selects_multi_step_budget() {
     let policy = base_policy();
     let recipe = ExecutionRecipeRuntimeState::default();
-    let mut route = route_with_contract(OutputSemanticKind::None, OutputLocatorKind::Filename);
+    let mut route = route_with_contract(OutputLocatorKind::Filename);
     route.delivery_required = true;
     route.delivery_intent = OutputDeliveryIntent::FileSingle;
     route.response_shape = OutputResponseShape::FileToken;

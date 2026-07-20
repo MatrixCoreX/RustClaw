@@ -70,10 +70,10 @@ pub(in crate::agent_engine::loop_control) fn prefer_terminal_model_answer_for_ve
         return false;
     }
     let output_contract = route.effective_output_contract();
-    if crate::finalize::raw_command_machine_field_delivery_satisfies_request(
+    if crate::finalize::exact_observation_machine_field_delivery_satisfies_request(
         &output_contract,
         reply.text.as_str(),
-    ) && !crate::finalize::raw_command_machine_field_delivery_satisfies_request(
+    ) && !crate::finalize::exact_observation_machine_field_delivery_satisfies_request(
         &output_contract,
         answer.as_str(),
     ) {

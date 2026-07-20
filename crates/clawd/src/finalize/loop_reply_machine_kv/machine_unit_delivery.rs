@@ -320,7 +320,6 @@ pub(super) fn current_delivery_is_publishable_evidence_summary(
         || crate::finalize::looks_like_planner_artifact(current)
         || crate::finalize::looks_like_internal_trace_artifact(current)
         || crate::finalize::is_execution_summary_message(current)
-        || super::super::looks_like_raw_command_snapshot(current)
         || super::super::looks_like_structured_machine_output(current)
         || current_delivery_is_machine_kv_only(current)
     {

@@ -502,3 +502,44 @@ fn signed_artifact_url_is_redacted_before_model_synthesis() {
     assert!(!uri.contains("secret-token-value"));
     assert!(uri.contains("[REDACTED]"));
 }
+
+#[test]
+fn exact_command_output_selector_preserves_generic_observation_text() {
+    let envelope = super::successful_execution_envelope(
+        "runtime.command",
+        "step_9",
+        &json!({"action": "execute"}),
+        "first line\nsecond line",
+        None,
+    );
+
+    assert_eq!(
+        super::selected_exact_machine_result(&[envelope], "command_output").as_deref(),
+        Some("first line\nsecond line")
+    );
+}
+
+#[test]
+fn exact_selector_reads_nested_structured_result_without_domain_rules() {
+    let envelope = super::successful_execution_envelope(
+        "registry.fixture",
+        "step_10",
+        &json!({"action": "inspect"}),
+        "untrusted fallback",
+        Some(&json!({
+            "metrics": {
+                "count": 3,
+                "labels": ["alpha", "beta"]
+            }
+        })),
+    );
+
+    assert_eq!(
+        super::selected_exact_machine_result(&[envelope.clone()], "metrics.count").as_deref(),
+        Some("3")
+    );
+    assert_eq!(
+        super::selected_exact_machine_result(&[envelope], "metrics.labels").as_deref(),
+        Some(r#"["alpha","beta"]"#)
+    );
+}

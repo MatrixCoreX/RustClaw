@@ -133,14 +133,17 @@ pub(super) fn candidate_path_matches(
     })
 }
 
-pub(super) fn raw_command_answer_is_exact_successful_observation(
+pub(super) fn exact_observation_answer_is_exact_successful_observation(
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    let candidate = candidate_answer.trim();
-    if candidate.is_empty() {
+    if !route.output_contract.requests_exact_command_output()
+        || route.output_contract.delivery_required
+    {
         return false;
     }
+    let candidate = candidate_answer.trim();
     let external_steps = journal
         .step_results
         .iter()
@@ -151,7 +154,6 @@ pub(super) fn raw_command_answer_is_exact_successful_observation(
     }
     external_steps.iter().all(|step| {
         step.status == crate::executor::StepExecutionStatus::Ok
-            && step.skill == "run_cmd"
             && step
                 .output_excerpt
                 .as_deref()
@@ -162,14 +164,14 @@ pub(super) fn raw_command_answer_is_exact_successful_observation(
     })
 }
 
-pub(super) fn raw_bounded_read_answer_is_exact_successful_observation(
+pub(super) fn exact_bounded_read_answer_is_exact_successful_observation(
     route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
     if !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+        || !route.output_contract.requests_exact_command_output()
     {
         return false;
     }
@@ -183,12 +185,12 @@ pub(super) fn raw_bounded_read_answer_is_exact_successful_observation(
         .filter(|step| step_can_supply_verifier_observation(step))
         .filter_map(|step| step.output_excerpt.as_deref())
         .flat_map(structured_json_values_from_step_output)
-        .filter(|value| raw_bounded_read_value_matches_route(route, value))
-        .flat_map(|value| raw_bounded_read_answer_variants_from_value(&value))
+        .filter(|value| exact_bounded_read_value_matches_route(route, value))
+        .flat_map(|value| exact_bounded_read_answer_variants_from_value(&value))
         .any(|observed| observed == candidate)
 }
 
-pub(super) fn raw_bounded_read_value_matches_route(
+pub(super) fn exact_bounded_read_value_matches_route(
     route: &AnswerContract,
     value: &serde_json::Value,
 ) -> bool {
@@ -199,12 +201,12 @@ pub(super) fn raw_bounded_read_value_matches_route(
     if expected.is_empty() {
         return true;
     }
-    raw_bounded_read_value_paths(value)
+    exact_bounded_read_value_paths(value)
         .iter()
         .any(|actual| verifier_paths_equivalent(actual, expected))
 }
 
-pub(super) fn raw_bounded_read_value_paths(value: &serde_json::Value) -> Vec<String> {
+pub(super) fn exact_bounded_read_value_paths(value: &serde_json::Value) -> Vec<String> {
     [
         value.get("path").and_then(|item| item.as_str()),
         value.get("resolved_path").and_then(|item| item.as_str()),
@@ -236,7 +238,7 @@ pub(super) fn verifier_paths_equivalent(actual: &str, expected: &str) -> bool {
         .is_some_and(|(actual, expected)| actual == expected)
 }
 
-pub(super) fn raw_bounded_read_answer_variants_from_value(
+pub(super) fn exact_bounded_read_answer_variants_from_value(
     value: &serde_json::Value,
 ) -> Vec<String> {
     let action = value
@@ -259,11 +261,11 @@ pub(super) fn raw_bounded_read_answer_variants_from_value(
     ]
     .into_iter()
     .flatten()
-    .flat_map(raw_bounded_read_answer_variants_from_excerpt)
+    .flat_map(exact_bounded_read_answer_variants_from_excerpt)
     .collect()
 }
 
-pub(super) fn raw_bounded_read_answer_variants_from_excerpt(excerpt: &str) -> Vec<String> {
+pub(super) fn exact_bounded_read_answer_variants_from_excerpt(excerpt: &str) -> Vec<String> {
     let mut variants = Vec::new();
     let raw = excerpt.trim();
     if !raw.is_empty() {

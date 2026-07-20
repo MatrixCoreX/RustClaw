@@ -117,9 +117,7 @@ pub(super) fn deterministic_filtered_log_entry_recovery(
         return None;
     }
     journal.step_results.iter().rev().find_map(|step| {
-        if step.status != crate::executor::StepExecutionStatus::Ok
-            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
-        {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
             return None;
         }
         let excerpt = step
@@ -130,15 +128,14 @@ pub(super) fn deterministic_filtered_log_entry_recovery(
     })
 }
 
-fn raw_tail_read_route_allows_failure_recovery(route_result: &crate::IntentOutputContract) -> bool {
-    let contract = route_result.clone();
-    route_result.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
-        && contract.response_shape == crate::OutputResponseShape::Strict
-        && contract.requires_content_evidence
-        && !contract.delivery_required
+fn exact_tail_read_route_allows_failure_recovery(route: &crate::IntentOutputContract) -> bool {
+    route.requests_exact_command_output()
+        && route.response_shape == crate::OutputResponseShape::Strict
+        && route.requires_content_evidence
+        && !route.delivery_required
 }
 
-fn raw_tail_read_finalizer_has_qualified_evidence(
+fn exact_tail_read_finalizer_has_qualified_evidence(
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     journal.finalizer_summary.as_ref().is_some_and(|summary| {
@@ -151,16 +148,16 @@ fn raw_tail_read_finalizer_has_qualified_evidence(
     })
 }
 
-fn raw_tail_read_answer_from_value(value: &Value, prefer_english: bool) -> Option<String> {
-    if let Some(answer) = raw_tail_read_answer_from_flat_value(value, prefer_english) {
+fn exact_tail_read_answer_from_value(value: &Value, prefer_english: bool) -> Option<String> {
+    if let Some(answer) = exact_tail_read_answer_from_flat_value(value, prefer_english) {
         return Some(answer);
     }
     value
         .get("extra")
-        .and_then(|extra| raw_tail_read_answer_from_value(extra, prefer_english))
+        .and_then(|extra| exact_tail_read_answer_from_value(extra, prefer_english))
 }
 
-fn raw_tail_read_answer_from_flat_value(value: &Value, prefer_english: bool) -> Option<String> {
+fn exact_tail_read_answer_from_flat_value(value: &Value, prefer_english: bool) -> Option<String> {
     if !matches!(
         value.get("action").and_then(Value::as_str),
         Some("read_range" | "read_text_range")
@@ -195,23 +192,23 @@ fn raw_tail_read_answer_from_flat_value(value: &Value, prefer_english: bool) -> 
     )
 }
 
-fn raw_tail_read_answer_from_step_output(output: &str, prefer_english: bool) -> Option<String> {
+fn exact_tail_read_answer_from_step_output(output: &str, prefer_english: bool) -> Option<String> {
     serde_json::from_str::<Value>(output.trim())
         .ok()
-        .and_then(|value| raw_tail_read_answer_from_value(&value, prefer_english))
+        .and_then(|value| exact_tail_read_answer_from_value(&value, prefer_english))
         .map(|answer| answer.trim().to_string())
         .filter(|answer| !answer.is_empty())
 }
 
-pub(super) fn deterministic_raw_tail_read_failure_recovery(
+pub(super) fn deterministic_exact_tail_read_failure_recovery(
     state: &AppState,
     task: &crate::ClaimedTask,
     user_request: &str,
     route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<String> {
-    if !raw_tail_read_route_allows_failure_recovery(route_result)
-        || !raw_tail_read_finalizer_has_qualified_evidence(journal)
+    if !exact_tail_read_route_allows_failure_recovery(route_result)
+        || !exact_tail_read_finalizer_has_qualified_evidence(journal)
     {
         return None;
     }
@@ -220,13 +217,11 @@ pub(super) fn deterministic_raw_tail_read_failure_recovery(
     let prefer_english =
         crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
     journal.step_results.iter().rev().find_map(|step| {
-        if step.status != crate::executor::StepExecutionStatus::Ok
-            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
-        {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
             return None;
         }
         step.output_excerpt
             .as_deref()
-            .and_then(|output| raw_tail_read_answer_from_step_output(output, prefer_english))
+            .and_then(|output| exact_tail_read_answer_from_step_output(output, prefer_english))
     })
 }

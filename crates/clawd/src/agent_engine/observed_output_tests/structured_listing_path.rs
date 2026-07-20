@@ -79,7 +79,6 @@ fn structured_keys_one_sentence_defers_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/package.json".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -108,7 +107,6 @@ fn direct_answer_formats_extract_fields_result_without_llm() {
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::Path,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::None,
                 locator_hint: "/tmp/config.toml".to_string(),
                 selection: crate::OutputSelectionContract::default(),
             };
@@ -137,7 +135,6 @@ fn direct_answer_uses_inventory_dir_names_for_system_basic() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -166,7 +163,6 @@ fn direct_answer_uses_inventory_dir_names_for_fs_basic() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "document".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -195,7 +191,6 @@ fn direct_answer_uses_inventory_dir_entry_sizes_when_names_only_is_false() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -224,7 +219,6 @@ fn direct_answer_does_not_apply_listing_limit_from_resolved_intent_text() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -253,7 +247,6 @@ fn direct_answer_does_not_apply_listing_limit_from_current_turn_request_text() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -281,7 +274,6 @@ fn scalar_listing_gate_does_not_repair_count_from_request_text_limit() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("count".to_string()),
                 ..Default::default()
@@ -313,7 +305,6 @@ fn direct_answer_uses_latest_list_dir_entries_for_act_free_shape() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "archive".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -345,7 +336,6 @@ fn direct_answer_uses_latest_list_dir_even_after_synthesis_step() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "document".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -373,7 +363,6 @@ fn direct_answer_preserves_list_dir_entries_without_request_text_limit() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "logs".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -402,7 +391,6 @@ fn ordinary_path_inspection_defers_system_basic_path_facts_to_model_synthesis() 
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
@@ -434,7 +422,6 @@ fn ordinary_path_inspection_defers_multiple_path_observations_to_model_synthesis
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     route_result.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route_result.locator_hint.clear();
-    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.requires_content_evidence = false;
     route_result.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = AgentRunContext {
@@ -456,7 +443,6 @@ fn ordinary_path_kind_inspection_defers_to_model_synthesis() {
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"configs/channels","resolved_path":"/tmp/repo/configs/channels","size_bytes":4096},"path":"/tmp/repo/configs/channels"}],"include_missing":true}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
-    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.locator_kind = OutputLocatorKind::Path;
     route_result.locator_hint = "/tmp/repo/configs/channels".to_string();
     route_result.selection.structured_field_selector =
@@ -483,7 +469,6 @@ fn ordinary_multi_path_inspection_defers_to_model_synthesis() {
             r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"package.json","resolved_path":"/tmp/repo/package.json","size_bytes":120},"path":"package.json"},{"exists":false,"path":"nope.json","error":"not found"}],"include_missing":true}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route_result.locator_hint = "/tmp/repo".to_string();
     route_result.selection.structured_field_selector = Some("exists,path".to_string());
@@ -512,7 +497,6 @@ fn ordinary_scalar_like_existence_request_uses_model_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "configs/config.toml".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
@@ -537,7 +521,6 @@ fn ordinary_path_metadata_observation_does_not_use_fixed_runtime_reply() {
             r#"{"action":"path_batch_facts","count":1,"fields":["exists","size"],"facts":[{"exists":true,"fact":{"kind":"file","path":"data/rustclaw.db","resolved_path":"/tmp/repo/data/rustclaw.db","size_bytes":55226368},"path":"/tmp/repo/data/rustclaw.db"}],"include_missing":true}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
-    route_result.semantic_kind = OutputSemanticKind::None;
     route_result.locator_kind = OutputLocatorKind::Path;
     route_result.locator_hint = "data/rustclaw.db".to_string();
     route_result.selection.structured_field_selector = Some("exists,path".to_string());
@@ -566,7 +549,6 @@ fn ordinary_missing_path_observation_defers_to_model_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "/tmp/missing.txt".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
@@ -610,7 +592,6 @@ fn run_cmd_yes_text_is_not_parsed_into_a_path_verdict() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
@@ -656,7 +637,6 @@ fn run_cmd_exists_text_is_not_parsed_into_a_path_verdict() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
@@ -704,7 +684,6 @@ fn ordinary_find_name_path_observation_defers_to_model_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "rustclaw.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),

@@ -39,28 +39,6 @@ fn resume_context_has_remaining_actions(resume_ctx: &Value) -> bool {
         .is_some_and(|actions| !actions.is_empty())
 }
 
-fn resume_context_failed_step_action(resume_ctx: &Value) -> Option<&str> {
-    resume_context_body(resume_ctx)
-        .get("failed_step")
-        .and_then(|step| step.get("action"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
-fn resume_context_failed_step_skill(resume_ctx: &Value) -> Option<String> {
-    if let Some(error) = resume_context_failed_structured_skill_error(resume_ctx) {
-        return Some(error.skill);
-    }
-    let action = resume_context_failed_step_action(resume_ctx)?;
-    action
-        .strip_prefix("skill(")
-        .and_then(|value| value.strip_suffix(')'))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
 fn resume_context_completed_message_json(message: &str) -> Option<Value> {
     let trimmed = message.trim();
     let json_start = trimmed.find('{')?;
@@ -140,10 +118,6 @@ fn structured_error_is_directory_lookup_failure(
         "read_dir_failed" | "directory_not_found" | "directory_lookup_failed"
     ) || structured_error_has_machine_token(
         error,
-        "operation",
-        &["read_dir", "list_dir", "directory_lookup"],
-    ) || structured_error_has_machine_token(
-        error,
         "reason_code",
         &[
             "read_dir_failed",
@@ -185,8 +159,8 @@ pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
             contract.response_shape,
             crate::OutputResponseShape::FileToken
         )
-        && (route_result.semantic_kind_is_unclassified() || route_result.requests_exact_path_list())
-        && resume_context_failed_step_skill(resume_ctx).as_deref() == Some("fs_search")
+        && (route_result.does_not_request_exact_command_output()
+            || route_result.requests_exact_path_list())
         && (resume_context_path_batch_facts_are_missing_only(resume_ctx)
             || resume_context_has_directory_lookup_failure(resume_ctx))
 }
@@ -318,9 +292,6 @@ fn journal_has_code_or_test_artifact_step(journal: &crate::task_journal::TaskJou
 fn step_has_validation_signal(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
     if step.status != crate::executor::StepExecutionStatus::Ok {
         return false;
-    }
-    if matches!(step.skill.as_str(), "run_cmd" | "process_basic") {
-        return true;
     }
     step.output_excerpt
         .as_deref()
@@ -554,7 +525,7 @@ pub(super) async fn retry_answer_after_verifier(
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
     let prompt = format!(
-        "You are rewriting a direct chat answer after answer verification failed.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nCurrent user request:\n{}\n\nCurrent task context:\n{}\n\nObserved task trace JSON:\n{}\n\nRejected answer:\n{}\n\nVerifier reason:\n{}\n\nVerifier retry instruction:\n{}\n\nReturn only the corrected final answer. Use the request language. Use only observed evidence from Current task context and Observed task trace JSON. Do not re-run tools. Preserve the most recent generated output's factual scope and evidence boundary. If Observed task trace JSON contains structured_field_value_projection rows, treat them as the preferred compact field/value evidence for requested tables, summaries, and missing field_value gaps. Render those observed rows in the user's requested visible shape; do not return raw JSON unless the user explicitly requested JSON. If the rejected answer is a JSON object, message_key payload, or other machine-format evidence, treat its fields as evidence to render; do not explain the machine format and do not ask the user to clarify the format. Treat machine status fields such as status, effective_status, result_kind, effective_success, and idempotent_success as authoritative over incidental counters; zero update counters are not a failure when the machine status says ok or effective/idempotent success. If the user asks whether an operation succeeded, result_kind=already_indexed with effective_success=true or idempotent_success=true is a successful completion, not a blocker and not a request for confirmation. If verifier missing_evidence_fields names output_format, keep the observed facts and correct only the visible answer shape. Treat the Verifier retry instruction as a mandatory shape contract: if it requires an exact number of sentences, lines, bullets, items, or words, silently count the corrected answer before returning it and rewrite until the count is exact. Do not return a shorter condensed answer when an exact count is requested. Do not add new setup categories, project-doc references, support/contact recommendations, usage claims, paths, commands, config keys, credentials, callbacks, or verification steps unless they are present in the observed evidence.",
+        "You are rewriting a direct chat answer after answer verification failed.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nCurrent user request:\n{}\n\nCurrent task context:\n{}\n\nObserved task trace JSON:\n{}\n\nRejected answer:\n{}\n\nVerifier reason:\n{}\n\nVerifier retry instruction:\n{}\n\nReturn only the corrected final answer. Use the request language. Use only observed evidence from Current task context and Observed task trace JSON. Do not re-run tools. Preserve the most recent generated output's factual scope and evidence boundary. If Observed task trace JSON contains structured_field_value_projection rows, treat them as the preferred compact field/value evidence for requested tables, summaries, and missing field_value gaps. Render those observed rows in the user's requested visible shape; do not return raw JSON unless the user explicitly requested JSON. If the rejected answer is a JSON object, message_key payload, or other machine-format evidence, treat its fields as evidence to render; do not explain the machine format and do not ask the user to clarify the format. Treat structured machine status and idempotency fields as authoritative over incidental counters; zero update counters are not a failure when the machine evidence explicitly reports successful or idempotent completion. If verifier missing_evidence_fields names output_format, keep the observed facts and correct only the visible answer shape. Treat the Verifier retry instruction as a mandatory shape contract: if it requires an exact number of sentences, lines, bullets, items, or words, silently count the corrected answer before returning it and rewrite until the count is exact. Do not return a shorter condensed answer when an exact count is requested. Do not add new setup categories, project-doc references, support/contact recommendations, usage claims, paths, commands, config keys, credentials, callbacks, or verification steps unless they are present in the observed evidence.",
         state.policy.command_intent.default_locale,
         user_request.trim(),
         context,

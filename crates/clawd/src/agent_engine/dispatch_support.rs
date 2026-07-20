@@ -53,9 +53,6 @@ use skill_call_args::{
     record_latest_run_cmd_command_output_vars, strip_internal_execution_args,
     strip_unsupported_planner_metadata_args, write_file_effective_path,
 };
-pub(super) use skill_call_args::{
-    record_successful_run_cmd_command_output_var, successful_run_cmd_command_for_step,
-};
 
 pub(super) fn local_code_strict_json_projection_should_defer_observed_synthesis(
     user_text: &str,

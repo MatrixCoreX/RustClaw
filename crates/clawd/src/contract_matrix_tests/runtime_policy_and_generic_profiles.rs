@@ -3,7 +3,6 @@ use super::*;
 #[test]
 fn unclassified_inline_contract_uses_generic_inline_transform() {
     let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         delivery_required: false,
@@ -43,7 +42,6 @@ fn unclassified_inline_contract_uses_generic_inline_transform() {
 #[test]
 fn unclassified_path_contract_rejects_action_outside_generic_profile() {
     let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         delivery_required: false,
@@ -82,15 +80,9 @@ fn unclassified_path_contract_rejects_action_outside_generic_profile() {
 fn contract_matrix_final_answer_shapes_are_typed() {
     let matrix = load_workspace_matrix();
     let configured = matrix
-        .contracts
-        .values()
-        .map(|contract| contract.final_answer_shape.as_str())
-        .chain(
-            matrix
-                .generic_profiles
-                .iter()
-                .map(|profile| profile.final_answer_shape.as_str()),
-        )
+        .generic_profiles
+        .iter()
+        .map(|profile| profile.final_answer_shape.as_str())
         .collect::<BTreeSet<_>>();
     let typed = FinalAnswerShape::ALL
         .iter()
@@ -149,30 +141,6 @@ fn final_answer_shape_classes_are_total_and_runtime_mapped() {
 fn delivery_artifact_contracts_declare_file_artifact_kind() {
     let matrix = load_workspace_matrix();
 
-    for (key, contract) in &matrix.contracts {
-        let shape = FinalAnswerShape::parse(&contract.final_answer_shape)
-            .expect("contract final_answer_shape should be typed");
-        if shape.class() == FinalAnswerShapeClass::DeliveryArtifact {
-            assert_eq!(
-                contract.artifact_kind(),
-                "file",
-                "delivery artifact contract `{key}` must not default to text"
-            );
-            assert_eq!(
-                contract.channel_visibility(),
-                "user_visible",
-                "delivery artifact contract `{key}` must be user visible"
-            );
-        }
-        if normalize_action_token(&contract.delivery_shape) == "file" {
-            assert_eq!(
-                contract.artifact_kind(),
-                "file",
-                "file delivery-shape contract `{key}` must declare artifact_kind=file"
-            );
-        }
-    }
-
     for profile in &matrix.generic_profiles {
         let shape = FinalAnswerShape::parse(&profile.final_answer_shape)
             .expect("profile final_answer_shape should be typed");
@@ -198,15 +166,6 @@ fn contract_matrix_evidence_tokens_are_typed() {
     let matrix = load_workspace_matrix();
     let mut configured = BTreeSet::new();
 
-    for contract in matrix.contracts.values() {
-        configured.extend(
-            contract
-                .normalized_required_evidence()
-                .into_iter()
-                .filter(|field| !field.is_empty()),
-        );
-        configured.extend(evidence_expression_tokens(&contract.evidence_expression));
-    }
     for profile in &matrix.generic_profiles {
         configured.extend(
             profile
@@ -234,7 +193,6 @@ fn contract_matrix_evidence_tokens_are_typed() {
 #[test]
 fn bundled_contract_matrix_renders_prompt_line() {
     let mut output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         ..IntentOutputContract::default()
     };
@@ -260,7 +218,6 @@ fn bundled_contract_matrix_renders_prompt_line() {
 #[test]
 fn exact_path_list_prompt_uses_selected_machine_field_evidence() {
     let mut output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         ..IntentOutputContract::default()
     };
@@ -282,53 +239,22 @@ fn exact_path_list_prompt_uses_selected_machine_field_evidence() {
 }
 
 #[test]
-fn contract_matrix_covers_all_output_semantic_kinds() {
+fn contract_matrix_covers_exact_command_output_profile() {
     let matrix = load_workspace_matrix();
+    let mut output_contract = IntentOutputContract::default();
+    output_contract.configure_exact_command_output();
+    let matched = matrix
+        .match_output_contract(&output_contract)
+        .expect("exact command output profile");
 
-    let missing = OutputSemanticKind::ALL
-        .iter()
-        .filter(|kind| matrix.semantic_contract(**kind).is_none())
-        .map(|kind| kind.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(
-        missing.is_empty(),
-        "missing semantic contracts: {missing:?}"
+    assert_eq!(matched.match_name(), "generic_exact_command_output");
+    assert_eq!(matched.required_evidence(), vec!["command_output"]);
+    assert_eq!(
+        required_evidence_for_output_contract(&output_contract),
+        Some(fallback_required_evidence_fields_for_output_contract(
+            &output_contract
+        ))
     );
-}
-
-#[test]
-fn contract_matrix_evidence_matches_task_contract_defaults() {
-    let matrix = load_workspace_matrix();
-
-    for kind in OutputSemanticKind::ALL {
-        let output_contract = IntentOutputContract {
-            semantic_kind: *kind,
-            ..IntentOutputContract::default()
-        };
-        let fallback = fallback_required_evidence_fields_for_output_contract(&output_contract);
-        let actual = matrix
-            .semantic_contract(*kind)
-            .expect("semantic contract")
-            .normalized_required_evidence();
-        let resolved = required_evidence_for_output_contract(&output_contract)
-            .expect("resolved output contract evidence");
-
-        assert_eq!(
-            actual,
-            resolved,
-            "evidence mismatch for `{}`",
-            kind.as_str()
-        );
-        if !fallback.is_empty() {
-            assert_eq!(
-                actual,
-                fallback,
-                "fallback mismatch for `{}`",
-                kind.as_str()
-            );
-        }
-    }
 }
 
 #[test]
@@ -336,7 +262,6 @@ fn generic_profile_matches_untyped_path_content_contract() {
     let matrix = load_workspace_matrix();
     let matched = matrix
         .match_output_contract(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             response_shape: OutputResponseShape::Free,
@@ -376,7 +301,6 @@ fn generic_profile_matches_untyped_path_content_contract() {
 fn generic_path_content_allows_count_entries_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             response_shape: OutputResponseShape::OneSentence,
@@ -399,7 +323,6 @@ fn generic_path_content_allows_count_entries_observation() {
 fn generic_path_content_allows_stat_paths_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             response_shape: OutputResponseShape::Free,
@@ -423,7 +346,6 @@ fn generic_path_content_allows_stat_paths_observation() {
 fn generic_path_content_allows_git_status_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             response_shape: OutputResponseShape::Strict,
@@ -444,7 +366,6 @@ fn generic_delivery_takes_precedence_for_untyped_file_token_delivery() {
     let matrix = load_workspace_matrix();
     let matched = matrix
         .match_output_contract(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
@@ -461,7 +382,6 @@ fn generic_delivery_takes_precedence_for_untyped_file_token_delivery() {
 #[test]
 fn generic_delivery_allows_structured_missing_file_probes() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         delivery_required: true,
         delivery_intent: OutputDeliveryIntent::FileSingle,
         locator_kind: OutputLocatorKind::Path,
@@ -493,7 +413,6 @@ fn generic_delivery_allows_structured_missing_file_probes() {
 #[test]
 fn generic_delivery_allows_file_writes_before_delivery() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         delivery_required: true,
         delivery_intent: OutputDeliveryIntent::FileSingle,
         locator_kind: OutputLocatorKind::Filename,
@@ -520,7 +439,6 @@ fn generic_delivery_allows_file_writes_before_delivery() {
 #[test]
 fn generic_path_inspection_prefers_path_facts_and_allows_bounded_read() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: false,
         locator_kind: OutputLocatorKind::Filename,
         response_shape: OutputResponseShape::Free,
@@ -579,18 +497,15 @@ raw_excerpt_policy = "no_full_raw_excerpt"
 max_items = 24
 max_excerpt_chars = 240
 
-[contracts.none]
-semantic_kind = "none"
-operation = "unknown"
-target_object = "unknown"
-delivery_shape = "summary"
+[[generic_profiles]]
+name = "invalid_runtime_profile"
+response_shapes = ["free"]
 policy_mode = "maybe"
 allowed_actions = []
 preferred_actions = []
 forbidden_actions = []
 required_evidence = []
 final_answer_shape = "free"
-none_passthrough = true
 failure_policy = "no_retry"
 "#,
     )
@@ -616,9 +531,9 @@ fn contract_runtime_rejects_natural_language_evidence_profile() {
 #[test]
 fn configured_observation_extractors_must_exist_in_registry() {
     let source = format!(
-            "{}\n[[contracts.raw_command_output.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
-            include_str!("../../../../configs/task_contract_matrix.toml")
-        );
+        "{}\n[[generic_profiles.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
+        include_str!("../../../../configs/task_contract_matrix.toml")
+    );
     let err = parse_contract_matrix_source(&source)
         .expect_err("unregistered explicit extractor should fail validation");
 
@@ -630,7 +545,6 @@ fn configured_observation_extractors_must_exist_in_registry() {
 #[test]
 fn runtime_contract_snapshot_binds_matrix_and_compact_prompt_block() {
     let mut output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::CurrentWorkspace,

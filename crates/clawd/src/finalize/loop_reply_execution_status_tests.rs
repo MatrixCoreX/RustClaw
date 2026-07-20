@@ -33,7 +33,6 @@ fn deterministic_observed_execution_status_answer_reports_mixed_results() {
 #[test]
 fn agent_loop_rich_content_precedes_status_summary_without_legacy_content_flag() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::Free;
     route.requires_content_evidence = false;
     route.delivery_required = false;
@@ -85,7 +84,6 @@ fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_pat
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "configs/config_copy".to_string();
@@ -120,7 +118,6 @@ fn deterministic_missing_observed_target_uses_generic_machine_shape() {
     let mut route = free_route_result();
     route.requires_content_evidence = false;
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
@@ -155,7 +152,6 @@ fn deterministic_missing_observed_target_machine_payload_is_language_neutral() {
     let mut route = free_route_result();
     route.requires_content_evidence = false;
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
@@ -313,7 +309,6 @@ fn observed_fallback_allowed_for_matrix_route_after_planned_synthesis() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -341,7 +336,6 @@ fn content_answer_candidate_prevents_status_summary_replacement() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -596,7 +590,6 @@ fn structured_failure_request_prefers_final_respond_over_synthesis_stdout() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

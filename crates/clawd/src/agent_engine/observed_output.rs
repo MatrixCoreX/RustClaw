@@ -658,7 +658,7 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
     ) {
         return true;
     }
-    matches!(shape, FinalAnswerShape::RawOutputOrShortSummary)
+    matches!(shape, FinalAnswerShape::ExactObservationOrShortSummary)
 }
 
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {
@@ -691,7 +691,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         task.task_id,
     );
 
-    if let Some(answer) = strict_raw_tail_read_observed_answer(loop_state, agent_run_context) {
+    if let Some(answer) = strict_exact_tail_read_observed_answer(loop_state, agent_run_context) {
         return Ok(Some((
             answer,
             crate::task_journal::TaskJournalFinalizerSummary {
@@ -899,15 +899,12 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     )))
 }
 
-fn strict_raw_tail_read_observed_answer(
+fn strict_exact_tail_read_observed_answer(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|context| context.output_contract())?;
-    if !output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::RawCommandOutput,
-    ) || route.response_shape != crate::OutputResponseShape::Strict
+    if !route.requests_exact_command_output()
         || !route.requires_content_evidence
         || route.delivery_required
     {
@@ -917,28 +914,34 @@ fn strict_raw_tail_read_observed_answer(
         .executed_step_results
         .iter()
         .rev()
-        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "fs_basic" | "system_basic"))
+        .filter(|step| step.is_ok())
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
         .filter_map(|step| step.output.as_deref())
-        .find_map(strict_raw_tail_read_answer_from_output)
+        .find_map(strict_exact_tail_read_answer_from_output)
         .map(|answer| answer.trim().to_string())
         .filter(|answer| !answer.is_empty())
 }
 
-fn strict_raw_tail_read_answer_from_output(output: &str) -> Option<String> {
+fn strict_exact_tail_read_answer_from_output(output: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
-    strict_raw_tail_read_answer_from_value(&value)
+    strict_exact_tail_read_answer_from_value(&value)
 }
 
-fn strict_raw_tail_read_answer_from_value(value: &serde_json::Value) -> Option<String> {
-    if let Some(answer) = strict_raw_tail_read_answer_from_flat_value(value) {
+fn strict_exact_tail_read_answer_from_value(value: &serde_json::Value) -> Option<String> {
+    if let Some(answer) = strict_exact_tail_read_answer_from_flat_value(value) {
         return Some(answer);
     }
     value
         .get("extra")
-        .and_then(strict_raw_tail_read_answer_from_value)
+        .and_then(strict_exact_tail_read_answer_from_value)
 }
 
-fn strict_raw_tail_read_answer_from_flat_value(value: &serde_json::Value) -> Option<String> {
+fn strict_exact_tail_read_answer_from_flat_value(value: &serde_json::Value) -> Option<String> {
     if !matches!(
         value.get("action").and_then(serde_json::Value::as_str),
         Some("read_range" | "read_text_range")

@@ -14,7 +14,6 @@ fn load_workspace_matrix() -> ContractMatrix {
 fn generic_path_content_allows_runtime_equivalent_config_guard() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             ..IntentOutputContract::default()
@@ -45,16 +44,10 @@ fn load_registry_from_text(raw: &str) -> SkillsRegistry {
     registry
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum GeneratedContractMatch {
-    Semantic(OutputSemanticKind),
-    Generic(String),
-}
-
 #[derive(Debug, Clone)]
 struct GeneratedMatrixCase {
     id: String,
-    matched: GeneratedContractMatch,
+    matched_profile: String,
     action: Option<ActionRef>,
     expected_decision: Option<ActionPolicyDecision>,
     expected_required_evidence: Vec<String>,
@@ -67,15 +60,6 @@ fn generated_allowed_action(matched: &MatchedContract<'_>) -> Option<ActionRef> 
         if matched.action_policy(&action) == ActionPolicyDecision::Allowed {
             return Some(action);
         }
-    }
-    if matches!(
-        matched,
-        MatchedContract::Semantic(MatrixContract {
-            none_passthrough: true,
-            ..
-        })
-    ) {
-        return ActionRef::parse("respond");
     }
     None
 }
@@ -117,14 +101,14 @@ fn generated_negative_action(
 fn push_generated_case(
     cases: &mut Vec<GeneratedMatrixCase>,
     id: String,
-    matched: GeneratedContractMatch,
+    matched_profile: String,
     contract: &MatchedContract<'_>,
     action: Option<ActionRef>,
     expected_decision: Option<ActionPolicyDecision>,
 ) {
     cases.push(GeneratedMatrixCase {
         id,
-        matched,
+        matched_profile,
         action,
         expected_decision,
         expected_required_evidence: contract.required_evidence(),
@@ -138,50 +122,9 @@ fn generated_contract_cases(
 ) -> Vec<GeneratedMatrixCase> {
     let mut cases = Vec::new();
 
-    for kind in OutputSemanticKind::ALL {
-        let contract = matrix
-            .semantic_contract(*kind)
-            .expect("semantic contract exists");
-        let matched = MatchedContract::Semantic(contract);
-        let case_match = GeneratedContractMatch::Semantic(*kind);
-        let prefix = kind.as_str();
-
-        push_generated_case(
-            &mut cases,
-            format!("{prefix}::evidence_shape"),
-            case_match.clone(),
-            &matched,
-            None,
-            None,
-        );
-
-        if let Some(action) = generated_allowed_action(&matched) {
-            let decision = matched.action_policy(&action);
-            push_generated_case(
-                &mut cases,
-                format!("{prefix}::allowed::{}", action.as_key()),
-                case_match.clone(),
-                &matched,
-                Some(action),
-                Some(decision),
-            );
-        }
-
-        if let Some((action, decision)) = generated_negative_action(&matched) {
-            push_generated_case(
-                &mut cases,
-                format!("{prefix}::negative::{}", action.as_key()),
-                case_match,
-                &matched,
-                Some(action),
-                Some(decision),
-            );
-        }
-    }
-
     for profile in &matrix.generic_profiles {
-        let matched = MatchedContract::Generic(profile);
-        let case_match = GeneratedContractMatch::Generic(profile.name.clone());
+        let matched = MatchedContract(profile);
+        let case_match = profile.name.clone();
         let prefix = format!("generic::{}", profile.name);
 
         push_generated_case(
@@ -229,20 +172,13 @@ fn matched_for_generated_case<'a>(
     matrix: &'a ContractMatrix,
     case: &GeneratedMatrixCase,
 ) -> MatchedContract<'a> {
-    match &case.matched {
-        GeneratedContractMatch::Semantic(kind) => MatchedContract::Semantic(
-            matrix
-                .semantic_contract(*kind)
-                .expect("semantic contract exists"),
-        ),
-        GeneratedContractMatch::Generic(name) => MatchedContract::Generic(
-            matrix
-                .generic_profiles
-                .iter()
-                .find(|profile| profile.name == *name)
-                .expect("generic profile exists"),
-        ),
-    }
+    MatchedContract(
+        matrix
+            .generic_profiles
+            .iter()
+            .find(|profile| profile.name == case.matched_profile)
+            .expect("generic profile exists"),
+    )
 }
 
 #[test]
@@ -255,7 +191,7 @@ fn workspace_contract_matrix_loads_and_has_shape() {
     assert!(matrix
         .failure_attribution
         .contains(&"model_error".to_string()));
-    assert_eq!(matrix.policy.unknown_semantic, "reject");
+    assert_eq!(matrix.policy.unknown_contract, "reject");
     assert_eq!(
         matrix.trace_policy.evidence_storage,
         "redacted_excerpt_hash"
@@ -269,13 +205,6 @@ fn workspace_contract_matrix_loads_and_has_shape() {
 #[test]
 fn delete_contracts_cannot_be_satisfied_by_read_or_list_actions() {
     let matrix = load_workspace_matrix();
-    for (name, contract) in &matrix.contracts {
-        assert_delete_policy_for_actions(
-            &format!("contract `{name}`"),
-            &contract.operation,
-            &contract.allowed_actions,
-        );
-    }
     for profile in &matrix.generic_profiles {
         for raw in &profile.allowed_actions {
             let Some(action) = ActionRef::parse(raw) else {
@@ -291,49 +220,10 @@ fn delete_contracts_cannot_be_satisfied_by_read_or_list_actions() {
     }
 }
 
-fn assert_delete_policy_for_actions(context: &str, operation: &str, actions: &[String]) {
-    let operation = normalize_action_token(operation);
-    for raw in actions {
-        let Some(action) = ActionRef::parse(raw) else {
-            continue;
-        };
-        if operation == "delete" {
-            assert!(
-                !action_is_read_or_list_observation(&action),
-                "{context} allows read/list observation action `{}` for delete operation",
-                action.as_key()
-            );
-        } else if operation != "mutate" {
-            assert!(
-                !action_is_delete_mutation(&action),
-                "{context} allows delete action `{}` without delete operation",
-                action.as_key()
-            );
-        }
-    }
-}
-
 fn action_is_delete_mutation(action: &ActionRef) -> bool {
     matches!(
         (action.skill.as_str(), action.action.as_deref()),
         ("fs_basic", Some("remove_path")) | ("remove_file", _)
-    )
-}
-
-fn action_is_read_or_list_observation(action: &ActionRef) -> bool {
-    matches!(
-        (action.skill.as_str(), action.action.as_deref()),
-        ("read_file" | "list_dir" | "doc_parse", _)
-            | (
-                "fs_basic",
-                Some("list_dir" | "read_text_range" | "find_entries" | "grep_text")
-            )
-            | ("archive_basic", Some("list" | "read"))
-            | (
-                "config_basic",
-                Some("read_field" | "read_fields" | "list_keys")
-            )
-            | ("db_basic", Some("list_tables" | "query"))
     )
 }
 
@@ -418,7 +308,6 @@ fn generic_path_inspection_can_express_negative_evidence() {
 #[test]
 fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
     let mut output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
@@ -442,11 +331,7 @@ fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
         snapshot.get("policy_mode").and_then(Value::as_str),
         Some("enforce")
     );
-    assert_eq!(
-        snapshot.get("contract_marker").and_then(Value::as_str),
-        Some("none")
-    );
-    assert!(snapshot.get("semantic_kind").is_none());
+    assert!(snapshot.get("contract_marker").is_none());
     assert_eq!(
         snapshot.get("evidence_scope").and_then(Value::as_str),
         Some("current_task")
@@ -492,9 +377,13 @@ fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
 }
 
 #[test]
-fn raw_command_observation_source_defaults_to_text_legacy_extractor() {
+fn exact_observation_observation_source_defaults_to_text_legacy_extractor() {
     let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::RawCommandOutput,
+        response_shape: crate::OutputResponseShape::Strict,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("command_output".to_string()),
+            ..Default::default()
+        },
         ..IntentOutputContract::default()
     })
     .expect("trace snapshot");
@@ -512,7 +401,6 @@ fn raw_command_observation_source_defaults_to_text_legacy_extractor() {
 fn archive_count_uses_structured_action_observation() {
     let scalar_snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
         response_shape: crate::OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -531,7 +419,6 @@ fn archive_count_uses_structured_action_observation() {
 
     let scalar_contract = IntentOutputContract {
         response_shape: crate::OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -562,35 +449,8 @@ fn archive_count_uses_structured_action_observation() {
 }
 
 #[test]
-fn planner_semantic_kinds_directly_match_their_contracts() {
-    let matrix = load_workspace_matrix();
-
-    for kind in OutputSemanticKind::ALL
-        .iter()
-        .filter(|kind| **kind != OutputSemanticKind::None)
-    {
-        let output_contract = IntentOutputContract {
-            semantic_kind: *kind,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            ..IntentOutputContract::default()
-        };
-        let matched = matrix
-            .match_output_contract(&output_contract)
-            .unwrap_or_else(|| panic!("semantic match for {}", kind.as_str()));
-        assert_eq!(
-            matched.match_name(),
-            kind.as_str(),
-            "{} must directly own planner contract policy",
-            kind.as_str()
-        );
-    }
-}
-
-#[test]
 fn generic_delivery_snapshot_defaults_to_file_artifact() {
     let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         delivery_required: true,
         ..IntentOutputContract::default()
     })
@@ -609,7 +469,6 @@ fn generic_delivery_snapshot_defaults_to_file_artifact() {
 #[test]
 fn action_trace_records_contract_decision_and_shape() {
     let mut output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         response_shape: OutputResponseShape::Strict,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
@@ -658,7 +517,11 @@ fn action_trace_records_contract_decision_and_shape() {
 fn action_trace_marks_run_cmd_extractor_as_text_legacy() {
     let trace = action_trace_for_output_contract(
         &IntentOutputContract {
-            semantic_kind: OutputSemanticKind::RawCommandOutput,
+            response_shape: crate::OutputResponseShape::Strict,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("command_output".to_string()),
+                ..Default::default()
+            },
             ..IntentOutputContract::default()
         },
         "run_cmd",

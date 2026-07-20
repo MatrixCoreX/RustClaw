@@ -9,7 +9,6 @@ async fn finalize_loop_reply_keeps_clarify_machine_envelope_internal_by_default(
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -172,7 +171,6 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         turn_analysis: Some(crate::turn_context::TurnAnalysis {
@@ -425,7 +423,6 @@ async fn finalize_loop_reply_keeps_agent_loop_clarify_machine_fields_structured_
     route.requires_content_evidence = false;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -538,7 +535,6 @@ async fn finalize_loop_reply_does_not_attach_clarify_envelope_after_completed_ac
     route.response_shape = OutputResponseShape::Free;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -608,7 +604,6 @@ async fn finalize_loop_reply_does_not_mark_answer_delivery_as_clarify_from_route
     route.response_shape = OutputResponseShape::Free;
     route.requires_content_evidence = false;
     route.locator_kind = OutputLocatorKind::None;
-    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

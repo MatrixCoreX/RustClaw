@@ -6,7 +6,6 @@ fn should_verify_answer_skips_journal_grounded_strict_json_code_projection() {
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let answer = r#"{"created_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
     let mut journal =
@@ -64,7 +63,6 @@ fn should_verify_answer_skips_post_readback_strict_json_projection_observation()
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let answer = r#"{"changed_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"functions":["add","sub","mul"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -125,7 +123,6 @@ fn should_verify_answer_skips_readback_only_local_code_projection_with_validatio
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let answer = r#"{"project_dir":"/workspace","functions":["add","sub","mul","safe_div"],"error_codes":["division_by_zero"],"test_status":"passed","evidence_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"]}"#;
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -172,7 +169,6 @@ fn should_verify_answer_rejects_unresolved_strict_json_projection_observation() 
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let answer = r#"{"changed_files":["/workspace/calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"not_observed"}"#;
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -212,7 +208,6 @@ fn should_verify_answer_skips_publishable_code_projection_when_route_shape_is_no
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     let answer = r#"{"created_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"test_command":"cd /workspace && python3 test_calc_core.py","test_status":"passed"}"#;
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -424,7 +419,6 @@ fn should_verify_answer_requires_matching_synthesis_for_strict_json_skip() {
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let answer = r#"{"created_files":["/workspace/calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-code-json-missing-synthesis",

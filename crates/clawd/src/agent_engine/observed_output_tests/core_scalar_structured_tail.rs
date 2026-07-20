@@ -18,7 +18,6 @@ fn direct_scalar_reads_count_inventory_single_dimension_from_structured_output()
             r#"{"action":"count_inventory","kind_filter":"file","counts":{"total":12,"files":9,"dirs":3}}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -66,7 +65,6 @@ fn inventory_dir_file_names_contract_filters_names_by_kind() {
         "counts": {"files": 2, "dirs": 1, "total": 3}
     });
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
 
@@ -79,7 +77,7 @@ fn inventory_dir_file_names_contract_filters_names_by_kind() {
 }
 
 #[test]
-fn inventory_dir_file_names_contract_uses_direct_semantic_kind() {
+fn inventory_dir_file_names_contract_uses_direct_output_contract() {
     let value = serde_json::json!({
         "action": "inventory_dir",
         "names_only": true,
@@ -92,7 +90,6 @@ fn inventory_dir_file_names_contract_uses_direct_semantic_kind() {
         "counts": {"files": 2, "dirs": 1, "total": 3}
     });
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
 
@@ -226,7 +223,6 @@ fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentenc
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("count".to_string()),
                 ..Default::default()

@@ -70,25 +70,6 @@ impl OutputDeliveryIntent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum OutputSemanticKind {
-    #[default]
-    None,
-    RawCommandOutput,
-}
-
-impl OutputSemanticKind {
-    pub(crate) const ALL: &'static [Self] = &[Self::None, Self::RawCommandOutput];
-
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::RawCommandOutput => "raw_command_output",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct OutputSelectionContract {
     pub(crate) list_selector: OutputListSelector,
@@ -122,27 +103,11 @@ pub(crate) struct IntentOutputContract {
     pub(crate) delivery_required: bool,
     pub(crate) locator_kind: OutputLocatorKind,
     pub(crate) delivery_intent: OutputDeliveryIntent,
-    pub(crate) semantic_kind: OutputSemanticKind,
     pub(crate) locator_hint: String,
     pub(crate) selection: OutputSelectionContract,
 }
 
 impl IntentOutputContract {
-    pub(crate) fn semantic_kind_is(&self, semantic_kind: OutputSemanticKind) -> bool {
-        self.semantic_kind == semantic_kind
-    }
-
-    pub(crate) fn semantic_kind_is_any(&self, semantic_kinds: &[OutputSemanticKind]) -> bool {
-        semantic_kinds
-            .iter()
-            .copied()
-            .any(|semantic_kind| self.semantic_kind_is(semantic_kind))
-    }
-
-    pub(crate) fn semantic_kind_is_unclassified(&self) -> bool {
-        self.semantic_kind_is(OutputSemanticKind::None)
-    }
-
     pub(crate) fn requests_exact_count(&self) -> bool {
         self.response_shape == OutputResponseShape::Scalar
             && self
@@ -151,6 +116,28 @@ impl IntentOutputContract {
                 .as_deref()
                 .and_then(crate::machine_kv_projection::exact_machine_field_selector)
                 .is_some_and(|fields| matches!(fields.as_slice(), [field] if field == "count"))
+    }
+
+    pub(crate) fn requests_exact_command_output(&self) -> bool {
+        self.response_shape == OutputResponseShape::Strict
+            && self
+                .selection
+                .structured_field_selector
+                .as_deref()
+                .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+                .is_some_and(
+                    |fields| matches!(fields.as_slice(), [field] if field == "command_output"),
+                )
+    }
+
+    pub(crate) fn does_not_request_exact_command_output(&self) -> bool {
+        !self.requests_exact_command_output()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn configure_exact_command_output(&mut self) {
+        self.response_shape = OutputResponseShape::Strict;
+        self.selection.structured_field_selector = Some("command_output".to_string());
     }
 
     pub(crate) fn requests_exact_structured_fields(&self) -> bool {

@@ -227,8 +227,6 @@ fn bounded_read_range_observe_only_round_uses_incremental_planner() {
     let mut route = route_result(OutputResponseShape::Free);
     route.requires_content_evidence = false;
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::None;
-
     assert!(observe_only_round_should_continue(
         &route,
         &loop_state,
@@ -260,8 +258,6 @@ fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
     let mut route = route_result(OutputResponseShape::Free);
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::None;
-
     assert!(observe_only_round_should_continue(
         &route,
         &loop_state,
@@ -300,7 +296,6 @@ fn service_control_status_protocol_output_continues_for_model_synthesis() {
     let mut route = route_result(OutputResponseShape::Strict);
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::None;
-    route.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
         skill: "service_control".to_string(),
         args: json!({"action":"status","target":"clawd","manager_type":"rustclaw"}),
@@ -338,8 +333,7 @@ fn raw_strict_model_language_output_does_not_stop_on_bare_observation() {
     let mut route = route_result(OutputResponseShape::Strict);
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::None;
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
-
+    route.configure_exact_command_output();
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route.clone()),
@@ -386,7 +380,6 @@ fn unscoped_workspace_evidence_drafting_does_not_stop_on_search_only() {
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
         skill: "fs_search".to_string(),
         args: json!({"action":"find_name","pattern":"README"}),
@@ -414,7 +407,6 @@ fn unscoped_workspace_evidence_drafting_continues_after_doc_read() {
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"read_range","path":"README.md","mode":"head","n":120}),
@@ -440,7 +432,6 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "document".to_string();
     let actions = vec![
         AgentAction::CallTool {
@@ -473,7 +464,6 @@ fn path_inspection_waits_for_model_synthesis_after_observation() {
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "rustclaw.service".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let actions = vec![AgentAction::CallSkill {
@@ -502,7 +492,6 @@ fn missing_path_inspection_waits_for_model_synthesis() {
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "plan/missing.md".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let actions = vec![AgentAction::CallSkill {
@@ -531,7 +520,6 @@ fn missing_path_batch_facts_content_contract_continues_for_possible_fallback() {
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "plan/missing.md".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),

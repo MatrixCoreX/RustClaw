@@ -8,7 +8,6 @@ fn requested_machine_kv_summary_final_guard_preserves_terminal_scalar_respond() 
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-scalar", "ask", prompt);
@@ -79,7 +78,6 @@ fn requested_machine_kv_summary_final_guard_preserves_observed_empty_string_scal
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "./Cargo.toml".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-empty-scalar", "ask", prompt);
     journal
@@ -111,7 +109,6 @@ fn requested_machine_kv_summary_final_guard_preserves_transform_markdown_table()
     let mut route = route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-machine-kv-transform-table",
         "ask",
@@ -147,7 +144,6 @@ fn requested_machine_kv_summary_final_guard_preserves_transform_json_array() {
     let mut route = route_result();
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-machine-kv-transform-json-array",
         "ask",
@@ -184,7 +180,6 @@ fn requested_machine_kv_summary_final_guard_preserves_workspace_grounded_summary
     route.requires_content_evidence = true;
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "logs/clawd.run.log".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-workspace-grounded-final", "ask", prompt);
@@ -277,7 +272,6 @@ fn requested_machine_kv_summary_final_guard_preserves_delivery_file_token() {
     route.requires_content_evidence = true;
     route.delivery_required = true;
     route.response_shape = crate::OutputResponseShape::FileToken;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-delivery-file-token-kv", "ask", prompt);
     journal
@@ -368,7 +362,7 @@ fn requested_machine_kv_summary_final_guard_preserves_publishable_command_summar
     route.requires_content_evidence = false;
     route.delivery_required = false;
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-command-summary-final", "ask", prompt);
     journal
@@ -600,7 +594,6 @@ fn requested_machine_kv_summary_final_guard_restores_path_fact_over_filename_mar
     let prompt = "rustclaw.service";
     let mut route = route_result();
     route.response_shape = crate::OutputResponseShape::Free;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = "rustclaw.service".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-machine-kv-path-fact-final",

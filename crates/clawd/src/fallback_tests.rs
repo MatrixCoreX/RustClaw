@@ -191,7 +191,7 @@ fn user_response_contract_carries_clarify_case_as_missing_slot() {
         ClarifyFallbackSource::IntentUnresolved,
         "看一下那个日志最近 20 行",
         "semantic_contract_requires_evidence",
-        Some("clarify_case: missing_read_target\nresolved_user_intent: 查看日志最近 20 行\nsemantic_kind: raw_command_output"),
+        Some("clarify_case: missing_read_target\nresolved_user_intent: 查看日志最近 20 行"),
         "zh-CN",
     );
 
@@ -212,7 +212,6 @@ fn user_response_contract_carries_clarify_case_as_missing_slot() {
         .any(|boundary| boundary == "ask_only_for=target_path_scope_locator"));
     let block = contract.to_prompt_context_block();
     assert!(block.contains("\"missing_read_target\""));
-    assert!(block.contains("semantic_kind: raw_command_output"));
     assert!(block.contains("known_operation_from_resolved_user_intent=true"));
 }
 
@@ -227,7 +226,7 @@ fn structured_clarify_default_returns_missing_read_target_machine_payload() {
         ClarifyFallbackSource::IntentUnresolved,
         "读一下那个文件里的名字字段，只输出值",
         "semantic_contract_requires_evidence",
-        Some("clarify_case: missing_read_target\nresolved_user_intent: 读取指定文件中的 name 字段值，仅输出该值\nsemantic_kind: none"),
+        Some("clarify_case: missing_read_target\nresolved_user_intent: 读取指定文件中的 name 字段值，仅输出该值"),
         "zh-CN",
     );
 
@@ -257,7 +256,7 @@ fn structured_clarify_default_returns_missing_search_locator_machine_payload() {
         ClarifyFallbackSource::IntentUnresolved,
         "看看那个脚本在不在",
         "semantic_contract_requires_evidence",
-        Some("clarify_case: missing_search_locator\nresolved_user_intent: 检查脚本是否存在\nsemantic_kind: none"),
+        Some("clarify_case: missing_search_locator\nresolved_user_intent: 检查脚本是否存在"),
         "zh-CN",
     );
 

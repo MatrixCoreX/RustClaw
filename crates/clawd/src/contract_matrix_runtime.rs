@@ -173,8 +173,26 @@ pub(crate) fn final_answer_shape_for_output_contract(
         return Some(FinalAnswerShape::ExactList);
     }
     let matrix = bundled_contract_matrix()?;
-    let matched = matrix.match_output_contract(output_contract)?;
-    matched.final_answer_shape_kind()
+    matrix
+        .match_output_contract(output_contract)
+        .and_then(|matched| matched.final_answer_shape_kind())
+        .or_else(|| default_final_answer_shape(output_contract))
+}
+
+fn default_final_answer_shape(output_contract: &IntentOutputContract) -> Option<FinalAnswerShape> {
+    match output_contract.response_shape {
+        crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence => {
+            Some(FinalAnswerShape::Free)
+        }
+        crate::OutputResponseShape::Scalar
+            if output_contract.requests_exact_structured_fields() =>
+        {
+            Some(FinalAnswerShape::Scalar)
+        }
+        crate::OutputResponseShape::FileToken => Some(FinalAnswerShape::DeliveryTokenOrPath),
+        crate::OutputResponseShape::Strict => None,
+        crate::OutputResponseShape::Scalar => None,
+    }
 }
 
 pub(crate) fn runtime_contract_snapshot_for_output_contract(
@@ -225,15 +243,24 @@ pub(crate) fn trace_snapshot_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
-    let matched = matrix.match_output_contract(output_contract)?;
+    let matched = matrix.match_output_contract(output_contract);
     let final_answer_shape_kind = final_answer_shape_for_output_contract(output_contract);
-    let observation_extractors = matched.observation_extractors();
+    let observation_extractors = matched
+        .as_ref()
+        .map(MatchedContract::observation_extractors)
+        .unwrap_or_default();
+    let required_evidence = required_evidence_for_output_contract(output_contract)
+        .or_else(|| matched.as_ref().map(MatchedContract::required_evidence))
+        .unwrap_or_default();
+    let evidence_expression = matched
+        .as_ref()
+        .map(|matched| evidence_expression_for_output_contract(output_contract, matched))
+        .unwrap_or_default();
     Some(json!({
         "evidence_policy_version": matrix.matrix_version,
         "evidence_policy_hash": matrix.matrix_version_hash(),
         "schema_version": matrix.schema_version,
         "trace_policy": matrix.trace_policy.to_trace_json(),
-        "contract_marker": output_contract.semantic_kind.as_str(),
         "response_shape": output_contract.response_shape.as_str(),
         "locator_kind": output_contract.locator_kind.as_str(),
         "delivery_intent": output_contract.delivery_intent.as_str(),
@@ -243,29 +270,60 @@ pub(crate) fn trace_snapshot_for_output_contract(
             .selection
             .structured_field_selector
             .as_deref(),
-        "contract_match": matched.match_name(),
-        "policy_mode": matched.policy_mode(),
-        "evidence_scope": matched.evidence_scope(),
-        "freshness": matched.freshness(),
-        "artifact_kind": matched.artifact_kind(),
-        "channel_visibility": matched.channel_visibility(),
-        "evidence_profile": matched.evidence_profile(),
-        "required_evidence": required_evidence_for_output_contract(output_contract)
-            .unwrap_or_else(|| matched.required_evidence()),
-        "evidence_expression": evidence_expression_for_output_contract(output_contract, &matched)
-            .to_trace_json(&matched.required_evidence()),
-        "observation_sources": matched.observation_sources(),
+        "contract_match": matched
+            .as_ref()
+            .map(MatchedContract::match_name)
+            .unwrap_or("generic_default"),
+        "policy_mode": matched
+            .as_ref()
+            .map(MatchedContract::policy_mode)
+            .unwrap_or_else(|| "observe_only".to_string()),
+        "evidence_scope": matched
+            .as_ref()
+            .map(MatchedContract::evidence_scope)
+            .unwrap_or_else(|| "current_task".to_string()),
+        "freshness": matched
+            .as_ref()
+            .map(MatchedContract::freshness)
+            .unwrap_or_else(|| "current_task".to_string()),
+        "artifact_kind": matched
+            .as_ref()
+            .map(MatchedContract::artifact_kind)
+            .unwrap_or_else(|| "text".to_string()),
+        "channel_visibility": matched
+            .as_ref()
+            .map(MatchedContract::channel_visibility)
+            .unwrap_or_else(|| "user_visible".to_string()),
+        "evidence_profile": matched
+            .as_ref()
+            .map(MatchedContract::evidence_profile)
+            .unwrap_or_else(|| "generic".to_string()),
+        "required_evidence": required_evidence,
+        "evidence_expression": evidence_expression.to_trace_json(&[]),
+        "observation_sources": matched
+            .as_ref()
+            .map(MatchedContract::observation_sources)
+            .unwrap_or_default(),
         "observation_extractors": observation_extractors_trace_json(&observation_extractors),
         "final_answer_shape": final_answer_shape_kind
             .map(FinalAnswerShape::as_str)
-            .unwrap_or_else(|| matched.final_answer_shape()),
+            .or_else(|| matched.as_ref().map(MatchedContract::final_answer_shape)),
         "final_answer_shape_class": final_answer_shape_kind.map(|shape| shape.class().as_str()),
         "coarse_response_shape": final_answer_shape_kind
             .map(|shape| shape.coarse_response_shape().as_str()),
         "allows_model_language": final_answer_shape_kind.map(FinalAnswerShape::allows_model_language),
-        "preferred_actions": normalized_tokens(matched.preferred_actions()),
-        "allowed_actions": normalized_tokens(matched.allowed_actions()),
-        "forbidden_actions": normalized_tokens(matched.forbidden_actions()),
+        "preferred_actions": matched
+            .as_ref()
+            .map(|matched| normalized_tokens(matched.preferred_actions()))
+            .unwrap_or_default(),
+        "allowed_actions": matched
+            .as_ref()
+            .map(|matched| normalized_tokens(matched.allowed_actions()))
+            .unwrap_or_default(),
+        "forbidden_actions": matched
+            .as_ref()
+            .map(|matched| normalized_tokens(matched.forbidden_actions()))
+            .unwrap_or_default(),
     }))
 }
 
@@ -403,13 +461,6 @@ pub(crate) fn action_policy_for_output_contract(
     let output_contract = output_contract?;
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
-    if output_contract.semantic_kind_is_unclassified()
-        && !output_contract.requires_content_evidence
-        && !output_contract.delivery_required
-        && matched.match_name() == crate::OutputSemanticKind::None.as_str()
-    {
-        return None;
-    }
     let policy_action = policy_action_ref_for_match(&matched, normalized_skill, args)?;
     let final_answer_shape_kind = final_answer_shape_for_output_contract(output_contract)?;
     let decision = matched.action_policy(&policy_action.effective);

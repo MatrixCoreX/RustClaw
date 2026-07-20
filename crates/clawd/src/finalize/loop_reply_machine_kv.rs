@@ -28,8 +28,8 @@ use request_surfaces::requested_machine_kv_request_surfaces;
 use structured_contract_delivery::current_delivery_contains_full_structured_contract;
 
 use super::{
-    final_answer_text_from_delivery, log_deterministic_delivery_record,
-    raw_command_machine_field_delivery_satisfies_request,
+    exact_observation_machine_field_delivery_satisfies_request, final_answer_text_from_delivery,
+    log_deterministic_delivery_record,
 };
 
 pub(super) fn replace_delivery_with_requested_machine_kv_summary(
@@ -57,8 +57,8 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     if agent_run_context
         .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
-                && raw_command_machine_field_delivery_satisfies_request(route, &current)
+            route.requests_exact_command_output()
+                && exact_observation_machine_field_delivery_satisfies_request(route, &current)
         })
     {
         loop_state.last_user_visible_respond = Some(current);

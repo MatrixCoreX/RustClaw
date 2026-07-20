@@ -102,7 +102,6 @@ fn non_exact_path_locator_does_not_replace_model_output_with_observed_listing() 
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Free;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "plan/extra_missing_repair_probe.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -146,7 +145,6 @@ fn non_exact_strict_path_locator_does_not_replace_model_output() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "plan/extra_missing_repair_probe.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -240,7 +238,6 @@ fn scalar_observed_answer_replaces_run_cmd_step_status_after_fallback_success() 
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -289,12 +286,12 @@ fn scalar_observed_answer_replaces_run_cmd_step_status_after_fallback_success() 
 }
 
 #[test]
-fn scalar_raw_command_keeps_written_file_path_synthesis() {
+fn scalar_exact_observation_keeps_written_file_path_synthesis() {
     let state = test_state();
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = crate::OutputLocatorKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -726,7 +723,7 @@ fn grounded_terminal_respond_replaces_structured_json_delivery() {
     let task = claimed_task("task-grounded-terminal-respond");
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = crate::OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = true;
@@ -785,7 +782,6 @@ fn grounded_latest_synthesis_replaces_structured_json_delivery() {
     let task = claimed_task("task-grounded-synthesis");
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = true;
@@ -829,7 +825,7 @@ fn grounded_terminal_respond_rejects_ungrounded_content() {
     let task = claimed_task("task-grounded-terminal-respond-ungrounded");
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = crate::OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = true;
@@ -882,7 +878,6 @@ fn loop_contract_observed_answer_requires_contract_evidence_completeness() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result();
     contract.response_shape = crate::OutputResponseShape::Scalar;
-    contract.semantic_kind = crate::OutputSemanticKind::None;
     loop_state.output_contract = Some(contract);
     loop_state
         .executed_step_results
@@ -912,7 +907,6 @@ fn loop_contract_observed_answer_requires_matrix_strict_extractor_when_route_is_
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.locator_hint.clear();
@@ -975,7 +969,7 @@ fn loop_contract_observed_answer_does_not_hide_later_failure() {
 fn exact_observed_answer_does_not_replace_mixed_failure_summary() {
     let state = test_state();
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1136,7 +1130,6 @@ fn strict_scalar_count_keeps_planned_explanatory_answer() {
     let mut delivery_messages = vec!["55 个。当前范围内共有这么多普通文件。".to_string()];
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     route.exact_sentence_count = Some(1);
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -1182,7 +1175,6 @@ fn unclassified_strict_summary_preserves_publishable_model_answer() {
     let mut delivery_messages = vec![synthesis.to_string()];
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::None;
     route.locator_hint.clear();
     route.requires_content_evidence = true;

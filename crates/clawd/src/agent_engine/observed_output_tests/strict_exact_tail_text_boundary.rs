@@ -1,5 +1,5 @@
 #[test]
-fn strict_raw_tail_read_accepts_machine_extra_payload() {
+fn strict_exact_tail_read_accepts_machine_extra_payload() {
     let output = serde_json::json!({
         "status": "ok",
         "text": "tail read completed",
@@ -14,13 +14,13 @@ fn strict_raw_tail_read_accepts_machine_extra_payload() {
     .to_string();
 
     assert_eq!(
-        super::strict_raw_tail_read_answer_from_output(&output).as_deref(),
+        super::strict_exact_tail_read_answer_from_output(&output).as_deref(),
         Some("alpha\nbeta")
     );
 }
 
 #[test]
-fn strict_raw_tail_read_ignores_json_hidden_in_visible_text() {
+fn strict_exact_tail_read_ignores_json_hidden_in_visible_text() {
     let hidden_payload = serde_json::json!({
         "action": "read_range",
         "mode": "tail",
@@ -35,5 +35,5 @@ fn strict_raw_tail_read_ignores_json_hidden_in_visible_text() {
     })
     .to_string();
 
-    assert_eq!(super::strict_raw_tail_read_answer_from_output(&output), None);
+    assert_eq!(super::strict_exact_tail_read_answer_from_output(&output), None);
 }

@@ -1,4 +1,4 @@
-use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
+use crate::{IntentOutputContract, OutputResponseShape};
 
 use super::{
     enforce_output_contract, looks_like_delivery_locator_literal, sync_output_payload,
@@ -51,7 +51,6 @@ fn content_evidence_one_sentence_prefers_tail_conclusion_over_inventory_first_li
         exact_sentence_count: None,
         response_shape: OutputResponseShape::OneSentence,
         requires_content_evidence: true,
-        semantic_kind: OutputSemanticKind::None,
         ..Default::default()
     };
     let mut text = "logs 目录下与 clawd 相关的文件（26 个，按观察顺序）：\nclawd.run.log\nclawd.log\n\nclawd.run.log 最后 20 行均为 INFO task_call 流转。\n\n更像正常启动，没有遇到报错。".to_string();
@@ -76,7 +75,6 @@ fn non_file_contract_strips_spurious_leading_file_label_from_prose() {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Free,
         delivery_required: false,
-        semantic_kind: OutputSemanticKind::None,
         ..Default::default()
     };
     let mut text =
@@ -102,7 +100,6 @@ fn exact_sentence_count_overrides_mislabelled_one_sentence_contract() {
     let contract = IntentOutputContract {
         exact_sentence_count: Some(3),
         response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::None,
         ..Default::default()
     };
     let expected = "第一句概括背景。第二句说明重点。第三句给出结论。";
@@ -168,7 +165,6 @@ fn scalar_contract_preserves_natural_language_summary_with_single_ascii_token() 
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         ..Default::default()
     };
     let expected = "该测试验证 RustClaw 在连续会话下能否稳定保持上下文、记忆和状态。";
@@ -193,7 +189,6 @@ fn scalar_count_contract_still_extracts_count_from_sentence() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -215,7 +210,6 @@ fn scalar_count_contract_does_not_extract_path_from_missing_result() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()
@@ -238,7 +232,6 @@ fn scalar_count_contract_ignores_digits_embedded_in_path_tokens() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        semantic_kind: OutputSemanticKind::None,
         selection: crate::OutputSelectionContract {
             structured_field_selector: Some("count".to_string()),
             ..Default::default()

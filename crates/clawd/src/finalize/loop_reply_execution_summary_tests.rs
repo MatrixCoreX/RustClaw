@@ -110,7 +110,6 @@ fn execution_summary_suppressed_for_grounded_content_answer() {
     );
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "prompts/schemas/agent_loop_decision_envelope.schema.json".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
@@ -191,7 +190,6 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_name_list_answer(
     ));
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -217,7 +215,6 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_status_answer() {
     ));
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Free;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -357,7 +354,6 @@ fn execution_summary_drops_existing_summary_for_config_guard_delivery() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Free;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -387,7 +383,6 @@ fn execution_summary_drops_existing_summary_for_transform_result_delivery() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -417,7 +412,6 @@ fn execution_summary_drops_existing_summary_for_strict_synthesized_delivery() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -452,7 +446,6 @@ fn execution_summary_drops_existing_summary_for_synthesized_content_delivery() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Free;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -515,7 +508,6 @@ fn execution_summary_suppressed_for_scalar_content_synthesis() {
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -905,9 +897,9 @@ fn execution_summary_is_not_attached_for_exact_observed_passthrough_delivery() {
 }
 
 #[test]
-fn execution_summary_skips_for_raw_command_output_route() {
+fn execution_summary_skips_for_exact_observation_output_route() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -927,7 +919,6 @@ fn execution_summary_suppressed_for_strict_content_excerpt_contract() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -969,7 +960,6 @@ fn execution_summary_suppressed_for_generic_path_content_contract() {
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd.log".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -996,7 +986,6 @@ fn execution_summary_sanitizes_log_excerpt_secrets_and_ansi() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1015,7 +1004,6 @@ fn execution_summary_sanitizes_log_excerpt_secrets_and_ansi() {
 fn execution_summary_suppressed_for_exact_file_names_contract() {
     let mut route = free_route_result();
     route.locator_hint = "document".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1039,7 +1027,6 @@ fn execution_summary_skips_for_exact_sentence_count_contract() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.exact_sentence_count = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1066,7 +1053,6 @@ fn execution_summary_skips_for_exact_sentence_count_contract() {
 #[test]
 fn execution_summary_skips_for_scalar_count_contract() {
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.structured_field_selector = Some("count".to_string());
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
@@ -1091,7 +1077,6 @@ fn execution_summary_skips_for_scalar_count_contract() {
 #[test]
 fn execution_summary_skips_for_scalar_count_inventory_observation() {
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -1139,8 +1124,7 @@ fn execution_summary_skips_for_strict_json_container_delivery() {
 
 #[test]
 fn execution_summary_suppressed_for_file_names_contract_even_with_original_user_request() {
-    let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
+    let route = free_route_result();
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some("先列出 logs 目录下前 5 个文件名".to_string()),
@@ -1255,7 +1239,6 @@ fn execution_summary_suppressed_for_successful_file_token_delivery() {
 #[test]
 fn execution_summary_suppressed_for_path_inspection_contract() {
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = false;
     route.locator_kind = OutputLocatorKind::Path;
@@ -1310,7 +1293,6 @@ fn execution_summary_includes_direct_fs_search_structured_observation() {
 fn execution_summary_suppressed_for_scalar_contract_without_reading_user_text() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::Scalar;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_hint = ".".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

@@ -1,37 +1,62 @@
 #!/usr/bin/env python3
-"""Keep the legacy domain finalizer surface monotonic while it is deleted."""
+"""Enforce the domain-neutral finalizer and generic output-contract boundary."""
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import re
 import sys
 import tomllib
-from collections import Counter
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CLAWD_SRC = ROOT / "crates/clawd/src"
+CORE_SRC = ROOT / "crates/claw-core/src"
 FINALIZE_DIR = CLAWD_SRC / "finalize"
-PIPELINE_TYPES = CLAWD_SRC / "pipeline_types.rs"
 REGISTRY = ROOT / "configs/skills_registry.toml"
 ENVELOPE_SOURCE = ROOT / "crates/claw-core/src/capability_result.rs"
-SYNTHESIS_SOURCE = (
-    ROOT / "crates/clawd/src/agent_engine/capability_result_synthesis.rs"
-)
-SYNTHESIS_PROMPT = (
-    ROOT / "prompts/layers/overlays/capability_result_synthesis_prompt.md"
+SYNTHESIS_SOURCE = ROOT / "crates/clawd/src/agent_engine/capability_result_synthesis.rs"
+SYNTHESIS_PROMPT = ROOT / "prompts/layers/overlays/capability_result_synthesis_prompt.md"
+
+# These ceilings are the post-semantic-contract baseline. They prevent
+# unrelated growth while domain-specific branches are held at exactly zero.
+MAX_FINALIZER_PRODUCTION_MODULES = 66
+MAX_FINALIZER_PRODUCTION_LINES = 24_155
+
+FORBIDDEN_RUNTIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("legacy_raw_output_type", re.compile(r"\bRawCommandOutput\b")),
+    ("legacy_output_type", re.compile(r"\bOutputSemanticKind\b")),
+    (
+        "legacy_raw_final_answer_shape",
+        re.compile(r"\b(?:RawOutputOrShortSummary|raw_output_or_short_summary)\b"),
+    ),
+    ("legacy_runtime_field", re.compile(r"\bsemantic_kind\b")),
+    ("legacy_registry_field", re.compile(r"\boutput_semantic_kind\b")),
+    ("legacy_exact_module", re.compile(r"\bloop_reply_raw_command\b")),
+    (
+        "legacy_raw_verifier_module",
+        re.compile(r"\banswer_verifier_delivery_raw\b"),
+    ),
+    (
+        "legacy_raw_exact_helper",
+        re.compile(
+            r"\b(?:raw_bounded_read|strict_raw_tail_read|"
+            r"route_requires_raw_tail_read_passthrough|"
+            r"route_expects_synthesis_over_raw_observation)\w*\b"
+        ),
+    ),
 )
 
-# Baseline after introducing the generic envelope. These are ceilings, not
-# targets. Track C must drive them toward 0/0/<=15_000 as legacy cohorts leave.
-MAX_SEMANTIC_VARIANTS = 2
-MAX_SEMANTIC_PRODUCTION_FILES = 30
-MAX_FINALIZER_PRODUCTION_MODULES = 66
-MAX_FINALIZER_PRODUCTION_LINES = 25_257
-MAX_FINALIZER_REGISTRY_TOKEN_OCCURRENCES = 78
+
+@dataclasses.dataclass(frozen=True)
+class Finding:
+    path: str
+    line: int
+    kind: str
+    text: str
 
 
 def relative(path: Path) -> str:
@@ -51,54 +76,17 @@ def production_rust_files(source_root: Path) -> list[Path]:
     return sorted(
         path
         for path in source_root.rglob("*.rs")
-        if not is_test_source(path, source_root)
+        if path.is_file() and not is_test_source(path, source_root)
     )
 
 
-def semantic_variants(raw: str) -> list[str]:
-    marker = "enum OutputSemanticKind {"
-    if marker not in raw:
-        return []
-    body = raw.split(marker, 1)[1].split("\n}", 1)[0]
-    return [
-        line.strip().rstrip(",")
-        for line in body.splitlines()
-        if re.fullmatch(r"[A-Za-z][A-Za-z0-9]*,?", line.strip())
-    ]
-
-
-def classify_semantic_owner(path: Path) -> str:
-    rel = relative(path)
-    if "/finalize/" in rel:
-        if any(
-            token in rel
-            for token in (
-                "machine",
-                "exact",
-                "raw_command",
-                "scalar",
-                "markdown",
-            )
-        ):
-            return "exact_machine_serialization"
-        if any(token in rel for token in ("file", "artifact", "delivery")):
-            return "artifact_channel_delivery"
-        if any(token in rel for token in ("task_", "resume", "lifecycle")):
-            return "lifecycle_control"
-        return "business_language_rendering"
-    if any(
-        token in rel
-        for token in ("verifier", "contract", "resolver", "clarify", "policy")
-    ):
-        return "safety_policy_contract"
-    if any(
-        token in rel
-        for token in ("observed_output", "evidence", "task_journal", "observed_facts")
-    ):
-        return "evidence_extraction"
-    if any(token in rel for token in ("delivery", "output_paths")):
-        return "artifact_channel_delivery"
-    return "unclassified_legacy"
+def runtime_contract_files() -> list[Path]:
+    files = production_rust_files(CLAWD_SRC) + production_rust_files(CORE_SRC)
+    files.extend(sorted((ROOT / "configs").glob("*.toml")))
+    files.extend(sorted((ROOT / "docker/config").glob("*.toml")))
+    files.extend(sorted((ROOT / "prompts").rglob("*.md")))
+    files.extend(sorted((ROOT / "prompts").rglob("*.json")))
+    return files
 
 
 def registry_skill_names() -> list[str]:
@@ -114,78 +102,81 @@ def registry_skill_names() -> list[str]:
     )
 
 
-def registry_token_occurrences(files: list[Path]) -> int:
-    names = registry_skill_names()
-    total = 0
+def scan_forbidden_runtime_tokens(files: list[Path]) -> list[Finding]:
+    findings: list[Finding] = []
     for path in files:
-        raw = path.read_text(encoding="utf-8")
-        for name in names:
-            total += len(
-                re.findall(
-                    rf"(?<![a-z0-9_]){re.escape(name)}(?![a-z0-9_])",
-                    raw,
-                )
-            )
-    return total
+        for line_no, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for kind, pattern in FORBIDDEN_RUNTIME_PATTERNS:
+                if pattern.search(line):
+                    findings.append(Finding(relative(path), line_no, kind, line.strip()))
+    return findings
+
+
+def scan_finalizer_registry_tokens(files: list[Path]) -> list[Finding]:
+    findings: list[Finding] = []
+    names = registry_skill_names()
+    for path in files:
+        for line_no, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for name in names:
+                if re.search(rf"(?<![a-z0-9_]){re.escape(name)}(?![a-z0-9_])", line):
+                    findings.append(
+                        Finding(
+                            relative(path),
+                            line_no,
+                            "finalizer_registry_skill_dependency",
+                            f"{name}: {line.strip()}",
+                        )
+                    )
+    return findings
 
 
 def inventory() -> dict[str, object]:
-    production = production_rust_files(CLAWD_SRC)
     finalizer_production = production_rust_files(FINALIZE_DIR)
-    semantic_files = [
-        path
-        for path in production
-        if "OutputSemanticKind" in path.read_text(encoding="utf-8")
-    ]
-    owners = Counter(classify_semantic_owner(path) for path in semantic_files)
+    runtime_findings = scan_forbidden_runtime_tokens(runtime_contract_files())
+    registry_findings = scan_finalizer_registry_tokens(finalizer_production)
     return {
-        "semantic_variants": len(
-            semantic_variants(PIPELINE_TYPES.read_text(encoding="utf-8"))
-        ),
-        "semantic_production_files": len(semantic_files),
-        "semantic_owner_categories": dict(sorted(owners.items())),
-        "semantic_owner_files": [
-            {
-                "path": relative(path),
-                "category": classify_semantic_owner(path),
-            }
-            for path in semantic_files
+        "zero_domain_runtime_hits": len(runtime_findings),
+        "zero_domain_runtime_findings": [dataclasses.asdict(item) for item in runtime_findings],
+        "finalizer_registry_dependency_hits": len(registry_findings),
+        "finalizer_registry_dependency_findings": [
+            dataclasses.asdict(item) for item in registry_findings
         ],
         "finalizer_production_modules": len(finalizer_production),
         "finalizer_production_lines": sum(
             len(path.read_text(encoding="utf-8").splitlines())
             for path in finalizer_production
         ),
-        "finalizer_registry_token_occurrences": registry_token_occurrences(
-            finalizer_production
-        ),
     }
 
 
 def findings_for(metrics: dict[str, object]) -> list[str]:
     findings: list[str] = []
-    ceilings = {
-        "semantic_variants": MAX_SEMANTIC_VARIANTS,
-        "semantic_production_files": MAX_SEMANTIC_PRODUCTION_FILES,
-        "finalizer_production_modules": MAX_FINALIZER_PRODUCTION_MODULES,
-        "finalizer_production_lines": MAX_FINALIZER_PRODUCTION_LINES,
-        "finalizer_registry_token_occurrences": (
-            MAX_FINALIZER_REGISTRY_TOKEN_OCCURRENCES
-        ),
-    }
-    for key, ceiling in ceilings.items():
-        value = int(metrics[key])
-        if value > ceiling:
-            findings.append(f"{key}_grew:{value}>{ceiling}")
+    if int(metrics["zero_domain_runtime_hits"]):
+        findings.append(
+            f"zero_domain_runtime_hits:{metrics['zero_domain_runtime_hits']}"
+        )
+    if int(metrics["finalizer_registry_dependency_hits"]):
+        findings.append(
+            "finalizer_registry_dependency_hits:"
+            f"{metrics['finalizer_registry_dependency_hits']}"
+        )
+    modules = int(metrics["finalizer_production_modules"])
+    lines = int(metrics["finalizer_production_lines"])
+    if modules > MAX_FINALIZER_PRODUCTION_MODULES:
+        findings.append(
+            f"finalizer_production_modules_grew:{modules}>{MAX_FINALIZER_PRODUCTION_MODULES}"
+        )
+    if lines > MAX_FINALIZER_PRODUCTION_LINES:
+        findings.append(
+            f"finalizer_production_lines_grew:{lines}>{MAX_FINALIZER_PRODUCTION_LINES}"
+        )
     for required in (ENVELOPE_SOURCE, SYNTHESIS_SOURCE, SYNTHESIS_PROMPT):
         if not required.exists():
             findings.append(f"generic_capability_result_file_missing:{relative(required)}")
-            continue
-        raw = required.read_text(encoding="utf-8")
-        if "OutputSemanticKind" in raw:
-            findings.append(
-                f"generic_capability_result_depends_on_semantic_kind:{relative(required)}"
-            )
     if ENVELOPE_SOURCE.exists():
         envelope = ENVELOPE_SOURCE.read_text(encoding="utf-8")
         for token in (
@@ -202,38 +193,34 @@ def findings_for(metrics: dict[str, object]) -> list[str]:
 
 
 def run_self_test() -> int:
-    sample = """
-#[derive(Default)]
-enum OutputSemanticKind {
-    None,
-    ScalarCount,
-}
-"""
-    assert semantic_variants(sample) == ["None", "ScalarCount"]
-    assert classify_semantic_owner(
-        FINALIZE_DIR / "loop_reply_git_state.rs"
-    ) == "business_language_rendering"
-    assert classify_semantic_owner(
-        FINALIZE_DIR / "loop_reply_machine_kv.rs"
-    ) == "exact_machine_serialization"
-    assert is_test_source(
-        FINALIZE_DIR / "task_tests/final_status.rs",
-        FINALIZE_DIR,
+    fixture = FINALIZE_DIR / "fixture.rs"
+    sample = (
+        'let kind = OutputSemanticKind::RawCommandOutput;\n'
+        'let shape = RawOutputOrShortSummary;\n'
+        'let helper = strict_raw_tail_read_answer();\n'
     )
+    sample_findings: list[Finding] = []
+    for line_no, line in enumerate(sample.splitlines(), start=1):
+        for kind, pattern in FORBIDDEN_RUNTIME_PATTERNS:
+            if pattern.search(line):
+                sample_findings.append(Finding(relative(fixture), line_no, kind, line))
+    assert {item.kind for item in sample_findings} == {
+        "legacy_raw_output_type",
+        "legacy_output_type",
+        "legacy_raw_final_answer_shape",
+        "legacy_raw_exact_helper",
+    }
+    assert is_test_source(FINALIZE_DIR / "task_tests/final_status.rs", FINALIZE_DIR)
     assert not is_test_source(
-        FINALIZE_DIR / "loop_reply_synthesis_preference.rs",
-        FINALIZE_DIR,
+        FINALIZE_DIR / "loop_reply_synthesis_preference.rs", FINALIZE_DIR
     )
     bad = {
-        "semantic_variants": MAX_SEMANTIC_VARIANTS + 1,
-        "semantic_production_files": MAX_SEMANTIC_PRODUCTION_FILES,
+        "zero_domain_runtime_hits": 1,
+        "finalizer_registry_dependency_hits": 0,
         "finalizer_production_modules": MAX_FINALIZER_PRODUCTION_MODULES,
         "finalizer_production_lines": MAX_FINALIZER_PRODUCTION_LINES,
-        "finalizer_registry_token_occurrences": (
-            MAX_FINALIZER_REGISTRY_TOKEN_OCCURRENCES
-        ),
     }
-    assert any("semantic_variants_grew" in item for item in findings_for(bad))
+    assert "zero_domain_runtime_hits:1" in findings_for(bad)
     print("FINALIZER_ARCHITECTURE_SELF_TEST ok")
     return 0
 
@@ -252,11 +239,10 @@ def main(argv: list[str]) -> int:
     print(
         "FINALIZER_ARCHITECTURE_CHECK "
         f"findings={len(findings)} "
-        f"variants={metrics['semantic_variants']} "
-        f"semantic_files={metrics['semantic_production_files']} "
+        f"zero_domain_hits={metrics['zero_domain_runtime_hits']} "
+        f"registry_dependencies={metrics['finalizer_registry_dependency_hits']} "
         f"modules={metrics['finalizer_production_modules']} "
-        f"lines={metrics['finalizer_production_lines']} "
-        f"registry_tokens={metrics['finalizer_registry_token_occurrences']}"
+        f"lines={metrics['finalizer_production_lines']}"
     )
     for finding in findings:
         print(f"  - {finding}")

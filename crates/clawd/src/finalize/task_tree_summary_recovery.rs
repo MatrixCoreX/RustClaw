@@ -12,9 +12,7 @@ pub(super) fn deterministic_tree_summary_rows_failure_recovery(
         .iter()
         .rev()
         .filter_map(|step| {
-            if step.status != crate::executor::StepExecutionStatus::Ok
-                || !step.skill.eq_ignore_ascii_case("system_basic")
-            {
+            if step.status != crate::executor::StepExecutionStatus::Ok {
                 return None;
             }
             let output = step.output_excerpt.as_deref()?;

@@ -411,7 +411,7 @@ fn route_allows_standalone_scalar_non_promotion(
             route_result.delivery_intent,
             crate::OutputDeliveryIntent::None
         )
-        && matches!(route_result.semantic_kind, crate::OutputSemanticKind::None)
+        && route_result.does_not_request_exact_command_output()
 }
 
 fn standalone_scalar_output_should_not_promote(

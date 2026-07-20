@@ -263,7 +263,7 @@ fn route_uses_non_binding_workspace_evidence(route_result: &crate::IntentOutputC
         && route_result.requires_content_evidence
         && !route_result.delivery_required
         && !route_result.requests_exact_list()
-        && route_result.semantic_kind_is_unclassified()
+        && route_result.does_not_request_exact_command_output()
 }
 
 fn route_contract_can_publish_ordered_entries(route_result: &crate::IntentOutputContract) -> bool {

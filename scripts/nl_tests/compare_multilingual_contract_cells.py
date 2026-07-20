@@ -43,7 +43,8 @@ def signature(obs: Any) -> dict[str, Any]:
     return {
         "status": obs.status,
         "contract_match": obs.contract_match,
-        "contract_semantic_kind": obs.contract_semantic_kind,
+        "contract_response_shape": obs.contract_response_shape,
+        "contract_structured_field_selector": obs.contract_structured_field_selector,
         "contract_final_answer_shape": obs.contract_final_answer_shape,
         "required_evidence": normalized_list(obs.required_evidence),
         "missing_evidence": normalized_list(obs.missing_evidence),
@@ -176,7 +177,8 @@ def fake_obs(**overrides: Any) -> Any:
     base = {
         "status": "succeeded",
         "contract_match": "generic_exact_count",
-        "contract_semantic_kind": "none",
+        "contract_response_shape": "free",
+        "contract_structured_field_selector": "",
         "contract_final_answer_shape": "scalar",
         "required_evidence": ["count"],
         "missing_evidence": [],

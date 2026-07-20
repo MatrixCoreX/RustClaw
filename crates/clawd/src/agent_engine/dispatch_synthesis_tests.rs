@@ -33,7 +33,6 @@ fn route_result_with_contract(
         } else {
             OutputDeliveryIntent::None
         },
-        semantic_kind: Default::default(),
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     }

@@ -178,31 +178,21 @@ impl AgentLoopGuardPolicy {
         let evidence_required = output_contract.requires_content_evidence
             || output_contract.delivery_required
             || !required_evidence_fields.is_empty();
-        if output_contract.delivery_required
-            || matches!(
-                operation,
-                crate::evidence_policy::EvidenceOperation::Write
-                    | crate::evidence_policy::EvidenceOperation::Modify
-            )
-        {
+        if output_contract.delivery_required {
             return LoopBudgetProfile::MultiStepWorkspace;
         }
         if matches!(
             target_object,
             crate::evidence_policy::EvidenceTargetObject::Directory
-        ) && matches!(
-            operation,
-            crate::evidence_policy::EvidenceOperation::Summarize
-        ) {
+        ) && required_evidence_fields.len() >= 2
+        {
             return LoopBudgetProfile::MultiStepWorkspace;
         }
         if required_evidence_fields.len() >= 2
             || (evidence_required
                 && matches!(
                     operation,
-                    crate::evidence_policy::EvidenceOperation::Summarize
-                        | crate::evidence_policy::EvidenceOperation::Validate
-                        | crate::evidence_policy::EvidenceOperation::Run
+                    crate::evidence_policy::EvidenceOperation::Run
                         | crate::evidence_policy::EvidenceOperation::List
                         | crate::evidence_policy::EvidenceOperation::Inspect
                 ))

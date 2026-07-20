@@ -4,7 +4,7 @@ use super::*;
 fn exact_scalar_path_does_not_repair_media_artifact_output_with_text_write() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_result_with_contract(false);
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;
@@ -54,7 +54,7 @@ fn exact_scalar_path_does_not_repair_media_artifact_output_with_text_write() {
 fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_result_with_contract(false);
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.selection.structured_field_selector = Some("path".to_string());
     let result = verify_plan(
@@ -97,7 +97,7 @@ fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
 fn exact_scalar_path_does_not_write_stat_json_over_media_path() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result_with_semantic(crate::OutputSemanticKind::None);
+    let mut route = route_result_with_contract(false);
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.selection.structured_field_selector = Some("path".to_string());
     route.delivery_required = false;

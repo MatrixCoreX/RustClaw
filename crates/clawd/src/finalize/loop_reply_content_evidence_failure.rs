@@ -4,8 +4,7 @@ use crate::{AppState, AskReply, ClaimedTask};
 
 use super::{
     direct_scalar_observed_answer, execution_summary_arg_is_sensitive,
-    latest_tail_read_range_observed_answer, plan_step_for_execution,
-    prefer_english_for_agent_contextual_user_text, route_prefers_observed_answer,
+    latest_tail_read_range_observed_answer, plan_step_for_execution, route_prefers_observed_answer,
     route_requires_content_evidence, route_resolved_intent, truncate_with_ellipsis,
 };
 
@@ -18,48 +17,6 @@ fn error_looks_like_missing_file_or_directory(error: &str) -> bool {
         return structured.error_kind == "not_found";
     }
     error.trim().starts_with("__RC_READ_FILE_NOT_FOUND__:")
-}
-
-fn crypto_account_access_failure_answer(
-    state: &AppState,
-    user_text: &str,
-    agent_run_context: Option<&AgentRunContext>,
-    failed_step: &crate::executor::StepExecutionResult,
-    raw_error: &str,
-) -> Option<String> {
-    if !crate::skills::is_crypto_account_access_error(&failed_step.skill, raw_error) {
-        return None;
-    }
-    let prefer_english =
-        prefer_english_for_agent_contextual_user_text(state, user_text, agent_run_context);
-    Some(crate::bilingual_t_with_default_vars(
-        state,
-        "crypto.err.account_access_failed",
-        "crypto.err.account_access_failed",
-        "crypto.err.account_access_failed",
-        prefer_english,
-        &[],
-    ))
-}
-
-fn crypto_recoverable_i18n_failure_answer(
-    state: &AppState,
-    user_text: &str,
-    agent_run_context: Option<&AgentRunContext>,
-    failed_step: &crate::executor::StepExecutionResult,
-    raw_error: &str,
-) -> Option<String> {
-    let key = crate::skills::crypto_recoverable_i18n_error_key(&failed_step.skill, raw_error)?;
-    let prefer_english =
-        prefer_english_for_agent_contextual_user_text(state, user_text, agent_run_context);
-    Some(crate::bilingual_t_with_default_vars(
-        state,
-        &key,
-        &key,
-        &key,
-        prefer_english,
-        &[],
-    ))
 }
 
 fn content_evidence_failed_step_locator(
@@ -139,31 +96,11 @@ fn structured_target_label_from_value(value: &serde_json::Value) -> Option<Strin
     }
 }
 
-fn structured_failure_is_publishable_user_result(
-    failed_step: &crate::executor::StepExecutionResult,
-    raw_error: &str,
-) -> bool {
+fn structured_failure_is_publishable_user_result(raw_error: &str) -> bool {
     let Some(structured) = crate::skills::parse_structured_skill_error(raw_error) else {
         return false;
     };
-    let effective_skill = if structured.skill.trim().is_empty() {
-        failed_step.skill.as_str()
-    } else {
-        structured.skill.as_str()
-    };
-    if effective_skill.eq_ignore_ascii_case("db_basic") {
-        return matches!(
-            structured.error_kind.as_str(),
-            "sqlite_open_failed"
-                | "sqlite_query_failed"
-                | "sqlite_execute_failed"
-                | "unsafe_sql"
-                | "confirmation_required"
-                | "invalid_input"
-                | "unsupported_action"
-        );
-    }
-    matches!(structured.error_kind.as_str(), "contract_action_rejected")
+    !structured.error_kind.trim().is_empty()
 }
 
 fn push_structured_error_facts(observed_facts: &mut Vec<String>, raw_error: &str) {
@@ -314,52 +251,6 @@ pub(super) async fn content_evidence_step_failure_answer(
         };
     let error = error_observation.as_str();
 
-    if let Some(answer) = crypto_account_access_failure_answer(
-        state,
-        user_text,
-        agent_run_context,
-        failed_step,
-        raw_error,
-    ) {
-        return Some((
-            answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: 1,
-                ..Default::default()
-            },
-        ));
-    }
-
-    if let Some(answer) = crypto_recoverable_i18n_failure_answer(
-        state,
-        user_text,
-        agent_run_context,
-        failed_step,
-        raw_error,
-    ) {
-        return Some((
-            answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: 1,
-                ..Default::default()
-            },
-        ));
-    }
-
     let missing_target = error_looks_like_missing_file_or_directory(raw_error);
     if missing_target {
         let answer = content_evidence_missing_target_answer(
@@ -389,7 +280,7 @@ pub(super) async fn content_evidence_step_failure_answer(
     let publishable_observed_failure = permission_denied
         || recoverable_skill_error
         || observable_run_cmd_error
-        || structured_failure_is_publishable_user_result(failed_step, raw_error);
+        || structured_failure_is_publishable_user_result(raw_error);
     let locator = content_evidence_failed_step_locator(loop_state, agent_run_context, failed_step);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let mut observed_facts = vec![

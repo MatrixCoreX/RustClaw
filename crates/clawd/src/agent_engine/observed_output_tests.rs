@@ -31,7 +31,7 @@ use super::{
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
     AppState, ClaimedTask, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, SkillViewsSnapshot,
+    OutputResponseShape, SkillViewsSnapshot,
 };
 use claw_core::skill_registry::SkillsRegistry;
 
@@ -103,7 +103,7 @@ include!("observed_output_tests/observed_fallback_read_range.rs");
 include!("observed_output_tests/structured_scalar_text_boundary.rs");
 include!("observed_output_tests/system_basic_info_text_boundary.rs");
 include!("observed_output_tests/success_text_boundary.rs");
-include!("observed_output_tests/strict_raw_tail_text_boundary.rs");
+include!("observed_output_tests/strict_exact_tail_text_boundary.rs");
 include!("observed_output_tests/structured_listing_path.rs");
 include!("observed_output_tests/structured_listing_path_tail.rs");
 include!("observed_output_tests/system_archive_path_package.rs");

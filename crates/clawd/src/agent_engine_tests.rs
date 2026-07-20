@@ -4,7 +4,6 @@ use super::*;
 fn checkpoint_action_plan_preserves_exact_action_and_output_contract() {
     let mut contract = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
-        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
         ..Default::default()
     };
     contract.selection.structured_field_selector =
@@ -145,7 +144,6 @@ fn quick_index_includes_planner_capability_metadata() {
         subprocess: Some(false),
         package_install: Some(false),
         privilege_escalation: Some(false),
-        output_semantic_kind: Some("path_inspection".to_string()),
         final_answer_shape: Some("summary_with_evidence".to_string()),
     }]);
     manifest.risk_level = Some(SkillRiskLevel::Medium);
@@ -177,7 +175,6 @@ fn quick_index_includes_planner_capability_metadata() {
     assert!(text.contains("filesystem_write=false"));
     assert!(text.contains("external_publish=false"));
     assert!(text.contains("credential_access=false"));
-    assert!(text.contains("output_semantic_kind=path_inspection"));
     assert!(text.contains("final_answer_shape=summary_with_evidence"));
     assert!(output_contract.contains("output_contract: kind=text"));
     assert!(output_contract.contains("required=text"));
@@ -413,34 +410,6 @@ fn loop_state_seeds_active_bound_targets_from_boundary_observation_block() {
     let targets: Vec<String> =
         serde_json::from_str(raw).expect("workspace scalar targets must be JSON encoded");
     assert_eq!(targets, vec!["/tmp/work".to_string()]);
-}
-
-#[test]
-fn loop_state_ignores_legacy_current_workspace_scope_semantic_marker() {
-    let mut loop_state = LoopState::new(2);
-    let observation = json!({
-        "kind": "agent_loop_boundary_observations",
-        "schema_version": 1,
-        "current_workspace_scope": {
-            "source": "current_workspace_scope",
-            "target": "/tmp/work",
-            "semantic_kind": "scalar_count",
-            "response_shape": "scalar"
-        }
-    });
-    let ctx = AgentRunContext {
-        context_bundle_summary: Some(format!(
-            "legacy boundary\n\n### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS\n",
-            observation
-        )),
-        ..AgentRunContext::default()
-    };
-
-    seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
-
-    assert!(!loop_state
-        .output_vars
-        .contains_key("current_workspace_scalar_count_targets"));
 }
 
 #[test]

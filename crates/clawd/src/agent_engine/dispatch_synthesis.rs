@@ -40,14 +40,14 @@ pub(super) fn synthesize_route_allows_direct_fallback(
     }
     if route.requires_content_evidence
         && !route.delivery_required
-        && route.semantic_kind_is_unclassified()
+        && route.does_not_request_exact_command_output()
     {
         return true;
     }
     if route.requests_exact_path_list() {
         return true;
     }
-    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    if route.requests_exact_command_output()
         && route.response_shape == crate::OutputResponseShape::Strict
     {
         return false;
@@ -57,7 +57,7 @@ pub(super) fn synthesize_route_allows_direct_fallback(
         crate::OutputResponseShape::Scalar
             | crate::OutputResponseShape::Strict
             | crate::OutputResponseShape::FileToken
-    ) || route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    ) || route.requests_exact_command_output()
 }
 
 fn output_has_count_inventory_total(output: &str) -> bool {
@@ -96,7 +96,7 @@ pub(super) fn synthesize_direct_observed_fallback_answer(
         return Some(answer);
     }
     if let Some(answer) =
-        synthesize_strict_raw_tail_read_direct_answer(loop_state, agent_run_context)
+        synthesize_strict_exact_tail_read_direct_answer(loop_state, agent_run_context)
     {
         return Some(answer);
     }
@@ -223,12 +223,12 @@ fn push_unique_string(values: &mut Vec<String>, value: &str) {
     }
 }
 
-fn synthesize_strict_raw_tail_read_direct_answer(
+fn synthesize_strict_exact_tail_read_direct_answer(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|context| context.output_contract())?;
-    if !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    if !route.requests_exact_command_output()
         || route.response_shape != crate::OutputResponseShape::Strict
         || !route.requires_content_evidence
         || route.delivery_required
@@ -239,28 +239,34 @@ fn synthesize_strict_raw_tail_read_direct_answer(
         .executed_step_results
         .iter()
         .rev()
-        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "fs_basic" | "system_basic"))
+        .filter(|step| step.is_ok())
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
         .filter_map(|step| step.output.as_deref())
-        .find_map(strict_raw_tail_read_answer_from_output)
+        .find_map(strict_exact_tail_read_answer_from_output)
         .map(|answer| answer.trim().to_string())
         .filter(|answer| !answer.is_empty())
 }
 
-fn strict_raw_tail_read_answer_from_output(output: &str) -> Option<String> {
+fn strict_exact_tail_read_answer_from_output(output: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(output.trim()).ok()?;
-    strict_raw_tail_read_answer_from_value(&value)
+    strict_exact_tail_read_answer_from_value(&value)
 }
 
-fn strict_raw_tail_read_answer_from_value(value: &Value) -> Option<String> {
-    if let Some(answer) = strict_raw_tail_read_answer_from_flat_value(value) {
+fn strict_exact_tail_read_answer_from_value(value: &Value) -> Option<String> {
+    if let Some(answer) = strict_exact_tail_read_answer_from_flat_value(value) {
         return Some(answer);
     }
     value
         .get("extra")
-        .and_then(strict_raw_tail_read_answer_from_value)
+        .and_then(strict_exact_tail_read_answer_from_value)
 }
 
-fn strict_raw_tail_read_answer_from_flat_value(value: &Value) -> Option<String> {
+fn strict_exact_tail_read_answer_from_flat_value(value: &Value) -> Option<String> {
     if !matches!(
         value.get("action").and_then(Value::as_str),
         Some("read_range" | "read_text_range")
@@ -374,8 +380,8 @@ pub(super) fn synthesize_direct_fallback_would_passthrough_multiline_read_range(
     {
         return false;
     }
-    let semantic_blocks_direct_passthrough = route.semantic_kind_is_unclassified()
-        || (route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+    let semantic_blocks_direct_passthrough = route.does_not_request_exact_command_output()
+        || (route.requests_exact_command_output()
             && latest_round_plan_requests_synthesis(loop_state));
     if !semantic_blocks_direct_passthrough {
         return false;

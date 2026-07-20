@@ -15,7 +15,6 @@ fn requested_machine_kv_summary_does_not_replace_model_text_with_path_fact_templ
         r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":769},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}}"#,
     ));
     let mut route = free_route_result();
-    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "rustclaw.service".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

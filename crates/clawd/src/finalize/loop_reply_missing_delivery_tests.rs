@@ -285,7 +285,6 @@ fn generic_content_observed_language_is_not_runtime_publishable() {
         r#"{"extra":{"action":"analyze","field_value":{"keyword_counts":{},"level_counts":{},"total_lines":42},"path":"/tmp/app.log","total_lines":42},"text":"status=observed"}"#,
     ));
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.response_shape = OutputResponseShape::OneSentence;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "/tmp/app.log".to_string();
@@ -403,7 +402,6 @@ async fn observed_execution_without_delivery_uses_language_synthesis_for_config_
     ));
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -442,7 +440,6 @@ fn exact_file_names_contract_prefers_observed_list_over_synthesized_sentence() {
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_hint = "document".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -496,7 +493,6 @@ fn finalize_structured_clarify_context_uses_route_reason_code() {
     route.locator_hint.clear();
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::Path;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

@@ -55,7 +55,9 @@ pub(super) fn route_output_contract_machine_json(
     let final_answer_shape = crate::evidence_policy::final_answer_shape_for_output_contract(route);
     serde_json::json!({
         "response_shape": route.response_shape.as_str(),
-        "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
+        "final_answer_shape": final_answer_shape
+            .map(crate::evidence_policy::FinalAnswerShape::as_str)
+            .unwrap_or_else(|| route.response_shape.as_str()),
         "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
         "locator_kind": route.locator_kind.as_str(),
         "delivery_required": route.delivery_required,

@@ -32,7 +32,6 @@ fn derive_locator_clarify_state_from_semantic_clarify() {
     assert_eq!(clarify_state.missing_slot, ClarifyMissingSlot::Locator);
     assert!(!clarify_state.delivery_required);
     assert_eq!(clarify_state.output_shape, None);
-    assert_eq!(clarify_state.semantic_kind, None);
     assert_eq!(clarify_state.source_request, "看一下那个日志最后 5 行");
 }
 
@@ -53,7 +52,6 @@ fn derive_user_input_clarify_state_for_freeform_waiting_request() {
     assert_eq!(clarify_state.missing_slot, ClarifyMissingSlot::UserInput);
     assert!(!clarify_state.delivery_required);
     assert_eq!(clarify_state.output_shape, None);
-    assert_eq!(clarify_state.semantic_kind, None);
 }
 
 #[test]
@@ -80,7 +78,6 @@ fn derive_locator_clarify_state_preserves_non_free_output_shape() {
         clarify_state.output_shape.as_deref(),
         Some(crate::OutputResponseShape::OneSentence.as_str())
     );
-    assert_eq!(clarify_state.semantic_kind, None);
 }
 
 #[test]
@@ -154,7 +151,6 @@ fn derive_locator_clarify_state_does_not_invent_a_semantic_contract() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::None,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -170,8 +166,6 @@ fn derive_locator_clarify_state_does_not_invent_a_semantic_contract() {
         None,
     )
     .expect("clarify state should be derived");
-
-    assert_eq!(clarify_state.semantic_kind, None);
     assert_eq!(
         clarify_state.output_shape.as_deref(),
         Some(crate::OutputResponseShape::Strict.as_str())

@@ -569,7 +569,7 @@ pub(super) fn direct_path_from_active_bound_inventory(
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
-        if !step.is_ok() || !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
+        if !step.is_ok() {
             continue;
         }
         let Some(value) = step
@@ -1000,12 +1000,7 @@ pub(super) fn direct_scalar_path_candidate_list_from_observed_outputs(
     }
     let mut path_batch_candidate = None;
     for step in loop_state.executed_step_results.iter().rev() {
-        if !step.is_ok()
-            || !matches!(
-                step.skill.as_str(),
-                "fs_basic" | "system_basic" | "list_dir"
-            )
-        {
+        if !step.is_ok() {
             continue;
         }
         let Some(output) = step
@@ -1065,7 +1060,7 @@ pub(super) fn direct_file_token_from_observed_path_batch_facts(
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
-        if !step.is_ok() || !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
+        if !step.is_ok() {
             continue;
         }
         let Some(output) = step
@@ -1110,7 +1105,7 @@ pub(super) fn direct_file_token_from_observed_find_entries(
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
-        if !step.is_ok() || !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
+        if !step.is_ok() {
             continue;
         }
         let Some(output) = step
@@ -1157,12 +1152,7 @@ pub(super) fn direct_file_token_from_observed_inventory(
         planned_file_delivery_used_unresolved_runtime_placeholder(loop_state);
     let planned_inventory_selection = planned_file_delivery_inventory_selection(loop_state);
     for step in loop_state.executed_step_results.iter().rev() {
-        if !step.is_ok()
-            || !matches!(
-                step.skill.as_str(),
-                "fs_basic" | "system_basic" | "list_dir"
-            )
-        {
+        if !step.is_ok() {
             continue;
         }
         let Some(output) = step

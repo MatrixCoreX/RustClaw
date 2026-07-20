@@ -9,7 +9,6 @@ fn generic_content_tail_read_does_not_replace_failed_synthesis() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd_manual.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -142,7 +141,6 @@ fn bounded_head_read_range_observed_answer_replaces_failed_synthesis_for_content
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/device_local/README.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -204,7 +202,6 @@ fn bounded_head_read_range_recovery_allows_unclassified_failed_free_route() {
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::Free;
     route.requires_content_evidence = false;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -265,7 +262,6 @@ fn generic_one_sentence_content_keeps_model_synthesis_authority() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd.run.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -318,7 +314,6 @@ fn tail_read_range_rejects_unclassified_content_contract() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/model_io.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -360,7 +355,7 @@ fn tail_read_range_backfill_reads_extra_wrapped_fs_basic_output() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd-dev.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -394,7 +389,6 @@ fn tail_read_range_observed_answer_ignores_json_hidden_in_visible_text() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd-dev.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -434,13 +428,13 @@ fn tail_read_range_observed_answer_ignores_json_hidden_in_visible_text() {
 }
 
 #[test]
-fn strict_raw_tail_read_replaces_synthesized_failure_from_log_contents() {
+fn strict_exact_tail_read_replaces_synthesized_failure_from_log_contents() {
     let state = test_state();
     let task = claimed_task("task-tail-replace-log-failure-synthesis");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd-dev.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -486,13 +480,13 @@ fn strict_raw_tail_read_replaces_synthesized_failure_from_log_contents() {
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_strict_raw_tail_read_overrides_synthesized_failure_text() {
+async fn finalize_loop_reply_strict_exact_tail_read_overrides_synthesized_failure_text() {
     let state = test_state();
     let task = claimed_task("task-tail-finalize-replace-log-failure-synthesis");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd-dev.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -510,6 +504,19 @@ async fn finalize_loop_reply_strict_raw_tail_read_overrides_synthesized_failure_
         "fs_basic",
         r#"{"extra":{"action":"read_range","mode":"tail","requested_n":2,"excerpt":"98|WARN provider failed: http 401\n99|WARN memory fallback failed: http 401","path":"logs/clawd-dev.log"}}"#,
     ));
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "fs_basic",
+            "step_1",
+            &serde_json::json!({"action": "read_range"}),
+            "untrusted wrapper",
+            Some(&serde_json::json!({
+                "action": "read_range",
+                "command_output": "WARN provider failed: http 401\nWARN memory fallback failed: http 401",
+                "path": "logs/clawd-dev.log"
+            })),
+        ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "synthesize_answer",
@@ -541,13 +548,13 @@ async fn finalize_loop_reply_strict_raw_tail_read_overrides_synthesized_failure_
 }
 
 #[tokio::test]
-async fn enforce_contract_keeps_strict_raw_tail_read_with_error_like_log_text() {
+async fn enforce_contract_keeps_strict_exact_tail_read_with_error_like_log_text() {
     let state = test_state();
     let task = claimed_task("task-tail-contract-keeps-error-like-log-text");
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd-dev.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -588,7 +595,6 @@ fn generic_content_tail_read_keeps_machine_projection_for_model_synthesis() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Free;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -637,7 +643,6 @@ async fn content_evidence_failure_defers_when_latest_tail_read_range_available()
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/model_io.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -674,7 +679,6 @@ fn generic_one_sentence_tail_read_does_not_select_a_line_in_runtime() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -705,7 +709,6 @@ fn tail_read_range_observed_answer_preserves_existing_content_summary() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd.run.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -753,7 +756,6 @@ fn generic_tail_read_does_not_replace_model_summary() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/model_io.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -818,7 +820,6 @@ fn tail_read_range_observed_answer_preserves_latest_registered_respond() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Free;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd.run.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -863,7 +864,6 @@ fn generic_tail_read_does_not_reconstruct_model_summary_from_step_history() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/clawd.run.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -922,7 +922,7 @@ fn tail_read_range_observed_answer_replaces_synthesis_after_tail_for_strict_raw_
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs/model_io.log".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {

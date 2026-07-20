@@ -141,7 +141,6 @@ fn compound_content_file_delivery_appends_token_after_summary() {
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = OutputSemanticKind::None;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = file.display().to_string();
@@ -182,7 +181,6 @@ fn unclassified_content_evidence_file_delivery_appends_token_after_summary() {
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = OutputResponseShape::Free;
-    route.semantic_kind = OutputSemanticKind::None;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = file.display().to_string();
@@ -357,7 +355,6 @@ async fn compound_content_file_delivery_enforce_preserves_synthesis_before_token
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = OutputSemanticKind::None;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = file.display().to_string();
@@ -418,7 +415,6 @@ async fn generated_delivery_existing_file_content_synthesis_enforce_preserves_su
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = OutputResponseShape::FileToken;
-    route.semantic_kind = OutputSemanticKind::None;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = canonical_text.clone();
@@ -489,7 +485,6 @@ fn generated_delivery_existing_file_content_synthesis_ignores_write_plans() {
     route.delivery_required = true;
     route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.response_shape = OutputResponseShape::FileToken;
-    route.semantic_kind = OutputSemanticKind::None;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = canonical_text;

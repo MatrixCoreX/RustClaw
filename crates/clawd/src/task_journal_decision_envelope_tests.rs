@@ -4,7 +4,6 @@ use super::{TaskJournal, TaskJournalRoundTrace};
 
 fn route_for_round_envelope() -> crate::IntentOutputContract {
     crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     }
@@ -121,7 +120,6 @@ fn planner_contract_envelope_uses_plan_slots_and_contract_evidence_without_route
         output_contract: Some(crate::IntentOutputContract {
             response_shape: crate::OutputResponseShape::Scalar,
             requires_content_evidence: true,
-            semantic_kind: crate::OutputSemanticKind::None,
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("count".to_string()),
                 ..Default::default()

@@ -2,10 +2,11 @@ use crate::agent_engine::{append_delivery_message, AgentRunContext};
 use crate::{AppState, ClaimedTask};
 
 use super::{
-    log_deterministic_delivery_record, missing_file_path_from_loop,
-    output_excerpt_has_missing_file_evidence, output_text_from_execution_result,
-    plan_step_for_execution, planned_delivery_is_publishable_model_language_answer,
-    raw_command_arg_from_plan_step, step_error_has_missing_file_evidence, truncate_with_ellipsis,
+    exact_observation_arg_from_plan_step, log_deterministic_delivery_record,
+    missing_file_path_from_loop, output_excerpt_has_missing_file_evidence,
+    output_text_from_execution_result, plan_step_for_execution,
+    planned_delivery_is_publishable_model_language_answer, step_error_has_missing_file_evidence,
+    truncate_with_ellipsis,
 };
 
 fn observed_execution_status_steps<'a>(
@@ -54,7 +55,7 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     if !route.requires_content_evidence && !agent_loop_rich_content {
         return false;
     }
-    if route.semantic_kind_is_any(&[crate::OutputSemanticKind::RawCommandOutput]) {
+    if route.requests_exact_command_output() {
         return false;
     }
     successful_content_observation_count(loop_state) > 0
@@ -385,7 +386,7 @@ pub(super) fn planned_delivery_identifies_failed_observed_step(
                 "respond" | "think" | "synthesize_answer"
             )
             && plan_step_for_execution(loop_state, step)
-                .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
+                .and_then(|plan_step| exact_observation_arg_from_plan_step(Some(plan_step)))
                 .is_some_and(|command| delivery.contains(command))
     })
 }

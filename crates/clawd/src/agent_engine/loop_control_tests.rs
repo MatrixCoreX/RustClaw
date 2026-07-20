@@ -42,7 +42,7 @@ use crate::{
     },
     executor::{StepExecutionResult, StepExecutionStatus},
     AgentAction, AskReply, ClaimedTask, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
+    OutputLocatorKind, OutputResponseShape,
 };
 use serde_json::json;
 
@@ -66,7 +66,6 @@ fn route_result(shape: OutputResponseShape) -> IntentOutputContract {
         delivery_required: false,
         locator_kind: OutputLocatorKind::None,
         delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind: Default::default(),
         locator_hint: String::new(),
         selection: crate::OutputSelectionContract::default(),
     }
@@ -356,7 +355,6 @@ fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_exce
 #[test]
 fn structured_scalar_output_format_gap_recovers_quoted_observed_value() {
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::None;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Filename;
     route.locator_hint = "package.json".to_string();
@@ -414,7 +412,7 @@ fn machine_kv_summary_output_format_gap_recovers_from_observed_read_range_token(
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-kv-recovery",
         "ask",
-        "Use read_range only. Answer exactly as machine summary: required=yes script=check_runtime_semantic_rewrite_boundary.py.",
+        "Use read_range only. Answer exactly as machine summary: required=yes script=check_planner_runtime_boundary.py.",
     );
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
@@ -423,7 +421,7 @@ fn machine_kv_summary_output_format_gap_recovers_from_observed_read_range_token(
         answer_incomplete_reason: "candidate returned prose instead of requested machine shape"
             .to_string(),
         should_retry: true,
-        retry_instruction: "return required=yes script=check_runtime_semantic_rewrite_boundary.py"
+        retry_instruction: "return required=yes script=check_planner_runtime_boundary.py"
             .to_string(),
         confidence: 0.96,
     });
@@ -436,9 +434,9 @@ fn machine_kv_summary_output_format_gap_recovers_from_observed_read_range_token(
                 "extra": {
                     "action": "read_range",
                     "path": "AGENTS.md",
-                    "excerpt": "248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes"
+                    "excerpt": "248|must run `python3 scripts/check_planner_runtime_boundary.py` after boundary changes"
                 },
-                "text": "{\"action\":\"read_range\",\"excerpt\":\"248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes\"}"
+                "text": "{\"action\":\"read_range\",\"excerpt\":\"248|must run `python3 scripts/check_planner_runtime_boundary.py` after boundary changes\"}"
             })
             .to_string(),
         ));
@@ -452,7 +450,7 @@ fn machine_kv_summary_output_format_gap_recovers_from_observed_read_range_token(
     );
     assert_eq!(
         reply.text,
-        "required=yes script=check_runtime_semantic_rewrite_boundary.py"
+        "required=yes script=check_planner_runtime_boundary.py"
     );
     assert!(!reply.should_fail_task);
     let journal = reply.task_journal.as_ref().expect("journal");
@@ -512,7 +510,6 @@ fn language_only_output_format_gap_keeps_best_model_answer_success() {
     route.requires_content_evidence = false;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.record_final_answer("best model answer");
@@ -551,7 +548,6 @@ fn language_only_output_format_gap_prefers_latest_terminal_answer_over_stale_tex
     route.requires_content_evidence = false;
     route.locator_kind = OutputLocatorKind::None;
     route.locator_hint.clear();
-    route.semantic_kind = OutputSemanticKind::None;
     let table_only = "| name | score |\n| --- | --- |\n| beta | 12 |";
     let full_answer = "**1. log evidence**\n- WARN=2, ERROR=1\n\n**2. doc summary**\n- service notes\n\n**3. table**\n\n| name | score |\n| --- | --- |\n| beta | 12 |";
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
@@ -680,7 +676,6 @@ fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
 #[test]
 fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::None;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =

@@ -4,7 +4,6 @@ use super::*;
 fn generic_file_delivery_allows_parent_directory_creation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -129,7 +128,6 @@ fn exact_scalar_path_profile_rejects_multi_field_selector() {
 fn generic_file_delivery_allows_existing_file_path_facts() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -149,7 +147,6 @@ fn generic_file_delivery_allows_existing_file_path_facts() {
 fn generic_file_delivery_allows_existing_file_content_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -171,7 +168,6 @@ fn generic_file_delivery_allows_existing_file_content_evidence() {
 fn generic_file_delivery_allows_directory_inventory_for_existing_selection() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -191,7 +187,6 @@ fn generic_file_delivery_allows_directory_inventory_for_existing_selection() {
 fn generic_file_delivery_allows_runtime_command_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -214,7 +209,6 @@ fn generic_file_delivery_allows_runtime_command_observation() {
 fn generic_file_delivery_allows_audio_synthesis_file_output() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -237,7 +231,6 @@ fn generic_file_delivery_allows_audio_synthesis_file_output() {
 fn generic_file_delivery_allows_image_generation_file_output() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -260,7 +253,6 @@ fn generic_file_delivery_allows_image_generation_file_output() {
 fn generic_file_delivery_allows_image_edit_file_output() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             delivery_required: true,
             delivery_intent: OutputDeliveryIntent::FileSingle,
             response_shape: OutputResponseShape::FileToken,
@@ -285,7 +277,6 @@ fn generic_file_delivery_allows_image_edit_file_output() {
 fn generic_path_content_allows_log_analyze_for_log_paths() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "logs".to_string(),
@@ -305,7 +296,6 @@ fn generic_path_content_allows_log_analyze_for_log_paths() {
 fn generic_path_content_allows_inline_transform_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "docs/service_notes.md".to_string(),
@@ -331,7 +321,6 @@ fn generic_path_content_allows_inline_transform_evidence() {
 fn generic_path_content_allows_health_check_field_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
             requires_content_evidence: true,
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "runtime".to_string(),
@@ -370,7 +359,6 @@ fn generic_path_content_allows_structured_field_evidence() {
     ] {
         let policy = action_policy_for_output_contract(
             Some(&IntentOutputContract {
-                semantic_kind: OutputSemanticKind::None,
                 requires_content_evidence: true,
                 locator_kind: OutputLocatorKind::Path,
                 locator_hint: "package.json".to_string(),
@@ -391,7 +379,6 @@ fn generic_path_content_allows_structured_field_evidence() {
 #[test]
 fn generic_path_content_allows_supplemental_directory_inventory() {
     let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::None,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::Path,
         locator_hint: "UI/package.json".to_string(),

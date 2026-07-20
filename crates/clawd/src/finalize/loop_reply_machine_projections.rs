@@ -76,7 +76,7 @@ pub(super) fn direct_compare_paths_required_metadata_from_observed_output(
         .executed_step_results
         .iter()
         .rev()
-        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "system_basic" | "fs_basic"))
+        .filter(|step| step.is_ok())
         .filter_map(|step| step.output.as_deref())
         .find_map(|output| {
             let output =

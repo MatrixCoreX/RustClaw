@@ -636,7 +636,7 @@ fn observed_execution_has_complete_contract_evidence(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if route.semantic_kind_is_unclassified() && !route.delivery_required {
+    if route.does_not_request_exact_command_output() && !route.delivery_required {
         return false;
     }
     if finalizer_summary

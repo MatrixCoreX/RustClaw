@@ -6,7 +6,6 @@ use super::{local_missing_evidence_verifier_gap_for_answer, route_with_mode};
 fn local_missing_evidence_gap_skips_git_and_package_status_observations() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.requires_content_evidence = false;
     let mut journal =

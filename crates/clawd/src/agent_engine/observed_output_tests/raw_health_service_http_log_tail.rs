@@ -13,7 +13,6 @@ fn direct_answer_defers_http_basic_one_sentence_summary_to_llm() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Url,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -41,7 +40,6 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Url,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -69,7 +67,6 @@ fn direct_answer_preserves_http_status_machine_value_without_domain_rendering() 
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: String::new(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -103,7 +100,6 @@ fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "telegramd".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -132,7 +128,6 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "telegramd".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -161,7 +156,6 @@ fn direct_answer_uses_generic_selector_for_service_control_machine_value() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::None,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
             locator_hint: "telegramd".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("post_state".to_string()),

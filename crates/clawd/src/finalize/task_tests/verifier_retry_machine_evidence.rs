@@ -53,7 +53,7 @@ fn answer_verifier_retry_machine_evidence_accepts_local_code_json_with_artifact_
         .push(crate::task_journal::TaskJournalStepTrace::ok(
             "step_2",
             "run_cmd",
-            r#"{"exit_code":0,"stdout":"ok"}"#,
+            r#"{"exit_code":0,"stdout":"ok","validation_result":{"status":"pass"}}"#,
         ));
 
     assert!(answer_verifier_retry_answer_has_required_machine_evidence(

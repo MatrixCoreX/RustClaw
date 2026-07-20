@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""User-text semantic selection guards for runtime semantic rewrite checks."""
+"""User-text selection guards for planner runtime boundary checks."""
 
 from __future__ import annotations
 
@@ -114,8 +114,7 @@ def scan_sqlite_route_request_text(rel_path: str, text: str) -> list[Finding]:
         block_start, block_text = block
         for offset, line in enumerate(block_text.splitlines(), start=0):
             if (
-                "OutputSemanticKind::Sqlite" not in line
-                and "sqlite_schema_version_target" not in line
+                "sqlite_schema_version_target" not in line
                 and "text_has_sqlite_schema_version_machine_token" not in line
             ):
                 continue

@@ -202,18 +202,19 @@ readiness`, `clawcli llm-trace`, `model_readiness_summary`,
 `selected_entry_status`, `model_catalog_trace.readiness`, `credential_state`,
 `ready`, capability flags, async/dry-run metadata, UI teaching trace tokens, and
 missing selected-entry behavior remain secret-free machine-field contracts.
-It also writes `semantic_boundary_contracts.txt` from
-`scripts/check_runtime_semantic_rewrite_boundary.py --self-test`,
+It also writes `planner_runtime_boundary_contracts.txt` from
+`scripts/check_planner_runtime_boundary.py --self-test`,
 `scripts/check_contract_repair_loop_observation_boundary.py --self-test`,
 `scripts/check_route_reason_marker_facade.py --self-test`, and
-`scripts/check_output_semantic_kind_write_boundary.py --self-test` plus their
-main checks. `gate_summary.env` records `semantic_boundary_contracts=1`, and
-the artifact must contain `RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`,
+`scripts/check_finalizer_architecture.py --self-test` plus their main checks.
+`gate_summary.env` records `planner_runtime_boundary_contracts=1`, and the
+artifact must contain `PLANNER_RUNTIME_BOUNDARY_CHECK findings=0`,
 `CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`,
 `ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`,
 `ROUTE_REASON_MARKER_FACADE_CHECK findings=0`,
-`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok`, and
-`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`.
+`FINALIZER_ARCHITECTURE_SELF_TEST ok`,
+`FINALIZER_ARCHITECTURE_CHECK findings=0`, `zero_domain_hits=0`, and
+`registry_dependencies=0`.
 It also writes `agent_architecture_boundary_contracts.txt` from
 `scripts/check_boundary_envelope_schema.py --self-test`,
 `scripts/check_planner_no_pre_llm_deterministic_fast_path.py --self-test`,
@@ -438,13 +439,14 @@ route/frontdoor/static `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the
 main guard success tokens, including
 `AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py` and
 `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`.
-For `semantic_boundary_contracts.txt`, the required content includes
-`RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`,
+For `planner_runtime_boundary_contracts.txt`, the required content includes
+`PLANNER_RUNTIME_BOUNDARY_CHECK findings=0`,
 `CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`,
 `ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`,
 `ROUTE_REASON_MARKER_FACADE_CHECK findings=0`,
-`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok`, and
-`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`.
+`FINALIZER_ARCHITECTURE_SELF_TEST ok`,
+`FINALIZER_ARCHITECTURE_CHECK findings=0`, `zero_domain_hits=0`, and
+`registry_dependencies=0`.
 For `agent_architecture_boundary_contracts.txt`, the required content includes
 `BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`,
 `PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`,

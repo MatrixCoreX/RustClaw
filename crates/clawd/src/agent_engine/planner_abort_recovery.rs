@@ -121,7 +121,7 @@ fn planner_contract_summary(output_contract: Option<&crate::IntentOutputContract
         "delivery_required": contract.delivery_required,
         "locator_kind": contract.locator_kind.as_str(),
         "delivery_intent": contract.delivery_intent.as_str(),
-        "result_kind": contract.semantic_kind.as_str(),
+        "structured_field_selector": contract.selection.structured_field_selector,
         "locator_hint": contract.locator_hint,
     });
     serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string())

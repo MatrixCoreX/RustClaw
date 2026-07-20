@@ -138,7 +138,7 @@ flowchart TD
     U -->|runner| X[skill-runner 子进程]
     X --> Y[具体技能二进制<br/>单行 JSON 协议]
     SS --> Z
-    S --> Z[Observation]
+    S --> Z[CapabilityResultEnvelope<br/>data + evidence + artifacts + continuation]
     V --> Z
     W --> Z
     Y --> Z
@@ -149,7 +149,7 @@ flowchart TD
     ZEV --> ZC
     ZC -->|需要修复| ZR[RepairEnvelope<br/>bounded recovery signal]
     ZR --> G
-    ZC -->|完成| ZD[Observed-output finalizer]
+    ZC -->|完成| ZD[薄 output-contract finalizer]
     ZB --> ZE[Output-contract guard]
     ZD --> ZE
     ZE --> ZF[持久化结果 + 交付]
@@ -159,7 +159,7 @@ flowchart TD
 - `Planner prompt`：是普通 `ask` 的第一次语义 LLM 调用。resume 和 async-poll executor 可以恢复已经准入的机器 checkpoint，但不能引入新的 planner 前语义决策路径。
 - `call_capability`：推荐的 planner action，把 tool/skill 选择放到 registry metadata 与 resolver policy 后面。
 - `Generated INTERFACE prompts`：来自 `crates/skills/*/INTERFACE.md`、`external_skills/*/INTERFACE.md` 和 `prompts/layers/generated/skills/*`；新增技能应改这些契约，不改 `clawd` 主流程分支。
-- `Command payload contract repair`：声明了 command payload 的任务会按需要归一到 `RawCommandOutput` 或 `CommandOutputSummary` 机器契约，包括上游提示误标成 service-status 的情况。
+- `Exact machine output`：planner 使用 `response_shape=strict` 和经过验证的 `structured_field_selector`（例如 `command_output`）提出精确输出要求；runtime 只从 `CapabilityResultEnvelope` 投影该字段。自由回答和一句话回答继续由模型合成。
 - `PlanVerifier`：执行前阻断不可用能力、缺必填字段、不安全 mutation，以及不符合输出/证据形状的计划。拒绝路径应携带稳定机器字段，不写固定用户可见回复模板。
 - `Pre-tool hooks + adapter preflight`：循环执行和有边界的恢复重试都必须经过同一套 hook、contract-argument、command-policy 与结构化错误检查，之后才允许真正执行有副作用的 adapter。
 - `Task journal event`：executor observation 会投影为稳定的 `tool_started`、`tool_step`、`tool_finished`，以及可选 `coding_checkpoint` / `coding_evidence` 事件，带 step refs、evidence refs、artifact 计数、coding 计数、checkpoint kind、验证命令计数/token、验证状态/失败类别 token、验证风险 token、时间字段和 failure attribution，供 CLI/UI 进度视图使用。
@@ -168,11 +168,11 @@ flowchart TD
 - `Skill process protocol`：runner 技能通过 stdin/stdout 交换单行 JSON；运行时需要判断时，技能应在 `extra` 返回稳定机器字段。
 - `synthesize_answer`：在循环内需要自然语言合成时调度，不是每个任务固定最后再调用一次 LLM。
 - `RepairEnvelope`：verifier、executor、permission、provider 和 checkpoint recovery 路径会把结构化 repair context 暴露给下一轮循环；用户可见 fallback prose 应来自 i18n、finalizer、UI 或模型，不应来自 runtime 模板。
-- `Observed-output finalization`：只在循环已经选择并完成对应回复或动作路径后发布有证据支撑的输出。它不是另一套语义路由器。
+- `Output-contract finalization`：只保留精确机器字段与 artifact 传输的确定性边界，其余回答发布模型基于证据的合成结果；它不选择技能，也不渲染领域专属 prose。
 
 ### 权限平面与命令策略
 
-权限平面是结构化执行边界，不是第二套语义路由器。来自 `configs/skills_registry.toml` 的 registry metadata、面向非能力输出形态的 bundled evidence policy，以及 verifier 状态会投影到 `permission_decision`，让 UI/API/finalizer 能解释发生了什么，而不需要 runtime 写死自然语言回复。普通 registry capability family 由 planner `call_capability` 和 resolver metadata 选择，不再由旧 `semantic_kind` 或兼容 contract-marker 值选择。
+权限平面是结构化执行边界，不是第二套语义路由器。来自 `configs/skills_registry.toml` 的 registry metadata、面向非能力输出形态的 bundled evidence policy，以及 verifier 状态会投影到 `permission_decision`，让 UI/API/finalizer 能解释发生了什么，而不需要 runtime 写死自然语言回复。普通 registry capability family 由 planner `call_capability` 和 resolver metadata 选择，不由历史 route marker 或兼容 hint 选择。
 
 - `risk_level`、`requires_confirmation`、`once_per_task`、`idempotent`、`dedup_scope` 优先来自 registry 与 planner capability metadata。
 - `action_effect` 从结构化 skill/action 参数和 contract metadata 派生，不从用户语言短语里判断。
@@ -874,8 +874,8 @@ flowchart TD
     AM --> AA[Agent parity gate artifact<br/>no_agent_mode_payload.txt]
     O --> ALS[Agent-loop 静态合同<br/>route authority + frontdoor boundary + legacy boundary + NL hardmatch guards]
     ALS --> ALA[Agent parity gate artifact<br/>agent_loop_static_contracts.txt]
-    O --> SBC[Semantic boundary contracts<br/>runtime rewrite + contract repair + route marker + semantic-kind write guards]
-    SBC --> SBCA[Agent parity gate artifact<br/>semantic_boundary_contracts.txt]
+    O --> SBC[Planner runtime 边界合同<br/>frontdoor + loop repair + route marker + zero-domain finalizer guards]
+    SBC --> SBCA[Agent parity gate artifact<br/>planner_runtime_boundary_contracts.txt]
     O --> ABC[架构边界合同<br/>boundary schema + normalizer + planner + resolver + finalizer + evidence facade guards]
     ABC --> ABCA[Agent parity gate artifact<br/>agent_architecture_boundary_contracts.txt]
     O --> DBI[确定性边界 inventory 合同<br/>answer verifier + observed output + decision inventory + repair inventory guards]
@@ -921,9 +921,9 @@ Agent parity gate 还会运行 `scripts/check_agent_loop_guard_final_scope.py --
 
 `agent_loop_static_contracts.txt` 还会包含 frontdoor boundary dispatch 守卫：`scripts/check_frontdoor_boundary_dispatch.py --self-test` 和主检查必须输出 `AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py` 与 `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`，确保 ask front door 只保留 schedule/resume/边界准备入口，不重新决定普通请求该直答、澄清还是执行。
 
-同一 gate 还会写入 `semantic_boundary_contracts.txt` 并记录 `semantic_boundary_contracts=1`。该 artifact 必须包含 `RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`、`CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`、`ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`、`ROUTE_REASON_MARKER_FACADE_CHECK findings=0`、`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok` 和 `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`，把 runtime semantic rewrite debt、worker contract repair mutation、临时 route-reason 解析和直接 semantic-kind 写入都纳入 release-gated 机器合同。
+同一 gate 还会写入 `planner_runtime_boundary_contracts.txt` 并记录 `planner_runtime_boundary_contracts=1`。该 artifact 必须包含 `PLANNER_RUNTIME_BOUNDARY_CHECK findings=0`、`CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`、`ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`、`ROUTE_REASON_MARKER_FACADE_CHECK findings=0`、`FINALIZER_ARCHITECTURE_SELF_TEST ok`、`FINALIZER_ARCHITECTURE_CHECK findings=0`、`zero_domain_hits=0` 和 `registry_dependencies=0`，把 planner-owned runtime、loop-only repair、机器 route marker 和 zero-domain finalizer 纳入 release gate。
 
-同一 gate 还会写入 `agent_architecture_boundary_contracts.txt` 并记录 `agent_architecture_boundary_contracts=1`。该 artifact 必须包含 `BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`、`PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`、`CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`、`FINALIZER_BOUNDARY_CHECK ok` 和 `EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0`，保证 machine-only boundary schema、planner、resolver、finalizer 和 evidence-policy facade 不会悄悄退回旧的前置语义路由或静态兼容路径；`RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0` 另行证明已删除的 intent-normalizer 与 contract-repair prompt/schema/helper 没有回归。
+同一 gate 还会写入 `agent_architecture_boundary_contracts.txt` 并记录 `agent_architecture_boundary_contracts=1`。该 artifact 必须包含 `BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`、`PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`、`CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`、`FINALIZER_BOUNDARY_CHECK ok` 和 `EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0`，保证 machine-only boundary schema、planner、resolver、finalizer 和 evidence-policy facade 不会悄悄退回旧的前置语义路由或静态兼容路径；`PLANNER_RUNTIME_BOUNDARY_CHECK findings=0` 另行证明已删除的 intent-normalizer 与 contract-repair prompt/schema/helper 没有回归。
 
 同一 gate 还会写入 `deterministic_boundary_inventory_contracts.txt` 并记录 `deterministic_boundary_inventory_contracts=1`。该 artifact 必须包含 `ANSWER_VERIFIER_BOUNDARY_CHECK ok`、`OBSERVED_OUTPUT_BOUNDARY_CHECK ok`、`DETERMINISTIC_DECISION_INVENTORY_CHECK ok`、`REPAIR_BOUNDARY_INVENTORY_CHECK ok` 和 `REPAIR_BOUNDARY_INVENTORY_COVERAGE_CHECK required=... missing=0`，保证 answer verifier、observed-output、确定性 branch inventory 和 repair inventory 不会继续膨胀成隐藏路由器、固定 prose 渲染器或未登记兼容路径。
 
@@ -961,7 +961,7 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 4. Canary：改变默认 authority 或删除旧 gate 前跑 500 条 client-like。
 5. Safe aggregate：先跑 compact 等价覆盖；只有高风险删除 gate 或发布硬化才跑完整 2100+。
 
-当前不再用固定七天等待作为普通开发删除门槛。删除兼容路径前，应使用受影响 compact live NL、release-gate 等价覆盖、loop-boundary/replay 无 unexplained mismatch，以及静态门禁。Contract repair 清理必须通过 `python3 scripts/check_contract_repair_loop_observation_boundary.py`；route/output-contract 清理应通过 `python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_output_semantic_kind_write_boundary.py`；repair 清理应通过 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
+当前不再用固定七天等待作为普通开发删除门槛。删除兼容路径前，应使用受影响 compact live NL、release-gate 等价覆盖、loop-boundary/replay 无 unexplained mismatch，以及静态门禁。Contract repair 清理必须通过 `python3 scripts/check_contract_repair_loop_observation_boundary.py`；planner/output-contract 清理应通过 `python3 scripts/check_planner_runtime_boundary.py`、`python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_finalizer_architecture.py`；repair 清理应通过 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
 
 面向长尾闭环链路的常用入口：
 

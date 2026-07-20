@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{
     agent_engine::LoopState, executor::StepExecutionStatus, AgentAction, AskReply,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
 };
 use serde_json::json;
 
@@ -1143,7 +1143,6 @@ fn answer_verifier_retry_summary_skips_file_delivery_candidate_disambiguation() 
     let mut route = route_result(OutputResponseShape::FileToken);
     route.delivery_required = true;
     route.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.semantic_kind = OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step(
         "step_1",
@@ -1348,7 +1347,6 @@ fn raw_observation_output_format_gap_does_not_suppress_structural_retry() {
     let mut route = route_result(OutputResponseShape::Free);
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
-    route.semantic_kind = OutputSemanticKind::None;
     route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step(
@@ -1415,7 +1413,7 @@ fn terminal_model_answer_does_not_suppress_non_format_evidence_gap() {
 }
 
 #[test]
-fn terminal_model_answer_replaces_raw_observation_before_verifier() {
+fn terminal_model_answer_replaces_direct_observation_before_verifier() {
     let raw_readme = "# RustClaw\n\nRustClaw is a local Rust agent runtime centered on `clawd`.";
     let answer = "RustClaw 是以 `clawd` 为核心的本地 Rust 智能体运行时。它整合多渠道聊天、任务执行、工具和技能路由等能力。它面向通过聊天应用或浏览器完成日常使用和管理。";
     let mut route = route_result(OutputResponseShape::Strict);
@@ -1493,9 +1491,9 @@ fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observe
 }
 
 #[test]
-fn terminal_model_answer_does_not_replace_requested_raw_command_fields_with_stdout() {
+fn terminal_model_answer_does_not_replace_requested_exact_observation_fields_with_stdout() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::Path;
     route.selection.structured_field_selector =
         Some("command,created_path,stdout,status".to_string());
@@ -1583,7 +1581,7 @@ fn terminal_model_answer_does_not_replace_single_machine_projection_with_observe
 #[test]
 fn permission_denied_content_access_suppresses_missing_evidence_retry() {
     let mut route = route_result(OutputResponseShape::Strict);
-    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "/etc/shadow".to_string();

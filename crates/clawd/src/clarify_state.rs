@@ -21,7 +21,6 @@ pub(crate) struct ClarifyState {
     pub(crate) candidate_targets: Vec<String>,
     pub(crate) delivery_required: bool,
     pub(crate) output_shape: Option<String>,
-    pub(crate) semantic_kind: Option<String>,
     pub(crate) source_request: String,
     pub(crate) source_task_id: String,
     pub(crate) updated_at_ts: u64,
@@ -146,7 +145,6 @@ fn derive_clarify_state_for_ask_outcome(
     let candidate_targets =
         derive_clarify_candidate_targets(fuzzy_locator_suggestions, prior_session_snapshot);
     let now_ts = crate::now_ts_u64();
-    let semantic_kind = clarify_state_semantic_kind(route_result);
     let missing_slot = clarify_state_missing_slot(route_result);
     Some(ClarifyState {
         missing_slot,
@@ -162,7 +160,6 @@ fn derive_clarify_state_for_ask_outcome(
             crate::OutputResponseShape::Free
         ))
         .then(|| route_result.response_shape.as_str().to_string()),
-        semantic_kind,
         source_request: clarify_state_source_request(prompt, route_result),
         source_task_id: task_id.to_string(),
         updated_at_ts: now_ts,
@@ -246,13 +243,6 @@ pub(crate) fn normalize_structured_field_selector_token(raw: &str) -> Option<Str
                 || matches!(ch, '_' | '-' | '$' | '@' | '.' | '/' | '*' | '[' | ']')
         })
         .then(|| selector.to_string())
-}
-
-fn clarify_state_semantic_kind(route_result: &crate::IntentOutputContract) -> Option<String> {
-    if !matches!(route_result.semantic_kind, crate::OutputSemanticKind::None) {
-        return Some(route_result.semantic_kind.as_str().to_string());
-    }
-    None
 }
 
 fn derive_clarify_candidate_targets(

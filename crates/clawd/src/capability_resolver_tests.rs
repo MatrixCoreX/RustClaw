@@ -67,7 +67,6 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::High,
-            output_semantic_kind: None,
         },
         ResolverCandidate {
             skill: "fs_basic".to_string(),
@@ -76,7 +75,6 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::Low,
-            output_semantic_kind: None,
         },
     ];
     candidates.sort_by_key(resolver_candidate_rank);
@@ -84,27 +82,23 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
 }
 
 #[test]
-fn schedule_preview_resolves_without_domain_output_semantic_kind() {
+fn schedule_preview_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
-    let (_, record) = resolve_capability_action_with_record_for_state(
+    let (_, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "schedule.preview",
         json!({"text": "language-neutral schedule input"}),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
 }
 
 #[test]
-fn package_detection_resolves_without_domain_output_semantic_kind() {
+fn package_detection_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
-    let (action, record) = resolve_capability_action_with_record_for_state(
+    let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "package.detect_manager",
         json!({}),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected package manager tool action");
     };
@@ -113,15 +107,13 @@ fn package_detection_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
-fn config_key_listing_resolves_without_domain_output_semantic_kind() {
+fn config_key_listing_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
-    let (action, record) = resolve_capability_action_with_record_for_state(
+    let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "config.list_keys",
         json!({"path": "configs/config.toml"}),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected config tool action");
     };
@@ -133,9 +125,9 @@ fn config_key_listing_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
-fn config_read_resolves_without_domain_output_semantic_kind() {
+fn config_read_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
-    let (action, record) = resolve_capability_action_with_record_for_state(
+    let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "config.read_field",
         json!({
@@ -143,8 +135,6 @@ fn config_read_resolves_without_domain_output_semantic_kind() {
             "field_path": "llm.selected_vendor",
         }),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected config tool action");
     };
@@ -162,13 +152,11 @@ fn config_read_resolves_without_domain_output_semantic_kind() {
 #[test]
 fn config_risk_resolves_without_domain_output_contract() {
     let state = state_with_workspace_registry();
-    let (action, record) = resolve_capability_action_with_record_for_state(
+    let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "config.risk",
         json!({"path": "configs/config.toml"}),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected config risk tool action");
     };
@@ -186,7 +174,7 @@ fn config_risk_resolves_without_domain_output_contract() {
 #[test]
 fn config_mutation_resolves_without_domain_output_contract() {
     let state = state_with_workspace_registry();
-    let (action, record) = resolve_capability_action_with_record_for_state(
+    let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "config.apply_change",
         json!({
@@ -195,8 +183,6 @@ fn config_mutation_resolves_without_domain_output_contract() {
             "value": true,
         }),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected config mutation tool action");
     };
@@ -214,13 +200,11 @@ fn config_mutation_resolves_without_domain_output_contract() {
 #[test]
 fn config_validation_resolves_without_domain_output_contract() {
     let state = state_with_workspace_registry();
-    let (action, record) = resolve_capability_action_with_record_for_state(
+    let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "config.validate",
         json!({"path": "configs/config.toml"}),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected config validation tool action");
     };
@@ -235,7 +219,7 @@ fn config_validation_resolves_without_domain_output_contract() {
 #[test]
 fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() {
     let state = state_with_workspace_registry();
-    let (action, record) = resolve_capability_action_with_record_for_state(
+    let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "filesystem.grep_text",
         json!({
@@ -244,8 +228,6 @@ fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() 
             "max_results": 8,
         }),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected filesystem tool action");
     };
@@ -262,7 +244,7 @@ fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() 
 #[test]
 fn filesystem_read_resolver_preserves_planner_range_without_semantic_contract() {
     let state = state_with_workspace_registry();
-    let (action, record) = resolve_capability_action_with_record_for_state(
+    let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
         "filesystem.read_text_range",
         json!({
@@ -271,8 +253,6 @@ fn filesystem_read_resolver_preserves_planner_range_without_semantic_contract() 
             "n": 20,
         }),
     );
-
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected filesystem tool action");
     };
@@ -290,7 +270,7 @@ fn filesystem_read_resolver_preserves_planner_range_without_semantic_contract() 
 }
 
 #[test]
-fn docker_capabilities_resolve_without_domain_output_semantic_kinds() {
+fn docker_capabilities_resolve_through_registry_contracts() {
     let state = state_with_workspace_registry();
     for (capability, expected_action, args) in [
         ("docker.list_containers", "ps", json!({})),
@@ -306,10 +286,8 @@ fn docker_capabilities_resolve_without_domain_output_semantic_kinds() {
             json!({"container": "rustclaw-test"}),
         ),
     ] {
-        let (action, record) =
+        let (action, _record) =
             resolve_capability_action_with_record_for_state(&state, capability, args);
-
-        assert_eq!(record.output_semantic_kind, None, "{capability}");
         let Some(AgentAction::CallTool { tool, args }) = action else {
             panic!("expected docker tool action for {capability}");
         };
@@ -323,7 +301,7 @@ fn docker_capabilities_resolve_without_domain_output_semantic_kinds() {
 }
 
 #[test]
-fn database_capabilities_resolve_without_domain_output_semantic_kinds() {
+fn database_capabilities_resolve_through_registry_contracts() {
     let state = state_with_workspace_registry();
     for (capability, expected_action, args) in [
         (
@@ -347,10 +325,8 @@ fn database_capabilities_resolve_without_domain_output_semantic_kinds() {
             json!({"db_path": "data/app.db"}),
         ),
     ] {
-        let (action, record) =
+        let (action, _record) =
             resolve_capability_action_with_record_for_state(&state, capability, args);
-
-        assert_eq!(record.output_semantic_kind, None, "{capability}");
         let Some(AgentAction::CallTool { tool, args }) = action else {
             panic!("expected database tool action for {capability}");
         };
@@ -364,7 +340,7 @@ fn database_capabilities_resolve_without_domain_output_semantic_kinds() {
 }
 
 #[test]
-fn archive_capabilities_resolve_without_domain_output_semantic_kinds() {
+fn archive_capabilities_resolve_through_registry_contracts() {
     let state = state_with_workspace_registry();
     for (capability, expected_action, args) in [
         ("archive.list", "list", json!({"archive": "tmp/bundle.zip"})),
@@ -384,10 +360,8 @@ fn archive_capabilities_resolve_without_domain_output_semantic_kinds() {
             json!({"archive": "tmp/bundle.zip", "dest": "tmp/unpacked"}),
         ),
     ] {
-        let (action, record) =
+        let (action, _record) =
             resolve_capability_action_with_record_for_state(&state, capability, args);
-
-        assert_eq!(record.output_semantic_kind, None, "{capability}");
         let Some(AgentAction::CallTool { tool, args }) = action else {
             panic!("expected archive tool action for {capability}");
         };
@@ -401,17 +375,15 @@ fn archive_capabilities_resolve_without_domain_output_semantic_kinds() {
 }
 
 #[test]
-fn git_capabilities_resolve_without_domain_output_semantic_kinds() {
+fn git_capabilities_resolve_through_registry_contracts() {
     let state = state_with_workspace_registry();
     for (capability, expected_action, args) in [
         ("git.status", "status", json!({})),
         ("git.current_branch", "current_branch", json!({})),
         ("git.log", "log", json!({"limit": 3})),
     ] {
-        let (action, record) =
+        let (action, _record) =
             resolve_capability_action_with_record_for_state(&state, capability, args);
-
-        assert_eq!(record.output_semantic_kind, None, "{capability}");
         let Some(AgentAction::CallTool { tool, args }) = action else {
             panic!("expected git tool action for {capability}");
         };
@@ -425,7 +397,7 @@ fn git_capabilities_resolve_without_domain_output_semantic_kinds() {
 }
 
 #[test]
-fn weather_capability_resolves_without_domain_output_semantic_kind() {
+fn weather_capability_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -437,7 +409,6 @@ fn weather_capability_resolves_without_domain_output_semantic_kind() {
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"
     );
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallSkill { skill, args }) = action else {
         panic!("expected weather skill action, got {action:?}");
     };
@@ -450,7 +421,7 @@ fn weather_capability_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
-fn rss_capability_resolves_without_domain_output_semantic_kind() {
+fn rss_capability_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -462,7 +433,6 @@ fn rss_capability_resolves_without_domain_output_semantic_kind() {
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"
     );
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallSkill { skill, args }) = action else {
         panic!("expected rss_fetch skill action, got {action:?}");
     };
@@ -472,7 +442,7 @@ fn rss_capability_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
-fn media_photo_and_publish_preview_resolve_without_domain_output_semantic_kinds() {
+fn media_photo_and_publish_preview_resolve_through_registry_contracts() {
     let state = state_with_workspace_registry();
     let cases = [
         (
@@ -502,7 +472,6 @@ fn media_photo_and_publish_preview_resolve_without_domain_output_semantic_kinds(
             record.reason_code,
             "capability_resolver_registry_mapping_resolved"
         );
-        assert_eq!(record.output_semantic_kind, None);
         let Some(AgentAction::CallSkill { skill, args }) = action else {
             panic!("expected skill action for {capability}, got {action:?}");
         };
@@ -515,7 +484,7 @@ fn media_photo_and_publish_preview_resolve_without_domain_output_semantic_kinds(
 }
 
 #[test]
-fn web_search_capability_resolves_without_domain_output_semantic_kind() {
+fn web_search_capability_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -527,7 +496,6 @@ fn web_search_capability_resolves_without_domain_output_semantic_kind() {
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"
     );
-    assert_eq!(record.output_semantic_kind, None);
     let Some(AgentAction::CallTool { tool: skill, args }) = action else {
         panic!("expected web_search_extract action, got {action:?}");
     };
@@ -543,8 +511,7 @@ fn web_search_capability_resolves_without_domain_output_semantic_kind() {
 }
 
 #[test]
-fn missing_semantic_metadata_preserves_existing_planner_output_contract() {
-    let state = state_with_workspace_registry();
+fn planner_output_contract_is_preserved_without_registry_rewrite() {
     let mut output_contract = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
         ..Default::default()
@@ -572,7 +539,8 @@ fn missing_semantic_metadata_preserves_existing_planner_output_contract() {
         raw_plan_text: "{}".to_string(),
     };
 
-    let preserved = bind_unclassified_output_contract_from_capabilities(&state, &plan_result)
+    let preserved = plan_result
+        .output_contract
         .expect("existing planner contract must remain available");
     assert_eq!(preserved.response_shape, crate::OutputResponseShape::Strict);
     assert_eq!(

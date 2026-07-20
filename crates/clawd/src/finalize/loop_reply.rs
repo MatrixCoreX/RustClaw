@@ -29,7 +29,7 @@ mod final_answer_renderers;
 use final_answer_renderers::{
     replace_delivery_with_matrix_observed_shape_answer,
     replace_delivery_with_requested_machine_kv_summary,
-    replace_final_delivery_with_raw_command_machine_field_projection,
+    replace_final_delivery_with_exact_observation_machine_field_projection,
 };
 
 #[path = "loop_reply_scalar_answer.rs"]
@@ -88,10 +88,10 @@ use execution_status::{
 mod execution_summary;
 use execution_summary::{
     attach_execution_summary_to_delivery, delivery_matches_latest_publishable_synthesis,
-    delivery_messages_include_delivery_token, execution_summary_arg_is_sensitive,
-    latest_publishable_synthesis_matches_written_file_path,
+    delivery_messages_include_delivery_token, exact_observation_arg_from_plan_step,
+    execution_summary_arg_is_sensitive, latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, output_text_from_execution_result,
-    plan_step_for_execution, raw_command_arg_from_plan_step, truncate_with_ellipsis,
+    plan_step_for_execution, truncate_with_ellipsis,
 };
 #[cfg(test)]
 use execution_summary::{
@@ -99,18 +99,16 @@ use execution_summary::{
     delivery_contract_suppresses_execution_summary,
 };
 
-#[path = "loop_reply_raw_command.rs"]
-mod raw_command;
-#[cfg(test)]
-use raw_command::shell_stdout_redirect_target_path;
-use raw_command::{
-    direct_raw_command_output_projection, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, output_contract_requests_exact_delivery,
-    raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
+#[path = "loop_reply_exact_observation.rs"]
+mod exact_observation;
+use exact_observation::{
+    direct_exact_observation_output_projection,
+    exact_observation_output_needs_structural_projection, looks_like_structured_machine_output,
+    output_contract_requests_exact_delivery,
 };
-pub(crate) use raw_command::{
-    raw_command_machine_field_delivery_satisfies_request,
-    raw_command_machine_field_projection_from_journal,
+pub(crate) use exact_observation::{
+    exact_observation_machine_field_delivery_satisfies_request,
+    exact_observation_machine_field_projection_from_journal,
 };
 
 #[path = "loop_reply_file_delivery.rs"]
@@ -151,7 +149,7 @@ use tail_read::{
     current_user_visible_delivery_text, latest_bounded_read_range_answer_from_loop,
     latest_plan_requested_synthesis, latest_tail_read_range_answer_from_loop,
     latest_tail_read_range_observed_answer, replace_delivery_with_latest_tail_read_range_answer,
-    route_allows_latest_tail_read_range_delivery, route_requires_raw_tail_read_passthrough,
+    route_allows_latest_tail_read_range_delivery, route_requires_exact_tail_read_delivery,
     tail_read_directory_inventory_projection_available,
 };
 
@@ -202,15 +200,16 @@ mod control_envelope;
 mod delivery_backfill;
 use delivery_backfill::{
     backfill_delivery_from_last_outputs, current_delivery_is_latest_publishable_synthesis,
-    delivery_is_raw_read_observation, last_respond_matches_single_line_observation,
-    publishable_summary_has_multi_source_observation, replace_placeholder_delivery_with_synthesis,
-    replace_raw_observation_delivery_with_synthesis, replace_raw_read_delivery_with_synthesis,
-    step_output_is_read_range, strict_raw_command_output_exact_observation_answer,
+    delivery_is_direct_read_observation, last_respond_matches_single_line_observation,
+    publishable_summary_has_multi_source_observation,
+    replace_direct_observation_delivery_with_synthesis,
+    replace_direct_read_observation_with_synthesis, replace_placeholder_delivery_with_synthesis,
+    step_output_is_read_range, strict_exact_observation_output_exact_observation_answer,
     valid_publishable_synthesis_output,
 };
 pub(crate) use delivery_backfill::{
     latest_contractual_synthesis_output, latest_publishable_respond_step_output,
-    route_expects_synthesis_over_raw_observation,
+    route_expects_synthesis_over_direct_observation,
 };
 
 #[path = "loop_reply_contract_enforce.rs"]
@@ -222,7 +221,7 @@ use contract_enforce::{
 };
 use contract_enforce::{
     discard_meta_respond_placeholder_for_content_evidence,
-    discard_raw_passthrough_delivery_when_structured_answer_available,
+    discard_observed_passthrough_delivery_when_structured_answer_available,
     enforce_delivery_output_contract,
 };
 
@@ -232,7 +231,7 @@ use observed_contract::{
     direct_non_builtin_skill_raw_answer, direct_publishable_observed_answer,
     direct_scalar_observed_answer, direct_structured_observed_answer,
     direct_structured_observed_answer_allowing_implicit_metadata_path_facts,
-    latest_successful_observation_body, latest_successful_raw_observation_body,
+    latest_successful_observation_body, latest_successful_step_output,
     replace_delivery_with_direct_scalar_observed_answer,
     replace_delivery_with_direct_structured_observed_answer,
     replace_delivery_with_loop_contract_observed_answer,
@@ -255,8 +254,7 @@ use language_closeout::{
     auto_requested_success_marker, ensure_requested_success_marker_visible,
     execution_recipe_budget_exhausted_message, execution_recipe_missing_success_marker_message,
     final_reply_language_hint, missing_requested_success_marker,
-    prefer_english_for_agent_contextual_user_text, route_allows_model_language_final_answer,
-    route_resolved_intent,
+    route_allows_model_language_final_answer, route_resolved_intent,
 };
 
 #[path = "loop_reply_local_code_projection.rs"]
@@ -306,7 +304,7 @@ use synthesis_preference::structured_compound_synthesis_can_replace_current_deli
 use synthesis_preference::{
     prefer_content_evidence_synthesis_for_final_delivery,
     prefer_latest_synthesis_for_compound_observation_delivery,
-    replace_raw_passthrough_delivery_with_publishable_synthesis,
+    replace_observed_passthrough_delivery_with_publishable_synthesis,
 };
 
 // Stage 3.1：build_loop_journal 已搬移到 `crate::finalize::build_from_loop_state`，
@@ -457,7 +455,7 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
     )
     .await;
-    discard_raw_passthrough_delivery_when_structured_answer_available(
+    discard_observed_passthrough_delivery_when_structured_answer_available(
         task,
         &mut loop_state,
         agent_run_context,
@@ -568,14 +566,14 @@ pub(crate) async fn finalize_loop_reply(
     if loop_state.delivery_messages.is_empty() {
         if let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
             if let Some((answer, summary)) =
-                direct_raw_command_output_projection(state, route, &loop_state)
+                direct_exact_observation_output_projection(state, route, &loop_state)
             {
                 finalizer_summary = Some(summary);
                 loop_state.last_user_visible_respond = Some(answer.clone());
                 append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
                 log_deterministic_delivery_record(
                     &task.task_id,
-                    "fallback_from_raw_command_projection",
+                    "fallback_from_exact_observation_projection",
                     "attached",
                     agent_run_context,
                     loop_state.executed_step_results.len(),
@@ -889,8 +887,8 @@ pub(crate) async fn finalize_loop_reply(
     enforce_delivery_output_contract(state, task, user_text, &mut loop_state, agent_run_context)
         .await;
     replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
-    replace_raw_read_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
-    replace_raw_observation_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
+    replace_direct_read_observation_with_synthesis(task, &mut loop_state, agent_run_context);
+    replace_direct_observation_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
     let replaced_deterministic_fallback = run_deterministic_fallback_renderer_registry(
         state,
         task,
@@ -998,7 +996,7 @@ pub(crate) async fn finalize_loop_reply(
         );
     }
     if !replaced_grounded_answer
-        || route_requires_raw_tail_read_passthrough(
+        || route_requires_exact_tail_read_delivery(
             agent_run_context.and_then(|ctx| ctx.output_contract()),
         )
         || tail_read_directory_inventory_projection_available(&loop_state, agent_run_context)
@@ -1193,7 +1191,7 @@ pub(crate) async fn finalize_loop_reply(
             .with_task_journal(journal));
     }
 
-    replace_raw_passthrough_delivery_with_publishable_synthesis(
+    replace_observed_passthrough_delivery_with_publishable_synthesis(
         task,
         &mut loop_state,
         agent_run_context,
@@ -1365,7 +1363,7 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
-    replace_final_delivery_with_raw_command_machine_field_projection(
+    replace_final_delivery_with_exact_observation_machine_field_projection(
         state,
         task,
         &mut loop_state,

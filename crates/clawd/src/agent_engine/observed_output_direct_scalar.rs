@@ -314,21 +314,7 @@ pub(super) fn selected_capability_result_exact_candidate(
     let [field] = fields.as_slice() else {
         return None;
     };
-    results.iter().rev().find_map(|result| {
-        if result.status != claw_core::capability_result::CapabilityResultStatus::Ok {
-            return None;
-        }
-        selected_result_data_value(&result.data, field).and_then(exact_result_value_text)
-    })
-}
-
-fn exact_result_value_text(value: &serde_json::Value) -> Option<String> {
-    value_scalar_text(value).or_else(|| match value {
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            serde_json::to_string(value).ok()
-        }
-        _ => None,
-    })
+    crate::capability_result::selected_exact_machine_result(results, field)
 }
 
 fn selected_result_data_value<'a>(

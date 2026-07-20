@@ -213,11 +213,7 @@ pub(super) async fn prepare_round_actions(
         crate::truncate_for_log(&plan_result.planner_notes),
         crate::truncate_for_log(&plan_result.raw_plan_text)
     );
-    let effective_output_contract =
-        crate::capability_resolver::bind_unclassified_output_contract_from_capabilities(
-            state,
-            &plan_result,
-        );
+    let effective_output_contract = plan_result.output_contract.clone();
     let verify_mode = production_verify_mode();
     let verify_result = crate::verifier::verify_plan(
         state,

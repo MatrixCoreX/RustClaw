@@ -23,7 +23,6 @@ fn checkpoint_action_round_trips_exact_private_args_and_contract() {
     });
     let contract = serde_json::json!({
         "response_shape": "strict",
-        "semantic_kind": "raw_command_output",
         "selection": {
             "structured_field_selector": "command,created_path,status"
         }

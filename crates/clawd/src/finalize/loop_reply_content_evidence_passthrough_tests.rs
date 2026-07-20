@@ -18,7 +18,6 @@ fn content_evidence_contractual_terminal_answer_is_kept_before_meta_classifier()
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "release_checklist.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -43,7 +42,7 @@ fn content_evidence_contractual_terminal_answer_is_kept_before_meta_classifier()
 }
 
 #[test]
-fn content_evidence_one_sentence_terminal_answer_is_kept_without_semantic_kind() {
+fn content_evidence_one_sentence_terminal_answer_is_kept_without_domain_routing() {
     let answer = "最先该做的是**验证配置能正确加载**。";
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
@@ -60,7 +59,6 @@ fn content_evidence_one_sentence_terminal_answer_is_kept_without_semantic_kind()
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -106,7 +104,7 @@ fn content_evidence_keeps_strict_json_projection_before_meta_classifier() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.configure_exact_command_output();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -146,7 +144,6 @@ fn content_evidence_scalar_heading_terminal_answer_is_kept_before_meta_classifie
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "service_notes.md".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -181,7 +178,6 @@ fn content_evidence_contractual_terminal_answer_requires_observation() {
     let mut route = free_route_result();
     route.response_shape = crate::OutputResponseShape::OneSentence;
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -217,7 +213,6 @@ fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "docs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
@@ -261,7 +256,6 @@ fn single_listing_entry_passthrough_is_dropped_for_content_evidence() {
         delivery_required: false,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
         locator_hint: "docs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
