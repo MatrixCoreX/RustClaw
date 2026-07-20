@@ -48,7 +48,7 @@ pub(crate) struct LlmProviderRouteEvaluation {
     pub(crate) required_context_window_tokens: usize,
     pub(crate) context_window_tokens: Option<usize>,
     pub(crate) input_modalities: Vec<String>,
-    pub(crate) supports_tools: bool,
+    pub(crate) native_tools: bool,
     pub(crate) latency_sample_count: u64,
     pub(crate) routing_latency_ms: u64,
     pub(crate) price_score_microusd_per_million: Option<u64>,
@@ -85,8 +85,9 @@ pub(crate) fn route_providers(
             {
                 exclusion_codes.push("required_input_modality_unsupported".to_string());
             }
-            if hints.requires_tool_support && !provider.config.supports_tools {
-                exclusion_codes.push("tool_support_required".to_string());
+            let model_capabilities = provider.model_capabilities();
+            if hints.requires_native_tools && !model_capabilities.native_tools {
+                exclusion_codes.push("native_tools_required".to_string());
             }
             if provider
                 .config
@@ -106,7 +107,7 @@ pub(crate) fn route_providers(
                 required_context_window_tokens,
                 context_window_tokens: provider.config.context_window_tokens,
                 input_modalities,
-                supports_tools: provider.config.supports_tools,
+                native_tools: model_capabilities.native_tools,
                 latency_sample_count,
                 routing_latency_ms,
                 price_score_microusd_per_million: price_score,

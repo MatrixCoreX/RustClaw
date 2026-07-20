@@ -1050,7 +1050,7 @@ fn default_llm_input_modalities() -> Vec<String> {
 }
 
 fn default_llm_supports_tools() -> bool {
-    true
+    false
 }
 
 #[derive(Debug, Clone, Deserialize)]

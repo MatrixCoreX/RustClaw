@@ -6,6 +6,7 @@ pub mod channel_i18n;
 pub mod config;
 pub mod hard_rules;
 pub mod model_catalog;
+pub mod model_turn;
 pub mod prompt_layers;
 pub mod provider_failure_policy;
 pub mod secrets;

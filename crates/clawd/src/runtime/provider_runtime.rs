@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use claw_core::config::AgentConfig;
+use claw_core::model_turn::ProviderModelCapabilities;
 use reqwest::Client;
 use tokio::sync::Semaphore;
 
@@ -19,6 +20,25 @@ pub(crate) struct LlmProviderRuntime {
 }
 
 impl LlmProviderRuntime {
+    pub(crate) fn model_capabilities(&self) -> ProviderModelCapabilities {
+        let protocol = self.config.provider_type.trim();
+        let openai_compatible = protocol == "openai_compat";
+        let native_tools = self.config.supports_tools && openai_compatible;
+        ProviderModelCapabilities {
+            native_tools,
+            parallel_tools: native_tools,
+            structured_output: false,
+            streaming: openai_compatible,
+            reasoning: false,
+            vision: self
+                .config
+                .input_modalities
+                .iter()
+                .any(|modality| modality.eq_ignore_ascii_case("image")),
+            prompt_cache: false,
+        }
+    }
+
     /// §P4.4 E3.a：根据 vendor 从 `provider.config.name` 推断 secret name 形式。
     ///
     /// 命名约定来自 [`crate::llm_gateway::synthesize_llm_providers`]：所有

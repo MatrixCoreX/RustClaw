@@ -190,3 +190,23 @@ fn vendor_name_strip_returns_none_for_non_vendor_prefix() {
         );
     }
 }
+
+#[test]
+fn model_capabilities_require_adapter_and_configuration_support() {
+    let mut provider = make_provider("vendor-minimax", "k");
+    let capabilities = provider.model_capabilities();
+    assert!(capabilities.native_tools);
+    assert!(capabilities.parallel_tools);
+    assert!(capabilities.streaming);
+    assert!(!capabilities.structured_output);
+
+    provider.config.provider_type = "anthropic_claude".to_string();
+    let capabilities = provider.model_capabilities();
+    assert!(!capabilities.native_tools);
+    assert!(!capabilities.parallel_tools);
+    assert!(!capabilities.streaming);
+
+    provider.config.provider_type = "openai_compat".to_string();
+    provider.config.supports_tools = false;
+    assert!(!provider.model_capabilities().native_tools);
+}

@@ -94,7 +94,7 @@ fn routing_filters_incompatible_modality_context_and_tool_contracts() {
     let hints = ChatRequestHints {
         required_input_modalities: vec!["image".to_string()],
         minimum_context_window_tokens: Some(10_000),
-        requires_tool_support: true,
+        requires_native_tools: true,
         ..Default::default()
     };
 
@@ -125,7 +125,7 @@ fn routing_filters_incompatible_modality_context_and_tool_contracts() {
             && evaluation
                 .exclusion_codes
                 .iter()
-                .any(|code| code == "tool_support_required")
+                .any(|code| code == "native_tools_required")
     }));
 }
 

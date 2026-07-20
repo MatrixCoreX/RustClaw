@@ -316,7 +316,7 @@ pub(crate) struct ChatRequestHints {
     pub(crate) max_tokens: Option<u64>,
     pub(crate) required_input_modalities: Vec<String>,
     pub(crate) minimum_context_window_tokens: Option<usize>,
-    pub(crate) requires_tool_support: bool,
+    pub(crate) requires_native_tools: bool,
     pub(crate) routing_preference: LlmRoutingPreference,
 }
 
@@ -327,7 +327,7 @@ impl Default for ChatRequestHints {
             max_tokens: None,
             required_input_modalities: vec!["text".to_string()],
             minimum_context_window_tokens: None,
-            requires_tool_support: false,
+            requires_native_tools: false,
             routing_preference: LlmRoutingPreference::Balanced,
         }
     }
