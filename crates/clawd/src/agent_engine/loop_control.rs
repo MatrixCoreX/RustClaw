@@ -1207,9 +1207,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
         suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, route_result);
         suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, route_result);
-        if try_recover_document_heading_answer_verifier_gap(route_result, &mut reply) {
-            return Ok(reply);
-        }
         if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
             if answer_verifier_output_format_machine_payload_gap(&verifier, &reply.text) {
                 if let (Some(route), Some(journal_snapshot)) =
@@ -1391,9 +1388,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 user_text,
                 &mut reply,
             ) {
-                return Ok(reply);
-            }
-            if try_recover_document_heading_answer_verifier_gap(route_result, &mut reply) {
                 return Ok(reply);
             }
             if try_recover_structured_scalar_output_format_answer_verifier_gap(

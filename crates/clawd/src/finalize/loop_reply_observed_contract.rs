@@ -5,12 +5,12 @@ use super::{
     current_delivery_is_latest_publishable_synthesis, current_user_visible_delivery_text,
     delivery_is_raw_read_observation, delivery_is_single_line_text,
     delivery_message_is_json_container, deterministic_missing_observed_target_answer,
-    deterministic_scalar_markdown_heading_answer_from_loop, direct_raw_command_output_projection,
-    evidence_policy_candidate_satisfies_final_shape, latest_contractual_synthesis_output,
-    latest_path_batch_facts_has_implicit_metadata_fields, latest_plan_requested_synthesis,
-    latest_publishable_respond_step_output, latest_publishable_synthesis_step_matches,
-    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, planned_delivery_is_publishable_model_language_answer,
+    direct_raw_command_output_projection, evidence_policy_candidate_satisfies_final_shape,
+    latest_contractual_synthesis_output, latest_path_batch_facts_has_implicit_metadata_fields,
+    latest_plan_requested_synthesis, latest_publishable_respond_step_output,
+    latest_publishable_synthesis_step_matches, log_deterministic_delivery_record,
+    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
+    planned_delivery_is_publishable_model_language_answer,
     publishable_summary_has_multi_source_observation,
     raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
     route_prefers_observed_answer, route_requires_evidence_policy_deterministic_final_answer,
@@ -55,26 +55,6 @@ pub(super) fn direct_scalar_observed_answer(
     {
         return Some((answer, summary));
     }
-    if route_requests_title_scalar_selector(route) {
-        if let Some(answer) =
-            deterministic_scalar_markdown_heading_answer_from_loop(loop_state, agent_run_context)
-        {
-            return Some((
-                answer,
-                crate::task_journal::TaskJournalFinalizerSummary {
-                    stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                    disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                    contract_ok: true,
-                    completion_ok: Some(true),
-                    grounded_ok: Some(true),
-                    format_ok: Some(true),
-                    needs_clarify: Some(false),
-                    used_evidence_ids_count: 1,
-                    ..Default::default()
-                },
-            ));
-        }
-    }
     if let Some((answer, summary)) =
         latest_terminal_scalar_respond_answer_from_loop_contract(route, loop_state)
     {
@@ -89,24 +69,6 @@ pub(super) fn direct_scalar_observed_answer(
             agent_run_context,
         )
     }) {
-        return Some((
-            answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: 1,
-                ..Default::default()
-            },
-        ));
-    }
-    if let Some(answer) =
-        deterministic_scalar_markdown_heading_answer_from_loop(loop_state, agent_run_context)
-    {
         return Some((
             answer,
             crate::task_journal::TaskJournalFinalizerSummary {
@@ -188,15 +150,6 @@ pub(super) fn direct_scalar_observed_answer(
             ..Default::default()
         },
     ))
-}
-
-fn route_requests_title_scalar_selector(route: &crate::IntentOutputContract) -> bool {
-    route.response_shape == crate::OutputResponseShape::Scalar
-        && route
-            .selection
-            .structured_field_selector
-            .as_deref()
-            .is_some_and(|selector| selector == "title")
 }
 
 fn scalar_projection_should_defer_to_publishable_evidence_summary(

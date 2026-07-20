@@ -95,7 +95,6 @@ pub(crate) fn operation_for_output_contract(
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ContentPresenceCheck
-        | OutputSemanticKind::DocumentHeading
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::FileBasename
         | OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
@@ -243,7 +242,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary
-        | OutputSemanticKind::DocumentHeading
         | OutputSemanticKind::ExcerptKindJudgment => {
             fields.insert("content_excerpt");
         }
@@ -310,9 +308,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
     }
     if output_contract.semantic_kind_is(OutputSemanticKind::ExistenceWithPathSummary) {
         fields.insert("content_excerpt");
-    }
-    if output_contract.semantic_kind_is(OutputSemanticKind::DocumentHeading) {
-        fields.insert("path");
     }
     fields.into_iter().map(str::to_string).collect()
 }

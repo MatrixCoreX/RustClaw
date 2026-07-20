@@ -80,31 +80,4 @@ impl TaskJournalRolloutAttribution {
             ..Self::default()
         }
     }
-
-    pub(crate) fn document_heading_answer_verifier_recovery(
-        summary: Option<&TaskJournalAnswerVerifierSummary>,
-    ) -> Self {
-        Self {
-            switch_name: "deterministic_answer_recovery".to_string(),
-            event: "document_heading_answer_verifier_recovery".to_string(),
-            outcome: "recovered".to_string(),
-            reason_code: Some(
-                "document_heading_recovered_from_observed_markdown_heading".to_string(),
-            ),
-            owner_layer: Some("answer_verifier_recovery".to_string()),
-            decision: Some("recovered".to_string()),
-            missing_evidence_fields: summary
-                .map(|summary| summary.missing_evidence_fields.clone())
-                .unwrap_or_default(),
-            confidence: summary.map(|summary| summary.confidence),
-            final_outcome: Some("success".to_string()),
-            boundary_context: Some(Self::deterministic_boundary_context(
-                "recovery_boundary",
-                "document_heading_recovered_from_observed_markdown_heading",
-                "answer_verifier_summary",
-                "observed_markdown_heading",
-            )),
-            ..Self::default()
-        }
-    }
 }

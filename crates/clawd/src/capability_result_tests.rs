@@ -69,6 +69,36 @@ fn weather_result_preserves_structured_fields_for_generic_synthesis() {
 }
 
 #[test]
+fn read_range_result_preserves_explicit_title_field() {
+    let output = json!({
+        "text": "untrusted fallback",
+        "extra": {
+            "action": "read_range",
+            "path": "docs/service_notes.md",
+            "field_selector": "title",
+            "title": "Service Notes",
+            "exists": true
+        }
+    });
+    let envelope = super::successful_execution_envelope(
+        "system_basic",
+        "step_1",
+        &json!({"action": "read_range", "field_selector": "title"}),
+        &output.to_string(),
+        output.get("extra"),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/title"),
+        Some(&json!("Service Notes"))
+    );
+    assert_eq!(
+        envelope.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+}
+
+#[test]
 fn rss_result_preserves_items_and_sources_for_generic_synthesis() {
     let output = json!({
         "text": "machine fallback",

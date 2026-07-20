@@ -217,6 +217,31 @@ fn config_field_results_use_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn read_range_title_result_uses_generic_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "system_basic",
+            Some("read_range".to_string()),
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "docs/service_notes.md",
+                    "field_selector": "title",
+                    "title": "Service Notes",
+                    "exists": true
+                }
+            }),
+        ));
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
 fn exact_machine_and_artifact_delivery_bypass_language_synthesis() {
     let mut loop_state = LoopState::default();
     let mut result =

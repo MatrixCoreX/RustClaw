@@ -36,9 +36,9 @@ use dispatch_local_code_projection_gate::{
     LOCAL_CODE_PROJECTION_PENDING_READBACK, LOCAL_CODE_PROJECTION_PENDING_VALIDATION,
 };
 use dispatch_synthesis::{
-    deterministic_scalar_markdown_heading_answer, filesystem_mutation_lifecycle_structured_answer,
-    kb_filesystem_mutation_structured_answer, local_code_task_strict_json_projection,
-    requested_local_code_json_fields, route_resolved_intent, step_has_observable_synthesis_fact,
+    filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
+    local_code_task_strict_json_projection, requested_local_code_json_fields,
+    route_resolved_intent, step_has_observable_synthesis_fact,
     strict_json_projection_answer_satisfies_request, synthesize_answer_allows_direct_fallback,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
@@ -936,11 +936,6 @@ pub(super) async fn handle_synthesize_answer_action(
                 {
                     return Ok(answer);
                 }
-            }
-            if let Some(answer) =
-                deterministic_scalar_markdown_heading_answer(loop_state, agent_run_context)
-            {
-                return Ok(answer);
             }
             if let Some((answer, _summary)) =
                 crate::finalize::deterministic_matrix_observed_shape_answer(

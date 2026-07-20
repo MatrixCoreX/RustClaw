@@ -120,63 +120,6 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
 }
 
 #[test]
-fn deterministic_scalar_markdown_heading_uses_title_field_selector_for_free_route() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r##"{"extra":{"action":"read_range","field_selector":"title","field_value":"Service Notes","value_text":"Service Notes","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"/tmp/service_notes.md"}}"##,
-    ));
-    let route = crate::IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: crate::OutputResponseShape::Free,
-        requires_content_evidence: true,
-        delivery_required: false,
-        locator_kind: crate::OutputLocatorKind::None,
-        delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
-        locator_hint: String::new(),
-        selection: crate::OutputSelectionContract::default(),
-    };
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert_eq!(
-        deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).as_deref(),
-        Some("Service Notes")
-    );
-}
-
-#[test]
-fn deterministic_scalar_markdown_heading_keeps_free_route_without_title_selector() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r##"{"extra":{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"/tmp/service_notes.md"}}"##,
-    ));
-    let route = crate::IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: crate::OutputResponseShape::Free,
-        requires_content_evidence: true,
-        delivery_required: false,
-        locator_kind: crate::OutputLocatorKind::None,
-        delivery_intent: crate::OutputDeliveryIntent::None,
-        semantic_kind: crate::OutputSemanticKind::None,
-        locator_hint: String::new(),
-        selection: crate::OutputSelectionContract::default(),
-    };
-    let ctx = AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert!(deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).is_none());
-}
-
-#[test]
 fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

@@ -5,25 +5,15 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 #[cfg(test)]
 use super::{
     delivery_matches_config_guard_answer, delivery_message_is_json_container,
-    first_markdown_heading_from_read_output, last_respond_matches_single_line_observation,
-    looks_like_raw_command_snapshot, markdown_heading_from_line, message_is_non_answer_separator,
-    output_contract_requests_exact_delivery,
-    route_allows_observed_markdown_heading_scalar_delivery, route_has_evidence_policy_final_shape,
+    last_respond_matches_single_line_observation, looks_like_raw_command_snapshot,
+    message_is_non_answer_separator, output_contract_requests_exact_delivery,
+    route_has_evidence_policy_final_shape,
     route_requires_evidence_policy_deterministic_final_answer, single_publishable_delivery_message,
 };
 use super::{
     looks_like_structured_machine_output, step_output_is_read_range,
     valid_publishable_synthesis_output,
 };
-
-#[cfg(test)]
-pub(super) fn should_attach_execution_summary(
-    _loop_state: &LoopState,
-    _agent_run_context: Option<&AgentRunContext>,
-    _user_text: Option<&str>,
-) -> bool {
-    false
-}
 
 #[cfg(test)]
 pub(super) fn route_requires_content_excerpt_evidence(route: &crate::IntentOutputContract) -> bool {
@@ -483,13 +473,6 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     if delivery_matches_latest_transform_observation(loop_state, delivery_messages) {
         return true;
     }
-    if delivery_matches_observed_markdown_heading_delivery(
-        loop_state,
-        agent_run_context,
-        delivery_messages,
-    ) {
-        return true;
-    }
     if delivery_matches_latest_read_range_synthesis(loop_state, route, delivery_messages) {
         return true;
     }
@@ -622,49 +605,6 @@ pub(super) fn latest_publishable_synthesis_matches_written_file_path(
         .or(loop_state.last_written_file_path.as_ref())
         .map(String::as_str)
         .is_some_and(|path| same_observed_or_display_path(synthesis, path))
-}
-
-#[cfg(test)]
-fn delivery_matches_observed_markdown_heading_delivery(
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    delivery_messages: &[String],
-) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
-        return false;
-    };
-    if !route_allows_observed_markdown_heading_scalar_delivery(route)
-        || route.delivery_required
-        || matches!(
-            route.semantic_kind,
-            crate::OutputSemanticKind::FileNames
-                | crate::OutputSemanticKind::DirectoryNames
-                | crate::OutputSemanticKind::FilePaths
-                | crate::OutputSemanticKind::DirectoryEntryGroups
-                | crate::OutputSemanticKind::ScalarCount
-                | crate::OutputSemanticKind::RawCommandOutput
-                | crate::OutputSemanticKind::ScalarPathOnly
-                | crate::OutputSemanticKind::ExistenceWithPath
-                | crate::OutputSemanticKind::ExistenceWithPathSummary
-        )
-    {
-        return false;
-    }
-    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
-        return false;
-    };
-    let Some(delivery_heading) = markdown_heading_from_line(delivery_text) else {
-        return false;
-    };
-    loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .filter(|step| step.is_ok())
-        .filter_map(|step| step.output.as_deref())
-        .find(|output| output.contains("\"read_range\"") || output.contains("\"read_text_range\""))
-        .and_then(first_markdown_heading_from_read_output)
-        .is_some_and(|observed_heading| observed_heading.trim() == delivery_heading.trim())
 }
 
 #[cfg(test)]

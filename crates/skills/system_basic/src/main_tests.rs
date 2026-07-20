@@ -1188,6 +1188,10 @@ fn read_range_title_field_selector_projects_markdown_heading() {
         Some("Service Notes")
     );
     assert_eq!(
+        value.get("title").and_then(Value::as_str),
+        Some("Service Notes")
+    );
+    assert_eq!(
         value.get("value_text").and_then(Value::as_str),
         Some("Service Notes")
     );
@@ -1211,6 +1215,7 @@ fn read_range_title_field_selector_reports_missing_without_heading() {
         Some("title")
     );
     assert_eq!(value.get("exists").and_then(Value::as_bool), Some(false));
+    assert!(value.get("title").is_some_and(Value::is_null));
     assert!(value.get("field_value").is_some_and(Value::is_null));
     assert_eq!(value.get("value_text").and_then(Value::as_str), Some(""));
     let _ = std::fs::remove_dir_all(root);
