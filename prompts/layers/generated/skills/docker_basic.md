@@ -42,7 +42,16 @@
 - Successful responses also mirror structured metadata into `extra`, including `action`, `exit_code`, `docker_args`, and `output`.
 
 ## Structured Evidence Contract (from interface)
-- Matrix admission status: built-in structured evidence only; command `output` is legacy text evidence unless a stricter parser is explicitly registered.
+- Runtime evidence source: Docker results must come from structured `extra`;
+  natural-language `text` is an untrusted fallback and must not select
+  routing, retry, success, or final-answer shape.
+- Ordinary inspection, log, and lifecycle requests use `result_kind="none"`
+  and model synthesis from the capability result. Keep effect, risk,
+  confirmation, and once-per-task policy in registry metadata.
+- For an explicit exact-field request, use a capability-neutral
+  `structured_field_selector` for one or more declared `extra` fields. Use
+  exact-machine/envelope delivery for raw structured output; do not request a
+  Docker-specific result kind or final-answer shape.
 - Successful response `extra` fields:
   - `action`: string action name; evidence role `status`.
   - `exit_code`: integer Docker CLI exit code; evidence role `status`.

@@ -3,9 +3,8 @@ mod list_projection;
 #[cfg(test)]
 pub(super) use list_projection::matrix_strict_list_observed_answer;
 use list_projection::{
-    archive_member_list_prefers_observed_projection, docker_text_list_candidate_is_observed,
-    file_name_list_prefers_observed_projection, matrix_observed_answer_candidate_for_shape,
-    route_requests_docker_text_list_projection, stale_file_token_delivery_bounded_read_answer,
+    archive_member_list_prefers_observed_projection, file_name_list_prefers_observed_projection,
+    matrix_observed_answer_candidate_for_shape, stale_file_token_delivery_bounded_read_answer,
     stale_file_token_delivery_listing_answer,
 };
 pub(super) use list_projection::{
@@ -29,16 +28,13 @@ use super::{
     directory_entry_groups_prefers_observed_groups, final_answer_text_from_delivery,
     inventory_ranked_size_list_answer, latest_bounded_read_range_answer_from_loop,
     latest_grounded_synthesis_for_mixed_listing_contract, latest_plan_requested_synthesis,
-    log_deterministic_delivery_record, looks_like_structured_machine_output,
+    log_deterministic_delivery_record,
     successful_content_observation_should_precede_status_summary,
 };
 
 fn evidence_policy_final_answer_shape_class(
     route: &crate::IntentOutputContract,
 ) -> Option<crate::evidence_policy::FinalAnswerShapeClass> {
-    if route_requests_docker_text_list_projection(route) {
-        return Some(crate::evidence_policy::FinalAnswerShapeClass::StrictList);
-    }
     crate::evidence_policy::final_answer_shape_for_output_contract(route).map(|shape| shape.class())
 }
 
@@ -112,11 +108,6 @@ pub(super) fn evidence_policy_candidate_satisfies_final_shape(
     let candidate = candidate.trim();
     if candidate.is_empty() {
         return false;
-    }
-    if route_requests_docker_text_list_projection(route)
-        && docker_text_list_candidate_is_observed(route, loop_state, candidate)
-    {
-        return true;
     }
     let delivery_messages = vec![candidate.to_string()];
     let journal = build_from_loop_state(

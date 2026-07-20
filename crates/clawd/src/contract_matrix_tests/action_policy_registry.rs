@@ -63,11 +63,6 @@ fn planner_semantic_contracts_own_registered_actions() {
             "db_basic",
             serde_json::json!({"action":"schema_version","db_path":"tmp/app.db"}),
         ),
-        (
-            OutputSemanticKind::DockerContainerLifecycle,
-            "docker_basic",
-            serde_json::json!({"action":"restart","container":"rustclaw_api","dry_run":true}),
-        ),
     ] {
         let policy = action_policy_for_output_contract(
             Some(&IntentOutputContract {
@@ -955,11 +950,6 @@ fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
             "archive_read",
             OutputSemanticKind::ArchiveRead,
             "archive_basic.read",
-        ),
-        (
-            "docker_container_lifecycle",
-            OutputSemanticKind::DockerContainerLifecycle,
-            "docker_basic",
         ),
     ];
 

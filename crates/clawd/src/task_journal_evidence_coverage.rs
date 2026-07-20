@@ -516,17 +516,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    let docker_contract_shape = output_contract_has_docker_answer_shape(output_contract);
-    let observed_textual_runtime_output = observed_canonical.contains("command_output")
-        || observed_canonical.contains("content_excerpt")
-        || observed_fields.contains("text_excerpt");
-    if docker_contract_shape && observed_textual_runtime_output {
-        if output_contract_has_docker_field_value_answer_shape(output_contract) {
-            observed_canonical.insert("field_value".to_string());
-        } else if output_contract_has_docker_candidate_answer_shape(output_contract) {
-            observed_canonical.insert("candidates".to_string());
-        }
-    }
     if (output_contract.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
         || output_contract_has_service_status_answer_shape(output_contract))
         && (observed_canonical.contains("status")
@@ -585,33 +574,6 @@ fn output_contract_final_answer_shape(
     output_contract: &crate::IntentOutputContract,
 ) -> Option<crate::evidence_policy::FinalAnswerShape> {
     crate::evidence_policy::final_answer_shape_for_output_contract(output_contract)
-}
-
-fn output_contract_has_docker_answer_shape(output_contract: &crate::IntentOutputContract) -> bool {
-    output_contract_has_docker_field_value_answer_shape(output_contract)
-        || output_contract_has_docker_candidate_answer_shape(output_contract)
-}
-
-fn output_contract_has_docker_field_value_answer_shape(
-    output_contract: &crate::IntentOutputContract,
-) -> bool {
-    matches!(
-        output_contract_final_answer_shape(output_contract),
-        Some(crate::evidence_policy::FinalAnswerShape::LifecycleResult)
-    )
-}
-
-fn output_contract_has_docker_candidate_answer_shape(
-    output_contract: &crate::IntentOutputContract,
-) -> bool {
-    matches!(
-        output_contract_final_answer_shape(output_contract),
-        Some(
-            crate::evidence_policy::FinalAnswerShape::ContainerList
-                | crate::evidence_policy::FinalAnswerShape::ImageList
-                | crate::evidence_policy::FinalAnswerShape::LogExcerptOrSummary
-        )
-    )
 }
 
 fn output_contract_has_service_status_answer_shape(

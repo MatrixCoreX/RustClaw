@@ -297,50 +297,6 @@ pub(super) fn archive_database_aggregate_structured_answer(
 #[path = "dispatch_synthesis_tests.rs"]
 mod tests;
 
-pub(super) fn package_docker_probe_structured_answer(loop_state: &LoopState) -> Option<String> {
-    let package = loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok() && step.skill == "package_manager")
-        .filter_map(|step| step.output.as_deref())
-        .filter_map(skill_output_payload)
-        .find(|payload| payload.get("action").and_then(Value::as_str) == Some("detect"))?;
-    let docker_version = loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok() && step.skill == "docker_basic")
-        .filter_map(|step| step.output.as_deref())
-        .filter_map(skill_output_payload)
-        .find(|payload| payload.get("action").and_then(Value::as_str) == Some("version"))?;
-    let docker_ps = loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok() && step.skill == "docker_basic")
-        .filter_map(|step| step.output.as_deref())
-        .filter_map(skill_output_payload)
-        .find(|payload| payload.get("action").and_then(Value::as_str) == Some("ps"))?;
-
-    let manager = package
-        .get("manager")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    Some(
-        serde_json::json!({
-            "package_manager": {
-                "manager": manager,
-                "platform": package.get("platform").cloned().unwrap_or(Value::Null),
-                "candidate_order": package.get("candidate_order").cloned().unwrap_or(Value::Null),
-            },
-            "docker": {
-                "version": docker_probe_payload(&docker_version),
-                "containers": docker_probe_payload(&docker_ps),
-            },
-        })
-        .to_string(),
-    )
-}
-
 pub(super) fn filesystem_mutation_lifecycle_structured_answer(
     state: &AppState,
     loop_state: &LoopState,
@@ -639,16 +595,6 @@ fn copy_value_field(source: &Value, target: &mut serde_json::Map<String, Value>,
     if let Some(value) = source.get(field).filter(|value| !value.is_null()) {
         target.insert(field.to_string(), value.clone());
     }
-}
-
-fn docker_probe_payload(payload: &Value) -> Value {
-    serde_json::json!({
-        "available": payload.get("available").cloned().unwrap_or(Value::Null),
-        "command_succeeded": payload.get("command_succeeded").cloned().unwrap_or(Value::Null),
-        "exit_code": payload.get("exit_code").cloned().unwrap_or(Value::Null),
-        "docker_args": payload.get("docker_args").cloned().unwrap_or(Value::Null),
-        "output": payload.get("output").cloned().unwrap_or(Value::Null),
-    })
 }
 
 fn skill_output_payload(output: &str) -> Option<Value> {

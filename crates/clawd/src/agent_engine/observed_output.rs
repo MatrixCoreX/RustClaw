@@ -808,7 +808,6 @@ fn observed_answer_fallback_can_use_compact_prompt(
     }
     crate::evidence_policy::final_answer_shape_for_output_contract(route)
         .is_some_and(observed_answer_fallback_shape_can_use_compact_prompt)
-        || observed_answer_fallback_capability_ref_can_use_compact_prompt(route)
 }
 
 fn observed_answer_fallback_shape_can_use_compact_prompt(
@@ -833,7 +832,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
             | FinalAnswerShape::ExistenceVerdictWithPath
             | FinalAnswerShape::GitStateSummary
             | FinalAnswerShape::JudgmentWithExcerptBasis
-            | FinalAnswerShape::LogExcerptOrSummary
             | FinalAnswerShape::PresenceVerdictWithMatch
             | FinalAnswerShape::RawOutputOrShortSummary
             | FinalAnswerShape::RecentArtifactJudgment
@@ -841,17 +839,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
             | FinalAnswerShape::StatusWithSource
             | FinalAnswerShape::ValidationVerdict
     )
-}
-
-fn observed_answer_fallback_capability_ref_can_use_compact_prompt(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::DockerPs,
-        crate::OutputSemanticKind::DockerImages,
-        crate::OutputSemanticKind::DockerLogs,
-        crate::OutputSemanticKind::DockerContainerLifecycle,
-    ])
 }
 
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {

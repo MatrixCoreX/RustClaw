@@ -208,7 +208,6 @@ pub(super) fn matrix_observed_answer_candidate_for_shape(
         crate::evidence_policy::FinalAnswerShapeClass::StrictList => route
             .and_then(|route| {
                 matrix_grouped_name_list_observed_answer(route, loop_state)
-                    .or_else(|| matrix_docker_text_list_observed_answer(route, loop_state))
                     .or_else(|| matrix_strict_list_observed_answer(route, loop_state))
             })
             .or_else(|| {
@@ -914,74 +913,6 @@ fn push_ordered_matrix_grouped_name_lines(
     }
     lines.push(format!("{title}:"));
     lines.extend(items.into_iter().map(|item| format!("- {item}")));
-}
-
-pub(super) fn matrix_docker_text_list_observed_answer(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route_requests_docker_text_list_projection(route) {
-        return None;
-    }
-    for step in loop_state.executed_step_results.iter().rev() {
-        if !step.is_ok() || !matches!(step.skill.as_str(), "docker_basic" | "run_cmd") {
-            continue;
-        }
-        let Some(output) = step
-            .output
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-        else {
-            continue;
-        };
-        if looks_like_structured_machine_output(output)
-            || crate::finalize::looks_like_planner_artifact(output)
-            || crate::finalize::looks_like_internal_trace_artifact(output)
-        {
-            continue;
-        }
-        return Some((
-            output.to_string(),
-            matrix_observed_shape_summary(loop_state),
-        ));
-    }
-    None
-}
-
-pub(super) fn docker_text_list_candidate_is_observed(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-    candidate: &str,
-) -> bool {
-    if !route_requests_docker_text_list_projection(route) {
-        return false;
-    }
-    let candidate = candidate.trim();
-    if candidate.is_empty() {
-        return false;
-    }
-    loop_state.executed_step_results.iter().rev().any(|step| {
-        step.is_ok()
-            && matches!(step.skill.as_str(), "docker_basic" | "run_cmd")
-            && step
-                .output
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|output| output == candidate)
-    })
-}
-
-pub(super) fn route_requests_docker_text_list_projection(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    matches!(
-        crate::evidence_policy::final_answer_shape_for_output_contract(route),
-        Some(
-            crate::evidence_policy::FinalAnswerShape::ContainerList
-                | crate::evidence_policy::FinalAnswerShape::ImageList
-        )
-    )
 }
 
 fn collect_matrix_grouped_name_items(
