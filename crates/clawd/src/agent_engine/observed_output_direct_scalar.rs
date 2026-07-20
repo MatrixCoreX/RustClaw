@@ -234,12 +234,7 @@ pub(super) fn structured_scalar_candidate(
             .or_else(|| value.get("field_value"))
             .or_else(|| value.get("command_output"))
             .and_then(value_scalar_text),
-        "count_inventory" => count_inventory_direct_answer_candidate(
-            state,
-            value,
-            route.map(|route| route.response_shape),
-            prefer_english,
-        ),
+        "count_inventory" => count_inventory_direct_answer_candidate(value, route),
         _ => None,
     }
 }

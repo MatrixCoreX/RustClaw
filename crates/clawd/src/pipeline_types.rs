@@ -76,7 +76,6 @@ pub(crate) enum OutputSemanticKind {
     #[default]
     None,
     RawCommandOutput,
-    ScalarCount,
     ExistenceWithPath,
 }
 
@@ -84,7 +83,6 @@ impl OutputSemanticKind {
     pub(crate) const ALL: &'static [Self] = &[
         Self::None,
         Self::RawCommandOutput,
-        Self::ScalarCount,
         Self::ExistenceWithPath,
     ];
 
@@ -92,7 +90,6 @@ impl OutputSemanticKind {
         match self {
             Self::None => "none",
             Self::RawCommandOutput => "raw_command_output",
-            Self::ScalarCount => "scalar_count",
             Self::ExistenceWithPath => "existence_with_path",
         }
     }
@@ -150,6 +147,16 @@ impl IntentOutputContract {
 
     pub(crate) fn semantic_kind_is_unclassified(&self) -> bool {
         self.semantic_kind_is(OutputSemanticKind::None)
+    }
+
+    pub(crate) fn requests_exact_count(&self) -> bool {
+        self.response_shape == OutputResponseShape::Scalar
+            && self
+                .selection
+                .structured_field_selector
+                .as_deref()
+                .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+                .is_some_and(|fields| matches!(fields.as_slice(), [field] if field == "count"))
     }
 
     pub(crate) fn requests_exact_name_list(&self) -> bool {

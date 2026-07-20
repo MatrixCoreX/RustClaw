@@ -6,19 +6,6 @@ pub(super) fn is_internal_missing_scalar_sentinel(text: &str) -> bool {
     trimmed == "<missing>" || trimmed.ends_with(": <missing>")
 }
 
-pub(super) fn scalar_count_diagnostic_machine_answer(diagnostic: &str) -> String {
-    let diagnostic = crate::truncate_for_agent_trace(
-        &crate::visible_text::sanitize_user_visible_text(diagnostic).replace('\n', " "),
-    );
-    [
-        "message_key=clawd.msg.scalar_count.unreliable".to_string(),
-        "reason_code=count_unreliable_diagnostic".to_string(),
-        "final_answer_shape=scalar_count_unavailable".to_string(),
-        format!("diagnostic={diagnostic}"),
-    ]
-    .join("\n")
-}
-
 pub(super) fn missing_extract_field_machine_answer(field_path: &str) -> String {
     let mut lines = vec![
         "message_key=clawd.msg.extract_field_missing".to_string(),

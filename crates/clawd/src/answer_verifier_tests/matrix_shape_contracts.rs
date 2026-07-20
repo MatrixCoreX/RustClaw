@@ -4,7 +4,8 @@ use super::*;
 fn matrix_scalar_shape_requires_plain_scalar_answer() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-matrix-scalar", "ask", "count them");
     journal
@@ -36,7 +37,8 @@ fn matrix_scalar_shape_requires_plain_scalar_answer() {
 fn matrix_scalar_count_shape_allows_observed_component_breakdown() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-component-count", "ask", "count dirs");
     journal
@@ -213,7 +215,8 @@ fn matrix_single_path_shape_requires_plain_grounded_path() {
 fn matrix_scalar_shape_uses_observed_evidence_map_values() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-scalar-evidence",
         "ask",

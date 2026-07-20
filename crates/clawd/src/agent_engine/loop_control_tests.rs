@@ -26,7 +26,6 @@ use super::{
     try_recover_local_health_answer_verifier_gap_from_loop_state,
     try_recover_log_analyze_answer_verifier_gap,
     try_recover_machine_kv_summary_output_format_answer_verifier_gap,
-    try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_evidence_table_answer_verifier_gap,
     try_recover_structured_listing_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
@@ -279,58 +278,6 @@ fn structured_search_verifier_exhaustion_recovers_with_full_candidate_list() {
     assert!(reply.text.contains("README.md"));
     assert!(reply.text.contains("UI/README.md"));
     assert!(reply.text.contains("docs/README.md"));
-    let journal = reply.task_journal.as_ref().expect("journal");
-    assert_eq!(
-        journal.final_status,
-        Some(crate::task_journal::TaskJournalFinalStatus::Success)
-    );
-    assert!(journal.answer_verifier_summary.is_none());
-}
-
-#[test]
-fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["count".to_string()],
-        answer_incomplete_reason: "answer asks to rerun instead of delivering observed count"
-            .to_string(),
-        should_retry: true,
-        retry_instruction: "use the observed counts.total field".to_string(),
-        confidence: 0.94,
-    });
-    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: StepExecutionStatus::Ok,
-        output_excerpt: Some(
-            r#"{"action":"count_inventory","counts":{"dirs":6,"files":58,"hidden":0,"total":64},"path":"/repo/scripts","recursive":false}"#
-                .to_string(),
-        ),
-        error_excerpt: None,
-        started_at: 0,
-        finished_at: 0,
-    });
-    let mut route = route_result(OutputResponseShape::OneSentence);
-    route.semantic_kind = OutputSemanticKind::ScalarCount;
-    let mut reply = AskReply::non_llm("需要重新触发计数任务。".to_string())
-        .with_messages(vec![
-            "**执行过程**\n1. 调用工具 `fs_basic`。".to_string(),
-            "需要重新触发计数任务。".to_string(),
-        ])
-        .with_task_journal(journal);
-
-    assert!(try_recover_structured_count_answer_verifier_gap(
-        Some(&answer_contract(&route)),
-        "先数一下 scripts 目录直接有多少个子项",
-        &mut reply
-    ));
-
-    assert!(!reply.should_fail_task);
-    assert!(reply.text.contains("64"));
-    assert!(reply.text.contains("58"));
-    assert!(reply.text.contains("6"));
     let journal = reply.task_journal.as_ref().expect("journal");
     assert_eq!(
         journal.final_status,

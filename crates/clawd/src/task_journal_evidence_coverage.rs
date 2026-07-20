@@ -450,7 +450,7 @@ pub(super) fn augment_output_contract_canonical_evidence(
     {
         observed_canonical.insert("command_output".to_string());
     }
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarCount)
+    if output_contract.requests_exact_count()
         && (observed_canonical.contains("value") || observed_canonical.contains("field_value"))
     {
         observed_canonical.insert("count".to_string());

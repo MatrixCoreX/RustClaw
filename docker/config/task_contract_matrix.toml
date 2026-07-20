@@ -67,6 +67,28 @@ final_answer_shape = "single_path"
 failure_policy = "retry_with_alternatives"
 
 [[generic_profiles]]
+name = "generic_exact_count"
+semantic_kind = "none"
+delivery_required = false
+response_shapes = ["scalar"]
+structured_field_selectors = ["count"]
+policy_mode = "enforce"
+evidence_scope = "current_task"
+freshness = "current_task"
+artifact_kind = "text"
+channel_visibility = "user_visible"
+evidence_profile = "generic"
+allowed_actions = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "run_cmd"]
+preferred_actions = ["fs_basic.count_entries"]
+required_evidence = ["count"]
+final_answer_shape = "scalar"
+failure_policy = "retry_with_alternatives"
+observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "run_cmd"]
+
+[generic_profiles.evidence_expression]
+all_of = ["count"]
+
+[[generic_profiles]]
 name = "generic_path_content"
 semantic_kind = "none"
 requires_content_evidence = true
@@ -141,18 +163,6 @@ failure_policy = "retry_with_alternatives"
 
 [contracts.raw_command_output.evidence_expression]
 any_of = ["command_output", "field_value", "content_excerpt"]
-
-[contracts.scalar_count]
-semantic_kind = "scalar_count"
-operation = "count"
-target_object = "unknown"
-delivery_shape = "raw"
-allowed_actions = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "run_cmd"]
-preferred_actions = ["fs_basic.count_entries"]
-required_evidence = ["count"]
-final_answer_shape = "scalar"
-failure_policy = "retry_with_alternatives"
-observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "run_cmd"]
 
 [contracts.existence_with_path]
 semantic_kind = "existence_with_path"

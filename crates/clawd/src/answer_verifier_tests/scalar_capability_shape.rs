@@ -6,7 +6,8 @@ fn planner_scalar_count_contract_verifies_scalar() {
     route.request_text = "capability_ref=filesystem.count_entries".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.structured_field_selector = Some("count".to_string());
 
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-count-entries-capability",

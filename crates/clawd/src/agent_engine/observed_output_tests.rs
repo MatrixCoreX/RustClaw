@@ -23,7 +23,6 @@ use super::{
     route_allows_path_batch_scalar_path_observed_answer, route_allows_raw_listing_direct_answer,
     route_disallows_direct_observation_passthrough, route_prefers_plain_fs_search_paths,
     route_requests_exact_scalar_path, route_requires_synthesized_delivery,
-    scalar_count_diagnostic_line_for_answer, scalar_count_diagnostic_machine_answer,
     scalar_route_prefers_structured_observed_answer, selected_capability_result_scalar_candidate,
     strip_bare_json_language_prefix, structured_observed_body,
     tree_summary_direct_answer_candidate, try_synthesize_answer_from_observed_output,

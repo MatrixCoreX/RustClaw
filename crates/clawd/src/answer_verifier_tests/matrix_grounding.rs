@@ -54,7 +54,8 @@ fn single_file_delivery_rejects_token_mixed_with_prose() {
 fn matrix_scalar_shape_rejects_unregistered_fallback_extractor_values() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-scalar-fallback-extractor",
         "ask",
@@ -79,7 +80,8 @@ fn matrix_scalar_shape_rejects_unregistered_fallback_extractor_values() {
 fn matrix_scalar_shape_accepts_admitted_external_extra_count() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-external-admitted",
         "ask",
@@ -382,7 +384,8 @@ fn matrix_scalar_shape_accepts_count_from_array_evidence_for_non_scalar_route_sh
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-array-count", "ask", "count rows");
     journal
@@ -393,7 +396,7 @@ fn matrix_scalar_shape_accepts_count_from_array_evidence_for_non_scalar_route_sh
             json!({"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}).to_string(),
         ));
 
-    assert!(structurally_satisfies_answer_contract(
+    assert!(!structurally_satisfies_answer_contract(
         &route, &journal, "2"
     ));
 }
@@ -514,7 +517,8 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
 
     let mut scalar_route = route_with_mode();
     scalar_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    scalar_route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    scalar_route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    scalar_route.output_contract.selection.structured_field_selector = Some("count".to_string());
     let mut scalar_journal =
         crate::task_journal::TaskJournal::for_task("task-synth-scalar", "ask", "count files");
     scalar_journal

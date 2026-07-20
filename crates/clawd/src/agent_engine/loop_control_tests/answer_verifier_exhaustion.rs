@@ -269,40 +269,6 @@ fn answer_verifier_exhaustion_recovers_multi_source_terminal_answer_for_free_rou
 }
 
 #[test]
-fn structured_count_recovery_returns_machine_fields_without_language_template() {
-    let mut route = route_result(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::ScalarCount;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-count-recovery", "ask", "prompt");
-    journal.step_results.push(
-        crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "fs_basic",
-            r#"{"action":"count_inventory","path":"docs","recursive":false,"counts":{"total":3,"files":2,"dirs":1,"hidden":0}}"#,
-        ),
-    );
-    let mut reply = AskReply::non_llm("old count answer".to_string()).with_task_journal(journal);
-
-    assert!(try_recover_structured_count_answer_verifier_gap(
-        Some(&answer_contract(&route)),
-        "数一下 docs 下面有多少项",
-        &mut reply,
-    ));
-
-    assert!(reply
-        .text
-        .contains("message_key=clawd.msg.structured_count.summary"));
-    assert!(reply.text.contains("reason_code=structured_count_observed"));
-    assert!(reply.text.contains("path=docs"));
-    assert!(reply.text.contains("total=3"));
-    assert!(reply.text.contains("files=2"));
-    assert!(reply.text.contains("dirs=1"));
-    assert!(reply.text.contains("hidden=0"));
-    assert!(!reply.text.contains("共有"), "reply: {}", reply.text);
-    assert!(!reply.text.contains("has "), "reply: {}", reply.text);
-}
-
-#[test]
 fn unclassified_search_does_not_use_semantic_specific_recovery() {
     let mut route = route_result(OutputResponseShape::Free);
     route.semantic_kind = OutputSemanticKind::None;

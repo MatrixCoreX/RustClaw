@@ -404,7 +404,8 @@ fn matrix_shape_guard_replaces_scalar_count_field_placeholder_with_observed_valu
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint = "logs".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()

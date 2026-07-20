@@ -1313,10 +1313,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             if try_recover_log_analyze_answer_verifier_gap(user_text, &mut reply) {
                 return Ok(reply);
             }
-            if try_recover_structured_count_answer_verifier_gap(route_result, user_text, &mut reply)
-            {
-                return Ok(reply);
-            }
             if try_recover_structured_search_answer_verifier_gap(
                 route_result,
                 user_text,

@@ -1363,7 +1363,7 @@ pub(super) fn route_allows_direct_scalar_observed_answer(
     route: &crate::IntentOutputContract,
 ) -> bool {
     let contract = route.clone();
-    if route.semantic_kind_is(crate::OutputSemanticKind::ScalarCount) {
+    if route.requests_exact_count() {
         return true;
     }
     if contract.response_shape == crate::OutputResponseShape::Scalar {

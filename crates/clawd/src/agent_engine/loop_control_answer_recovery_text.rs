@@ -58,34 +58,6 @@ pub(super) fn deterministic_structured_search_summary_text(
     lines.join("\n")
 }
 
-pub(super) fn deterministic_structured_count_summary_text(
-    _user_text: &str,
-    finding: &StructuredCountFinding,
-) -> String {
-    let mut lines = vec![
-        "message_key=clawd.msg.structured_count.summary".to_string(),
-        "reason_code=structured_count_observed".to_string(),
-        format!("total={}", finding.total),
-    ];
-    if let Some(path) = finding.path.as_deref() {
-        push_machine_line(&mut lines, "path", path);
-    }
-    if let Some(files) = finding.files {
-        lines.push(format!("files={files}"));
-    }
-    if let Some(dirs) = finding.dirs {
-        lines.push(format!("dirs={dirs}"));
-    }
-    if let Some(hidden) = finding.hidden {
-        lines.push(format!("hidden={hidden}"));
-    }
-    if let Some(recursive) = finding.recursive {
-        lines.push(format!("recursive={recursive}"));
-        lines.push(format!("direct={}", !recursive));
-    }
-    lines.join("\n")
-}
-
 fn push_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
     let value = crate::truncate_for_agent_trace(
         &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),

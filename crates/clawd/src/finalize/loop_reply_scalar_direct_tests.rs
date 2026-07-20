@@ -922,7 +922,8 @@ fn direct_scalar_finalize_reports_missing_path_before_extracting_path_field() {
     let mut route = scalar_route_result();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "configs/config_copy".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -961,7 +962,8 @@ fn direct_scalar_finalize_does_not_repair_limited_listing_from_drifted_scalar_co
     let mut route = scalar_route_result();
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "logs".to_string();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -1006,7 +1008,8 @@ fn direct_scalar_finalize_preserves_planned_count_inventory_breakdown() {
         r#"{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26}}"#,
     ));
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some("帮我检查一下当前目录底下有多少个文件和文件夹。".to_string()),
@@ -1035,7 +1038,8 @@ fn direct_scalar_finalize_uses_total_count_without_component_plan() {
         r#"{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26}}"#,
     ));
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some("当前目录有多少个项目？只回复数字。".to_string()),
@@ -1062,7 +1066,8 @@ fn direct_scalar_finalize_uses_wrapped_count_inventory_total() {
         r#"{"extra":{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26},"path":"logs"},"text":"{\"action\":\"count_inventory\",\"counts\":{\"total\":66,\"files\":40,\"dirs\":26},\"path\":\"logs\"}"}"#,
     ));
     let mut route = scalar_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     route.locator_hint = "logs".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1093,7 +1098,9 @@ fn scalar_count_contract_projects_find_ext_count_from_machine_field() {
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
     route.requires_content_evidence = true;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some(
@@ -1116,7 +1123,7 @@ fn scalar_count_contract_projects_find_ext_count_from_machine_field() {
 }
 
 #[test]
-fn direct_scalar_finalize_allows_scalar_count_with_one_sentence_shape() {
+fn one_sentence_count_waits_for_model_synthesis() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1125,21 +1132,16 @@ fn direct_scalar_finalize_allows_scalar_count_with_one_sentence_shape() {
     ));
     let mut route = scalar_route_result();
     route.response_shape = OutputResponseShape::OneSentence;
-    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some("再数一下 document 目录直接有多少个子项".to_string()),
         ..Default::default()
     };
 
-    let (answer, summary) =
-        direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
-            .expect("scalar count should not require scalar response shape");
-
-    assert!(answer.contains("34"));
-    assert_eq!(
-        summary.disposition,
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    assert!(
+        direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context)).is_none()
     );
 }
 

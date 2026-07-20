@@ -58,7 +58,7 @@ fn route_prefers_observed_count(
     if contract.delivery_required {
         return false;
     }
-    route.semantic_kind_is(crate::OutputSemanticKind::ScalarCount)
+    route.requests_exact_count()
         && !plan_requests_count_inventory_file_dir_breakdown(loop_state)
 }
 

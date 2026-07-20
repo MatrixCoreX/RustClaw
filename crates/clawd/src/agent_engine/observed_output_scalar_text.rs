@@ -28,39 +28,6 @@ pub(super) fn normalized_scalar_candidate(body: &str) -> Option<String> {
     (lines.len() == 1).then(|| lines[0].to_string())
 }
 
-fn numeric_scalar_text(text: &str) -> bool {
-    let trimmed = text.trim();
-    !trimmed.is_empty() && trimmed.parse::<f64>().is_ok()
-}
-
-pub(super) fn scalar_count_diagnostic_line_for_answer(
-    answer: &str,
-    route: Option<&crate::IntentOutputContract>,
-    loop_state: &LoopState,
-) -> Option<String> {
-    let route = route?;
-    if !route_requests_scalar_count(route) || !numeric_scalar_text(answer) {
-        return None;
-    }
-    let observed = extract_latest_generic_successful_output(loop_state)?;
-    let lines = observed
-        .body
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| *line != "exit=0")
-        .filter(|line| !is_ignorable_shell_warning(line))
-        .filter(|line| !looks_like_structured_machine_output_line(line))
-        .collect::<Vec<_>>();
-    if lines.len() <= 1 {
-        return None;
-    }
-    lines
-        .into_iter()
-        .find(|line| !numeric_scalar_text(line))
-        .map(ToString::to_string)
-}
-
 pub(super) fn value_scalar_text(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::Null => Some("null".to_string()),

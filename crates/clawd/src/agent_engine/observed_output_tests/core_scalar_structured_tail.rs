@@ -18,7 +18,8 @@ fn direct_scalar_reads_count_inventory_single_dimension_from_structured_output()
             r#"{"action":"count_inventory","kind_filter":"file","counts":{"total":12,"files":9,"dirs":3}}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.selection.structured_field_selector = Some("count".to_string());
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -38,27 +39,17 @@ fn direct_count_inventory_uses_total_when_response_contract_is_known() {
         "recursive": false
     });
 
-    assert!(super::count_inventory_direct_answer_candidate(None, &value, None, false,).is_none());
+    assert!(super::count_inventory_direct_answer_candidate(&value, None).is_none());
 
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route.selection.structured_field_selector = Some("count".to_string());
     assert_eq!(
-        super::count_inventory_direct_answer_candidate(
-            None,
-            &value,
-            Some(OutputResponseShape::Scalar),
-            false,
-        )
-        .as_deref(),
+        super::count_inventory_direct_answer_candidate(&value, Some(&route)).as_deref(),
         Some("66")
     );
 
-    let one_sentence = super::count_inventory_direct_answer_candidate(
-        None,
-        &value,
-        Some(OutputResponseShape::OneSentence),
-        false,
-    )
-    .expect("one-sentence count answer");
-    assert!(one_sentence.contains("66"));
+    route.response_shape = OutputResponseShape::OneSentence;
+    assert!(super::count_inventory_direct_answer_candidate(&value, Some(&route)).is_none());
 }
 
 #[test]
@@ -235,9 +226,12 @@ fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentenc
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ScalarCount,
+            semantic_kind: OutputSemanticKind::None,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("count".to_string()),
+                ..Default::default()
+            },
             locator_hint: ".".to_string(),
-            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

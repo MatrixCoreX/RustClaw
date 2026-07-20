@@ -579,9 +579,12 @@ fn direct_scalar_counts_multiline_list_dir_when_route_requests_count() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarCount,
+            semantic_kind: crate::OutputSemanticKind::None,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("count".to_string()),
+                ..Default::default()
+            },
             locator_hint: "scripts".to_string(),
-            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -608,9 +611,12 @@ fn direct_scalar_uses_inventory_dir_count_for_scalar_count() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarCount,
+            semantic_kind: crate::OutputSemanticKind::None,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("count".to_string()),
+                ..Default::default()
+            },
             locator_hint: "scripts".to_string(),
-            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -623,7 +629,7 @@ fn direct_scalar_uses_inventory_dir_count_for_scalar_count() {
 }
 
 #[test]
-fn direct_count_uses_inventory_dir_total_for_non_scalar_shape() {
+fn non_scalar_count_observation_waits_for_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -637,17 +643,19 @@ fn direct_count_uses_inventory_dir_total_for_non_scalar_shape() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarCount,
+            semantic_kind: crate::OutputSemanticKind::None,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("count".to_string()),
+                ..Default::default()
+            },
             locator_hint: "document".to_string(),
-            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("4")
+    assert!(
+        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).is_none()
     );
 }
 

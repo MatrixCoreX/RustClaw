@@ -121,7 +121,11 @@ fn planner_contract_envelope_uses_plan_slots_and_contract_evidence_without_route
         output_contract: Some(crate::IntentOutputContract {
             response_shape: crate::OutputResponseShape::Scalar,
             requires_content_evidence: true,
-            semantic_kind: crate::OutputSemanticKind::ScalarCount,
+            semantic_kind: crate::OutputSemanticKind::None,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("count".to_string()),
+                ..Default::default()
+            },
             ..Default::default()
         }),
         steps: vec![crate::PlanStep {

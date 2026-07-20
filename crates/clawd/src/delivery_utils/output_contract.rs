@@ -672,17 +672,11 @@ fn extract_scalar_literal_for_contract(
     text: &str,
     output_contract: &IntentOutputContract,
 ) -> Option<String> {
-    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarCount) {
+    if output_contract.requests_exact_count() {
         extract_scalar_count_literal(text)
-    } else if allows_loose_scalar_token_extraction(output_contract.semantic_kind) {
-        extract_scalar_literal_loose(text)
     } else {
         extract_scalar_literal_explicit_for_contract(text, output_contract)
     }
-}
-
-fn allows_loose_scalar_token_extraction(kind: crate::OutputSemanticKind) -> bool {
-    matches!(kind, crate::OutputSemanticKind::ScalarCount)
 }
 
 fn extract_scalar_count_literal(text: &str) -> Option<String> {
@@ -731,24 +725,6 @@ fn scalar_count_integer_candidates(text: &str) -> Vec<String> {
     candidates
 }
 
-fn extract_scalar_literal_explicit(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed == "<missing>" {
-        return Some(trimmed.to_string());
-    }
-    if is_scalar_literal(trimmed) {
-        return Some(trimmed.to_string());
-    }
-
-    if let Some(scalar) = extract_single_delimited_scalar(trimmed, "`") {
-        return Some(scalar);
-    }
-    if let Some(scalar) = extract_single_delimited_scalar(trimmed, "**") {
-        return Some(scalar);
-    }
-    None
-}
-
 fn extract_scalar_literal_explicit_for_contract(
     text: &str,
     output_contract: &IntentOutputContract,
@@ -770,26 +746,6 @@ fn extract_scalar_literal_explicit_for_contract(
         }
     }
     None
-}
-
-fn extract_scalar_literal_loose(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if let Some(scalar) = extract_scalar_literal_explicit(trimmed) {
-        return Some(scalar);
-    }
-
-    let mut candidates = Vec::new();
-    for token in trimmed.split_whitespace() {
-        let token = trim_scalar_token_punctuation(token);
-        if is_scalar_literal(&token) && !candidates.iter().any(|existing| existing == &token) {
-            candidates.push(token);
-        }
-    }
-    if candidates.len() == 1 {
-        candidates.pop()
-    } else {
-        None
-    }
 }
 
 fn contains_missing_scalar_sentinel(text: &str) -> bool {

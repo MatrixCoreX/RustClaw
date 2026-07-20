@@ -145,8 +145,8 @@ use output_process_service::process_basic_observed_candidate;
 #[path = "observed_output_scalar_text.rs"]
 mod output_scalar_text;
 use output_scalar_text::{
-    normalized_scalar_candidate, scalar_count_diagnostic_line_for_answer, trim_for_observed_prompt,
-    value_scalar_text, value_structured_text,
+    normalized_scalar_candidate, trim_for_observed_prompt, value_scalar_text,
+    value_structured_text,
 };
 
 #[path = "observed_output_status_json.rs"]
@@ -843,18 +843,6 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             crate::truncate_for_log(&replacement)
         );
         answer = replacement;
-    }
-    if let Some(diagnostic) = scalar_count_diagnostic_line_for_answer(
-        &answer,
-        agent_run_context.and_then(|ctx| ctx.output_contract()),
-        loop_state,
-    ) {
-        tracing::info!(
-            "observed_answer_fallback_replace_scalar_count_with_diagnostic task_id={} diagnostic={}",
-            task.task_id,
-            crate::truncate_for_log(&diagnostic)
-        );
-        answer = scalar_count_diagnostic_machine_answer(&diagnostic);
     }
     let direct_passthrough_disallowed = agent_run_context
         .and_then(|ctx| ctx.output_contract())

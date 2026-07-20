@@ -281,9 +281,12 @@ fn scalar_listing_gate_does_not_repair_count_from_request_text_limit() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarCount,
+            semantic_kind: crate::OutputSemanticKind::None,
+            selection: crate::OutputSelectionContract {
+                structured_field_selector: Some("count".to_string()),
+                ..Default::default()
+            },
             locator_hint: "logs".to_string(),
-            selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),

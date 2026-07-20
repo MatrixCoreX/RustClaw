@@ -219,7 +219,7 @@ fn db_basic_rows_answer_from_output_for_route(
     db_basic_rows_answer_from_output_with_scalar_count(
         output,
         route.clone().response_shape == crate::OutputResponseShape::Scalar
-            && route.semantic_kind_is(crate::OutputSemanticKind::ScalarCount),
+            && route.requests_exact_count(),
     )
 }
 
