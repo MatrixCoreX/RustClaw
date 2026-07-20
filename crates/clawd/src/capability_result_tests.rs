@@ -271,6 +271,47 @@ fn config_key_result_preserves_generic_listing_fields() {
 }
 
 #[test]
+fn config_field_result_preserves_generic_read_fields() {
+    let extra = json!({
+        "action": "extract_field",
+        "field_path": "llm.selected_vendor",
+        "exists": true,
+        "field_value": "minimax",
+        "value": "minimax",
+        "value_text": "minimax",
+        "value_type": "string"
+    });
+    let envelope = super::successful_execution_envelope(
+        "config_basic",
+        "step_1",
+        &json!({
+            "action": "read_field",
+            "path": "configs/config.toml",
+            "field_path": "llm.selected_vendor",
+        }),
+        "untrusted fallback",
+        Some(&extra),
+    );
+
+    assert_eq!(
+        envelope.data.pointer("/extra/field_path"),
+        Some(&json!("llm.selected_vendor"))
+    );
+    assert_eq!(
+        envelope.data.pointer("/extra/field_value"),
+        Some(&json!("minimax"))
+    );
+    assert_eq!(
+        envelope.data.pointer("/extra/value_type"),
+        Some(&json!("string"))
+    );
+    assert_eq!(
+        envelope.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+}
+
+#[test]
 fn pending_result_becomes_poll_continuation() {
     let envelope = super::successful_execution_envelope(
         "video_generate",

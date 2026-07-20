@@ -1029,10 +1029,6 @@ crates/clawd/src/verifier_creation_targets.rs	contract generated_file_path_repor
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`	"skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`"
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` relative creation target anchored to `{anchored}`	"skill `{normalized_skill}` relative creation target anchored to `{anchored}`"
 crates/clawd/src/verifier_creation_targets.rs	unbounded unique step id search	unreachable!("unbounded unique step id search")
-crates/clawd/src/verifier_structured_fields.rs	clawd_structured_field_{name}_{}_{}	"clawd_structured_field_{name}_{}_{}",
-crates/clawd/src/verifier_structured_fields.rs	structured_field_selector `{selector}` was enforced on config_basic.{action}	"structured_field_selector `{selector}` was enforced on config_basic.{action}"
-crates/clawd/src/verifier_structured_fields.rs	structured_field_target_path was enforced on config_basic.{action}	"structured_field_target_path was enforced on config_basic.{action}"
-crates/clawd/src/verifier_structured_fields.rs	time before unix epoch	.expect("time before unix epoch")
 crates/clawd/src/virtual_tools.rs	unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config	"unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config",
 crates/clawd/src/virtual_tools.rs	{tool} args must be a JSON object	.ok_or_else(|| format!("{tool} args must be a JSON object"))
 crates/clawd/src/visible_text.rs	valid JSON escaped CSI regex	Regex::new(r"\\\\u001[bB]\\[[0-?]*[ -/]*[@-~]").expect("valid JSON escaped CSI regex")

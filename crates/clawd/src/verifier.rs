@@ -11,8 +11,6 @@ mod creation_targets;
 mod permission;
 #[path = "verifier_risk_policy.rs"]
 mod risk_policy;
-#[path = "verifier_structured_fields.rs"]
-mod structured_fields;
 #[path = "verifier_templates.rs"]
 mod templates;
 
@@ -1018,14 +1016,6 @@ pub(crate) fn verify_plan(
         input.output_contract,
         &mut effective_plan_result,
     );
-    structured_fields::apply_structured_field_selector_repair(
-        state,
-        input.output_contract,
-        input.request_text,
-        &mut effective_plan_result,
-        &mut issues,
-    );
-
     let visible_skills: HashSet<String> = state
         .planner_available_skills_for_task(task)
         .into_iter()

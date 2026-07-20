@@ -105,6 +105,20 @@ planner_capabilities = [
 ]
 
 [[skills]]
+name = "config_basic"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+output_kind = "text"
+side_effect = false
+auto_invocable = true
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["read_field", "read_fields"] }, path = { type = "string" }, field_path = { type = "string" }, field_paths = { type = "array", items = { type = "string" } } } }
+planner_capabilities = [
+  { name = "config.read_field", action = "read_field", effect = "observe", required = ["path", "field_path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.read_fields", action = "read_fields", effect = "observe", required = ["path", "field_paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
+
+[[skills]]
 name = "package_manager"
 enabled = true
 kind = "builtin"
@@ -1944,3 +1958,6 @@ mod agent_loop_execution_contract;
 
 #[path = "verifier_tests/direct_capability.rs"]
 mod direct_capability;
+
+#[path = "verifier_tests/config_read_contract.rs"]
+mod config_read_contract;
