@@ -191,6 +191,32 @@ fn config_key_results_use_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn config_field_results_use_generic_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "config_basic",
+            Some("read_field".to_string()),
+            json!({
+                "extra": {
+                    "action": "extract_field",
+                    "field_path": "llm.selected_vendor",
+                    "exists": true,
+                    "value": "minimax",
+                    "value_text": "minimax",
+                    "value_type": "string"
+                }
+            }),
+        ));
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+}
+
+#[test]
 fn exact_machine_and_artifact_delivery_bypass_language_synthesis() {
     let mut loop_state = LoopState::default();
     let mut result =

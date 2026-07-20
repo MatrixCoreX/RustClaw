@@ -160,6 +160,55 @@ fn structured_field_selector_projects_scalar_from_capability_result_extra() {
 }
 
 #[test]
+fn config_read_uses_generic_capability_result_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "config_basic"
+        enabled = true
+        kind = "builtin"
+        semantic_tags = []
+        "#,
+        &["config_basic"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("value".to_string());
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "extract_field",
+        "field_path": "llm.selected_vendor",
+        "exists": true,
+        "value": "minimax",
+        "value_text": "minimax",
+        "value_type": "string",
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "config_basic",
+            "step_1",
+            &serde_json::json!({"action": "read_field"}),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+
+    assert_eq!(
+        extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &state,
+            Some(&agent_run_context)
+        )
+        .as_deref(),
+        Some("minimax")
+    );
+}
+
+#[test]
 fn database_version_uses_generic_capability_result_selector() {
     let state = test_state_with_registry(
         r#"

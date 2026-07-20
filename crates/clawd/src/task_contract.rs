@@ -50,9 +50,6 @@ pub(crate) fn target_object_for_output_contract(
     match semantic_kind {
         OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
         OutputSemanticKind::FilesystemMutationResult => return TaskTargetObject::Path,
-        OutputSemanticKind::ConfigFieldRead => {
-            return TaskTargetObject::ConfigKey;
-        }
         OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
         _ => {}
     }
@@ -101,8 +98,7 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::DocumentHeading
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::FileBasename
-        | OutputSemanticKind::ExistenceWithPath
-        | OutputSemanticKind::ConfigFieldRead => TaskOperation::Inspect,
+        | OutputSemanticKind::ExistenceWithPath => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
             TaskOperation::Validate
         }
