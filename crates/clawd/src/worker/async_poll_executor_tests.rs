@@ -44,6 +44,7 @@ fn async_poll_claimed_dispatch(
         last_successful_step: Some("step_1".to_string()),
         pending_action: None,
         observations: Vec::new(),
+        capability_results: Vec::new(),
         evidence_refs: Vec::new(),
         artifact_refs: Vec::new(),
         completed_side_effect_refs: Vec::new(),

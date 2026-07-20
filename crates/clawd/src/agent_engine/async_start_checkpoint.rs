@@ -161,6 +161,7 @@ fn build_pending_async_job_checkpoint_progress_payload(
         last_successful_step,
         pending_action: None,
         observations: checkpoint_step_observations(loop_state),
+        capability_results: loop_state.capability_results.clone(),
         evidence_refs,
         artifact_refs: Vec::new(),
         completed_side_effect_refs: completed_side_effect_refs(loop_state),

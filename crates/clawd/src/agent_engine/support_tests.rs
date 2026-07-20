@@ -638,6 +638,11 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
             "step_id": "step_4",
             "status": "ok"
         })],
+        capability_results: vec![claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "fs_basic",
+            Some("read_text_range".to_string()),
+            serde_json::json!({"output": {"content": "checkpoint evidence"}}),
+        )],
         evidence_refs: vec!["step_4".to_string()],
         artifact_refs: vec![
             "artifact:report".to_string(),
@@ -682,6 +687,12 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
     assert_eq!(loop_state.total_steps_executed, 4);
     assert_eq!(loop_state.tool_calls_total, 2);
     assert!(loop_state.has_tool_or_skill_output);
+    assert_eq!(loop_state.capability_results.len(), 1);
+    assert_eq!(loop_state.capability_results[0].capability, "fs_basic");
+    assert_eq!(
+        loop_state.capability_results[0].action.as_deref(),
+        Some("read_text_range")
+    );
     assert_eq!(
         loop_state
             .successful_action_fingerprints

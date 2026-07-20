@@ -1372,6 +1372,8 @@ pub(crate) struct TaskCheckpoint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) pending_action: Option<Value>,
     pub(crate) observations: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) capability_results: Vec<claw_core::capability_result::CapabilityResultEnvelope>,
     pub(crate) evidence_refs: Vec<String>,
     pub(crate) artifact_refs: Vec<String>,
     pub(crate) completed_side_effect_refs: Vec<String>,

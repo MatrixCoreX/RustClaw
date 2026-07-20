@@ -50,6 +50,7 @@ pub(super) fn record_provider_wait_checkpoint(
             "kind": "provider_blocker",
             "provider_status": provider_status,
         })],
+        capability_results: journal.capability_results.clone(),
         evidence_refs: Vec::new(),
         artifact_refs: Vec::new(),
         completed_side_effect_refs: Vec::new(),

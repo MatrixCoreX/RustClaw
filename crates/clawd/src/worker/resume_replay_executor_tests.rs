@@ -76,6 +76,7 @@ fn only_confirmation_checkpoint_requires_private_stored_action() {
             "args_keys": ["command"]
         })),
         observations: Vec::new(),
+        capability_results: Vec::new(),
         evidence_refs: Vec::new(),
         artifact_refs: Vec::new(),
         completed_side_effect_refs: Vec::new(),

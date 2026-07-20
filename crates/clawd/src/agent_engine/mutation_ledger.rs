@@ -71,6 +71,7 @@ pub(super) fn record_completed_without_replay(
     record: &crate::repo::TaskMutationRecord,
     action_fingerprint: &str,
     normalized_skill: &str,
+    args: &Value,
     global_step: usize,
     step_in_round: usize,
 ) -> Result<SkillActionOutcome, String> {
@@ -89,17 +90,24 @@ pub(super) fn record_completed_without_replay(
         .entry(action_fingerprint.to_string())
         .or_insert(1);
     loop_state.has_tool_or_skill_output = true;
+    let step_result = crate::executor::StepExecutionResult {
+        step_id: format!("step_{global_step}"),
+        skill: normalized_skill.to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(output.clone()),
+        error: None,
+        started_at: crate::now_ts_u64(),
+        finished_at: crate::now_ts_u64(),
+    };
     loop_state
-        .executed_step_results
-        .push(crate::executor::StepExecutionResult {
-            step_id: format!("step_{global_step}"),
-            skill: normalized_skill.to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some(output.clone()),
-            error: None,
-            started_at: crate::now_ts_u64(),
-            finished_at: crate::now_ts_u64(),
-        });
+        .capability_results
+        .push(crate::capability_result::envelope_for_step_execution(
+            normalized_skill,
+            args,
+            &step_result,
+            record.outcome.as_ref(),
+        ));
+    loop_state.executed_step_results.push(step_result);
     crate::append_subtask_result(
         &mut loop_state.subtask_results,
         global_step,

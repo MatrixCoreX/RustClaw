@@ -68,6 +68,27 @@ pub(crate) fn failed_execution_envelope(
     envelope
 }
 
+pub(crate) fn envelope_for_step_execution(
+    capability: &str,
+    args: &Value,
+    step: &crate::executor::StepExecutionResult,
+    extra: Option<&Value>,
+) -> CapabilityResultEnvelope {
+    if step.status == crate::executor::StepExecutionStatus::Ok {
+        if let Some(output) = step.output.as_deref() {
+            return successful_execution_envelope(capability, &step.step_id, args, output, extra);
+        }
+    }
+    failed_execution_envelope(
+        capability,
+        &step.step_id,
+        args,
+        step.error
+            .as_deref()
+            .unwrap_or("capability_execution_failed"),
+    )
+}
+
 pub(crate) fn selected_exact_machine_result(
     results: &[CapabilityResultEnvelope],
     selector: &str,
@@ -208,15 +229,27 @@ fn extra_requests_user_input(extra: Option<&Value>) -> bool {
 }
 
 fn extra_reports_waiting(extra: Option<&Value>) -> bool {
-    extra
-        .and_then(Value::as_object)
+    continuation_object(extra)
         .and_then(|extra| extra.get("status"))
         .and_then(Value::as_str)
-        .is_some_and(|status| matches!(status, "pending" | "running" | "waiting" | "background"))
+        .is_some_and(|status| {
+            matches!(
+                status,
+                "accepted" | "pending" | "running" | "waiting" | "background"
+            )
+        })
+}
+
+fn continuation_object(extra: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
+    let extra = extra?.as_object()?;
+    extra
+        .get("pending_async_job")
+        .and_then(Value::as_object)
+        .or(Some(extra))
 }
 
 fn continuation_reference(extra: Option<&Value>) -> Option<String> {
-    let extra = extra?.as_object()?;
+    let extra = continuation_object(extra)?;
     ["job_id", "poll_ref", "checkpoint_ref", "result_ref"]
         .into_iter()
         .find_map(|key| extra.get(key).and_then(Value::as_str))
@@ -226,7 +259,7 @@ fn continuation_reference(extra: Option<&Value>) -> Option<String> {
 }
 
 fn continuation_poll_after_ms(extra: Option<&Value>) -> Option<u64> {
-    let extra = extra?.as_object()?;
+    let extra = continuation_object(extra)?;
     extra
         .get("poll_after_ms")
         .and_then(Value::as_u64)
@@ -239,7 +272,7 @@ fn continuation_poll_after_ms(extra: Option<&Value>) -> Option<u64> {
 }
 
 fn continuation_state(extra: Option<&Value>) -> Value {
-    let Some(extra) = extra.and_then(Value::as_object) else {
+    let Some(extra) = continuation_object(extra) else {
         return json!({});
     };
     let mut state = JsonMap::new();

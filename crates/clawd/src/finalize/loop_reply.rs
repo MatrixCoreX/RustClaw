@@ -307,8 +307,6 @@ use synthesis_preference::{
     replace_observed_passthrough_delivery_with_publishable_synthesis,
 };
 
-// Stage 3.1：build_loop_journal 已搬移到 `crate::finalize::build_from_loop_state`，
-// 行为零变化。本文件保留 thin alias 以最小化 diff。
 use crate::finalize::build_terminal_from_loop_state as build_loop_journal;
 
 fn priority_last_respond_for_final_delivery<'a>(

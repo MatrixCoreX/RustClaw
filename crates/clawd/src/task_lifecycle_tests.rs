@@ -631,6 +631,7 @@ fn checkpoint_schema_records_resume_entrypoint_and_budget() {
         last_successful_step: Some("step_3".to_string()),
         pending_action: Some(json!({"kind": "call_capability", "capability": "fs_basic"})),
         observations: vec![json!({"source": "fs_basic", "status": "ok"})],
+        capability_results: Vec::new(),
         evidence_refs: vec!["step_3:evidence:1".to_string()],
         artifact_refs: vec!["artifact:file:README.md".to_string()],
         completed_side_effect_refs: vec!["write_file:document/report.txt".to_string()],
@@ -656,6 +657,10 @@ fn checkpoint_schema_records_resume_entrypoint_and_budget() {
     assert_eq!(json["budget"]["llm_calls"], 5);
     assert_eq!(json["budget"]["llm_elapsed_ms"], 1234);
     assert_eq!(json["budget"]["tool_elapsed_ms"], 0);
+    assert!(json.get("capability_results").is_none());
+    let restored: TaskCheckpoint =
+        serde_json::from_value(json).expect("legacy checkpoint without capability results");
+    assert!(restored.capability_results.is_empty());
 }
 
 #[test]

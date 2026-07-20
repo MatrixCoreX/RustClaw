@@ -59,30 +59,6 @@ impl CapabilityAdapterKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CapabilityAdapterStatus {
-    Ready,
-    Pending,
-    Succeeded,
-    Failed,
-    Cancelled,
-    Unsupported,
-}
-
-impl CapabilityAdapterStatus {
-    pub fn as_token(self) -> &'static str {
-        match self {
-            Self::Ready => "ready",
-            Self::Pending => "pending",
-            Self::Succeeded => "succeeded",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Unsupported => "unsupported",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityAdapterInvocation {
     pub adapter_kind: CapabilityAdapterKind,
@@ -101,24 +77,6 @@ pub struct CapabilityAdapterInvocation {
     pub checkpoint_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll_ref: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CapabilityAdapterOutcome {
-    pub adapter_kind: CapabilityAdapterKind,
-    pub status: CapabilityAdapterStatus,
-    #[serde(default, skip_serializing_if = "JsonValue::is_null")]
-    pub output: JsonValue,
-    #[serde(default, skip_serializing_if = "JsonValue::is_null")]
-    pub evidence: JsonValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub poll_after_seconds: Option<u64>,
-    #[serde(default)]
-    pub terminal: bool,
 }
 
 pub fn skill_uses_external_api(entry: &SkillRegistryEntry) -> bool {

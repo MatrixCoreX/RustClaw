@@ -545,6 +545,14 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
         },
     )
     .await;
+    loop_state
+        .capability_results
+        .push(crate::capability_result::envelope_for_step_execution(
+            "run_cmd",
+            &retry_args,
+            &retry_step,
+            None,
+        ));
     record_post_tool_use_hook_observations(
         state,
         task,
