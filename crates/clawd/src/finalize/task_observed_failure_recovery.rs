@@ -152,10 +152,7 @@ fn content_tail_read_route_allows_failure_recovery(
         crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
     ) && contract.requires_content_evidence
         && !contract.delivery_required
-        && route_result.semantic_kind_is_any(&[
-            crate::OutputSemanticKind::ContentExcerptSummary,
-            crate::OutputSemanticKind::ExcerptKindJudgment,
-        ])
+        && route_result.semantic_kind_is_any(&[crate::OutputSemanticKind::ContentExcerptSummary])
 }
 
 fn content_tail_read_answer_from_step_output(output: &str, prefer_english: bool) -> Option<String> {

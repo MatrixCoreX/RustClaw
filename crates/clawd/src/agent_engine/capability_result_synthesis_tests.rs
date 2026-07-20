@@ -242,6 +242,42 @@ fn read_range_title_result_uses_generic_synthesis_without_domain_contract() {
 }
 
 #[test]
+fn read_range_excerpt_uses_generic_judgment_synthesis_without_domain_contract() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "fs_basic",
+            Some("read_text_range".to_string()),
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "docs/release_checklist.md",
+                    "excerpt": "1|# Release Checklist\n2|Verify config loading.",
+                    "start_line": 1,
+                    "end_line": 2
+                }
+            }),
+        ));
+    let route = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        locator_hint: "docs/release_checklist.md".to_string(),
+        ..Default::default()
+    };
+    let context = AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+
+    assert!(eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&context)
+    ));
+}
+
+#[test]
 fn path_facts_result_uses_generic_synthesis_without_domain_contract() {
     let mut loop_state = LoopState::default();
     loop_state

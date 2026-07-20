@@ -174,7 +174,7 @@ fn directory_purpose_summary_style_hint_uses_listing_evidence() {
 }
 
 #[test]
-fn excerpt_kind_judgment_style_hint_preserves_listing_and_excerpt_deliverables() {
+fn generic_evidence_grounded_judgment_uses_model_synthesis_style() {
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
@@ -182,7 +182,7 @@ fn excerpt_kind_judgment_style_hint_preserves_listing_and_excerpt_deliverables()
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExcerptKindJudgment,
+            semantic_kind: OutputSemanticKind::None,
             locator_hint: "docs/release_checklist.md".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
@@ -193,7 +193,7 @@ fn excerpt_kind_judgment_style_hint_preserves_listing_and_excerpt_deliverables()
 
     let hint = observed_response_style_hint(Some(&agent_run_context));
 
-    assert!(hint.contains("style_policy=excerpt_kind_judgment"));
-    assert!(hint.contains("include=candidates,judgment"));
-    assert!(hint.contains("one_sentence=combine_deliverables"));
+    assert!(hint.contains("style_policy=evidence_synthesis"));
+    assert!(hint.contains("passthrough=disallowed"));
+    assert!(hint.contains("response_shape=one_sentence"));
 }

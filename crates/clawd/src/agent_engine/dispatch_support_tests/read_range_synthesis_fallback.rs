@@ -176,6 +176,17 @@ fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
     };
     assert!(synthesize_bounded_read_range_direct_answer(&loop_state, Some(&summary_ctx)).is_none());
 
+    let mut generic_evidence_route = base_route.clone();
+    generic_evidence_route.semantic_kind = crate::OutputSemanticKind::None;
+    let generic_evidence_ctx = AgentRunContext {
+        output_contract: Some(generic_evidence_route),
+        ..AgentRunContext::default()
+    };
+    assert!(
+        synthesize_bounded_read_range_direct_answer(&loop_state, Some(&generic_evidence_ctx))
+            .is_none()
+    );
+
     let mut scalar_route = base_route;
     scalar_route.semantic_kind = crate::OutputSemanticKind::None;
     scalar_route.response_shape = crate::OutputResponseShape::Scalar;

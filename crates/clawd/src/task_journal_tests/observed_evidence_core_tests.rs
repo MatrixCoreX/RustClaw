@@ -1296,57 +1296,6 @@ fn content_excerpt_summary_directory_inventory_can_complete_from_listing_evidenc
 }
 
 #[test]
-fn excerpt_kind_judgment_directory_counts_can_complete_from_count_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-excerpt-kind-counts",
-        "ask",
-        "judge repository layout from directory counts",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ExcerptKindJudgment);
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.response_shape = crate::OutputResponseShape::OneSentence;
-    journal.record_output_contract(&route.clone());
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "count_entries",
-                "path": "crates",
-                "count": 3
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "count_entries",
-                "path": "crates/skills",
-                "count": 8
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 3,
-        finished_at: 4,
-    });
-
-    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("count"));
-}
-
-#[test]
 fn generic_path_content_directory_counts_can_complete_from_count_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-generic-path-counts",

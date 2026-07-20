@@ -556,7 +556,6 @@ pub(crate) enum FinalAnswerShape {
     FailedStepWithEvidence,
     Free,
     GroupedNameList,
-    JudgmentWithExcerptBasis,
     LifecycleResult,
     ListOrEmptyStatement,
     NameList,
@@ -624,7 +623,6 @@ impl FinalAnswerShape {
         Self::FailedStepWithEvidence,
         Self::Free,
         Self::GroupedNameList,
-        Self::JudgmentWithExcerptBasis,
         Self::LifecycleResult,
         Self::ListOrEmptyStatement,
         Self::NameList,
@@ -652,7 +650,6 @@ impl FinalAnswerShape {
             "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
             "free" => Some(Self::Free),
             "grouped_name_list" => Some(Self::GroupedNameList),
-            "judgment_with_excerpt_basis" => Some(Self::JudgmentWithExcerptBasis),
             "lifecycle_result" => Some(Self::LifecycleResult),
             "list_or_empty_statement" => Some(Self::ListOrEmptyStatement),
             "name_list" => Some(Self::NameList),
@@ -682,7 +679,6 @@ impl FinalAnswerShape {
             Self::FailedStepWithEvidence => "failed_step_with_evidence",
             Self::Free => "free",
             Self::GroupedNameList => "grouped_name_list",
-            Self::JudgmentWithExcerptBasis => "judgment_with_excerpt_basis",
             Self::LifecycleResult => "lifecycle_result",
             Self::ListOrEmptyStatement => "list_or_empty_statement",
             Self::NameList => "name_list",
@@ -713,7 +709,6 @@ impl FinalAnswerShape {
             | Self::PathList => FinalAnswerShapeClass::StrictList,
             Self::ComparisonVerdict
             | Self::ExistenceVerdictWithPath
-            | Self::JudgmentWithExcerptBasis
             | Self::LifecycleResult
             | Self::RecentArtifactJudgment
             | Self::RiskAssessment

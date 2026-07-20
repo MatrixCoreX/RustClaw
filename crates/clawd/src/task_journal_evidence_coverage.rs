@@ -600,7 +600,6 @@ pub(super) fn step_error_supplies_negative_contract_evidence(
     if !output_contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
-        crate::OutputSemanticKind::ExcerptKindJudgment,
         crate::OutputSemanticKind::ExistenceWithPath,
     ]) {
         return false;

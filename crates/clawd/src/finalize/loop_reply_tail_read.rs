@@ -61,7 +61,6 @@ pub(super) fn route_allows_latest_tail_read_range_delivery(
         && (route.semantic_kind_is_unclassified()
             || route.semantic_kind_is_any(&[
                 crate::OutputSemanticKind::ContentExcerptSummary,
-                crate::OutputSemanticKind::ExcerptKindJudgment,
                 crate::OutputSemanticKind::RawCommandOutput,
             ]))
 }
@@ -874,11 +873,7 @@ fn finalizer_summary_rejects_current_delivery(
 }
 
 fn semantic_kind_prefers_deterministic_tail_line(kind: crate::OutputSemanticKind) -> bool {
-    matches!(
-        kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::ExcerptKindJudgment
-    )
+    matches!(kind, crate::OutputSemanticKind::ContentExcerptSummary)
 }
 
 fn route_prefers_deterministic_tail_line(route: Option<&crate::IntentOutputContract>) -> bool {

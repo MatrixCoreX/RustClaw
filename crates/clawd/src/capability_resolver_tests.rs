@@ -187,6 +187,36 @@ fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() 
 }
 
 #[test]
+fn filesystem_read_resolver_preserves_planner_range_without_semantic_contract() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.read_text_range",
+        json!({
+            "path": "docs/release_checklist.md",
+            "mode": "head",
+            "n": 20,
+        }),
+    );
+
+    assert_eq!(record.output_semantic_kind, None);
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected filesystem tool action");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("read_text_range")
+    );
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("docs/release_checklist.md")
+    );
+    assert_eq!(args.get("mode").and_then(Value::as_str), Some("head"));
+    assert_eq!(args.get("n").and_then(Value::as_u64), Some(20));
+}
+
+#[test]
 fn docker_capabilities_resolve_without_domain_output_semantic_kinds() {
     let state = state_with_workspace_registry();
     for (capability, expected_action, args) in [

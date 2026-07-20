@@ -176,78 +176,6 @@ fn content_excerpt_with_summary_allows_supplemental_directory_listing() {
 }
 
 #[test]
-fn excerpt_kind_judgment_allows_directory_listing_context() {
-    for (capability, args, expected_action) in [
-        (
-            "fs_basic",
-            serde_json::json!({"action":"list_dir","path":"docs","names_only":true}),
-            "fs_basic.list_dir",
-        ),
-        (
-            "fs_basic",
-            serde_json::json!({"action":"count_entries","path":"crates"}),
-            "fs_basic.count_entries",
-        ),
-        (
-            "fs_basic",
-            serde_json::json!({"action":"find_entries","root":"crates","pattern":"skills"}),
-            "fs_basic.find_entries",
-        ),
-        (
-            "fs_basic",
-            serde_json::json!({"action":"stat_paths","paths":["crates","crates/skills"]}),
-            "fs_basic.stat_paths",
-        ),
-        (
-            "system_basic",
-            serde_json::json!({"action":"inventory_dir","path":"docs","names_only":true}),
-            "fs_basic.list_dir",
-        ),
-    ] {
-        let policy = action_policy_for_output_contract(
-            Some(&IntentOutputContract {
-                semantic_kind: OutputSemanticKind::ExcerptKindJudgment,
-                requires_content_evidence: true,
-                locator_kind: OutputLocatorKind::Path,
-                locator_hint: "docs/release_checklist.md".to_string(),
-                ..IntentOutputContract::default()
-            }),
-            capability,
-            &args,
-        )
-        .expect("policy decision");
-
-        assert!(policy.is_allowed(), "{policy:?}");
-        assert_eq!(policy.action_key, expected_action);
-        assert_eq!(policy.contract_match, "excerpt_kind_judgment");
-    }
-}
-
-#[test]
-fn excerpt_kind_judgment_allows_structured_field_context() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ExcerptKindJudgment,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            locator_hint: "Cargo.toml|UI/package.json|README.md".to_string(),
-            ..IntentOutputContract::default()
-        }),
-        "config_basic",
-        &serde_json::json!({
-            "action": "read_field",
-            "path": "Cargo.toml",
-            "field_path": "package.name"
-        }),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "config_basic.read_field");
-    assert_eq!(policy.contract_match, "excerpt_kind_judgment");
-}
-
-#[test]
 fn directory_purpose_summary_allows_log_analyze_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -1273,7 +1201,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 90);
+    let cases = generated_contract_cases(&matrix, 87);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();

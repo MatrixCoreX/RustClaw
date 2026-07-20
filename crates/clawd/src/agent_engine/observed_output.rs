@@ -793,7 +793,6 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
         shape,
         FinalAnswerShape::ComparisonVerdict
             | FinalAnswerShape::ExistenceVerdictWithPath
-            | FinalAnswerShape::JudgmentWithExcerptBasis
             | FinalAnswerShape::RawOutputOrShortSummary
             | FinalAnswerShape::RecentArtifactJudgment
             | FinalAnswerShape::ScalarEqualityVerdict

@@ -5,7 +5,6 @@ async fn finalize_loop_reply_accepts_terminal_machine_json_envelope() {
     let state = test_state();
     let task = claimed_task("task-machine-envelope-terminal");
     let mut route = free_route_result();
-    route.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
     route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),

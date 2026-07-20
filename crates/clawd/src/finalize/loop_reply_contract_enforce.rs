@@ -443,7 +443,6 @@ pub(super) fn route_prefers_content_evidence_synthesis(
     let content_summary_contract = route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
-        crate::OutputSemanticKind::ExcerptKindJudgment,
         crate::OutputSemanticKind::WorkspaceProjectSummary,
     ]) && !matches!(
         contract.response_shape,
@@ -457,7 +456,6 @@ pub(super) fn route_prefers_content_evidence_synthesis(
             || route.semantic_kind_is_any(&[
                 crate::OutputSemanticKind::ContentExcerptSummary,
                 crate::OutputSemanticKind::ContentExcerptWithSummary,
-                crate::OutputSemanticKind::ExcerptKindJudgment,
                 crate::OutputSemanticKind::WorkspaceProjectSummary,
                 crate::OutputSemanticKind::CommandOutputSummary,
                 crate::OutputSemanticKind::DirectoryPurposeSummary,
