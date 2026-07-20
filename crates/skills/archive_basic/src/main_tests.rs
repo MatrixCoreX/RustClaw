@@ -154,3 +154,58 @@ fn execute_read_projects_member_path_and_content_excerpt() {
         Some("fixture archive notes")
     );
 }
+
+#[test]
+fn execute_pack_and_unpack_project_generic_paths_and_artifact() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw_archive_envelope_{}_{}",
+        std::process::id(),
+        "unit"
+    ));
+    let source = root.join("source");
+    let archive = root.join("bundle.tar.gz");
+    let dest = root.join("unpacked");
+    std::fs::create_dir_all(&source).expect("create source directory");
+    std::fs::write(source.join("notes.txt"), "fixture archive notes\n")
+        .expect("write source fixture");
+
+    let (_text, pack_extra) = execute(json!({
+        "action": "pack",
+        "format": "tar.gz",
+        "source": source.display().to_string(),
+        "archive": archive.display().to_string()
+    }))
+    .expect("execute pack");
+
+    let archive_path = archive.display().to_string();
+    assert_eq!(
+        pack_extra
+            .pointer("/field_value/archive")
+            .and_then(Value::as_str),
+        Some(archive_path.as_str())
+    );
+    assert_eq!(
+        pack_extra
+            .pointer("/artifacts/0/path")
+            .and_then(Value::as_str),
+        Some(archive_path.as_str())
+    );
+
+    let (_text, unpack_extra) = execute(json!({
+        "action": "unpack",
+        "archive": archive.display().to_string(),
+        "dest": dest.display().to_string()
+    }))
+    .expect("execute unpack");
+
+    let dest_path = dest.display().to_string();
+    assert_eq!(
+        unpack_extra
+            .pointer("/field_value/dest")
+            .and_then(Value::as_str),
+        Some(dest_path.as_str())
+    );
+    let archived_source = source.strip_prefix("/").unwrap_or(source.as_path());
+    assert!(dest.join(archived_source).join("notes.txt").is_file());
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -138,13 +138,6 @@ fn planner_semantic_matrix_drives_evidence_contract() {
             TaskDeliveryShape::Raw,
             vec!["field_value"],
         ),
-        (
-            OutputSemanticKind::ArchivePack,
-            TaskTargetObject::Path,
-            TaskOperation::Write,
-            TaskDeliveryShape::File,
-            vec!["path"],
-        ),
     ] {
         let output_contract = IntentOutputContract {
             response_shape: OutputResponseShape::Strict,

@@ -553,10 +553,7 @@ impl ObservationExtractor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum FinalAnswerShape {
-    ArchiveMemberExcerpt,
-    ArchiveMemberList,
     ComparisonVerdict,
-    CreatedArchivePath,
     DeliveryTokenOrPath,
     ExistenceSummaryWithPath,
     ExistenceVerdictWithPath,
@@ -584,7 +581,6 @@ pub(crate) enum FinalAnswerShape {
     SummaryGroundedInExcerpt,
     SummaryGroundedInListing,
     SummaryWithEvidence,
-    UnpackDestinationSummary,
     ValidationVerdict,
 }
 
@@ -630,10 +626,7 @@ impl FinalAnswerShapeClass {
 impl FinalAnswerShape {
     #[cfg(test)]
     pub(crate) const ALL: &'static [Self] = &[
-        Self::ArchiveMemberExcerpt,
-        Self::ArchiveMemberList,
         Self::ComparisonVerdict,
-        Self::CreatedArchivePath,
         Self::DeliveryTokenOrPath,
         Self::ExistenceSummaryWithPath,
         Self::ExistenceVerdictWithPath,
@@ -661,16 +654,12 @@ impl FinalAnswerShape {
         Self::SummaryGroundedInExcerpt,
         Self::SummaryGroundedInListing,
         Self::SummaryWithEvidence,
-        Self::UnpackDestinationSummary,
         Self::ValidationVerdict,
     ];
 
     pub(crate) fn parse(raw: &str) -> Option<Self> {
         match raw.trim() {
-            "archive_member_excerpt" => Some(Self::ArchiveMemberExcerpt),
-            "archive_member_list" => Some(Self::ArchiveMemberList),
             "comparison_verdict" => Some(Self::ComparisonVerdict),
-            "created_archive_path" => Some(Self::CreatedArchivePath),
             "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
             "existence_summary_with_path" => Some(Self::ExistenceSummaryWithPath),
             "existence_verdict_with_path" => Some(Self::ExistenceVerdictWithPath),
@@ -698,7 +687,6 @@ impl FinalAnswerShape {
             "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
             "summary_grounded_in_listing" => Some(Self::SummaryGroundedInListing),
             "summary_with_evidence" => Some(Self::SummaryWithEvidence),
-            "unpack_destination_summary" => Some(Self::UnpackDestinationSummary),
             "validation_verdict" => Some(Self::ValidationVerdict),
             _ => None,
         }
@@ -706,10 +694,7 @@ impl FinalAnswerShape {
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::ArchiveMemberExcerpt => "archive_member_excerpt",
-            Self::ArchiveMemberList => "archive_member_list",
             Self::ComparisonVerdict => "comparison_verdict",
-            Self::CreatedArchivePath => "created_archive_path",
             Self::DeliveryTokenOrPath => "delivery_token_or_path",
             Self::ExistenceSummaryWithPath => "existence_summary_with_path",
             Self::ExistenceVerdictWithPath => "existence_verdict_with_path",
@@ -737,7 +722,6 @@ impl FinalAnswerShape {
             Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
             Self::SummaryGroundedInListing => "summary_grounded_in_listing",
             Self::SummaryWithEvidence => "summary_with_evidence",
-            Self::UnpackDestinationSummary => "unpack_destination_summary",
             Self::ValidationVerdict => "validation_verdict",
         }
     }
@@ -745,10 +729,9 @@ impl FinalAnswerShape {
     pub(crate) fn class(self) -> FinalAnswerShapeClass {
         match self {
             Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
-            Self::CreatedArchivePath | Self::SinglePath => FinalAnswerShapeClass::SinglePath,
+            Self::SinglePath => FinalAnswerShapeClass::SinglePath,
             Self::Scalar | Self::SingleCommitSubject => FinalAnswerShapeClass::ScalarValue,
-            Self::ArchiveMemberList
-            | Self::GroupedNameList
+            Self::GroupedNameList
             | Self::KeyListOrKeySummary
             | Self::ListOrEmptyStatement
             | Self::NameList
@@ -763,8 +746,7 @@ impl FinalAnswerShape {
             | Self::ScalarEqualityVerdict
             | Self::StatusWithSource
             | Self::ValidationVerdict => FinalAnswerShapeClass::Verdict,
-            Self::ArchiveMemberExcerpt
-            | Self::ExistenceSummaryWithPath
+            Self::ExistenceSummaryWithPath
             | Self::ExcerptPlusSummary
             | Self::FailedStepWithEvidence
             | Self::GitStateSummary
@@ -772,8 +754,7 @@ impl FinalAnswerShape {
             | Self::RawOutputOrShortSummary
             | Self::SummaryGroundedInExcerpt
             | Self::SummaryGroundedInListing
-            | Self::SummaryWithEvidence
-            | Self::UnpackDestinationSummary => FinalAnswerShapeClass::GroundedSummary,
+            | Self::SummaryWithEvidence => FinalAnswerShapeClass::GroundedSummary,
             Self::Free => FinalAnswerShapeClass::Freeform,
         }
     }

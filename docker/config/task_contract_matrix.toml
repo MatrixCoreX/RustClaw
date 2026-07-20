@@ -328,11 +328,7 @@ preferred_actions = ["fs_basic.count_entries"]
 required_evidence = ["count"]
 final_answer_shape = "scalar"
 failure_policy = "retry_with_alternatives"
-observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "archive_basic", "run_cmd"]
-
-[[contracts.scalar_count.observation_extractors]]
-source = "archive_basic"
-extractor_kind = "text_legacy"
+observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "run_cmd"]
 
 [contracts.quantity_comparison]
 semantic_kind = "quantity_comparison"
@@ -549,67 +545,3 @@ preferred_actions = ["config_basic.guard_rustclaw_config", "config_edit.plan_con
 required_evidence = ["candidates", "count"]
 final_answer_shape = "risk_assessment"
 failure_policy = "retry_with_alternatives"
-
-[contracts.archive_list]
-semantic_kind = "archive_list"
-operation = "list"
-target_object = "path"
-delivery_shape = "list"
-allowed_actions = ["archive_basic.list", "archive_basic.read", "db_basic"]
-preferred_actions = ["archive_basic.list", "archive_basic.read", "db_basic"]
-required_evidence = ["candidates"]
-final_answer_shape = "archive_member_list"
-failure_policy = "retry_with_alternatives"
-observation_sources = ["archive_basic.list", "archive_basic"]
-
-[[contracts.archive_list.observation_extractors]]
-source = "archive_basic.list"
-extractor_kind = "structured_json"
-
-[[contracts.archive_list.observation_extractors]]
-source = "archive_basic"
-extractor_kind = "text_legacy"
-
-[contracts.archive_read]
-semantic_kind = "archive_read"
-operation = "inspect"
-target_object = "path"
-delivery_shape = "summary"
-allowed_actions = ["archive_basic.read"]
-preferred_actions = ["archive_basic.read"]
-required_evidence = ["content_excerpt"]
-final_answer_shape = "archive_member_excerpt"
-failure_policy = "retry_with_alternatives"
-
-[contracts.archive_pack]
-semantic_kind = "archive_pack"
-operation = "write"
-target_object = "path"
-delivery_shape = "file"
-artifact_kind = "file"
-allowed_actions = ["archive_basic.pack", "archive_basic.list"]
-preferred_actions = ["archive_basic.pack", "archive_basic.list"]
-required_evidence = ["path"]
-final_answer_shape = "created_archive_path"
-failure_policy = "retry_with_alternatives"
-observation_sources = ["archive_basic.pack", "archive_basic.list", "archive_basic"]
-
-[[contracts.archive_pack.observation_extractors]]
-source = "archive_basic"
-extractor_kind = "text_legacy"
-
-[contracts.archive_unpack]
-semantic_kind = "archive_unpack"
-operation = "modify"
-target_object = "path"
-delivery_shape = "summary"
-allowed_actions = ["archive_basic.unpack"]
-preferred_actions = ["archive_basic.unpack"]
-required_evidence = ["path"]
-final_answer_shape = "unpack_destination_summary"
-failure_policy = "retry_with_alternatives"
-observation_sources = ["archive_basic.unpack", "archive_basic"]
-
-[[contracts.archive_unpack.observation_extractors]]
-source = "archive_basic"
-extractor_kind = "text_legacy"

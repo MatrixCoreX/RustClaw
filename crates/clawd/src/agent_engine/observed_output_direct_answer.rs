@@ -312,32 +312,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                         })
                     }),
                 "transform" => transform_skill_formatted_output_candidate(&observed_output.body),
-                "archive_basic" => {
-                    if let Some(answer) = archive_unpack_direct_answer_candidate(
-                        route,
-                        &observed_output.body,
-                        prefers_english_free_text,
-                    ) {
-                        Some(answer)
-                    } else if let Some(answer) =
-                        archive_read_direct_answer_candidate(route, &observed_output.body)
-                    {
-                        Some(answer)
-                    } else {
-                        archive_list_summary_from_body(&observed_output.body).and_then(|summary| {
-                            route.and_then(|route| {
-                                archive_entry_existence_direct_answer(
-                                    state,
-                                    route,
-                                    current_turn_request_text(Some(route), agent_run_context),
-                                    &summary,
-                                    auto_locator_path.or(locator_hint),
-                                    prefers_english_presence_answer,
-                                )
-                            })
-                        })
-                    }
-                }
                 "log_analyze" => None,
                 "system_basic" | "config_basic" | "fs_basic" => {
                     let system_basic_info = (observed_output.skill == "system_basic")
@@ -739,7 +713,6 @@ pub(super) fn allows_normalized_scalar_direct_fallback(
     match skill {
         "git_basic" => false,
         "package_manager" => false,
-        "archive_basic" => false,
         "http_basic" => {
             !matches!(
                 response_shape,

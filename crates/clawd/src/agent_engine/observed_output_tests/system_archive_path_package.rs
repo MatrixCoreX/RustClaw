@@ -57,39 +57,6 @@ fn direct_answer_defers_system_basic_info_summary_to_llm_for_brief_request() {
 }
 
 #[test]
-fn direct_answer_defers_archive_creation_success_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "archive_basic",
-        "exit=0\nupdating: tmp/rustclaw-workspace/scripts/skill_calls/\n",
-    ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::OneSentence,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ExistenceWithPath,
-            locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
-    );
-    assert!(
-        has_observed_answer_candidates(&loop_state),
-        "archive output should remain available as observed facts for synthesis"
-    );
-}
-
-#[test]
 fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -119,94 +86,6 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
     assert!(
         has_observed_answer_candidates(&loop_state),
         "archive json should remain available as observed facts for synthesis"
-    );
-}
-
-#[test]
-fn archive_read_direct_answer_projects_member_path_and_content_excerpt() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "archive_basic",
-        r#"{"action":"read","archive":"/repo/tmp/test_bundle.zip","path":"notes.txt","member":"notes.txt","member_path":"notes.txt","content":"fixture archive notes\n","content_excerpt":"fixture archive notes"}"#,
-    ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ArchiveRead,
-            locator_hint: "tmp/test_bundle.zip | notes.txt".to_string(),
-            selection: crate::OutputSelectionContract {
-                structured_field_selector: Some("member_path,content_excerpt".to_string()),
-                ..crate::OutputSelectionContract::default()
-            },
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some(r#"{"content_excerpt":"fixture archive notes","member_path":"notes.txt"}"#)
-    );
-}
-
-#[test]
-fn archive_pack_scalar_contract_returns_created_archive_path() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "archive_basic",
-            "archive_path=/tmp/rustclaw-workspace/tmp/nl_archive_case.zip\nexit=0\n  adding: /tmp/rustclaw-workspace/scripts/skill_calls/ (stored 0%)\n",
-        ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ArchivePack,
-            locator_hint: "scripts/skill_calls | tmp/nl_archive_case.zip".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert_eq!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("/tmp/rustclaw-workspace/tmp/nl_archive_case.zip")
-    );
-}
-
-#[test]
-fn archive_pack_scalar_contract_uses_planner_semantic_kind() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "archive_basic",
-        "archive_path=/tmp/rustclaw-workspace/tmp/nl_archive_case.zip\nexit=0\n",
-    ));
-    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.semantic_kind = OutputSemanticKind::ArchivePack;
-    route_result.requires_content_evidence = true;
-    route_result.locator_kind = OutputLocatorKind::Path;
-    route_result.locator_hint =
-        "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert_eq!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("/tmp/rustclaw-workspace/tmp/nl_archive_case.zip")
     );
 }
 
@@ -254,40 +133,6 @@ fn direct_scalar_keeps_multi_read_fields_ambiguous_when_multiple_scalars_exist()
         extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)),
         None
     );
-}
-
-#[test]
-fn archive_unpack_contract_returns_one_sentence_destination_summary() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "archive_basic",
-            "dest_path=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked\nexit=0\nArchive: /tmp/test_bundle.zip\n inflating: /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked/notes.txt\n",
-        ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ArchiveUnpack,
-            locator_hint: "/tmp/test_bundle.zip | tmp/contract_matrix_unpacked".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("archive unpack machine answer");
-    assert!(answer.contains("message_key=clawd.msg.archive_unpack.observed"));
-    assert!(answer.contains("reason_code=archive_unpack_observed"));
-    assert!(answer.contains("extracted=true"));
-    assert!(answer.contains("dest=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked"));
-    assert!(answer.contains("member_count=1"));
-    assert!(answer.contains("member.1=notes.txt"));
 }
 
 #[test]

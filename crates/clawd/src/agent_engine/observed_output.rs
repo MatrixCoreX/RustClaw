@@ -74,10 +74,6 @@ use output_fs_search::{
 mod output_path_facts;
 use output_path_facts::*;
 
-#[path = "observed_output_archive.rs"]
-mod output_archive;
-use output_archive::*;
-
 #[path = "observed_output_git.rs"]
 mod output_git;
 pub(crate) use output_git::{
@@ -1007,16 +1003,6 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     ) {
         tracing::info!(
             "observed_answer_fallback_replace_internal_missing_sentinel task_id={} replacement={}",
-            task.task_id,
-            crate::truncate_for_log(&replacement)
-        );
-        answer = replacement;
-    }
-    if let Some(replacement) =
-        archive_list_raw_passthrough_replacement(&answer, state, loop_state, &request_language_hint)
-    {
-        tracing::info!(
-            "observed_answer_fallback_replace_archive_raw_passthrough task_id={} replacement={}",
             task.task_id,
             crate::truncate_for_log(&replacement)
         );

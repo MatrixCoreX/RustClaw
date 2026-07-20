@@ -216,50 +216,6 @@ fn deterministic_missing_observed_target_answer_uses_machine_payload_for_non_bil
 }
 
 #[test]
-fn deterministic_missing_observed_target_answer_reports_missing_archive_path() {
-    let state = test_state();
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = OutputResponseShape::Strict;
-    route.semantic_kind = crate::OutputSemanticKind::ArchiveList;
-    route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint =
-        "scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip".to_string();
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    let structured_error = serde_json::json!({
-        "skill": "archive_basic",
-        "error_kind": "not_found",
-        "error_text": "archive not found: scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip",
-        "extra": {
-            "path": "scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip",
-            "role": "archive"
-        },
-        "text": null
-    });
-    loop_state.executed_step_results.push(err_step_result(
-        "step_1",
-        "archive_basic",
-        &format!("__RC_SKILL_ERROR__:{structured_error}"),
-    ));
-
-    let answer = deterministic_missing_observed_target_answer(
-        &state,
-        "Try to list scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip and report the failure clearly.",
-        &loop_state,
-        Some(&agent_run_context),
-    )
-    .expect("missing archive observation should produce a handled user answer");
-
-    assert!(answer.contains("missing_bundle.zip"));
-    assert!(answer.contains("exists=false"));
-    assert!(answer.contains("reason_code=missing_observed_target"));
-}
-
-#[test]
 fn deterministic_missing_observed_target_answer_skips_after_later_fallback_success() {
     let state = test_state();
     let mut route = free_route_result();

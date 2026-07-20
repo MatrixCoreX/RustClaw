@@ -543,15 +543,6 @@ fn validate_structured_observed_candidate(value: &serde_json::Value) -> Option<S
 }
 
 pub(super) fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
-    if skill == "archive_basic" {
-        return archive_list_summary_from_body(body)
-            .and_then(|summary| archive_list_summary_observed_candidate(&summary))
-            .or_else(|| {
-                serde_json::from_str::<serde_json::Value>(body)
-                    .ok()
-                    .and_then(|value| archive_basic_observed_candidate(&value))
-            });
-    }
     if skill == "process_basic" {
         return process_basic_observed_candidate(body);
     }

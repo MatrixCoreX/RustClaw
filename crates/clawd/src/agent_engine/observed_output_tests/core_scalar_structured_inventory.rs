@@ -259,6 +259,107 @@ fn database_table_list_uses_generic_exact_field_selector() {
 }
 
 #[test]
+fn archive_members_use_generic_exact_field_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "archive_basic"
+        enabled = true
+        kind = "runner"
+        semantic_tags = []
+        "#,
+        &["archive_basic"],
+    );
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route.requires_content_evidence = true;
+    route.selection.structured_field_selector = Some("members".to_string());
+    let agent_run_context = AgentRunContext {
+        output_contract: Some(route),
+        ..AgentRunContext::default()
+    };
+    let extra = serde_json::json!({
+        "action": "list",
+        "member_count": 2,
+        "members": ["notes.txt", "nested/config.ini"],
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .capability_results
+        .push(crate::capability_result::successful_execution_envelope(
+            "archive_basic",
+            "step_1",
+            &serde_json::json!({"action": "list"}),
+            "untrusted fallback",
+            Some(&extra),
+        ));
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output_i18n(
+            &loop_state,
+            &state,
+            Some(&agent_run_context)
+        )
+        .as_deref(),
+        Some(r#"["notes.txt","nested/config.ini"]"#)
+    );
+}
+
+#[test]
+fn archive_paths_use_generic_scalar_field_selector() {
+    let state = test_state_with_registry(
+        r#"
+        [[skills]]
+        name = "archive_basic"
+        enabled = true
+        kind = "runner"
+        semantic_tags = []
+        "#,
+        &["archive_basic"],
+    );
+    for (selector, extra, expected) in [
+        (
+            "archive",
+            serde_json::json!({"action": "pack", "archive": "/tmp/reports.zip"}),
+            "/tmp/reports.zip",
+        ),
+        (
+            "dest",
+            serde_json::json!({"action": "unpack", "dest": "/tmp/reports"}),
+            "/tmp/reports",
+        ),
+    ] {
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route.requires_content_evidence = true;
+        route.selection.structured_field_selector = Some(selector.to_string());
+        let agent_run_context = AgentRunContext {
+            output_contract: Some(route),
+            ..AgentRunContext::default()
+        };
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .capability_results
+            .push(crate::capability_result::successful_execution_envelope(
+                "archive_basic",
+                "step_1",
+                &serde_json::json!({"action": extra["action"]}),
+                "untrusted fallback",
+                Some(&extra),
+            ));
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output_i18n(
+                &loop_state,
+                &state,
+                Some(&agent_run_context)
+            )
+            .as_deref(),
+            Some(expected),
+            "{selector}"
+        );
+    }
+}
+
+#[test]
 fn scalar_output_does_not_guess_an_unselected_structured_field() {
     let state = test_state_with_registry(
         r#"

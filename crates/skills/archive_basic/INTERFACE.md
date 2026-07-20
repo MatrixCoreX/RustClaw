@@ -59,7 +59,13 @@
 - Successful responses also mirror structured metadata into `extra`, including `action`, relevant paths, and `output`.
 
 ## Structured Evidence Contract
-- Matrix admission status: built-in structured evidence only; do not use natural-language `text` as strict evidence when the same value exists in `extra`.
+- Runtime evidence source: archive results must come from structured `extra`;
+  natural-language `text` is an untrusted fallback and must not select routing,
+  retry, success, or final-answer shape.
+- Ordinary list/read/pack/unpack responses use `result_kind="none"` and model
+  synthesis from the capability result. Exact output uses generic selectors
+  such as `members`, `count`, `content_excerpt`, `archive`, or `dest`;
+  artifact delivery uses the structured `artifacts` array.
 - `list` success `extra` fields:
   - `action`: string, always `list`; evidence role `status`.
   - `archive`: string absolute/resolved archive path; evidence role `path`.
@@ -78,11 +84,14 @@
   - `source`: string resolved source path; evidence role `path`.
   - `archive`: string output archive path; evidence role `artifact_path`.
   - `output`: string command observation; fallback evidence only.
+  - `field_value`: object containing `archive`, `format`, and `source`.
+  - `artifacts`: array containing the created archive path and machine metadata.
 - `unpack` success `extra` fields:
   - `action`: string, always `unpack`; evidence role `status`.
   - `archive`: string input archive path; evidence role `path`.
   - `dest`: string extraction directory; evidence role `path`.
   - `output`: string command observation; fallback evidence only.
+  - `field_value`: object containing `dest`.
 - Sensitive fields: archive member `content` may include user data. Provider-facing traces should prefer excerpt/hash/length metadata unless the user explicitly requested the content.
 - Error responses include top-level `error_kind`; `extra.error_kind` is present when the error has path/action context.
 

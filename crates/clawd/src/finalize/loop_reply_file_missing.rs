@@ -313,10 +313,14 @@ pub(super) fn step_error_has_missing_file_evidence(
     }
     crate::skills::parse_structured_skill_error(error).is_some_and(|structured| {
         structured.error_kind == "not_found"
-            && matches!(
-                structured.skill.as_str(),
-                "read_file" | "system_basic" | "fs_search" | "archive_basic"
-            )
+            && structured.extra.as_ref().is_some_and(|extra| {
+                ["path", "resolved_path"].iter().any(|field| {
+                    extra
+                        .get(field)
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|path| !path.trim().is_empty())
+                })
+            })
     })
 }
 

@@ -77,10 +77,6 @@ fn route_contract_marker_is_service_status(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ServiceStatus)
 }
 
-fn route_contract_marker_is_archive_unpack(route: &AnswerContract) -> bool {
-    route_contract_marker_is(route, crate::OutputSemanticKind::ArchiveUnpack)
-}
-
 fn route_contract_marker_is_git_repository_state(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::GitRepositoryState)
 }
@@ -143,25 +139,6 @@ pub(super) fn candidate_answer_has_grounded_existing_plain_path(
         return false;
     };
     file_token_path_is_grounded_in_observations(journal, &canonical_candidate_path)
-}
-
-pub(super) fn archive_unpack_summary_answer_is_grounded_in_observation(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-    candidate_answer: &str,
-) -> bool {
-    if !route_contract_marker_is_archive_unpack(route) {
-        return false;
-    }
-    let candidate_answer = candidate_answer.trim();
-    if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
-        return false;
-    }
-    let observed_paths = observed_archive_unpack_destination_paths(route, journal);
-    !observed_paths.is_empty()
-        && observed_paths
-            .iter()
-            .any(|path| answer_mentions_observed_path(candidate_answer, path))
 }
 
 pub(super) fn git_repository_state_answer_is_grounded_in_successful_observation(
@@ -554,122 +531,6 @@ pub(super) fn parse_port_number(raw: &str) -> Option<u16> {
         return None;
     }
     raw.parse::<u16>().ok().filter(|port| *port > 0)
-}
-
-pub(super) fn observed_archive_unpack_destination_paths(
-    route: &AnswerContract,
-    journal: &crate::task_journal::TaskJournal,
-) -> BTreeSet<String> {
-    let mut paths = observed_single_path_values_from_evidence_map_for_route(route, journal);
-    for step in &journal.step_results {
-        if !step_can_supply_verifier_observation_for_route(route, step) {
-            continue;
-        }
-        if !step_can_supply_strict_evidence_for_route(route, step) {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        collect_archive_unpack_destination_paths_from_output(output, &mut paths);
-    }
-    paths
-}
-
-pub(super) fn collect_archive_unpack_destination_paths_from_output(
-    output: &str,
-    paths: &mut BTreeSet<String>,
-) {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) {
-        collect_archive_unpack_destination_paths_from_json(&value, paths);
-        return;
-    }
-    for line in output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        if archive_unpack_destination_key(key.trim()) {
-            let value = value.trim();
-            if !value.is_empty() {
-                paths.insert(value.to_string());
-            }
-        }
-    }
-}
-
-pub(super) fn collect_archive_unpack_destination_paths_from_json(
-    value: &serde_json::Value,
-    paths: &mut BTreeSet<String>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, child) in map {
-                if archive_unpack_destination_key(key) {
-                    if let Some(path) = child
-                        .as_str()
-                        .map(str::trim)
-                        .filter(|path| !path.is_empty())
-                    {
-                        paths.insert(path.to_string());
-                    }
-                }
-                collect_archive_unpack_destination_paths_from_json(child, paths);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_archive_unpack_destination_paths_from_json(item, paths);
-            }
-        }
-        _ => {}
-    }
-}
-
-pub(super) fn archive_unpack_destination_key(key: &str) -> bool {
-    matches!(
-        key,
-        "dest" | "dest_path" | "destination" | "destination_path" | "path"
-    )
-}
-
-pub(super) fn answer_mentions_observed_path(answer: &str, observed_path: &str) -> bool {
-    let observed_path = observed_path.trim();
-    if observed_path.is_empty() {
-        return false;
-    }
-    if answer.contains(observed_path) {
-        return true;
-    }
-    answer.split_whitespace().any(|token| {
-        let token = token
-            .trim_matches(|ch: char| {
-                matches!(
-                    ch,
-                    '`' | '"'
-                        | '\''
-                        | '('
-                        | ')'
-                        | '['
-                        | ']'
-                        | '{'
-                        | '}'
-                        | ','
-                        | '，'
-                        | '.'
-                        | '。'
-                        | ';'
-                        | '；'
-                        | ':'
-                        | '：'
-                )
-            })
-            .trim();
-        !token.is_empty() && single_path_matches_observed(token, observed_path)
-    })
 }
 
 pub(super) fn strict_single_path_answer(answer: &str) -> Option<String> {

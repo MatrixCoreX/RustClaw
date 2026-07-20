@@ -182,7 +182,6 @@ mod file_delivery;
 use file_delivery::resolve_file_token_from_auto_locator_answer;
 use file_delivery::{
     direct_async_poll_result_report_from_payload,
-    direct_created_archive_path_from_observed_archive_pack,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_file_token_from_observed_path_batch_facts,

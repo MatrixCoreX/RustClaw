@@ -284,13 +284,6 @@ pub(crate) fn structurally_satisfies_answer_contract(
     {
         return true;
     }
-    if archive_unpack_summary_answer_is_grounded_in_observation(
-        route_result,
-        journal,
-        candidate_answer,
-    ) {
-        return true;
-    }
     if raw_bounded_read_answer_is_exact_successful_observation(
         route_result,
         journal,

@@ -653,20 +653,6 @@ mod tests {
     }
 
     #[test]
-    fn single_path_output_contract_matches_capability_owned_single_path_shape() {
-        let mut contract = crate::IntentOutputContract::default();
-        contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-        let route = contract;
-
-        assert_eq!(
-            crate::evidence_policy::final_answer_shape_for_output_contract(&route),
-            Some(crate::evidence_policy::FinalAnswerShape::CreatedArchivePath)
-        );
-
-        assert!(super::route_matches_single_path_output_contract(&route));
-    }
-
-    #[test]
     fn single_path_output_contract_does_not_match_status_shape() {
         let route = unclassified_output_contract();
 

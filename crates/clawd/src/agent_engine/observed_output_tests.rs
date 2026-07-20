@@ -4,8 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use super::super::LoopState;
 use super::{
-    answer_is_direct_observation_passthrough, archive_list_raw_passthrough_replacement,
-    archive_list_summary_from_body, compound_listing_content_delivery_guard_entry,
+    answer_is_direct_observation_passthrough, compound_listing_content_delivery_guard_entry,
     cross_turn_observed_output_entries, dir_compare_direct_answer_candidate,
     execution_failed_step_guard_entry, extract_answer_from_finalizer_envelope_text,
     extract_direct_answer_from_generic_output, extract_direct_answer_from_generic_output_i18n,

@@ -910,11 +910,6 @@ fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
             OutputSemanticKind::ContentPresenceCheck,
             "fs_basic.grep_text",
         ),
-        (
-            "archive_read",
-            OutputSemanticKind::ArchiveRead,
-            "archive_basic.read",
-        ),
     ];
 
     for (contract_name, semantic_kind, preferred_action) in cases {

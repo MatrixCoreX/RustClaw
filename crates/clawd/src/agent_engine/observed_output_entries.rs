@@ -76,9 +76,7 @@ pub(super) fn normalized_structured_observed_fact_allows_artifact_filter_bypass(
     skill: &str,
     output: &str,
 ) -> bool {
-    (skill == "archive_basic" && output.trim_start().starts_with("archive_basic action="))
-        || (matches!(skill, "fs_basic" | "system_basic")
-            && output.trim_start().starts_with("read_range "))
+    (matches!(skill, "fs_basic" | "system_basic") && output.trim_start().starts_with("read_range "))
         || (skill == "run_cmd" && output.trim_start().starts_with("command_output:\n"))
 }
 

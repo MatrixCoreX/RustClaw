@@ -228,14 +228,28 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             )?;
             pack_archive(format, &source, &archive).map(|text| {
                 let archive_path = archive.display().to_string();
+                let source_path = source.display().to_string();
                 (
                     format!("archive_path={archive_path}\n{text}"),
                     json!({
                         "action":"pack",
                         "format":format,
-                        "source":source.display().to_string(),
+                        "source":source_path,
                         "archive":archive_path,
-                        "output":text
+                        "output":text,
+                        "field_value": {
+                            "archive": archive_path,
+                            "format": format,
+                            "source": source_path,
+                        },
+                        "artifacts": [{
+                            "path": archive_path,
+                            "metadata": {
+                                "action": "pack",
+                                "format": format,
+                                "source": source_path,
+                            }
+                        }]
                     }),
                 )
             })
@@ -255,7 +269,10 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                         "action":"unpack",
                         "archive":archive.display().to_string(),
                         "dest":dest_path,
-                        "output":text
+                        "output":text,
+                        "field_value": {
+                            "dest": dest_path,
+                        }
                     }),
                 )
             })

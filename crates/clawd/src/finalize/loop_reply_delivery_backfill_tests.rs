@@ -637,63 +637,6 @@ async fn finalize_loop_reply_prefers_db_rows_synthesis_over_locator_title_delive
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_prefers_structured_json_synthesis_for_compound_observations() {
-    let state = test_state();
-    let task = claimed_task("task-compound-structured-json-synth");
-    let raw_archive_listing = "nested/config.ini\nnotes.txt";
-    let synthesis = r#"{"archive":{"entries":["notes.txt","nested/config.ini"],"member":{"content":"fixture archive notes","name":"notes.txt"}},"database":{"tables":["orders","service_logs","users"]}}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state
-        .delivery_messages
-        .push(raw_archive_listing.to_string());
-    loop_state.last_user_visible_respond = Some(raw_archive_listing.to_string());
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "archive_basic",
-        r#"{"extra":{"action":"list","entries":[{"name":"notes.txt"},{"name":"nested/config.ini"}]}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "archive_basic",
-        r#"{"extra":{"action":"read","member":"notes.txt","content":"fixture archive notes\n"}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_3",
-        "db_basic",
-        r#"{"extra":{"action":"list_tables","result":{"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}}}"#,
-    ));
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_4", "synthesize_answer", synthesis));
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_5", "respond", raw_archive_listing));
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.semantic_kind = OutputSemanticKind::ArchiveList;
-    route.response_shape = OutputResponseShape::Strict;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-
-    let reply = finalize_loop_reply(
-        &state,
-        &task,
-        "list archive entries, read member, and list database tables",
-        loop_state,
-        Some(&ctx),
-    )
-    .await
-    .expect("finalize should succeed");
-
-    assert_eq!(reply.text, synthesis);
-    assert_eq!(reply.messages, vec![synthesis.to_string()]);
-    assert!(!reply.should_fail_task);
-}
-
-#[tokio::test]
 async fn finalize_loop_reply_uses_multi_locator_route_for_compound_synthesis() {
     let state = test_state();
     let task = claimed_task("task-compound-route-locator-synth");
