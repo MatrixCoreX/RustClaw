@@ -128,13 +128,6 @@ pub(super) fn extract_answer_from_observed_output_impl(
                         })
                         .flatten()
                 })
-                .or_else(|| {
-                    route
-                        .filter(|route| route_allows_strict_plain_observation_passthrough(route))
-                        .and_then(|_| {
-                            strict_plain_observation_passthrough_candidate(&observed_output.body)
-                        })
-                })
             } else {
                 None
             }

@@ -334,44 +334,6 @@ pub(super) fn route_allows_raw_listing_direct_answer(
     })
 }
 
-pub(super) fn route_allows_strict_plain_observation_passthrough(
-    route: &crate::IntentOutputContract,
-) -> bool {
-    route.requires_content_evidence
-        && !route.delivery_required
-        && super::output_route_policy::route_is_unclassified_contract(route)
-        && route.response_shape == crate::OutputResponseShape::Strict
-        && route.exact_sentence_count.is_none()
-}
-
-pub(super) fn strict_plain_observation_passthrough_candidate(body: &str) -> Option<String> {
-    let lines = body
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| *line != "exit=0")
-        .filter(|line| !is_ignorable_shell_warning(line))
-        .collect::<Vec<_>>();
-    if lines.is_empty()
-        || lines.len() > 80
-        || lines.iter().any(|line| {
-            looks_like_shell_long_listing_line(line)
-                || serde_json::from_str::<serde_json::Value>(line)
-                    .map(|value| value.is_object() || value.is_array())
-                    .unwrap_or(false)
-        })
-    {
-        return None;
-    }
-    let candidate = lines.join("\n");
-    if crate::finalize::looks_like_planner_artifact(&candidate)
-        || crate::finalize::looks_like_internal_trace_artifact(&candidate)
-    {
-        return None;
-    }
-    Some(candidate)
-}
-
 fn latest_list_dir_listing(loop_state: &LoopState) -> Option<String> {
     let idx = latest_successful_step_index(loop_state, |step| step.skill == "list_dir")?;
     let step = &loop_state.executed_step_results[idx];

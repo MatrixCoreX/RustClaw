@@ -223,7 +223,7 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
     );
 
     let mut delivery_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    delivery_route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    delivery_route.semantic_kind = OutputSemanticKind::None;
     delivery_route.delivery_required = true;
     let delivery_context = AgentRunContext {
         output_contract: Some(delivery_route.clone()),

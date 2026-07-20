@@ -131,11 +131,9 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
 }
 
 pub(crate) fn route_requires_synthesized_delivery(route: &crate::IntentOutputContract) -> bool {
-    if route_allows_strict_plain_observation_passthrough(route) {
-        return false;
-    }
     let constrained_sentence_delivery = route.response_shape
         == crate::OutputResponseShape::OneSentence
+        || route.response_shape == crate::OutputResponseShape::Strict
         || route.exact_sentence_count.is_some();
     route.requires_content_evidence
         && !route.delivery_required
@@ -151,9 +149,6 @@ pub(crate) fn route_disallows_direct_observation_passthrough(
     }
     if false || !route.requires_content_evidence || route.delivery_required {
         return false;
-    }
-    if route_contract_marker_is(route, crate::OutputSemanticKind::CommandOutputSummary) {
-        return true;
     }
     if route_contract_marker_is(route, crate::OutputSemanticKind::ExecutionFailedStep) {
         return true;

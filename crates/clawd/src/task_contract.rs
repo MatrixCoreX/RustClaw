@@ -49,7 +49,6 @@ pub(crate) fn target_object_for_output_contract(
     }
     match semantic_kind {
         OutputSemanticKind::FilesystemMutationResult => return TaskTargetObject::Path,
-        OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
         _ => {}
     }
     target_object_for_locator_kind(output_contract.locator_kind)
@@ -80,8 +79,7 @@ pub(crate) fn operation_for_output_contract(
         | OutputSemanticKind::DirectoryEntryGroups
         | OutputSemanticKind::FilePaths => TaskOperation::List,
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
-        OutputSemanticKind::CommandOutputSummary
-        | OutputSemanticKind::ContentExcerptSummary
+        OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary => TaskOperation::Summarize,
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
@@ -211,7 +209,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         fields.insert("path");
     }
     match output_contract.semantic_kind {
-        OutputSemanticKind::RawCommandOutput | OutputSemanticKind::CommandOutputSummary => {
+        OutputSemanticKind::RawCommandOutput => {
             fields.insert("command_output");
         }
         OutputSemanticKind::ScalarCount => {

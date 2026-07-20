@@ -85,10 +85,8 @@ fn last_respond_should_defer_to_publishable_evidence_summary(
     }
     let summary = valid_publishable_synthesis_output(loop_state)
         .or_else(|| latest_publishable_respond_step_output(loop_state));
-    if route.semantic_kind_is_any(&[
-        crate::OutputSemanticKind::RawCommandOutput,
-        crate::OutputSemanticKind::CommandOutputSummary,
-    ]) && !publishable_summary_has_multi_source_observation(loop_state)
+    if route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        && !publishable_summary_has_multi_source_observation(loop_state)
     {
         return false;
     }
@@ -958,7 +956,6 @@ pub(crate) fn route_expects_synthesis_over_raw_observation(
     route.semantic_kind_is_unclassified()
         || route.semantic_kind_is_any(&[
             crate::OutputSemanticKind::RawCommandOutput,
-            crate::OutputSemanticKind::CommandOutputSummary,
             crate::OutputSemanticKind::ContentExcerptSummary,
             crate::OutputSemanticKind::ContentExcerptWithSummary,
         ])

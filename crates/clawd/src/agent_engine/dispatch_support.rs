@@ -44,7 +44,7 @@ use dispatch_synthesis::{
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
-    synthesize_route_prefers_model_language_observed_status,
+    synthesize_route_prefers_model_language_failure_answer,
 };
 use dispatch_synthesis_bounded_read::synthesize_bounded_read_range_direct_answer;
 pub(super) use execution_status::deterministic_observed_execution_status_answer;
@@ -897,7 +897,7 @@ pub(super) async fn handle_synthesize_answer_action(
             {
                 return Ok(answer);
             }
-            if !synthesize_route_prefers_model_language_observed_status(agent_run_context) {
+            if !synthesize_route_prefers_model_language_failure_answer(agent_run_context) {
                 if let Some(answer) = deterministic_observed_execution_status_answer(
                     state,
                     task,

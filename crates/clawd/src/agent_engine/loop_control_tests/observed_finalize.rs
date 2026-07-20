@@ -24,7 +24,7 @@ fn observed_scalar_output_can_stop_loop_without_second_round() {
 }
 
 #[test]
-fn observed_config_basic_scalar_output_can_stop_loop_without_second_round() {
+fn observed_config_basic_strict_output_continues_for_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -36,7 +36,7 @@ fn observed_config_basic_scalar_output_can_stop_loop_without_second_round() {
         tool: "config_basic".to_string(),
         args: json!({"action":"read_field","path":"configs/skills_registry.toml","field_path":"run_cmd.planner_kind"}),
     }];
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route_result(OutputResponseShape::Strict)),
             ..Default::default()
@@ -47,7 +47,7 @@ fn observed_config_basic_scalar_output_can_stop_loop_without_second_round() {
 }
 
 #[test]
-fn observed_call_capability_inventory_names_can_stop_loop_without_second_round() {
+fn observed_call_capability_inventory_names_continue_for_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -60,7 +60,7 @@ fn observed_call_capability_inventory_names_can_stop_loop_without_second_round()
         args: json!({"path":"/workspace/document","files_only":true,"names_only":true,"max_entries":5}),
     }];
 
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route_result(OutputResponseShape::Strict)),
             ..Default::default()
@@ -118,7 +118,7 @@ fn incomplete_structured_selector_does_not_trigger_shared_round_stop() {
 }
 
 #[test]
-fn capability_inventory_names_can_stop_without_incremental_planner() {
+fn capability_inventory_names_continue_to_incremental_planner() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
@@ -133,7 +133,7 @@ fn capability_inventory_names_can_stop_without_incremental_planner() {
     }];
     let route = route_result(OutputResponseShape::Strict);
 
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route.clone()),
             ..Default::default()
@@ -260,7 +260,7 @@ fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
 }
 
 #[test]
-fn service_control_status_protocol_output_stops_for_observed_synthesis() {
+fn service_control_status_protocol_output_continues_for_model_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     let service_payload = json!({
@@ -306,7 +306,7 @@ fn service_control_status_protocol_output_stops_for_observed_synthesis() {
         ),
         None
     );
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&context),
         &loop_state,
         &actions,
@@ -741,7 +741,7 @@ fn strict_json_read_only_round_continues_planner_for_live_code_workspace() {
 }
 
 #[test]
-fn bounded_capability_observation_can_finalize_at_round_cap() {
+fn bounded_capability_observation_still_requires_synthesis_at_round_cap() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 2;
     loop_state.has_tool_or_skill_output = true;
@@ -761,7 +761,7 @@ fn bounded_capability_observation_can_finalize_at_round_cap() {
         &loop_state,
         &actions,
     ));
-    assert!(should_stop_for_observed_finalize(
+    assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             output_contract: Some(route.clone()),
             ..Default::default()

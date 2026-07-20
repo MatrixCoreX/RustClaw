@@ -1659,10 +1659,7 @@ fn ops_closed_loop_policy_uses_override_budget() {
 fn planner_contract_selects_grounded_summary_budget() {
     let policy = base_policy();
     let recipe = ExecutionRecipeRuntimeState::default();
-    let route = route_with_contract(
-        OutputSemanticKind::CommandOutputSummary,
-        OutputLocatorKind::None,
-    );
+    let route = route_with_contract(OutputSemanticKind::None, OutputLocatorKind::None);
 
     assert_eq!(
         AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
@@ -1677,10 +1674,7 @@ fn planner_contract_selects_grounded_summary_budget() {
 #[test]
 fn planner_contract_budget_does_not_depend_on_legacy_route_trace() {
     let recipe = ExecutionRecipeRuntimeState::default();
-    let route = route_with_contract(
-        OutputSemanticKind::CommandOutputSummary,
-        OutputLocatorKind::None,
-    );
+    let route = route_with_contract(OutputSemanticKind::None, OutputLocatorKind::None);
 
     assert_eq!(
         AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),

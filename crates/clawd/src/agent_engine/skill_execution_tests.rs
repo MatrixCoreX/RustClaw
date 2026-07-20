@@ -392,7 +392,7 @@ planner_capabilities = [
     );
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::CommandOutputSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
     });
@@ -596,7 +596,7 @@ fn active_ops_recipe_preflight_allows_backing_mutation_despite_summary_contract(
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::CommandOutputSummary,
+        semantic_kind: crate::OutputSemanticKind::None,
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Scalar,
         ..crate::IntentOutputContract::default()

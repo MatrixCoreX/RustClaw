@@ -2,22 +2,13 @@ use super::*;
 
 #[test]
 fn non_bridge_package_actions_remain_structured_contract_inputs() {
-    let cases = [
-        (
-            OutputSemanticKind::CommandOutputSummary,
-            "package_manager",
-            serde_json::json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
-            "package_manager.smart_install",
-            "command_output_summary",
-        ),
-        (
-            OutputSemanticKind::ContentExcerptSummary,
-            "package_manager",
-            serde_json::json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
-            "package_manager.smart_install",
-            "content_excerpt_summary",
-        ),
-    ];
+    let cases = [(
+        OutputSemanticKind::ContentExcerptSummary,
+        "package_manager",
+        serde_json::json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
+        "package_manager.smart_install",
+        "content_excerpt_summary",
+    )];
 
     for (semantic_kind, skill, args, expected_action, expected_contract) in cases {
         let policy = action_policy_for_output_contract(
@@ -280,131 +271,6 @@ fn action_policy_allows_http_observation_for_raw_command_output_contract() {
 }
 
 #[test]
-fn command_output_summary_contract_allows_run_cmd_and_model_language() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::CommandOutputSummary,
-            requires_content_evidence: true,
-            ..IntentOutputContract::default()
-        }),
-        "run_cmd",
-        &serde_json::json!({"command": "pwd"}),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "run_cmd");
-    assert_eq!(policy.contract_match, "command_output_summary");
-    assert_eq!(policy.required_evidence, vec!["command_output"]);
-    assert!(policy.final_answer_shape_kind.allows_model_language());
-}
-
-#[test]
-fn command_output_summary_allows_log_analyze_evidence() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::CommandOutputSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            locator_hint: "logs".to_string(),
-            ..IntentOutputContract::default()
-        }),
-        "log_analyze",
-        &serde_json::json!({
-            "action": "analyze",
-            "path": "logs",
-            "limit": 5,
-        }),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "log_analyze.analyze");
-    assert_eq!(policy.contract_match, "command_output_summary");
-    assert!(policy
-        .evidence_expression
-        .any_of
-        .contains(&"field_value".to_string()));
-}
-
-#[test]
-fn command_output_summary_allows_git_basic_state_observation() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::CommandOutputSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        }),
-        "git_basic",
-        &serde_json::json!({"action": "status"}),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "git_basic.status");
-    assert_eq!(policy.contract_match, "command_output_summary");
-    assert_eq!(policy.required_evidence, vec!["command_output"]);
-    assert!(policy.final_answer_shape_kind.allows_model_language());
-}
-
-#[test]
-fn command_output_summary_allows_supplemental_directory_inventory() {
-    let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::CommandOutputSummary,
-        requires_content_evidence: true,
-        locator_kind: OutputLocatorKind::Path,
-        locator_hint: "logs".to_string(),
-        ..IntentOutputContract::default()
-    };
-
-    let list_policy = action_policy_for_output_contract(
-        Some(&contract),
-        "fs_basic",
-        &serde_json::json!({
-            "action": "list_dir",
-            "path": "logs",
-            "files_only": true,
-        }),
-    )
-    .expect("list policy decision");
-    assert_eq!(list_policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(list_policy.action_key, "fs_basic.list_dir");
-    assert_eq!(list_policy.contract_match, "command_output_summary");
-
-    let find_policy = action_policy_for_output_contract(
-        Some(&contract),
-        "fs_basic",
-        &serde_json::json!({
-            "action": "find_entries",
-            "path": "logs",
-            "max_depth": 2,
-        }),
-    )
-    .expect("find policy decision");
-    assert_eq!(find_policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(find_policy.action_key, "fs_basic.find_entries");
-    assert_eq!(find_policy.contract_match, "command_output_summary");
-
-    let count_policy = action_policy_for_output_contract(
-        Some(&contract),
-        "fs_basic",
-        &serde_json::json!({
-            "action": "count_entries",
-            "path": "logs",
-        }),
-    )
-    .expect("count policy decision");
-    assert_eq!(count_policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(count_policy.action_key, "fs_basic.count_entries");
-    assert_eq!(count_policy.contract_match, "command_output_summary");
-    assert!(count_policy
-        .evidence_expression
-        .any_of
-        .contains(&"count".to_string()));
-}
-
-#[test]
 fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contract() {
     let contract = IntentOutputContract {
         semantic_kind: OutputSemanticKind::RawCommandOutput,
@@ -445,79 +311,6 @@ fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contrac
     assert_eq!(system_policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(system_policy.action_key, "fs_basic.read_text_range");
     assert_eq!(system_policy.contract_match, "raw_command_output");
-}
-
-#[test]
-fn command_output_summary_allows_structured_config_validation_observation() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::CommandOutputSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            locator_hint: "configs/config.toml".to_string(),
-            ..IntentOutputContract::default()
-        }),
-        "config_basic",
-        &serde_json::json!({
-            "action": "validate",
-            "path": "configs/config.toml",
-        }),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "config_basic.validate");
-    assert_eq!(policy.contract_match, "command_output_summary");
-}
-
-#[test]
-fn command_output_summary_allows_structured_config_field_observation() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::CommandOutputSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            locator_hint: "configs/config.toml".to_string(),
-            ..IntentOutputContract::default()
-        }),
-        "config_basic",
-        &serde_json::json!({
-            "action": "read_field",
-            "path": "configs/config.toml",
-            "field_path": "llm.selected_vendor",
-        }),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "config_basic.read_field");
-    assert_eq!(policy.contract_match, "command_output_summary");
-    assert!(policy
-        .evidence_expression
-        .any_of
-        .contains(&"field_value".to_string()));
-}
-
-#[test]
-fn command_output_summary_allows_task_control_get_observation() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::CommandOutputSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::None,
-            ..IntentOutputContract::default()
-        }),
-        "task_control",
-        &serde_json::json!({
-            "action": "get",
-            "task_id": "00000000-0000-4000-8000-000000000001",
-        }),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "task_control.get");
-    assert_eq!(policy.contract_match, "command_output_summary");
 }
 
 #[test]
@@ -631,27 +424,6 @@ fn contract_matrix_action_refs_have_registry_schemas() {
     missing.dedup();
 
     assert!(missing.is_empty(), "missing registry schemas: {missing:?}");
-}
-
-#[test]
-fn allowed_action_keeps_original_ref_without_preferred_replacement() {
-    let route = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::CommandOutputSummary,
-        ..IntentOutputContract::default()
-    };
-    let policy = action_policy_for_output_contract(
-        Some(&route),
-        "fs_basic",
-        &json!({"action":"stat_paths", "paths":["README.md"]}),
-    )
-    .expect("policy decision");
-
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.action_key, "fs_basic.stat_paths");
-    assert_eq!(policy.original_action_ref, "fs_basic.stat_paths");
-    assert_eq!(policy.replacement_action_ref, None);
-    assert_eq!(policy.contract_repair_source, "none");
-    assert_eq!(policy.preferred_replacement_reason_code, None);
 }
 
 #[test]
@@ -842,7 +614,7 @@ fn registry_action_index_contains_skill_level_and_action_level_refs() {
 #[test]
 fn matrix_generated_cases_cover_current_unique_contract_paths() {
     let matrix = load_workspace_matrix();
-    let cases = generated_contract_cases(&matrix, 54);
+    let cases = generated_contract_cases(&matrix, 51);
 
     let mut ids = BTreeSet::new();
     let mut semantic_counts: BTreeMap<&'static str, usize> = BTreeMap::new();
