@@ -248,18 +248,6 @@ failure_policy = "retry_with_alternatives"
 [contracts.document_heading.evidence_expression]
 all_of = ["content_excerpt", "path"]
 
-[contracts.web_page_summary]
-semantic_kind = "web_page_summary"
-operation = "summarize"
-target_object = "web"
-delivery_shape = "summary"
-locator_kinds = ["url"]
-allowed_actions = ["browser_web.open_extract", "http_basic"]
-preferred_actions = ["browser_web.open_extract"]
-required_evidence = ["content_excerpt"]
-final_answer_shape = "summary_grounded_in_excerpt"
-failure_policy = "retry_with_alternatives"
-
 [contracts.market_quote]
 semantic_kind = "market_quote"
 operation = "summarize"

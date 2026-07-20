@@ -27,7 +27,7 @@ SYNTHESIS_PROMPT = (
 
 # Baseline after introducing the generic envelope. These are ceilings, not
 # targets. Track C must drive them toward 0/0/<=15_000 as legacy cohorts leave.
-MAX_SEMANTIC_VARIANTS = 52
+MAX_SEMANTIC_VARIANTS = 51
 MAX_SEMANTIC_PRODUCTION_FILES = 83
 MAX_FINALIZER_PRODUCTION_MODULES = 76
 MAX_FINALIZER_PRODUCTION_LINES = 34_569

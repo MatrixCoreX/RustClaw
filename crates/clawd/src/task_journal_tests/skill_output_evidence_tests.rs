@@ -1399,14 +1399,18 @@ fn service_status_http_basic_json_wrapper_extracts_embedded_body_status_fields()
 }
 
 #[test]
-fn web_page_summary_http_basic_json_wrapper_body_counts_as_content_excerpt_evidence() {
+fn http_basic_json_wrapper_body_counts_as_generic_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-web-summary-http-basic-json",
         "ask",
         "summarize local health endpoint",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WebPageSummary);
-    route.requires_content_evidence = true;
+    let route = crate::IntentOutputContract {
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Url,
+        locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
+        ..crate::IntentOutputContract::default()
+    };
     journal.record_output_contract(&route.clone());
     let body = json!({
         "ok": true,

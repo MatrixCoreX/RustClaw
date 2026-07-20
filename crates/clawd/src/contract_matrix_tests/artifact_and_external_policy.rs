@@ -607,30 +607,6 @@ fn content_excerpt_summary_allows_supplemental_directory_inventory() {
 }
 
 #[test]
-fn web_page_summary_allows_browser_open_extract_for_url() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::WebPageSummary,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Url,
-            locator_hint: "https://example.com".to_string(),
-            response_shape: OutputResponseShape::OneSentence,
-            ..IntentOutputContract::default()
-        }),
-        "browser_web",
-        &serde_json::json!({
-            "action": "open_extract",
-            "url": "https://example.com"
-        }),
-    )
-    .expect("policy decision");
-
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "browser_web.open_extract");
-    assert_eq!(policy.contract_match, "web_page_summary");
-}
-
-#[test]
 fn market_quote_allows_stock_quote_without_locator() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

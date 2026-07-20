@@ -56,40 +56,6 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
 }
 
 #[test]
-fn direct_answer_defers_http_basic_web_page_summary_to_observed_synthesis() {
-    let mut loop_state = LoopState::new(2);
-    let body =
-        "status=200\n{\"ok\":true,\"data\":{\"version\":\"0.1.7\",\"worker_state\":\"running\"}}\n";
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "http_basic", body));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Url,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::WebPageSummary,
-            locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
-    );
-    assert_eq!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
-    );
-}
-
-#[test]
 fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
     let mut loop_state = LoopState::new(2);
     let body = "status=200\n{\"ok\":true,\"data\":{\"version\":\"0.1.7\",\"worker_state\":\"running\",\"queue_length\":0,\"bound_channel_count\":3}}\n";
