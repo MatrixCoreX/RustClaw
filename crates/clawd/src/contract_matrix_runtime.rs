@@ -1,8 +1,8 @@
 use super::MatchedContract;
 use super::{
     ActionPolicyDecision, ActionRef, ContractMatrix, EvidenceExpression, FinalAnswerShape,
-    FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor, OutputResponseShape,
-    OutputSemanticKind, BUNDLED_CONTRACT_MATRIX,
+    FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor, OutputSemanticKind,
+    BUNDLED_CONTRACT_MATRIX,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -146,23 +146,9 @@ pub(crate) fn required_evidence_for_output_contract(
 pub(crate) fn final_answer_shape_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<FinalAnswerShape> {
-    if let Some(shape) = final_answer_shape_override_for_output_contract(output_contract) {
-        return Some(shape);
-    }
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     matched.final_answer_shape_kind()
-}
-
-fn final_answer_shape_override_for_output_contract(
-    output_contract: &IntentOutputContract,
-) -> Option<FinalAnswerShape> {
-    if output_contract.semantic_kind_is(OutputSemanticKind::HiddenEntriesCheck)
-        && output_contract.response_shape == OutputResponseShape::Scalar
-    {
-        return Some(FinalAnswerShape::Scalar);
-    }
-    None
 }
 
 pub(crate) fn runtime_contract_snapshot_for_output_contract(
@@ -214,8 +200,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
 ) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
-    let final_answer_shape_kind = final_answer_shape_override_for_output_contract(output_contract)
-        .or_else(|| matched.final_answer_shape_kind());
+    let final_answer_shape_kind = matched.final_answer_shape_kind();
     let observation_extractors = matched.observation_extractors();
     Some(json!({
         "evidence_policy_version": matrix.matrix_version,
@@ -268,8 +253,7 @@ pub(crate) fn action_trace_for_output_contract(
     let action = ActionRef::parse(action_ref)?;
     let action_key = action.as_key();
     let observation_extractor = matched.observation_extractor_for_source(&action_key);
-    let final_answer_shape_kind = final_answer_shape_override_for_output_contract(output_contract)
-        .or_else(|| matched.final_answer_shape_kind());
+    let final_answer_shape_kind = matched.final_answer_shape_kind();
     Some(json!({
         "schema_version": 1,
         "action_ref": action_key,

@@ -637,32 +637,3 @@ fn direct_scalar_path_lists_inventory_dir_candidates_without_choosing_first() {
         Some("/tmp/stem_multi/abcd.cpp\n/tmp/stem_multi/abcd.txt")
     );
 }
-
-#[test]
-fn direct_scalar_uses_inventory_dir_hidden_count_for_hidden_entries_contract() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"inventory_dir","path":".","resolved_path":"/tmp/workspace","include_hidden":true,"names_only":true,"names":[".git",".env","README.md"],"counts":{"total":3,"hidden":2}}"#,
-        ));
-    let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::HiddenEntriesCheck,
-            locator_hint: ".".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
-    let agent_run_context = AgentRunContext {
-        output_contract: Some(route_result.clone()),
-        ..AgentRunContext::default()
-    };
-    assert_eq!(
-        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("2")
-    );
-}

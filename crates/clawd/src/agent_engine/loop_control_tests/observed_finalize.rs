@@ -509,38 +509,6 @@ fn unscoped_workspace_evidence_drafting_can_stop_after_doc_read() {
 }
 
 #[test]
-fn hidden_entries_scalar_output_can_stop_before_synthesis_followup() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "list_dir",
-        ".git\nREADME.md\n.env\nsrc\n",
-    ));
-    let mut route = route_result(OutputResponseShape::Scalar);
-    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
-    route.locator_hint = ".".to_string();
-    let actions = vec![
-        AgentAction::CallSkill {
-            skill: "list_dir".to_string(),
-            args: json!({"path":"."}),
-        },
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["last_output".to_string()],
-        },
-    ];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            output_contract: Some(route.clone()),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
 fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;

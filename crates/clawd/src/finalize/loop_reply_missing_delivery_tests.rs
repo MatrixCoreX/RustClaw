@@ -567,51 +567,6 @@ async fn observed_execution_without_delivery_uses_matrix_grouped_name_answer() {
     );
 }
 
-#[tokio::test]
-async fn observed_execution_without_delivery_uses_matrix_hidden_entries_answer() {
-    let state = test_state();
-    let task = claimed_task("task-matrix-hidden-no-delivery");
-    let mut route = free_route_result();
-    route.requires_content_evidence = true;
-    route.response_shape = crate::OutputResponseShape::Strict;
-    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
-    let ctx = crate::agent_engine::AgentRunContext {
-        output_contract: Some(route.clone()),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"inventory_dir","counts":{"dirs":1,"files":2,"hidden":2,"total":3},"entries":[{"hidden":true,"kind":"dir","name":".git","path":".git"},{"hidden":true,"kind":"file","name":".gitignore","path":".gitignore"},{"hidden":false,"kind":"file","name":"README.md","path":"README.md"}],"include_hidden":true,"names":[".git",".gitignore","README.md"],"path":"."}"#,
-    ));
-
-    let reply = observed_execution_without_publishable_delivery_reply(
-        &state,
-        &task,
-        "check hidden entries",
-        &loop_state,
-        Some(&ctx),
-        None,
-        "no publishable final answer was produced",
-    )
-    .await
-    .expect("observed execution reply");
-
-    assert!(!reply.should_fail_task);
-    assert_eq!(reply.text, ".git\n.gitignore");
-    assert_eq!(reply.messages, vec![reply.text.clone()]);
-    assert_eq!(
-        reply
-            .task_journal
-            .as_ref()
-            .and_then(|journal| journal.final_status),
-        Some(crate::task_journal::TaskJournalFinalStatus::Success)
-    );
-}
-
 #[test]
 fn exact_file_names_contract_prefers_observed_list_over_synthesized_sentence() {
     let state = test_state();

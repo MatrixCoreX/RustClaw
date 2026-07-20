@@ -703,18 +703,6 @@ fn planner_semantic_kinds_directly_match_their_contracts() {
 }
 
 #[test]
-fn final_shape_honors_scalar_hidden_entries() {
-    assert_eq!(
-        final_answer_shape_for_output_contract(&IntentOutputContract {
-            response_shape: OutputResponseShape::Scalar,
-            semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
-            ..IntentOutputContract::default()
-        }),
-        Some(FinalAnswerShape::Scalar)
-    );
-}
-
-#[test]
 fn generic_delivery_snapshot_defaults_to_file_artifact() {
     let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
         semantic_kind: OutputSemanticKind::None,

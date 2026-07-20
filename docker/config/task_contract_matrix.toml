@@ -149,17 +149,6 @@ required_evidence = ["field_value"]
 final_answer_shape = "status_with_source"
 failure_policy = "retry_with_alternatives"
 
-[contracts.hidden_entries_check]
-semantic_kind = "hidden_entries_check"
-operation = "inspect"
-target_object = "directory"
-delivery_shape = "list"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries"]
-preferred_actions = ["fs_basic.list_dir"]
-required_evidence = ["candidates"]
-final_answer_shape = "list_or_empty_statement"
-failure_policy = "retry_with_alternatives"
-
 [contracts.file_names]
 semantic_kind = "file_names"
 operation = "list"

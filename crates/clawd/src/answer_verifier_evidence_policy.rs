@@ -77,10 +77,6 @@ fn route_contract_marker_is_service_status(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ServiceStatus)
 }
 
-fn route_contract_marker_is_hidden_entries_check(route: &AnswerContract) -> bool {
-    route_contract_marker_is(route, crate::OutputSemanticKind::HiddenEntriesCheck)
-}
-
 fn route_contract_marker_is_directory_names(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
 }
@@ -755,92 +751,12 @@ pub(super) fn observed_strict_list_items(
         let Some(output) = step.output_excerpt.as_deref() else {
             continue;
         };
-        if route_contract_marker_is_hidden_entries_check(route) {
-            collect_observed_hidden_entries_from_output(output, &mut items);
-            continue;
-        }
         let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
             continue;
         };
         collect_observed_strict_list_items_from_value(&value, &mut items);
     }
     items.into_iter().collect()
-}
-
-pub(super) fn collect_observed_hidden_entries_from_output(
-    output: &str,
-    items: &mut BTreeSet<String>,
-) {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) {
-        collect_observed_hidden_entries_from_value(&value, items);
-        return;
-    }
-    for line in output.lines() {
-        if let Some(entry) = observed_hidden_entry_name(line) {
-            push_observed_list_item(&entry, items);
-        }
-    }
-}
-
-pub(super) fn collect_observed_hidden_entries_from_value(
-    value: &serde_json::Value,
-    items: &mut BTreeSet<String>,
-) {
-    if let Some(entries) = value.get("entries").and_then(|value| value.as_array()) {
-        for entry in entries {
-            let Some(map) = entry.as_object() else {
-                continue;
-            };
-            if !map
-                .get("hidden")
-                .and_then(|value| value.as_bool())
-                .unwrap_or_else(|| {
-                    map.get("name")
-                        .or_else(|| map.get("path"))
-                        .and_then(|value| value.as_str())
-                        .and_then(observed_hidden_entry_name)
-                        .is_some()
-                })
-            {
-                continue;
-            }
-            for key in ["name", "path", "resolved_path"] {
-                if let Some(entry) = map
-                    .get(key)
-                    .and_then(|value| value.as_str())
-                    .and_then(observed_hidden_entry_name)
-                {
-                    push_observed_list_item(&entry, items);
-                    break;
-                }
-            }
-        }
-    }
-    for key in ["names", "paths", "files", "dirs", "directories", "results"] {
-        if let Some(values) = value.get(key).and_then(|value| value.as_array()) {
-            for item in values {
-                if let Some(entry) = item.as_str().and_then(observed_hidden_entry_name) {
-                    push_observed_list_item(&entry, items);
-                } else {
-                    collect_observed_hidden_entries_from_value(item, items);
-                }
-            }
-        }
-    }
-}
-
-pub(super) fn observed_hidden_entry_name(raw: &str) -> Option<String> {
-    let value = raw.trim();
-    if value.is_empty() || value == "." || value == ".." {
-        return None;
-    }
-    let name = std::path::Path::new(value)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .unwrap_or(value);
-    (name.starts_with('.') && name != "." && name != "..").then(|| value.to_string())
 }
 
 pub(super) fn collect_observed_strict_list_items_from_value(

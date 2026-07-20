@@ -262,17 +262,3 @@ fn reject_scalar_count_when_no_integer_at_all() {
     );
     assert!(matches!(v, OutputContractVerdict::Reject { .. }));
 }
-
-#[test]
-fn hidden_entries_check_no_longer_uses_yes_no_or_hidden_word_dictionary() {
-    let contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::OneSentence,
-        semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
-        ..IntentOutputContract::default()
-    };
-    assert_eq!(
-        verify_output_contract(&contract, "看起来一切正常", "?"),
-        OutputContractVerdict::Pass
-    );
-}

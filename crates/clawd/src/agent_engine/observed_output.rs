@@ -34,15 +34,13 @@ use output_listing::route_prefers_direct_observed_answer_for_scalar;
 pub(crate) use output_listing::scalar_route_prefers_structured_observed_answer;
 use output_listing::{
     canonical_existing_path, count_answer_from_latest_fs_search, count_answer_from_latest_listing,
-    current_turn_request_text, hidden_entries_direct_answer, is_user_hidden_entry,
-    latest_hidden_entries, latest_successful_list_dir_answer_candidate,
+    current_turn_request_text, latest_successful_list_dir_answer_candidate,
     looks_like_shell_long_listing_line, normalized_listing_text,
     recent_file_path_candidate_for_scalar_path, resolve_listing_entry_full_path,
     route_allows_path_batch_scalar_path_observed_answer, route_allows_raw_listing_direct_answer,
     route_allows_scalar_read_range_direct_answer,
     route_allows_strict_plain_observation_passthrough, route_prefers_plain_fs_search_paths,
-    route_requests_hidden_entries_check, route_requests_scalar_count,
-    route_requests_scalar_existence, route_requests_scalar_path_only,
+    route_requests_scalar_count, route_requests_scalar_existence, route_requests_scalar_path_only,
     route_scalar_has_plain_path_terminal_respond, strict_plain_observation_passthrough_candidate,
 };
 
@@ -272,9 +270,6 @@ fn evidence_policy_checked_direct_candidate(
     if latest_observation_lacks_required_content_evidence(route, loop_state) {
         return None;
     }
-    if hidden_entries_direct_candidate_satisfies_contract(route, loop_state, &answer) {
-        return Some(answer);
-    }
     if system_basic_scalar_path_candidate_satisfies_contract(route, loop_state, &answer) {
         return Some(answer);
     }
@@ -290,61 +285,10 @@ fn evidence_policy_checked_direct_candidate(
     {
         return Some(answer);
     }
-    if hidden_entries_empty_direct_candidate_satisfies_contract(route, loop_state, &answer) {
-        return Some(answer);
-    }
     if requires_evidence_policy_grounding {
         return None;
     }
     Some(answer)
-}
-
-fn hidden_entries_empty_direct_candidate_satisfies_contract(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-    answer: &str,
-) -> bool {
-    if !output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::HiddenEntriesCheck,
-    ) || route.response_shape != crate::OutputResponseShape::Strict
-        || answer.trim().is_empty()
-        || crate::finalize::looks_like_planner_artifact(answer)
-        || crate::finalize::looks_like_internal_trace_artifact(answer)
-    {
-        return false;
-    }
-    latest_hidden_entries(loop_state).is_some_and(|hidden_entries| hidden_entries.is_empty())
-}
-
-fn hidden_entries_direct_candidate_satisfies_contract(
-    route: &crate::IntentOutputContract,
-    loop_state: &LoopState,
-    answer: &str,
-) -> bool {
-    if !output_route_policy::route_contract_marker_is(
-        route,
-        crate::OutputSemanticKind::HiddenEntriesCheck,
-    ) || route.response_shape != crate::OutputResponseShape::Strict
-        || crate::finalize::looks_like_planner_artifact(answer)
-        || crate::finalize::looks_like_internal_trace_artifact(answer)
-    {
-        return false;
-    }
-    let Some(hidden_entries) = latest_hidden_entries(loop_state) else {
-        return false;
-    };
-    let expected = hidden_entries
-        .into_iter()
-        .take(hidden_entries_contract_limit(route))
-        .collect::<Vec<_>>();
-    let actual = answer
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-    actual == expected
 }
 
 fn system_basic_scalar_path_candidate_satisfies_contract(
@@ -376,17 +320,6 @@ fn system_basic_scalar_path_candidate_satisfies_contract(
                 .and_then(|value| system_basic_info_scalar_path_candidate(&value))
                 .is_some_and(|candidate| candidate.trim() == answer)
     })
-}
-
-fn hidden_entries_contract_limit(route: &crate::IntentOutputContract) -> usize {
-    route
-        .selection
-        .list_selector
-        .limit
-        .and_then(|value| usize::try_from(value).ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(8)
-        .min(8)
 }
 
 fn route_requires_evidence_policy_grounded_direct_candidate(

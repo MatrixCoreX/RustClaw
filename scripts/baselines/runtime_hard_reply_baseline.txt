@@ -135,14 +135,9 @@ crates/clawd/src/agent_engine/loop_control_post_write_evidence_guard.rs	collect 
 crates/clawd/src/agent_engine/observed_output.rs	LLM 过保守错判为不可发	// 保留"LLM 过保守错判为不可发"的救回链路。
 crates/clawd/src/agent_engine/observed_output.rs	observed answer fallback LLM failed: {err}	.map_err(|err| format!("observed answer fallback LLM failed: {err}"))?;
 crates/clawd/src/agent_engine/observed_output.rs	observed answer fallback prompt missing: {err}	return Err(format!("observed answer fallback prompt missing: {err}"));
-crates/clawd/src/agent_engine/observed_output_archive.rs	valid zip listing entry regex	.expect("valid zip listing entry regex")
-crates/clawd/src/agent_engine/observed_output_direct_scalar.rs	valid git oneline regex	regex::Regex::new(r"^[0-9a-fA-F]{7,40}\\s+(.+)$").expect("valid git oneline regex")
-crates/clawd/src/agent_engine/observed_output_direct_scalar.rs	valid git oneline regex	regex::Regex::new(r"^[0-9a-fA-F]{7,40}\\s+.+$").expect("valid git oneline regex")
 crates/clawd/src/agent_engine/observed_output_entries.rs	### execution_failed_step_guard\n{}	(failed_count > 0).then(|| format!("### execution_failed_step_guard\\n{}", lines.join("\\n")))
-crates/clawd/src/agent_engine/observed_output_entries.rs	### git_repository_state_facts\n{}	"### git_repository_state_facts\\n{}",
 crates/clawd/src/agent_engine/observed_output_entries.rs	### prior_turn_execution_context\n{}	"### prior_turn_execution_context\\n{}",
 crates/clawd/src/agent_engine/observed_output_entries.rs	### prior_turn_observed_output\n{}	"### prior_turn_observed_output\\n{}",
-crates/clawd/src/agent_engine/observed_output_entries.rs	### route_contract_facts\nresolved_target_path: {resolved_path}\npath_rule: use resolved_target_path as the target file path; do not infer the target path from file content fields such as WorkingDirectory.	"### route_contract_facts\\nresolved_target_path: {resolved_path}\\npath_rule: use resolved_target_path as the target file path; do not infer the target path from file content fields such as WorkingDirectory."
 crates/clawd/src/agent_engine/observed_output_entries.rs	Most recent generated output:\n	const MARKER: &str = "Most recent generated output:\\n";
 crates/clawd/src/agent_engine/observed_output_entries.rs	{}:command:{command}:kind:{}:exit:{exit_code:?}	"{}:command:{command}:kind:{}:exit:{exit_code:?}",
 crates/clawd/src/agent_engine/observed_output_process_service.rs	no matching processes for filter:	.find_map(|line| line.strip_prefix("no matching processes for filter:"))
@@ -192,6 +187,7 @@ crates/clawd/src/bootstrap/prompts.rs	active execution anchor projection (task_c
 crates/clawd/src/bootstrap/prompts.rs	active task context projection (task_context_builder)	"active task context projection (task_context_builder)",
 crates/clawd/src/bootstrap/prompts.rs	agent_tool_spec (agent_engine)	"agent_tool_spec (agent_engine)",
 crates/clawd/src/bootstrap/prompts.rs	answer_verifier (finalize.answer)	"answer_verifier (finalize.answer)",
+crates/clawd/src/bootstrap/prompts.rs	capability_result_synthesis (agent loop)	"capability_result_synthesis (agent loop)",
 crates/clawd/src/bootstrap/prompts.rs	chat_response (ask_flow)	"chat_response (ask_flow)",
 crates/clawd/src/bootstrap/prompts.rs	delivery_text_classifier (semantic_judge.finalize)	"delivery_text_classifier (semantic_judge.finalize)",
 crates/clawd/src/bootstrap/prompts.rs	long_term_summary (memory.service)	"long_term_summary (memory.service)",
@@ -647,7 +643,6 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	no release asset found for p
 crates/clawd/src/http/ui_routes/workspace_update.rs	set -euo pipefail; if [[ -f 	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
 crates/clawd/src/http/ui_routes/workspace_update.rs	workspace update canceled by user	guard.error = Some("workspace update canceled by user".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {timeout_seconds}s	.map_err(|_| format!("{program} timed out after {timeout_seconds}s"))?
-crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {timeout_seconds}s	return Err(format!("{program} timed out after {timeout_seconds}s"));
 crates/clawd/src/llm_gateway.rs	HTTP 请求总量	/// （流程异常放大），不是挡"HTTP 请求总量"（那是 retry/circuit-breaker 的职责）。
 crates/clawd/src/llm_gateway.rs	No available LLM provider configured	return Err("No available LLM provider configured".to_string());
 crates/clawd/src/llm_gateway.rs	Provider override not found in config: {}	warn!("Provider override not found in config: {}", name);
@@ -743,7 +738,6 @@ crates/clawd/src/output_contract_verifier.rs	directory_names: candidate contains
 crates/clawd/src/output_contract_verifier.rs	directory_names: candidate mostly contains file-like entries	"directory_names: candidate mostly contains file-like entries",
 crates/clawd/src/output_contract_verifier.rs	directory_names: empty list candidate	"directory_names: empty list candidate",
 crates/clawd/src/output_contract_verifier.rs	directory_names: locator candidate is file-like	"directory_names: locator candidate is file-like",
-crates/clawd/src/output_contract_verifier.rs	hidden_entries_check: empty candidate	"hidden_entries_check: empty candidate",
 crates/clawd/src/output_contract_verifier.rs	scalar_count: candidate contains no integer literal	"scalar_count: candidate contains no integer literal",
 crates/clawd/src/output_contract_verifier.rs	scalar_count: empty candidate	"scalar_count: empty candidate",
 crates/clawd/src/output_contract_verifier.rs	scalar_count: extracted only unique integer from candidate	"scalar_count: extracted only unique integer from candidate",
@@ -860,19 +854,18 @@ crates/clawd/src/repo/auth_webd.rs	invalid stored password hash: {e}	.map_err(|e
 crates/clawd/src/repo/auth_webd.rs	user_key does not exist or is disabled in auth_keys	anyhow::bail!("user_key does not exist or is disabled in auth_keys");
 crates/clawd/src/repo/auth_webd.rs	username already assigned to another key	anyhow::bail!("username already assigned to another key");
 crates/clawd/src/repo/auth_webd.rs	username and user_key required	anyhow::bail!("username and user_key required");
+crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0	"ALTER TABLE task_mutation_ledger ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0",
+crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''	"ALTER TABLE task_mutation_ledger ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''",
 crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT	"ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT",
 crates/clawd/src/repo/task_mutation_ledger.rs	parse task mutation outcome projection	.context("parse task mutation outcome projection")
 crates/clawd/src/repo/task_mutation_ledger.rs	serialize task mutation outcome projection	.context("serialize task mutation outcome projection")?;
 crates/clawd/src/repo/task_mutation_ledger.rs	task mutation lease was not completable	Err(anyhow!("task mutation lease was not completable"))
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let db = pool.get().context("task mutation ledger db pool")?;
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let db = pool.get().context("task mutation ledger db pool")?;
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let db = pool.get().context("task mutation ledger db pool")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let mut db = pool.get().context("task mutation ledger db pool")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let mut db = pool.get().context("task mutation ledger db pool")?;
 crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let mut db = pool.get().context("task mutation ledger db pool")?;
 crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger insert was not observable	.ok_or_else(|| anyhow!("task mutation ledger insert was not observable"))?;
 crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger missing {field}	return Err(anyhow!("task mutation ledger missing {field}"));
 crates/clawd/src/repo/task_mutation_ledger.rs	unsupported task mutation ledger status: {status}	status => Err(anyhow!("unsupported task mutation ledger status: {status}")),
-crates/clawd/src/runtime/policy.rs	invalid tools pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')	"invalid tools pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
-crates/clawd/src/runtime/policy.rs	invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')	"invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
 crates/clawd/src/runtime/policy.rs	tools.by_provider contains empty key	return Err("tools.by_provider contains empty key".to_string());
 crates/clawd/src/runtime/state.rs	INSERT INTO tasks for fixture-replay e2e seed	.expect("INSERT INTO tasks for fixture-replay e2e seed");
 crates/clawd/src/runtime/state.rs	Step 4.b 前置清单	/// "Step 4.b 前置清单"。
@@ -1003,6 +996,7 @@ crates/clawd/src/task_context_builder/compaction.rs	### COMPACTED_HISTORY_CONTEX
 crates/clawd/src/task_event_transport.rs	invalid task event kind	let event_kind = normalize_machine_token(event_kind).context("invalid task event kind")?;
 crates/clawd/src/task_event_transport.rs	task event artifact db pool	let db = state.core.db.get().context("task event artifact db pool")?;
 crates/clawd/src/task_event_transport.rs	task event artifact db pool	let db = state.core.db.get().context("task event artifact db pool")?;
+crates/clawd/src/task_event_transport.rs	task event claim db pool	let db = state.core.db.get().context("task event claim db pool")?;
 crates/clawd/src/task_event_transport.rs	task event db pool	let db = state.core.db.get().context("task event db pool")?;
 crates/clawd/src/task_event_transport.rs	task event db pool	let mut db = state.core.db.get().context("task event db pool")?;
 crates/clawd/src/task_journal_event_stream.rs	coding_checkpoint:verification_command:{}	let checkpoint_ref = format!("coding_checkpoint:verification_command:{}", index + 1);
