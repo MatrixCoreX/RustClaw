@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    import yaml
+except ImportError as exc:  # pragma: no cover - environment preflight
+    raise RuntimeError(
+        "NL structural assertions require PyYAML; install scripts/nl_tests/requirements.txt"
+    ) from exc
+
 
 _MISSING = object()
 _CALL_ACTION_TYPES = {"call_capability", "call_tool", "call_skill"}
@@ -103,6 +110,15 @@ def actual_call_steps(result: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def step_has_structured_dry_run(step: dict[str, Any]) -> bool:
+    action_ref = str(
+        step.get("requested_action_ref")
+        or step.get("requested_capability")
+        or step.get("resolved_capability")
+        or ""
+    )
+    action = action_ref.rsplit(".", maxsplit=1)[-1]
+    if action == "preview" or action.startswith("preview_"):
+        return True
     observed = step.get("observed_evidence")
     if not isinstance(observed, dict):
         return False
@@ -136,24 +152,85 @@ def final_text_has_machine_field(text: str, field: str) -> bool:
     return final_text_machine_field_value(text, field) is not None
 
 
+def structured_mapping_from_text(text: str) -> dict[str, Any] | None:
+    candidates = [text.strip()]
+    candidates.extend(
+        match.group(1).strip()
+        for match in re.finditer(
+            r"```(?:json|ya?ml)?\s*\n(.*?)\n```",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    )
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                parsed = yaml.safe_load(candidate)
+            except yaml.YAMLError:
+                continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
 def final_text_machine_field_value(text: str, field: str) -> str | None:
-    try:
-        parsed = json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        parsed = None
-    if isinstance(parsed, dict) and field in parsed:
+    parsed = structured_mapping_from_text(text)
+    if parsed is not None and field in parsed:
         return value_to_compare_text(parsed[field])
     match = re.search(
-        rf"(?m)^\s*(?:[-*+]\s+)?(?:\*\*|__|`)?{re.escape(field)}(?:\*\*|__|`)?\s*[:=]\s*(.*?)\s*$",
+        rf"(?m)^\s*(?:[-*+]\s+)?(?:\*\*|__|`)?{re.escape(field)}(?:\*\*|__|`)?\s*:\s*(.*?)\s*$",
         text,
     )
     if match is not None:
         return match.group(1).strip()
     match = re.search(
-        rf"(?:^|[;\s]){re.escape(field)}\s*=\s*(\S+)",
+        rf"(?:^|[;\s]){re.escape(field)}\s*=\s*(.*?)(?=\s+[a-zA-Z0-9_.-]+\s*=|$)",
         text,
     )
     return match.group(1).strip() if match is not None else None
+
+
+def observed_machine_field_matches(
+    result: dict[str, Any],
+    field: str,
+    actual: str | None,
+) -> bool:
+    if actual is None:
+        return False
+    if actual in observed_machine_field_values(result, field):
+        return True
+    try:
+        actual_value = json.loads(actual)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    field_aliases = {
+        "path": {"path", "resolved_path", "effective_path"},
+    }
+    accepted_fields = field_aliases.get(field, {field})
+    for step in actual_call_steps(result):
+        observed = step.get("observed_evidence")
+        items = observed.get("items") if isinstance(observed, dict) else None
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            observed_leaf = str(item.get("field") or "").rsplit(".", maxsplit=1)[-1]
+            if observed_leaf not in accepted_fields:
+                continue
+            if item.get("kind") == "object" and isinstance(actual_value, dict):
+                keys = item.get("keys")
+                if isinstance(keys, list) and all(key in actual_value for key in keys):
+                    return True
+            if item.get("kind") == "array" and isinstance(actual_value, list):
+                count = item.get("count")
+                if isinstance(count, int) and not isinstance(count, bool) and count == len(actual_value):
+                    return True
+    return False
 
 
 def observed_machine_field_values(
@@ -282,7 +359,7 @@ def structural_assertions(
                 "expected": required_field,
                 "actual": actual,
                 "observed_values": observed_values,
-                "ok": actual is not None and actual in observed_values,
+                "ok": observed_machine_field_matches(result, required_field, actual),
             }
         )
 

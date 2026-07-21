@@ -363,6 +363,35 @@ fn execute_generate(
             .clamp(5, 900);
         let expires_at = (unix_ts() as i64).saturating_add(max_poll_seconds as i64);
         let dry_run_job_id = provider_video_job_id(provider_name, "dry_run");
+        let async_contract = json!({
+            "job_id": dry_run_job_id,
+            "provider": provider_name,
+            "status": "accepted",
+            "poll_after_seconds": poll_after_seconds,
+            "poll_after_ms": poll_after_seconds.saturating_mul(1_000),
+            "expires_at": expires_at,
+            "cancel_ref": dry_run_job_id,
+            "cancel_token": dry_run_job_id,
+            "result_ref": dry_run_job_id,
+            "message_key": "clawd.task.async_job_pending",
+            "retryable": true,
+            "poll_adapter": {
+                "kind": "media_job_poll",
+                "skill_name": "video_generate",
+                "args": {
+                    "action": "poll",
+                    "task_id": "dry_run",
+                    "job_id": dry_run_job_id,
+                    "vendor": provider_name,
+                    "model": model,
+                    "download": true,
+                    "output_path": output,
+                    "poll_after_seconds": poll_after_seconds,
+                    "expires_at": expires_at,
+                    "dry_run": true
+                }
+            }
+        });
         return Ok((
             "VIDEO_GENERATE_DRY_RUN".to_string(),
             json!({
@@ -377,35 +406,8 @@ fn execute_generate(
                 "output_path": output,
                 "outputs": [],
                 "planned_outputs": [{"type":"video_file","path": output}],
-                "pending_async_job_contract": {
-                    "job_id": dry_run_job_id,
-                    "provider": provider_name,
-                    "status": "accepted",
-                    "poll_after_seconds": poll_after_seconds,
-                    "poll_after_ms": poll_after_seconds.saturating_mul(1_000),
-                    "expires_at": expires_at,
-                    "cancel_ref": dry_run_job_id,
-                    "cancel_token": dry_run_job_id,
-                    "result_ref": dry_run_job_id,
-                    "message_key": "clawd.task.async_job_pending",
-                    "retryable": true,
-                    "poll_adapter": {
-                        "kind": "media_job_poll",
-                        "skill_name": "video_generate",
-                        "args": {
-                            "action": "poll",
-                            "task_id": "dry_run",
-                            "job_id": dry_run_job_id,
-                            "vendor": provider_name,
-                            "model": model,
-                            "download": true,
-                            "output_path": output,
-                            "poll_after_seconds": poll_after_seconds,
-                            "expires_at": expires_at,
-                            "dry_run": true
-                        }
-                    }
-                },
+                "pending_async_job_contract": async_contract,
+                "async_contract": async_contract,
             }),
         ));
     }

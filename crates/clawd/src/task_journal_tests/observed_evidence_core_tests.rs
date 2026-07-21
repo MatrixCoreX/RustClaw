@@ -108,6 +108,48 @@ fn trace_json_includes_redacted_observed_evidence_for_json_output() {
 }
 
 #[test]
+fn large_async_contract_does_not_starve_common_machine_fields() {
+    let nested_args = (0..32)
+        .map(|index| (format!("field_{index}"), json!(index)))
+        .collect::<serde_json::Map<_, _>>();
+    let observed = observed_evidence_from_output(Some(
+        &json!({
+            "text": "MEDIA_DRY_RUN",
+            "extra": {
+                "async_contract": {
+                    "poll_adapter": {"args": nested_args, "kind": "media_job_poll"},
+                    "status": "accepted"
+                },
+                "dry_run": true,
+                "provider": "fixture-provider",
+                "model": "fixture-model",
+                "duration": 10,
+                "planned_outputs": [{"type": "video_file", "path": "out.mp4"}]
+            }
+        })
+        .to_string(),
+    ))
+    .expect("structured evidence");
+    let fields = observed["items"]
+        .as_array()
+        .expect("evidence items")
+        .iter()
+        .filter_map(|item| item["field"].as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for field in [
+        "extra.dry_run",
+        "extra.provider",
+        "extra.model",
+        "extra.duration",
+        "extra.planned_outputs",
+        "extra.async_contract",
+    ] {
+        assert!(fields.contains(field), "missing {field}: {fields:?}");
+    }
+}
+
+#[test]
 fn multiline_excerpt_sampling_keeps_diagnostic_severity_lines() {
     let mut journal = TaskJournal::for_task("task-log-evidence", "ask", "分析日志");
     let log_excerpt = [

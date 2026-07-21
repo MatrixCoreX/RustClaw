@@ -66,6 +66,7 @@ fn dry_run_returns_request_payload_without_key() {
         extra["pending_async_job_contract"]["job_id"]
     );
     assert_eq!(extra["pending_async_job_contract"]["retryable"], true);
+    assert_eq!(extra["async_contract"], extra["pending_async_job_contract"]);
     assert_eq!(
         extra["pending_async_job_contract"]["poll_adapter"]["skill_name"],
         "video_generate"

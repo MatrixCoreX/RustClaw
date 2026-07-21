@@ -400,6 +400,15 @@ fn build_dry_run_response(
     job_id: &str,
 ) -> (String, Value) {
     let saved_path = output_path.to_string_lossy().to_string();
+    let async_contract = audio_pending_async_job_contract(
+        provider,
+        model,
+        job_id,
+        "dry_run",
+        &saved_path,
+        poll_after_seconds,
+        expires_at,
+    );
     (
         "AUDIO_SYNTHESIZE_DRY_RUN".to_string(),
         json!({
@@ -412,15 +421,8 @@ fn build_dry_run_response(
             "output_path": saved_path,
             "outputs": [],
             "planned_outputs": [{"type":"audio_file","path": saved_path}],
-            "pending_async_job_contract": audio_pending_async_job_contract(
-                provider,
-                model,
-                job_id,
-                "dry_run",
-                &saved_path,
-                poll_after_seconds,
-                expires_at,
-            ),
+            "pending_async_job_contract": async_contract,
+            "async_contract": async_contract,
             "request": {
                 "input_chars": input.chars().count()
             },

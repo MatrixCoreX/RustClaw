@@ -72,6 +72,7 @@
 - `planned_outputs`: planned file outputs for dry-run validation responses.
 - `dry_run`: present and true only for dry runs.
 - `pending_async_job_contract`: dry-run-only preview of the machine fields a live `generate` call will place in `pending_async_job`; it is intentionally not named `pending_async_job` so dry-run responses are not treated as real background work.
+- `async_contract`: stable alias of the same dry-run async job contract for planner-requested response fields.
 - `pending_async_job`: present when `generate.wait_for_completion` is omitted or false; contains `job_id`, `provider`, `status`, `poll_after_seconds`, `poll_after_ms`, `expires_at`, `cancel_ref`, `cancel_token`, `result_ref`, `message_key`, `retryable`, and `poll_adapter`.
 - `async_poll_adapter_result`: present for `poll`; contains `job_id`, `result_ref`, `status=accepted|running|succeeded|failed|expired|cancelled`, `poll_after_seconds`, `poll_after_ms`, `expires_at`, `message_key`, `retryable`, and `final_result_json`, `failure_result_json`, or `cancellation_result_json` when terminal.
 - `async_cancel_adapter_result`: present for `cancel`; contains `job_id`, `cancel_ref`, `cancel_token`, `status=cancelled|requires_provider_adapter`, `message_key`, `retryable`, and either `cancellation_result_json` or `provider_cancel_contract`.

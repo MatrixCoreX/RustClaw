@@ -65,6 +65,7 @@
 - `trace_id` and `extra_info`: provider metadata when returned.
 - `dry_run`: present and true only for dry runs.
 - `pending_async_job_contract`: dry-run-only preview of the machine fields a live async-capable adapter would place in `pending_async_job`; it is intentionally not named `pending_async_job`.
+- `async_contract`: stable alias of the same dry-run async job contract for planner-requested response fields.
 - `async_poll_adapter_result`: present for `poll`; contains `job_id`, `result_ref`, `status=accepted|running|succeeded|failed|expired|cancelled`, `poll_after_seconds`, `poll_after_ms`, `expires_at`, `message_key`, `retryable`, and terminal `final_result_json`, `failure_result_json`, or `cancellation_result_json`.
 - `async_cancel_adapter_result`: present for `cancel`; contains `job_id`, `cancel_ref`, `cancel_token`, `status=cancelled|requires_provider_adapter`, `message_key`, `retryable`, and either `cancellation_result_json` or `provider_cancel_contract`.
 

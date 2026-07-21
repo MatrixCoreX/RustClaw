@@ -693,6 +693,26 @@ fn task_budget_lifecycle_state(loop_state: &LoopState) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+fn round_requests_continuation(round: &RoundOutcome) -> bool {
+    round.stop_signal.as_deref().is_some_and(|signal| {
+        matches!(
+            signal,
+            "recoverable_failure_continue_round"
+                | "replan_from_verifier_signal"
+                | "post_write_validation_reserve"
+                | "repeat_action_limit"
+                | "repeat_completed_action"
+        )
+    })
+}
+
+fn round_model_finished(outcome: Option<&RoundOutcome>) -> bool {
+    outcome.is_some_and(|round| {
+        !round_requests_continuation(round)
+            && (round.executed_actions == 0 || round.stop_signal.is_some())
+    })
+}
+
 fn observe_task_budget(
     state: &AppState,
     task: &ClaimedTask,
@@ -729,19 +749,7 @@ fn observe_task_budget(
                 Some("repeat_action_limit" | "repeat_completed_action")
             )
     });
-    let model_finished = outcome.is_some_and(|round| {
-        round.executed_actions == 0
-            || round.stop_signal.as_deref().is_some_and(|signal| {
-                !matches!(
-                    signal,
-                    "recoverable_failure_continue_round"
-                        | "replan_from_verifier_signal"
-                        | "post_write_validation_reserve"
-                        | "repeat_action_limit"
-                        | "repeat_completed_action"
-                )
-            })
-    });
+    let model_finished = round_model_finished(outcome);
     let resumable = loop_state_has_recoverable_checkpoint_state(loop_state);
     let cumulative_elapsed_ms = loop_state.task_budget_slice_base_elapsed_ms.saturating_add(
         loop_started_at
