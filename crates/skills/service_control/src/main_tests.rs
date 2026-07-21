@@ -1,4 +1,16 @@
 use super::*;
+
+#[test]
+fn service_managers_are_platform_scoped() {
+    assert!(platform::manager_supported_on_platform("systemd", "linux"));
+    assert!(!platform::manager_supported_on_platform("systemd", "macos"));
+    assert!(platform::manager_supported_on_platform("launchd", "macos"));
+    assert!(!platform::manager_supported_on_platform("launchd", "linux"));
+    assert!(platform::manager_supported_on_platform(
+        "brew_services",
+        "macos"
+    ));
+}
 use serde_json::json;
 
 #[test]

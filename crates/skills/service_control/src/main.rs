@@ -15,8 +15,9 @@ mod platform;
 pub(crate) use config::is_ambiguous_target;
 use platform::{
     brew_service_entry, command_output_text, discover_all_candidates, fetch_logs_inner,
-    is_safe_target, launchctl_entry, looks_like_permission_error, normalize_target_alias,
-    process_count_for_target,
+    is_safe_target, launchctl_entry, looks_like_permission_error,
+    manager_supported_on_current_platform, normalize_target_alias, process_count_for_target,
+    service_output, sudo_service_output, sudo_systemctl_output, systemctl_output,
 };
 
 // ---------- Constants ----------
@@ -248,28 +249,8 @@ fn detect_manager_for_target(target: &str) -> Option<&'static str> {
     if launchctl_entry(target).is_some() {
         return Some("launchd");
     }
-    // Try systemctl is-active (read-only)
-    if let Ok(cmd_out) = Command::new("systemctl")
-        .args(["is-active", target])
-        .output()
-    {
-        if cmd_out.status.code().is_some() {
-            let stdout_str = String::from_utf8_lossy(&cmd_out.stdout).into_owned();
-            let s = stdout_str.trim();
-            if !s.is_empty()
-                && s.len() < 50
-                && s.chars()
-                    .all(|c| c.is_ascii_alphabetic() || c == ' ' || c == '(' || c == ')')
-            {
-                return Some("systemd");
-            }
-        }
-    }
-    // Try service status (read-only)
-    if let Ok(out) = Command::new("service").args([target, "status"]).output() {
-        if out.status.code().is_some() {
-            return Some("service");
-        }
+    if let Some(manager) = platform::detect_linux_manager_for_target(target) {
+        return Some(manager);
     }
     if process_count_for_target(target) > 0 {
         return Some("process_only");
@@ -285,8 +266,10 @@ fn resolve_manager(input: &SkillInput, effective_target: Option<&str>) -> String
         }
     }
     if let Some(ref mt) = input.manager_type {
-        if MANAGER_TYPES.contains(&mt.as_str()) {
+        if MANAGER_TYPES.contains(&mt.as_str()) && manager_supported_on_current_platform(mt) {
             return mt.clone();
+        } else if MANAGER_TYPES.contains(&mt.as_str()) {
+            return "unsupported".to_string();
         }
     }
     if let Some(t) = t {
@@ -546,6 +529,10 @@ fn execute(
         executed_actions: Vec::new(),
         ..Default::default()
     };
+    if manager == "unsupported" {
+        out.fail_kind("unsupported_platform", "unsupported_platform");
+        return Ok(out);
+    }
     if suggestion_used {
         out.add_evidence(format!(
             "used suggested_params fallback: {}",
@@ -864,7 +851,7 @@ fn run_status_inner(
                 out.fail_kind("invalid_input", "invalid target for systemd");
                 return ("unknown".to_string(), evidence);
             }
-            let o = Command::new("systemctl").args(["is-active", t]).output();
+            let o = systemctl_output(&["is-active", t]);
             match o {
                 Ok(outp) => {
                     let s = String::from_utf8_lossy(&outp.stdout).trim().to_string();
@@ -889,7 +876,7 @@ fn run_status_inner(
                 out.fail_kind("invalid_input", "invalid target for service");
                 return ("unknown".to_string(), evidence);
             }
-            let o = Command::new("service").args([t, "status"]).output();
+            let o = service_output(&[t, "status"]);
             match o {
                 Ok(outp) => {
                     let s = String::from_utf8_lossy(&outp.stdout);
@@ -1004,9 +991,7 @@ fn run_verify_inner(
             if !is_safe_target(target) {
                 return ("unknown".to_string(), evidence);
             }
-            let o = Command::new("systemctl")
-                .args(["is-active", target])
-                .output();
+            let o = systemctl_output(&["is-active", target]);
             match o {
                 Ok(outp) => {
                     let s = String::from_utf8_lossy(&outp.stdout).trim().to_string();
@@ -1020,7 +1005,7 @@ fn run_verify_inner(
             if !is_safe_target(target) {
                 return ("unknown".to_string(), evidence);
             }
-            let o = Command::new("service").args([target, "status"]).output();
+            let o = service_output(&[target, "status"]);
             match o {
                 Ok(outp) => {
                     let state = if outp.status.success() {
@@ -1161,9 +1146,7 @@ fn run_control_inner(
                     return Err(());
                 }
             };
-            let o = Command::new("systemctl")
-                .args(["--no-ask-password", cmd, target])
-                .output();
+            let o = systemctl_output(&["--no-ask-password", cmd, target]);
             match o {
                 Ok(outp) => {
                     if outp.status.success() {
@@ -1172,9 +1155,7 @@ fn run_control_inner(
                     } else {
                         let message = command_output_text(&outp);
                         if looks_like_permission_error(&message) {
-                            let o2 = Command::new("sudo")
-                                .args(["-n", "systemctl", "--no-ask-password", cmd, target])
-                                .output();
+                            let o2 = sudo_systemctl_output(&["--no-ask-password", cmd, target]);
                             match o2 {
                                 Ok(outp2) => {
                                     if outp2.status.success() {
@@ -1234,7 +1215,7 @@ fn run_control_inner(
                     return Err(());
                 }
             };
-            let o = Command::new("service").args([target, cmd]).output();
+            let o = service_output(&[target, cmd]);
             match o {
                 Ok(outp) => {
                     if outp.status.success() {
@@ -1243,9 +1224,7 @@ fn run_control_inner(
                     } else {
                         let message = command_output_text(&outp);
                         if looks_like_permission_error(&message) {
-                            let o2 = Command::new("sudo")
-                                .args(["-n", "service", target, cmd])
-                                .output();
+                            let o2 = sudo_service_output(&[target, cmd]);
                             match o2 {
                                 Ok(outp2) => {
                                     if outp2.status.success() {

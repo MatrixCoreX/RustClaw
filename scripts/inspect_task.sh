@@ -21,6 +21,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/shell_compat.sh"
 
 TASK_ID=""
 VERBOSE=0
@@ -153,7 +155,7 @@ COUNT=0
 MATCHED=()
 if [[ -f "$MODEL_IO_LOG" ]]; then
   grep_filter="\"task_id\":\"${TASK_ID}\""
-  mapfile -t MATCHED < <(grep -F "$grep_filter" "$MODEL_IO_LOG" || true)
+  array_from_command_lines MATCHED grep -F "$grep_filter" "$MODEL_IO_LOG"
   COUNT=${#MATCHED[@]}
 fi
 

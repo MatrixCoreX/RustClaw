@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/shell_compat.sh"
 
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
 if [[ -n "${NL_SUITE_RUN_DIR:-}" ]]; then
@@ -205,7 +207,7 @@ metrics_args() {
 run_metrics_gate() {
   local out_path="$1"
   shift
-  mapfile -t args < <(metrics_args "$out_path" "$@")
+  array_from_command_lines args metrics_args "$out_path" "$@"
   python3 "${SCRIPT_DIR}/summarize_rollout_metrics.py" "${args[@]}"
 }
 
@@ -419,6 +421,8 @@ echo "AGENT_PARITY_GATE_STEP deterministic_boundary_inventory_contracts"
 echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_long_files.py"
+  python3 "${ROOT_DIR}/scripts/check_cross_platform_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_cross_platform_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_skill_prompts.py"
   python3 "${ROOT_DIR}/scripts/check_skill_registry_parity.py" --mode all --strict
   python3 "${ROOT_DIR}/scripts/check_mcp_runtime_contracts.py" --self-test

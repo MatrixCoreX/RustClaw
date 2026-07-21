@@ -238,6 +238,7 @@ async fn trusted_hash_bound_command_hook_returns_structured_decision() {
         &json!({"schema_version": 1, "event_type": "pre_tool_use"}),
         CancellationToken::new(),
         claw_core::config::ToolSandboxMode::DangerFull,
+        claw_core::config::ToolSandboxBackend::Auto,
     )
     .await;
 
@@ -283,6 +284,7 @@ async fn slow_command_hook_times_out_with_fail_closed_decision() {
         &json!({"schema_version": 1, "event_type": "pre_tool_use"}),
         CancellationToken::new(),
         claw_core::config::ToolSandboxMode::DangerFull,
+        claw_core::config::ToolSandboxBackend::Auto,
     )
     .await;
 
@@ -314,6 +316,7 @@ async fn command_hook_cancellation_stops_the_child_and_fails_closed() {
         &json!({"schema_version": 1, "event_type": "pre_tool_use"}),
         cancellation,
         claw_core::config::ToolSandboxMode::DangerFull,
+        claw_core::config::ToolSandboxBackend::Auto,
     )
     .await;
 

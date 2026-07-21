@@ -316,6 +316,17 @@ fn build_capability_map_for_task_with_detail(
     task: &ClaimedTask,
     include_registry_skill_hints: bool,
 ) -> String {
+    let sandbox_diagnostics = crate::process_sandbox::sandbox_backend_diagnostics(
+        state.skill_rt.tools_policy.sandbox_backend,
+        state.skill_rt.tools_policy.sandbox_mode,
+        crate::process_sandbox::ProcessNetworkPolicy::Deny,
+    );
+    let sandbox_hint = format!(
+        "sandbox_runtime_v1={}",
+        serde_json::to_string(&sandbox_diagnostics).unwrap_or_else(|_| {
+            "{\"reason_code\":\"sandbox_diagnostics_encode_failed\"}".to_string()
+        })
+    );
     let all_visible = state.planner_visible_skills_for_task(task);
     let visible = state.planner_available_skills_for_task(task);
     let available_set = visible.iter().cloned().collect::<BTreeSet<_>>();
@@ -324,6 +335,7 @@ fn build_capability_map_for_task_with_detail(
     if visible.is_empty() && mcp_tools.is_empty() {
         let mut lines = vec![
             "Current runtime-available tool capabilities are unavailable; use chat only when no external retrieval or execution is needed.".to_string(),
+            sandbox_hint,
         ];
         if !unavailable_hints.is_empty() {
             lines.push("Enabled but unavailable capabilities omitted from planning:".to_string());
@@ -362,6 +374,7 @@ fn build_capability_map_for_task_with_detail(
             ),
         ),
         crate::async_job_contract::async_job_protocol_hint_line(),
+        sandbox_hint,
     ];
 
     if !layered.is_empty() {

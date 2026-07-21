@@ -145,7 +145,11 @@ crates/clawd/src/agent_engine/observed_output_success.rs	skill(run_cmd): success
 crates/clawd/src/agent_engine/observed_output_transform.rs	referenced transform step should produce formatted output	.expect("referenced transform step should produce formatted output");
 crates/clawd/src/agent_engine/observed_output_transform.rs	| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |	"| name | score |\\n| --- | --- |\\n| beta | 12 |\\n| gamma | 9 |\\n| alpha | 7 |"
 crates/clawd/src/agent_engine/planning.rs	Last round output: (none)	// 写入这里。结果是 round N+1 的 loop planner 看到 "Last round output: (none)"，
+crates/clawd/src/agent_engine/planning.rs	Registry capability name from the supplied runtime capability map.	"description": "Registry capability name from the supplied runtime capability map."
+crates/clawd/src/agent_engine/planning.rs	Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.	description: "Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.".to_string(),
+crates/clawd/src/agent_engine/planning.rs	Structured capability arguments.	"description": "Structured capability arguments."
 crates/clawd/src/agent_engine/planning.rs	runtime_capability_map_v2\n{capability_map}	Ok(format!("runtime_capability_map_v2\\n{capability_map}"))
+crates/clawd/src/agent_engine/planning.rs	{native_system_prompt}\n\n{native_user_prompt}	let native_prompt = format!("{native_system_prompt}\\n\\n{native_user_prompt}");
 crates/clawd/src/agent_engine/prepare_round.rs	needs_clarification: {needs_clarify}	format!("needs_clarification: {needs_clarify}"),
 crates/clawd/src/agent_engine/prepare_round.rs	needs_confirmation: {needs_confirmation}	format!("needs_confirmation: {needs_confirmation}"),
 crates/clawd/src/agent_engine/prepare_round.rs	verification_issue_kind: {first_issue_kind}	format!("verification_issue_kind: {first_issue_kind}"),
@@ -190,6 +194,8 @@ crates/clawd/src/bootstrap/prompts.rs	chat_response (ask_flow)	"chat_response (a
 crates/clawd/src/bootstrap/prompts.rs	delivery_text_classifier (semantic_judge.finalize)	"delivery_text_classifier (semantic_judge.finalize)",
 crates/clawd/src/bootstrap/prompts.rs	long_term_summary (memory.service)	"long_term_summary (memory.service)",
 crates/clawd/src/bootstrap/prompts.rs	loop_incremental_plan (agent_engine.planning)	"loop_incremental_plan (agent_engine.planning)",
+crates/clawd/src/bootstrap/prompts.rs	native_action_protocol (agent_engine.planning)	"native_action_protocol (agent_engine.planning)",
+crates/clawd/src/bootstrap/prompts.rs	native_turn_context (agent_engine.planning)	"native_turn_context (agent_engine.planning)",
 crates/clawd/src/bootstrap/prompts.rs	observed_answer_fallback (finalize.observed)	"observed_answer_fallback (finalize.observed)",
 crates/clawd/src/bootstrap/prompts.rs	observed_answer_fallback_compact (finalize.observed)	"observed_answer_fallback_compact (finalize.observed)",
 crates/clawd/src/bootstrap/prompts.rs	plan_repair (agent_engine.planning)	"plan_repair (agent_engine.planning)",
@@ -222,6 +228,7 @@ crates/clawd/src/capability_map.rs	provide conversational explanation, rewriting
 crates/clawd/src/capability_map.rs	requires_confirmation: {requires_confirmation}	parts.push(format!("requires_confirmation: {requires_confirmation}"));
 crates/clawd/src/capability_map.rs	run shell commands and inspect local system, developer, package, archive, git, HTTP, and database information	"run shell commands and inspect local system, developer, package, archive, git, HTTP, and database information"
 crates/clawd/src/capability_map.rs	transcribe audio and synthesize spoken output	CapabilityDomain::AudioMedia => "transcribe audio and synthesize spoken output",
+crates/clawd/src/capability_map.rs	{"reason_code":"sandbox_diagnostics_encode_failed"}	"{\\"reason_code\\":\\"sandbox_diagnostics_encode_failed\\"}".to_string()
 crates/clawd/src/channel_send.rs	telegram bot token is empty	return Err("telegram bot token is empty".to_string());
 crates/clawd/src/channel_send.rs	token response missing tenant_access_token	.ok_or_else(|| "token response missing tenant_access_token".to_string())
 crates/clawd/src/channel_send.rs	wechat api_base_url is empty	return Err("wechat api_base_url is empty".to_string());
@@ -724,6 +731,7 @@ crates/clawd/src/output_contract_verifier.rs	scalar_count: empty candidate	"scal
 crates/clawd/src/output_contract_verifier.rs	scalar_count: extracted only unique integer from candidate	"scalar_count: extracted only unique integer from candidate",
 crates/clawd/src/output_contract_verifier.rs	shape 整形	//! [`crate::delivery_utils::output_contract::enforce_output_contract`] "shape 整形"之上的 guard。
 crates/clawd/src/output_contract_verifier.rs	明显违反 contract	//! - 只拦"明显违反 contract"的结构性 anti-pattern，宁可漏拦也不要误拦合规答案。
+crates/clawd/src/process_sandbox.rs	(allow file-write* (subpath "{literal}"))\n	profile.push_str(&format!("(allow file-write* (subpath \\"{literal}\\"))\\n"));
 crates/clawd/src/prompt_utils.rs	initial parse error: {first_err}; repaired parse error: {second_err}	"initial parse error: {first_err}; repaired parse error: {second_err}"
 crates/clawd/src/prompt_utils.rs	prompt schema must be valid JSON	serde_json::from_str(raw).expect("prompt schema must be valid JSON")
 crates/clawd/src/prompt_utils.rs	unable to parse repaired JSON candidate	details: vec!["unable to parse repaired JSON candidate".to_string()],
@@ -740,6 +748,7 @@ crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inn
 crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
 crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
 crates/clawd/src/providers/circuit.rs	持续失败	//! 目标：在 fallback 循环里避免对一个已知"持续失败"的 provider 反复施压。
+crates/clawd/src/providers/client.rs	unsupported provider type: {provider_type}	format!("unsupported provider type: {provider_type}"),
 crates/clawd/src/providers/client.rs	unsupported provider type: {provider_type}	format!("unsupported provider type: {provider_type}"),
 crates/clawd/src/providers/client.rs	首次失败 + 再 retry	/// 或中间网关静默断链导致的"首次失败 + 再 retry"开销。
 crates/clawd/src/providers/fixture_replay.rs	fixture_replay load failed: {e}	format!("fixture_replay load failed: {e}"),
@@ -761,6 +770,8 @@ crates/clawd/src/providers/google_gemini.rs	read response failed: {err}	Provider
 crates/clawd/src/providers/openai_compat.rs	missing choices[0].message.content	"missing choices[0].message.content".to_string(),
 crates/clawd/src/providers/openai_compat.rs	parse response failed: {err}	format!("parse response failed: {err}"),
 crates/clawd/src/providers/openai_compat.rs	read response failed: {err}	ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
+crates/clawd/src/providers/openai_model_turn.rs	parse response failed: {err}	format!("parse response failed: {err}"),
+crates/clawd/src/providers/openai_model_turn.rs	read response failed: {err}	ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
 crates/clawd/src/providers/output.rs	create model io logs dir failed: {err}	warn!("create model io logs dir failed: {err}");
 crates/clawd/src/providers/output.rs	open model io log file failed: {err}	warn!("open model io log file failed: {err}");
 crates/clawd/src/providers/output.rs	read model io archives dir failed: {err}	warn!("read model io archives dir failed: {err}");
@@ -834,15 +845,9 @@ crates/clawd/src/repo/auth_webd.rs	username and user_key required	anyhow::bail!(
 crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0	"ALTER TABLE task_mutation_ledger ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0",
 crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''	"ALTER TABLE task_mutation_ledger ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''",
 crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT	"ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT",
-crates/clawd/src/repo/task_mutation_ledger.rs	parse task mutation outcome projection	.context("parse task mutation outcome projection")
-crates/clawd/src/repo/task_mutation_ledger.rs	serialize task mutation outcome projection	.context("serialize task mutation outcome projection")?;
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation lease was not completable	Err(anyhow!("task mutation lease was not completable"))
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let mut db = pool.get().context("task mutation ledger db pool")?;
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let mut db = pool.get().context("task mutation ledger db pool")?;
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger db pool	let mut db = pool.get().context("task mutation ledger db pool")?;
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger insert was not observable	.ok_or_else(|| anyhow!("task mutation ledger insert was not observable"))?;
-crates/clawd/src/repo/task_mutation_ledger.rs	task mutation ledger missing {field}	return Err(anyhow!("task mutation ledger missing {field}"));
-crates/clawd/src/repo/task_mutation_ledger.rs	unsupported task mutation ledger status: {status}	status => Err(anyhow!("unsupported task mutation ledger status: {status}")),
+crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger RENAME TO task_mutation_ledger_legacy;	tx.execute_batch("ALTER TABLE task_mutation_ledger RENAME TO task_mutation_ledger_legacy;")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	DROP TABLE task_mutation_ledger_legacy;	tx.execute_batch("DROP TABLE task_mutation_ledger_legacy;")?;
+crates/clawd/src/repo/task_mutation_ledger.rs	PRAGMA table_info({table})	let mut statement = db.prepare(&format!("PRAGMA table_info({table})"))?;
 crates/clawd/src/runtime/policy.rs	tools.by_provider contains empty key	return Err("tools.by_provider contains empty key".to_string());
 crates/clawd/src/runtime/state.rs	INSERT INTO tasks for fixture-replay e2e seed	.expect("INSERT INTO tasks for fixture-replay e2e seed");
 crates/clawd/src/runtime/state.rs	Step 4.b 前置清单	/// "Step 4.b 前置清单"。
@@ -974,8 +979,6 @@ crates/clawd/src/task_event_transport.rs	invalid task event kind	let event_kind 
 crates/clawd/src/task_event_transport.rs	task event artifact db pool	let db = state.core.db.get().context("task event artifact db pool")?;
 crates/clawd/src/task_event_transport.rs	task event artifact db pool	let db = state.core.db.get().context("task event artifact db pool")?;
 crates/clawd/src/task_event_transport.rs	task event claim db pool	let db = state.core.db.get().context("task event claim db pool")?;
-crates/clawd/src/task_event_transport.rs	task event db pool	let db = state.core.db.get().context("task event db pool")?;
-crates/clawd/src/task_event_transport.rs	task event db pool	let mut db = state.core.db.get().context("task event db pool")?;
 crates/clawd/src/task_journal_event_stream.rs	coding_checkpoint:verification_command:{}	let checkpoint_ref = format!("coding_checkpoint:verification_command:{}", index + 1);
 crates/clawd/src/task_journal_evidence_coverage.rs	all llm providers in circuit_breaker cooldown	if normalized.contains("all llm providers in circuit_breaker cooldown")
 crates/clawd/src/task_journal_evidence_registry.rs	evidence extractor registry contains all built-in extractor specs	.expect("evidence extractor registry contains all built-in extractor specs")
@@ -1016,6 +1019,7 @@ crates/clawd/src/worker/mod.rs	{prefix}\n{job_id_label}: {job_id}	let status_blo
 crates/clawd/src/worker/mod.rs	{text_trimmed}\n\n{status_block}	format!("{text_trimmed}\\n\\n{status_block}")
 crates/clawd/src/worker/run_skill_finalize.rs	run-skill:{}:async-job:{}	let checkpoint_id = format!("run-skill:{}:async-job:{}", task.task_id, job.job_id);
 crates/clawd/src/worker/run_skill_finalize.rs	run_skill:{skill_name}:async_job:{}	"run_skill:{skill_name}:async_job:{}",
+crates/clawd/src/worker/run_skill_mutation.rs	run-skill:{}:mutation-reconciliation	let checkpoint_id = format!("run-skill:{}:mutation-reconciliation", task.task_id);
 crates/clawd/src/worker/runtime_support/background_workers.rs	DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1	"DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
 crates/clawd/src/worker/runtime_support/background_workers.rs	DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1	"DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1",
 crates/clawd/src/worker/runtime_support/background_workers.rs	Schedule worker tick failed: {}	error!("Schedule worker tick failed: {}", err);

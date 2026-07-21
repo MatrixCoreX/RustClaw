@@ -129,18 +129,18 @@ check_binary_freshness() {
     echo "[binary] WARN: ${clawd_bin} not found (server may have been started from a different path)"
   else
     local bin_mtime
-    bin_mtime="$(stat -c '%Y' "$clawd_bin" 2>/dev/null || echo 0)"
+    bin_mtime="$(file_mtime_epoch "$clawd_bin")"
     local bin_mtime_str
-    bin_mtime_str="$(date -d "@${bin_mtime}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"
-    echo "[binary] target/release/clawd mtime=${bin_mtime_str} size=$(stat -c '%s' "$clawd_bin" 2>/dev/null || echo ?)"
+    bin_mtime_str="$(format_epoch_local "$bin_mtime")"
+    echo "[binary] target/release/clawd mtime=${bin_mtime_str} size=$(file_size_bytes "$clawd_bin")"
 
     local src_dir="${ROOT_DIR}/crates/clawd/src"
     if [[ -d "$src_dir" ]]; then
       local src_latest
-      src_latest="$(find "$src_dir" -type f -name '*.rs' -printf '%T@\n' 2>/dev/null | sort -rn | head -1 | cut -d. -f1)"
+      src_latest="$(latest_tree_mtime_epoch "$src_dir" ".rs")"
       if [[ -n "$src_latest" && "$src_latest" -gt "$bin_mtime" ]]; then
         local src_str
-        src_str="$(date -d "@${src_latest}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"
+        src_str="$(format_epoch_local "$src_latest")"
         echo "[binary] WARN: source under crates/clawd/src has files newer than binary"
         echo "[binary]       latest src mtime: ${src_str}"
         echo "[binary]       binary  mtime:   ${bin_mtime_str}"
@@ -1175,17 +1175,36 @@ fi
 
 ordinal=0
 run_count=0
-declare -A GROUP_CHAT_IDS=()
+GROUP_CHAT_KEYS=()
+GROUP_CHAT_VALUES=()
+
+group_chat_id_for_key() {
+  local requested="$1"
+  local index
+  for ((index = 0; index < ${#GROUP_CHAT_KEYS[@]}; index++)); do
+    if [[ "${GROUP_CHAT_KEYS[$index]}" == "$requested" ]]; then
+      printf '%s\n' "${GROUP_CHAT_VALUES[$index]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+remember_group_chat_id() {
+  GROUP_CHAT_KEYS+=("$1")
+  GROUP_CHAT_VALUES+=("$2")
+}
+
 for row in "${CASE_ROWS[@]}"; do
   IFS=$'\x1f' read -r source_line case_name tags prompt expect_substr confirm_reply <<< "$row"
   ordinal=$((ordinal + 1))
   chat_id_for_case=$((BASE_CHAT_ID + ordinal))
   group_key="$(case_group_key "$tags" || true)"
   if [[ -n "$group_key" ]]; then
-    if [[ -n "${GROUP_CHAT_IDS[$group_key]+x}" ]]; then
-      chat_id_for_case="${GROUP_CHAT_IDS[$group_key]}"
+    if existing_group_chat_id="$(group_chat_id_for_key "$group_key")"; then
+      chat_id_for_case="$existing_group_chat_id"
     else
-      GROUP_CHAT_IDS["$group_key"]="$chat_id_for_case"
+      remember_group_chat_id "$group_key" "$chat_id_for_case"
     fi
   fi
 

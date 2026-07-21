@@ -65,11 +65,67 @@ timeout_seconds = int(sys.argv[1])
 command = sys.argv[2:]
 
 try:
-    completed = subprocess.run(command, check=False)
+    completed = subprocess.run(command, check=False, timeout=timeout_seconds)
 except subprocess.TimeoutExpired:
     sys.exit(124)
 
 sys.exit(completed.returncode)
+PY
+}
+
+file_mtime_epoch() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+try:
+    print(int(os.path.getmtime(sys.argv[1])))
+except OSError:
+    print(0)
+PY
+}
+
+file_size_bytes() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+try:
+    print(os.path.getsize(sys.argv[1]))
+except OSError:
+    print(0)
+PY
+}
+
+latest_tree_mtime_epoch() {
+  local root="$1"
+  local suffix="${2:-}"
+  python3 - "$root" "$suffix" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+suffix = sys.argv[2]
+latest = 0
+try:
+    for path in root.rglob("*"):
+        if path.is_file() and (not suffix or path.name.endswith(suffix)):
+            latest = max(latest, int(path.stat().st_mtime))
+except OSError:
+    pass
+print(latest)
+PY
+}
+
+format_epoch_local() {
+  python3 - "$1" <<'PY'
+from datetime import datetime
+import sys
+
+try:
+    print(datetime.fromtimestamp(int(sys.argv[1])).strftime("%Y-%m-%d %H:%M:%S"))
+except (ValueError, OSError, OverflowError):
+    print("unknown")
 PY
 }
 

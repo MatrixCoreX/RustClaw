@@ -276,6 +276,7 @@ async fn evaluate_loaded_handlers(
                     handler,
                     &event,
                     cancellation.clone(),
+                    state.skill_rt.tools_policy.sandbox_backend,
                 )
                 .await
             }

@@ -743,6 +743,20 @@ pub(super) fn preflight_permission_decision(
     );
     let sandbox_denial_reason =
         crate::verifier::skill_sandbox_denial_reason(state, &canonical_skill, args);
+    let sandbox_network = if capability_policy
+        .get("network_access")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        crate::process_sandbox::ProcessNetworkPolicy::Inherit
+    } else {
+        crate::process_sandbox::ProcessNetworkPolicy::Deny
+    };
+    let sandbox_backend_diagnostics = crate::process_sandbox::sandbox_backend_diagnostics(
+        state.skill_rt.tools_policy.sandbox_backend,
+        state.skill_rt.tools_policy.sandbox_mode,
+        sandbox_network,
+    );
     let decision = crate::policy_decision::PolicyDecision::from_permission_flags(
         false,
         needs_confirmation,
@@ -780,6 +794,8 @@ pub(super) fn preflight_permission_decision(
         "needs_confirmation": needs_confirmation,
         "approval_policy": state.skill_rt.tools_policy.approval_policy_token(),
         "global_sandbox_mode": state.skill_rt.tools_policy.sandbox_mode_token(),
+        "global_sandbox_backend": state.skill_rt.tools_policy.sandbox_backend_token(),
+        "sandbox_backend_diagnostics": sandbox_backend_diagnostics,
         "sandbox_denial_reason": sandbox_denial_reason,
         "denied_by_policy": true,
         "dry_run_required": false,

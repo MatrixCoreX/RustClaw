@@ -26,6 +26,26 @@ fn command_permission_preview_uses_verifier_policy_tokens() {
     assert_eq!(preview["risk_level"], "high");
     assert_eq!(preview["confirmation_required"], false);
     assert_eq!(preview["would_execute"], false);
+    assert_eq!(
+        preview.pointer("/sandbox_backend_diagnostics/schema_version"),
+        Some(&json!(1))
+    );
+    assert_eq!(
+        preview.pointer("/sandbox_backend_diagnostics/requested_backend"),
+        Some(&json!("auto"))
+    );
+    assert!(preview
+        .pointer("/sandbox_backend_diagnostics/resolved_backend")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert!(preview
+        .pointer("/sandbox_backend_diagnostics/platform")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert!(preview
+        .pointer("/sandbox_backend_diagnostics/controls/filesystem")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
     assert!(preview["reason_codes"]
         .as_array()
         .is_some_and(|reasons| reasons.iter().any(|reason| reason == "sudo_not_allowed")));

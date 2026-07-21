@@ -663,16 +663,16 @@ run_one_suite() {
   esac
 }
 
-declare -A SEEN_SUITES=()
 ORDERED_SUITES=()
 
 add_suite() {
   local suite="$1"
+  local existing
   [[ -n "$suite" ]] || return 0
-  if [[ -z "${SEEN_SUITES[$suite]:-}" ]]; then
-    SEEN_SUITES["$suite"]=1
-    ORDERED_SUITES+=("$suite")
-  fi
+  for existing in "${ORDERED_SUITES[@]}"; do
+    [[ "$existing" == "$suite" ]] && return 0
+  done
+  ORDERED_SUITES+=("$suite")
 }
 
 expand_selector() {

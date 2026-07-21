@@ -521,6 +521,7 @@ async fn execute_external_local_shell_recipe(
         state.skill_rt.cmd_max_output_bytes,
         crate::skills::task_allows_sudo(state, Some(task)),
         state.skill_rt.tools_policy.sandbox_mode,
+        state.skill_rt.tools_policy.sandbox_backend,
         &state.skill_rt.workspace_root,
     )
     .await

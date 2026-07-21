@@ -1,4 +1,4 @@
-use claw_core::config::ToolSandboxMode;
+use claw_core::config::{ToolSandboxBackend, ToolSandboxMode};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -26,6 +26,7 @@ pub(super) async fn run_command_handler(
     handler: HookHandlerConfig,
     event: &Value,
     cancellation: CancellationToken,
+    sandbox_backend: ToolSandboxBackend,
 ) -> Result<ExecutedHook, (String, &'static str)> {
     let handler = validate_command_handler(workspace_root, handler)?;
     let result = execute_command_handler(
@@ -34,6 +35,7 @@ pub(super) async fn run_command_handler(
         event,
         cancellation,
         ToolSandboxMode::ReadOnly,
+        sandbox_backend,
     )
     .await;
     Ok(ExecutedHook {
@@ -103,6 +105,7 @@ pub(super) async fn execute_command_handler(
     event: &Value,
     cancellation: CancellationToken,
     sandbox_mode: ToolSandboxMode,
+    sandbox_backend: ToolSandboxBackend,
 ) -> HandlerRunResult {
     let started = Instant::now();
     let mut input = match serde_json::to_vec(event) {
@@ -125,6 +128,7 @@ pub(super) async fn execute_command_handler(
         &handler.path,
         crate::process_sandbox::ProcessSandboxRequest {
             mode: sandbox_mode,
+            backend: sandbox_backend,
             workspace_root,
             execution_root: workspace_root,
             network: crate::process_sandbox::ProcessNetworkPolicy::Deny,

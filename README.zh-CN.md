@@ -123,7 +123,7 @@ flowchart TD
 - `Observed-output finalizer`：只有答案形状与证据契约满足后，才发布有观测依据的结果。
 - `Output-contract guard`：保存结果前规范最终文本、`messages` 数组、文件 token、标量/严格输出形状和通道交付一致性。
 - `Journal + session update`：任务状态、观测事实和活跃会话锚点在收尾后持久化；后台记忆任务是可选、非阻塞的。
-- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`budget_decision`、`task_transition`、`checkpoint_created`、工具/coding/provider/hook/subagent 事件和 `task_final`。CLI 与 UI 直接渲染预算 profile/decision、continuation index、累计模型/工具/token/成本/耗时、soft-slice 状态、checkpoint、验证和 team 进度等机器字段，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
+- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`budget_decision`、`task_transition`、`checkpoint_created`、工具/coding/provider/hook/subagent 事件、`agent_team_started`、`subagent_finished`、`agent_team_aggregated` 和 `task_final`。Provider/context 投影保留 `prompt_truncation_count`、`prompt_bytes_before_max` 等机器指标。CLI 与 UI 直接渲染预算 profile/decision、continuation index、累计模型/工具/token/成本/耗时、soft-slice 状态、checkpoint、验证和 team 进度等机器字段，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
 
 ### Planner、LLM 与 Capability 流程
 
@@ -226,6 +226,41 @@ flowchart TD
     N --> O[UI / CLI permission panes<br/>原始 JSON 放在二级详情]
     GD --> O
 ```
+
+### 沙箱与跨平台执行
+
+`sandbox_mode` 定义权限范围，`sandbox_backend` 定义实现该范围的平台后端；两者互不替代。默认 `sandbox_backend = "auto"` 在 Linux 选择 Bubblewrap，在 macOS 选择 Seatbelt。受限模式下后端缺失、平台不匹配或远程执行器未配置时一律结构化拒绝，不会静默降级为无沙箱执行。只有管理员明确配置 `sandbox_mode = "danger_full"` 时才直接启动进程。
+
+```mermaid
+flowchart TD
+    A[工具 / 技能 / Hook 子进程] --> B{SandboxMode}
+    B -->|显式 danger_full| C[直接进程<br/>不声明沙箱保护]
+    B -->|受限模式| D{ToolSandboxBackend}
+    D -->|Linux auto| E[Bubblewrap adapter]
+    D -->|macOS auto| F[Seatbelt adapter<br/>/usr/bin/sandbox-exec]
+    D -->|显式 remote_container| G[远程执行合同]
+    E --> H{后端可用?}
+    F --> H
+    G --> I[未配置<br/>sandbox_remote_backend_not_configured]
+    H -->|否| J[Fail closed<br/>sandbox_backend_unavailable]
+    H -->|是| K[规范化 workspace / execution roots]
+    K --> L[文件系统 + 网络策略<br/>额外可写路径]
+    L --> M[清理并重建子进程环境<br/>启动进程]
+    C --> N[结构化诊断]
+    I --> N
+    J --> N
+    M --> N
+    N --> O[权限预览 / 结构化策略错误<br/>planner capability map + journal 投影]
+```
+
+| 后端 | 主机 | 选择方式 | 当前合同 |
+| --- | --- | --- | --- |
+| Bubblewrap | Linux | `auto` 或 `bubblewrap` | 文件写入范围、PID/IPC/UTS namespace、可选网络 namespace、前台或持久任务生命周期；缺失时 fail closed。 |
+| Seatbelt | macOS | `auto` 或 `macos_seatbelt` | 全局只读、限定路径写入、可选网络和进程策略；缺失时 fail closed。 |
+| Remote container | 任意 | 显式 `remote_container` | 目前只定义执行器合同；配置完成前返回 `sandbox_remote_backend_not_configured`，不会成为自动回退。 |
+| Direct | 任意 | 显式 `sandbox_mode = "danger_full"` | 不声明沙箱保护；这是管理员选择的绕过方式，不是后端不可用时的回退。 |
+
+诊断会报告请求/解析后的后端、平台、可用性、fail-closed 状态、原因码，以及 filesystem/network/process/credential/resource/environment 控制级别。服务发现同样由平台 adapter 管理：Linux 可使用 systemd/SysV；macOS 使用 Homebrew services、launchd 或进程观测。不兼容的显式 manager 会返回 `unsupported_platform`，不会在 macOS 启动 Linux 命令。开发与发布脚本统一使用 `scripts/shell_compat.sh`，不依赖 GNU 专有的文件/日期参数或 Bash 4 专有集合语法。完整合同见 [`docs/cross_platform_contract.md`](docs/cross_platform_contract.md)。
 
 可信生命周期 Hook 配置在 `configs/agent_guard.toml`，默认保持关闭。管理员可通过 `GET /v1/admin/hooks/status` 或浏览器“模型”页面查看安全状态投影。该机器合同展示 setup state、启用/有效/无效数量、信任与 hash 就绪状态，以及全部支持的 stage；不会回传 handler 参数、endpoint URL、环境变量引用或凭据。浏览器只提供刷新，并把 `redacted_config` 放在手动展开的第二层详情中。启用或信任 Hook 仍必须经过受审查的仓库配置，UI 不能把未审查脚本直接变成执行边界。
 

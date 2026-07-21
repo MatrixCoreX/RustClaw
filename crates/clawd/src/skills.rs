@@ -1593,6 +1593,12 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                 "message_key": "clawd.execution.sandbox_policy_denied",
                 "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
                 "sandbox_mode": state.skill_rt.tools_policy.sandbox_mode_token(),
+                "sandbox_backend": state.skill_rt.tools_policy.sandbox_backend_token(),
+                "sandbox_backend_diagnostics": crate::process_sandbox::sandbox_backend_diagnostics(
+                    state.skill_rt.tools_policy.sandbox_backend,
+                    state.skill_rt.tools_policy.sandbox_mode,
+                    crate::process_sandbox::ProcessNetworkPolicy::Deny,
+                ),
                 "approval_policy": state.skill_rt.tools_policy.approval_policy_token(),
                 "skill": skill_name,
                 "action": skill_action_token(&args),

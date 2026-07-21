@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=/dev/null
+source "${ROOT}/scripts/shell_compat.sh"
 CLAWCLI_BIN="${CLAWCLI_BIN:-$ROOT/target/debug/clawcli}"
 BASE_URL="${RUSTCLAW_BASE_URL:-http://127.0.0.1:8787}"
 KEY="${RUSTCLAW_CLI_SMOKE_KEY:-${RUSTCLAW_ADMIN_KEY:-}}"
@@ -65,7 +67,7 @@ echo "SMOKE events"
 run_cli events "$task_id" --jsonl >/dev/null
 
 echo "SMOKE watch"
-timeout "$WATCH_TIMEOUT_SECONDS" \
+run_with_timeout "$WATCH_TIMEOUT_SECONDS" \
   "${CLI_BASE[@]}" watch "$task_id" --until-terminal --jsonl >/dev/null
 
 echo "SMOKE wait"

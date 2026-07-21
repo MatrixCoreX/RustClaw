@@ -517,6 +517,9 @@ cmd_idle_timeout_seconds = 60
 cmd_max_output_bytes = 8000
 deny = []
 max_cmd_length = 2400
+# `auto` 在 Linux 选择 Bubblewrap、在 macOS 选择 Seatbelt；受限模式下
+# 后端不可用会结构化拒绝，不会静默降级为无沙箱执行。
+sandbox_backend = "auto"
 sandbox_mode = "workspace_write"
 
 # 用途/Purpose: 按模型提供商细化工具 allow/deny 覆盖.

@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use claw_core::config::ToolSandboxMode;
+use claw_core::config::{ToolSandboxBackend, ToolSandboxMode};
 
 use super::{
-    prepare_durable_process_command, prepare_process_command, ProcessNetworkPolicy,
-    ProcessSandboxRequest,
+    prepare_durable_process_command, prepare_process_command, sandbox_backend_diagnostics,
+    ProcessNetworkPolicy, ProcessSandboxRequest,
 };
 
 struct TestDir(PathBuf);
@@ -51,6 +51,7 @@ async fn danger_full_uses_direct_backend() {
         "bash",
         ProcessSandboxRequest {
             mode: ToolSandboxMode::DangerFull,
+            backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Inherit,
@@ -60,6 +61,84 @@ async fn danger_full_uses_direct_backend() {
     .expect("direct command");
 
     assert_eq!(prepared.backend, "direct");
+    let diagnostics = sandbox_backend_diagnostics(
+        ToolSandboxBackend::Auto,
+        ToolSandboxMode::DangerFull,
+        ProcessNetworkPolicy::Inherit,
+    );
+    assert_eq!(diagnostics.resolved_backend, "direct");
+    assert!(diagnostics.available);
+    assert!(!diagnostics.fail_closed);
+}
+
+#[test]
+fn remote_container_contract_is_explicit_and_fail_closed() {
+    let diagnostics = sandbox_backend_diagnostics(
+        ToolSandboxBackend::RemoteContainer,
+        ToolSandboxMode::WorkspaceWrite,
+        ProcessNetworkPolicy::Deny,
+    );
+    assert_eq!(diagnostics.resolved_backend, "remote_container");
+    assert!(!diagnostics.available);
+    assert!(diagnostics.fail_closed);
+    assert_eq!(
+        diagnostics.reason_code,
+        Some("sandbox_remote_backend_not_configured")
+    );
+
+    let root = TestDir::new("remote_contract");
+    let result = prepare_process_command(
+        "bash",
+        ProcessSandboxRequest {
+            mode: ToolSandboxMode::WorkspaceWrite,
+            backend: ToolSandboxBackend::RemoteContainer,
+            workspace_root: root.path(),
+            execution_root: root.path(),
+            network: ProcessNetworkPolicy::Deny,
+            additional_writable_paths: &[],
+        },
+    );
+    assert!(matches!(
+        result,
+        Err("sandbox_remote_backend_not_configured")
+    ));
+}
+
+#[test]
+fn platform_mismatched_explicit_backend_is_rejected() {
+    let backend = if cfg!(target_os = "macos") {
+        ToolSandboxBackend::Bubblewrap
+    } else {
+        ToolSandboxBackend::MacosSeatbelt
+    };
+    let diagnostics = sandbox_backend_diagnostics(
+        backend,
+        ToolSandboxMode::WorkspaceWrite,
+        ProcessNetworkPolicy::Deny,
+    );
+    assert!(!diagnostics.available);
+    assert!(diagnostics.fail_closed);
+    assert_eq!(
+        diagnostics.reason_code,
+        Some("sandbox_backend_unsupported_platform")
+    );
+}
+
+#[test]
+fn auto_backend_reports_the_current_platform_without_direct_fallback() {
+    let diagnostics = sandbox_backend_diagnostics(
+        ToolSandboxBackend::Auto,
+        ToolSandboxMode::WorkspaceWrite,
+        ProcessNetworkPolicy::Deny,
+    );
+    #[cfg(target_os = "linux")]
+    assert_eq!(diagnostics.resolved_backend, "bubblewrap");
+    #[cfg(target_os = "macos")]
+    assert_eq!(diagnostics.resolved_backend, "macos_seatbelt");
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    assert_eq!(diagnostics.resolved_backend, "unsupported");
+    assert_ne!(diagnostics.resolved_backend, "direct");
+    assert!(diagnostics.fail_closed);
 }
 
 #[cfg(target_os = "linux")]
@@ -73,6 +152,7 @@ fn durable_sandbox_omits_parent_death_while_foreground_keeps_it() {
     let root = TestDir::new("durable_lifetime");
     let request = || ProcessSandboxRequest {
         mode: ToolSandboxMode::WorkspaceWrite,
+        backend: ToolSandboxBackend::Auto,
         workspace_root: root.path(),
         execution_root: root.path(),
         network: ProcessNetworkPolicy::Deny,
@@ -113,6 +193,7 @@ async fn read_only_backend_rejects_workspace_mutation() {
         "bash",
         ProcessSandboxRequest {
             mode: ToolSandboxMode::ReadOnly,
+            backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
@@ -145,6 +226,7 @@ async fn workspace_backend_writes_only_inside_bound_workspace() {
         "bash",
         ProcessSandboxRequest {
             mode: ToolSandboxMode::WorkspaceWrite,
+            backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
@@ -181,6 +263,7 @@ async fn read_only_backend_can_execute_inside_system_temp_workspace() {
         "bash",
         ProcessSandboxRequest {
             mode: ToolSandboxMode::ReadOnly,
+            backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
@@ -212,6 +295,7 @@ async fn workspace_backend_can_write_inside_system_temp_workspace() {
         "bash",
         ProcessSandboxRequest {
             mode: ToolSandboxMode::WorkspaceWrite,
+            backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
@@ -249,6 +333,7 @@ async fn read_only_backend_limits_writes_to_explicit_internal_path() {
         "bash",
         ProcessSandboxRequest {
             mode: ToolSandboxMode::ReadOnly,
+            backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,

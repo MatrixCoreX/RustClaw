@@ -428,6 +428,9 @@ cmd_idle_timeout_seconds = 60
 cmd_max_output_bytes = 8000
 deny = []
 max_cmd_length = 2400
+# `auto` selects Bubblewrap on Linux and Seatbelt on macOS. Restricted modes
+# fail closed when the selected backend is unavailable.
+sandbox_backend = "auto"
 sandbox_mode = "workspace_write"
 
 # 用途/Purpose: 按模型提供商细化工具 allow/deny 覆盖.
