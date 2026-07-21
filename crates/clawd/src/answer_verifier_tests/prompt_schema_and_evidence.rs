@@ -149,6 +149,20 @@ fn answer_verifier_prompts_enforce_payload_only_without_runtime_phrase_matching(
 }
 
 #[test]
+fn answer_verifier_prompts_scope_constraints_to_compound_deliverables() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const RETRY_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
+
+    assert!(VERIFIER_PROMPT.contains("semantic deliverable it modifies"));
+    assert!(VERIFIER_PROMPT.contains("verify scoped constraints independently"));
+    assert!(VERIFIER_PROMPT.contains("without another tool call"));
+    assert!(RETRY_PROMPT.contains("one semantic component of a compound request"));
+    assert!(RETRY_PROMPT.contains("preserve every grounded sibling component"));
+}
+
+#[test]
 fn answer_verifier_gap_is_high_confidence_only() {
     let low = AnswerVerifierOut {
         pass: false,
