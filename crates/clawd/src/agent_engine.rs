@@ -135,7 +135,6 @@ pub(crate) fn answer_verifier_enforce_required_enabled(state: &AppState) -> bool
 const CLAWD_CONTINUE_ON_ERROR_ARG: &str = "_clawd_continue_on_error";
 const CLAWD_LITERAL_COMMAND_ARG: &str = "_clawd_literal_command";
 const CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG: &str = "_clawd_literal_failure_repairable";
-const CLAWD_MISSING_TARGET_REPAIRABLE_ARG: &str = "_clawd_missing_target_repairable";
 pub(crate) const CLAWD_RUNTIME_ASYNC_JOB_START_ARG: &str = "_clawd_runtime_async_job_start";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
