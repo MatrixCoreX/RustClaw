@@ -244,6 +244,33 @@ def main() -> int:
         )
         assert normalized_path_row["assertion"] == "pass"
 
+        markdown_machine_fields = write_result(
+            root,
+            "markdown-machine-fields.json",
+            result_with_steps(
+                [
+                    capability_step(
+                        observed_fields={
+                            "path": "README.md",
+                            "resolved_path": "/workspace/README.md",
+                            "exists": False,
+                        }
+                    )
+                ],
+                text=(
+                    "- **path**: /workspace/README.md\n"
+                    "- `exists`: false\n"
+                    "- error_code: path_not_found"
+                ),
+            ),
+        )
+        markdown_machine_fields_row = row_for(
+            markdown_machine_fields,
+            "final_observed_field:path;final_observed_field:exists;final_field:error_code",
+            expect="path_not_found",
+        )
+        assert markdown_machine_fields_row["assertion"] == "pass"
+
     print("MANUAL_CASE_ASSERTIONS_TESTS ok")
     return 0
 
