@@ -65,8 +65,22 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("Never derive a capability name by combining a skill name"));
     assert!(prompt.contains("runtime delivery token (`FILE:<path>`"));
     assert!(prompt.contains("speculative claim about channel attachment support"));
+    assert!(prompt.contains("A directory listing proves entry names and listed metadata"));
+    assert!(prompt.contains("before asserting concrete current keys, members, values"));
     assert!(prompt.contains("preserve each"));
     assert!(prompt.contains("scalar, object, or array shape"));
+}
+
+#[test]
+fn answer_verifier_distinguishes_listing_metadata_from_file_contents() {
+    let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../prompts/layers/overlays/answer_verifier_prompt.md");
+    let prompt = std::fs::read_to_string(overlay).expect("read answer verifier prompt");
+
+    assert!(prompt.contains("Directory listing evidence proves entry names"));
+    assert!(prompt.contains("does not prove current file contents"));
+    assert!(prompt.contains("clearly generic or approximate type-level description"));
+    assert!(prompt.contains("current keys, members, values, scripts, schemas"));
 }
 
 #[test]
