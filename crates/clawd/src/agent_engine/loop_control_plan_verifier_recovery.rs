@@ -19,25 +19,30 @@ fn issue_is_planner_repairable(kind: crate::verifier::VerifyIssueKind) -> bool {
     )
 }
 
-fn planner_repair_signal(
+pub(in crate::agent_engine) fn plan_verifier_rejection_is_repairable(
     verify_result: &crate::verifier::VerifyResult,
-) -> Option<serde_json::Value> {
-    if verify_result.mode != crate::verifier::VerifyMode::Enforce
-        || verify_result.approved
-        || verify_result.needs_confirmation
-        || verify_result.issues.is_empty()
-        || verify_result.issues.iter().any(|issue| {
+) -> bool {
+    verify_result.mode == crate::verifier::VerifyMode::Enforce
+        && !verify_result.approved
+        && !verify_result.needs_confirmation
+        && !verify_result.issues.is_empty()
+        && !verify_result.issues.iter().any(|issue| {
             matches!(
                 issue.kind,
                 crate::verifier::VerifyIssueKind::MissingRequiredArg
                     | crate::verifier::VerifyIssueKind::BoundaryClarifyRequired
             )
         })
-        || !verify_result
+        && verify_result
             .issues
             .iter()
             .all(|issue| issue_is_planner_repairable(issue.kind))
-    {
+}
+
+fn planner_repair_signal(
+    verify_result: &crate::verifier::VerifyResult,
+) -> Option<serde_json::Value> {
+    if !plan_verifier_rejection_is_repairable(verify_result) {
         return None;
     }
 

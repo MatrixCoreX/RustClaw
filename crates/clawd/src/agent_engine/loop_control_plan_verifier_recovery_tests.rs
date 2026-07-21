@@ -85,6 +85,16 @@ fn invalid_planner_arguments_enter_bounded_replan() {
 }
 
 #[test]
+fn repairability_predicate_matches_bounded_replan_contract() {
+    assert!(plan_verifier_rejection_is_repairable(&verify_result(&[
+        crate::verifier::VerifyIssueKind::InvalidArgumentValue,
+    ])));
+    assert!(!plan_verifier_rejection_is_repairable(&verify_result(&[
+        crate::verifier::VerifyIssueKind::SandboxPolicyDenied,
+    ])));
+}
+
+#[test]
 fn permission_denial_never_enters_planner_repair() {
     let mut loop_state = LoopState::default();
     let outcome = recover_plan_verifier_rejection(

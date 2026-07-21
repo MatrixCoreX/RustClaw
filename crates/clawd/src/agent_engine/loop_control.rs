@@ -32,6 +32,7 @@ pub(in crate::agent_engine) use loop_control_observe_round::observation_round_ne
 use loop_control_observe_round::{
     observe_only_round_should_continue, read_observe_round_should_continue,
 };
+pub(in crate::agent_engine) use loop_control_plan_verifier_recovery::plan_verifier_rejection_is_repairable;
 use loop_control_plan_verifier_recovery::*;
 use loop_control_post_write_evidence_guard::*;
 use loop_control_structured_clarify::*;

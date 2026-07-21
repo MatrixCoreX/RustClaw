@@ -157,6 +157,13 @@ fn verifier_gate_should_stop_round(verify_result: &crate::verifier::VerifyResult
     verifier_gate_needs_clarification(verify_result)
 }
 
+fn verifier_gate_requires_immediate_response(
+    verify_result: &crate::verifier::VerifyResult,
+) -> bool {
+    verifier_gate_should_stop_round(verify_result)
+        && !super::loop_control::plan_verifier_rejection_is_repairable(verify_result)
+}
+
 fn planner_user_text<'a>(
     agent_run_context: Option<&'a AgentRunContext>,
     fallback: &'a str,
@@ -270,7 +277,7 @@ pub(super) async fn prepare_round_actions(
     );
     let actions = if verifier_confirmation_gate_requires_checkpoint(&verify_result) {
         Vec::new()
-    } else if verifier_gate_should_stop_round(&verify_result) {
+    } else if verifier_gate_requires_immediate_response(&verify_result) {
         let content = build_verifier_gate_response(
             state,
             task,
