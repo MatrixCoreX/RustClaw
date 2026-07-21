@@ -109,7 +109,7 @@ fn response_maps_parallel_tool_calls_without_prose_parsing() {
 }
 
 #[test]
-fn malformed_tool_arguments_fail_with_machine_code() {
+fn malformed_tool_arguments_are_preserved_for_planner_contract_repair() {
     let response = json!({
         "choices": [{
             "message": {
@@ -127,9 +127,49 @@ fn malformed_tool_arguments_fail_with_machine_code() {
         }]
     });
 
+    let turn = parse_openai_model_turn(&response).expect("transport preserves malformed call");
+    assert_eq!(turn.tool_calls.len(), 1);
+    assert_eq!(turn.tool_calls[0].name, "call_capability");
     assert_eq!(
-        parse_openai_model_turn(&response),
-        Err("model_turn_tool_arguments_invalid index=0".to_string())
+        turn.tool_calls[0].arguments,
+        Value::String("{not-json".to_string())
+    );
+    assert_eq!(turn.finish_reason, ModelFinishReason::ToolCalls);
+}
+
+#[test]
+fn malformed_streamed_tool_arguments_are_preserved_for_planner_contract_repair() {
+    let mut decoder = SseDecoder::default();
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    let frames = format!(
+        "data: {}\n\ndata: [DONE]\n\n",
+        json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call-1",
+                        "function": {
+                            "name": "call_capability",
+                            "arguments": "{not-json"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })
+    );
+    for frame in decoder.push(frames.as_bytes()).expect("decode stream") {
+        accumulator.apply(frame, None).expect("apply stream");
+    }
+
+    let output = accumulator
+        .finish(None)
+        .expect("preserve malformed stream call");
+    assert_eq!(output.turn.tool_calls.len(), 1);
+    assert_eq!(
+        output.turn.tool_calls[0].arguments,
+        Value::String("{not-json".to_string())
     );
 }
 

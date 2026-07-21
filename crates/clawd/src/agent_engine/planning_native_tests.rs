@@ -73,6 +73,20 @@ fn native_tool_rejects_unknown_protocol_name_and_invalid_args() {
         actions_from_native_turn(&invalid).expect_err("invalid args rejected"),
         "native_plan_args_not_object"
     );
+
+    let malformed_transport_arguments = turn(
+        vec![ModelToolCall {
+            id: "call-3".to_string(),
+            name: "call_capability".to_string(),
+            arguments: Value::String("{not-json".to_string()),
+        }],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn(&malformed_transport_arguments)
+            .expect_err("malformed transport arguments rejected by planner contract"),
+        "native_plan_arguments_not_object"
+    );
 }
 
 #[test]
