@@ -49,6 +49,19 @@ fn planner_overlays_expand_high_cardinality_placeholders_once() {
 }
 
 #[test]
+fn native_action_protocol_requires_capability_owned_structured_observations() {
+    let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../prompts/layers/overlays/native_action_protocol.md");
+    let prompt = std::fs::read_to_string(overlay).expect("read native action protocol");
+
+    assert!(prompt
+        .contains("When the user requests a structured parse, validation, preview, inspection"));
+    assert!(prompt.contains("call that capability instead of substituting your own inference"));
+    assert!(prompt.contains("only when no runtime evidence or effect is"));
+    assert!(prompt.contains("needed, or after the required capability observations are available"));
+}
+
+#[test]
 fn planner_overlays_require_runtime_observation_for_policy_projections() {
     let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
     for relative_path in [
