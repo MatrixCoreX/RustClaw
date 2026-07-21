@@ -28,6 +28,11 @@ Protocol rules:
 - Once a successful capability observation contains the requested fields,
   synthesize the answer. Do not call the capability again merely to confirm or
   restate the same successful result.
+- A directory listing proves entry names and listed metadata, not the current
+  contents of those files. You may give a clearly generic or approximate
+  type-level description from a name or extension, but observe file content
+  before asserting concrete current keys, members, values, scripts, schemas, or
+  other contents.
 - When the user explicitly requests delivery of a local file or generated local
   media artifact, first ensure the path exists, then return only the standalone
   runtime delivery token (`FILE:<path>`, `IMAGE_FILE:<path>`, or
