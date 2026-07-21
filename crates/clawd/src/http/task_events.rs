@@ -30,6 +30,7 @@ struct EventStreamState {
     receiver: broadcast::Receiver<u64>,
     pending: VecDeque<Value>,
     cursor: u64,
+    available_newest_seq: Option<u64>,
     follow_live: bool,
     terminal_seen: bool,
     done: bool,
@@ -103,6 +104,15 @@ pub(crate) async fn stream_task_events(
             cursor,
             replay.oldest_seq,
             replay.newest_seq,
+            replay.replay_source,
+        ));
+    } else if replay.archive_recovered {
+        pending.push_front(archive_replay_control_event(
+            &task_id,
+            cursor,
+            replay.oldest_seq,
+            replay.newest_seq,
+            replay.latest_snapshot.as_ref(),
         ));
     }
     let stream = event_stream(EventStreamState {
@@ -111,6 +121,7 @@ pub(crate) async fn stream_task_events(
         receiver,
         pending,
         cursor,
+        available_newest_seq: replay.newest_seq,
         follow_live: query.follow.unwrap_or(true),
         terminal_seen: false,
         done: false,
@@ -218,10 +229,44 @@ fn event_stream(
                 if event_is_terminal(&value) {
                     state.terminal_seen = true;
                 }
-                if (state.terminal_seen || !state.follow_live) && state.pending.is_empty() {
+                if (state.terminal_seen
+                    || (!state.follow_live
+                        && state.pending.is_empty()
+                        && !has_unread_persisted_events(&state)))
+                    && state.pending.is_empty()
+                {
                     state.done = true;
                 }
                 return Some((Ok(event), state));
+            }
+            if has_unread_persisted_events(&state) {
+                match crate::task_event_transport::replay_events_after(
+                    &state.app,
+                    &state.task_id,
+                    state.cursor,
+                ) {
+                    Ok(replay) if !replay.events.is_empty() => {
+                        state.available_newest_seq = replay.newest_seq;
+                        state.pending.extend(replay.events);
+                        continue;
+                    }
+                    Ok(replay) => {
+                        state.available_newest_seq = replay.newest_seq;
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            "task event archive replay failed task_id={} error={}",
+                            state.task_id,
+                            error
+                        );
+                        state.pending.push_back(stream_error_control_event(
+                            &state.task_id,
+                            "task_event_archive_replay_failed",
+                        ));
+                        state.done = true;
+                        continue;
+                    }
+                }
             }
             if !state.follow_live {
                 state.done = true;
@@ -237,6 +282,7 @@ fn event_stream(
                         state.cursor,
                     ) {
                         Ok(replay) => {
+                            state.available_newest_seq = replay.newest_seq;
                             state.pending.extend(replay.events);
                             if replay.cursor_expired {
                                 state.pending.push_front(cursor_expired_control_event(
@@ -244,6 +290,7 @@ fn event_stream(
                                     state.cursor,
                                     replay.oldest_seq,
                                     replay.newest_seq,
+                                    replay.replay_source,
                                 ));
                             }
                         }
@@ -267,6 +314,12 @@ fn event_stream(
             }
         }
     })
+}
+
+fn has_unread_persisted_events(state: &EventStreamState) -> bool {
+    state
+        .available_newest_seq
+        .is_some_and(|newest| state.cursor < newest)
 }
 
 fn requested_cursor(headers: &HeaderMap, query_cursor: Option<u64>) -> Result<u64, ()> {
@@ -309,6 +362,7 @@ fn cursor_expired_control_event(
     requested_cursor: u64,
     oldest_seq: Option<u64>,
     newest_seq: Option<u64>,
+    replay_source: &str,
 ) -> Value {
     json!({
         "schema_version": 1,
@@ -319,7 +373,30 @@ fn cursor_expired_control_event(
             "requested_cursor": requested_cursor,
             "oldest_available_seq": oldest_seq,
             "newest_available_seq": newest_seq,
-            "replay_mode": "retained_suffix",
+            "replay_mode": "available_suffix",
+            "replay_source": replay_source,
+        },
+    })
+}
+
+fn archive_replay_control_event(
+    task_id: &str,
+    requested_cursor: u64,
+    oldest_seq: Option<u64>,
+    newest_seq: Option<u64>,
+    latest_snapshot: Option<&Value>,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "task_id": task_id,
+        "event_kind": "archive_replay",
+        "event_type": "archive_replay",
+        "payload": {
+            "requested_cursor": requested_cursor,
+            "oldest_available_seq": oldest_seq,
+            "newest_available_seq": newest_seq,
+            "replay_mode": "archive_recovery",
+            "latest_snapshot": latest_snapshot,
         },
     })
 }

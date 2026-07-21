@@ -360,6 +360,7 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
          )",
         [],
     )?;
+    crate::task_event_archive::delete_orphaned_records(&db)?;
 
     // Phase 2.2 Stage 2: audit_logs 已经搬到独立 audit pool（见 db_init::init_audit_db）。
     // 这里清理也走 audit_db，避免在主库 writer 锁上和任务回收争抢。

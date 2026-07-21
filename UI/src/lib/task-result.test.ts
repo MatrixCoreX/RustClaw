@@ -108,6 +108,41 @@ test("summarizes persisted subagent graph events", () => {
   assert.equal(nodeView.tone, "failed");
 });
 
+test("distinguishes archive recovery from an irrecoverable event gap", () => {
+  const recovered = buildTaskTraceEventView(
+    {
+      event_type: "archive_replay",
+      payload: {
+        requested_cursor: 4,
+        oldest_available_seq: 1,
+        newest_available_seq: 2048,
+        replay_mode: "archive_recovery",
+      },
+    },
+    "en",
+  );
+  assert.equal(recovered.title, "Archived events restored");
+  assert.equal(recovered.detail, "Replay range 1 to 2048.");
+  assert.equal(recovered.tone, "ok");
+
+  const expired = buildTaskTraceEventView(
+    {
+      event_type: "cursor_expired",
+      payload: {
+        requested_cursor: 4,
+        oldest_available_seq: 20,
+        newest_available_seq: 2048,
+        replay_mode: "available_suffix",
+        replay_source: "archive",
+      },
+    },
+    "en",
+  );
+  assert.equal(expired.title, "Event history gap");
+  assert.equal(expired.detail, "The oldest available event is 20.");
+  assert.equal(expired.tone, "attention");
+});
+
 test("extracts visible task text before falling back to error text", () => {
   const result: TaskQueryResponse = {
     task_id: "task-1",

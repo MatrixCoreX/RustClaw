@@ -28,6 +28,34 @@ CREATE TABLE IF NOT EXISTS task_event_stream (
 );
 CREATE INDEX IF NOT EXISTS idx_task_event_stream_task_seq
     ON task_event_stream(task_id, seq);
+CREATE TABLE IF NOT EXISTS task_event_archive (
+    task_id                TEXT NOT NULL,
+    seq                    INTEGER NOT NULL,
+    event_hash             TEXT NOT NULL,
+    previous_event_hash    TEXT,
+    event_json             TEXT NOT NULL,
+    payload_schema_version INTEGER NOT NULL,
+    redaction_policy       TEXT NOT NULL,
+    created_at_ms          INTEGER NOT NULL,
+    PRIMARY KEY (task_id, seq),
+    UNIQUE (task_id, event_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_task_event_archive_task_seq
+    ON task_event_archive(task_id, seq);
+CREATE TABLE IF NOT EXISTS task_event_snapshots (
+    task_id            TEXT NOT NULL,
+    snapshot_seq       INTEGER NOT NULL,
+    source_seq_start   INTEGER NOT NULL,
+    source_seq_end     INTEGER NOT NULL,
+    source_event_count INTEGER NOT NULL,
+    source_hash        TEXT NOT NULL,
+    snapshot_hash      TEXT NOT NULL,
+    snapshot_json      TEXT NOT NULL,
+    created_at_ms      INTEGER NOT NULL,
+    PRIMARY KEY (task_id, snapshot_seq)
+);
+CREATE INDEX IF NOT EXISTS idx_task_event_snapshots_task_seq
+    ON task_event_snapshots(task_id, snapshot_seq);
 CREATE TABLE IF NOT EXISTS task_event_artifacts (
     task_id       TEXT NOT NULL,
     artifact_id   TEXT NOT NULL,
@@ -83,8 +111,11 @@ impl TaskEventNotifier {
 pub(crate) struct ReplayBatch {
     pub(crate) events: Vec<Value>,
     pub(crate) cursor_expired: bool,
+    pub(crate) archive_recovered: bool,
+    pub(crate) replay_source: &'static str,
     pub(crate) oldest_seq: Option<u64>,
     pub(crate) newest_seq: Option<u64>,
+    pub(crate) latest_snapshot: Option<Value>,
 }
 
 pub(crate) fn publish_event(
@@ -143,7 +174,7 @@ fn publish_event_internal(
     });
     let event_hash = value_hash(&fingerprint_source)?;
 
-    let mut db = state.core.db.get().context("task event db pool")?;
+    let mut db = state.core.db.get().context("task_event_db_pool")?;
     db.execute_batch(INIT_TASK_EVENT_SQL)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(task) = active_claim {
@@ -172,9 +203,12 @@ fn publish_event_internal(
             ));
         }
     }
+    crate::task_event_archive::backfill_hot_suffix(&tx, task_id)?;
     if let Some(existing) = tx
         .query_row(
-            "SELECT event_json FROM task_event_stream WHERE task_id = ?1 AND event_hash = ?2",
+            "SELECT event_json
+             FROM task_event_archive
+             WHERE task_id = ?1 AND event_hash = ?2",
             params![task_id, event_hash],
             |row| row.get::<_, String>(0),
         )
@@ -184,12 +218,16 @@ fn publish_event_internal(
         return Ok(serde_json::from_str(&existing).ok());
     }
     let seq = tx.query_row(
-        "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_event_stream WHERE task_id = ?1",
+        "SELECT COALESCE(MAX(seq), 0) + 1
+         FROM task_event_archive
+         WHERE task_id = ?1",
         params![task_id],
         |row| row.get::<_, u64>(0),
     )?;
+    let previous_event_hash = crate::task_event_archive::previous_event_hash(&tx, task_id)?;
     let event = json!({
         "schema_version": EVENT_SCHEMA_VERSION,
+        "payload_schema_version": EVENT_SCHEMA_VERSION,
         "seq": seq,
         "timestamp_ms": timestamp_ms,
         "task_id": task_id,
@@ -199,6 +237,8 @@ fn publish_event_internal(
         "child_task_id": context.child_task_id,
         "event_kind": event_kind,
         "event_type": event_kind,
+        "event_hash": event_hash,
+        "previous_event_hash": previous_event_hash,
         "payload": payload,
         "redaction": {
             "applied": redacted_fields > 0,
@@ -211,6 +251,16 @@ fn publish_event_internal(
         "INSERT INTO task_event_stream(task_id, seq, event_hash, event_json, created_at_ms)
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![task_id, seq, event_hash, serialized, timestamp_ms],
+    )?;
+    crate::task_event_archive::insert_event(
+        &tx,
+        task_id,
+        seq,
+        &event_hash,
+        previous_event_hash.as_deref(),
+        &event_kind,
+        &serialized,
+        timestamp_ms,
     )?;
     tx.execute(
         "DELETE FROM task_event_stream WHERE task_id = ?1 AND seq <= ?2",
@@ -226,8 +276,50 @@ pub(crate) fn replay_events_after(
     task_id: &str,
     cursor: u64,
 ) -> anyhow::Result<ReplayBatch> {
-    let db = state.core.db.get().context("task event db pool")?;
+    let mut db = state.core.db.get().context("task_event_db_pool")?;
     db.execute_batch(INIT_TASK_EVENT_SQL)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::task_event_archive::backfill_hot_suffix(&tx, task_id)?;
+    tx.commit()?;
+    let hot_oldest_seq = db.query_row(
+        "SELECT MIN(seq) FROM task_event_stream WHERE task_id = ?1",
+        params![task_id],
+        |row| row.get::<_, Option<u64>>(0),
+    )?;
+    let archived =
+        crate::task_event_archive::replay_after(&db, task_id, cursor, EVENT_REPLAY_LIMIT)?;
+    if archived.oldest_seq.is_some() {
+        let cursor_expired = archived
+            .oldest_seq
+            .is_some_and(|oldest| cursor > 0 && cursor < oldest - 1);
+        let effective_cursor = if cursor_expired {
+            archived.oldest_seq.unwrap_or(1).saturating_sub(1)
+        } else {
+            cursor
+        };
+        let archived = if effective_cursor == cursor {
+            archived
+        } else {
+            crate::task_event_archive::replay_after(
+                &db,
+                task_id,
+                effective_cursor,
+                EVENT_REPLAY_LIMIT,
+            )?
+        };
+        let archive_recovered = hot_oldest_seq.is_some_and(|oldest| {
+            cursor > 0 && cursor < oldest.saturating_sub(1) && !cursor_expired
+        });
+        return Ok(ReplayBatch {
+            events: archived.events,
+            cursor_expired,
+            archive_recovered,
+            replay_source: "archive",
+            oldest_seq: archived.oldest_seq,
+            newest_seq: archived.newest_seq,
+            latest_snapshot: archived.latest_snapshot,
+        });
+    }
     let (oldest_seq, newest_seq) = db.query_row(
         "SELECT MIN(seq), MAX(seq) FROM task_event_stream WHERE task_id = ?1",
         params![task_id],
@@ -256,8 +348,11 @@ pub(crate) fn replay_events_after(
     Ok(ReplayBatch {
         events,
         cursor_expired,
+        archive_recovered: false,
+        replay_source: "hot",
         oldest_seq,
         newest_seq,
+        latest_snapshot: None,
     })
 }
 

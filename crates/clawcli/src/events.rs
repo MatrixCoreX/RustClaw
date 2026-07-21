@@ -397,7 +397,7 @@ fn lifecycle_worker_event_line(event: &serde_json::Value) -> Option<TaskEventLin
     task_event_line(&normalized)
 }
 
-fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
+pub(crate) fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
     let mut parts = Vec::new();
     let mut fields = BTreeMap::new();
     push_scalar_token(&mut parts, &mut fields, "seq", event.get("seq"));

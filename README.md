@@ -475,7 +475,7 @@ clawcli goal clear task-123
 ```
 
 - `clawcli llm-trace <task_id> [--raw] [--limit N]` reads the task debug endpoint and prints numbered LLM calls with `llm_call_ref=LLM#1..N`, flow/code attribution, provider/model/status tokens, usage tokens, and optional raw request/response fields.
-- Task event streams include goal, context budget/compaction, task-budget decisions, transitions, checkpoints, tool lifecycle, coding evidence, provider, hook, subagent/team, and final events. `clawcli events/watch`, reports, and browser task details render stable fields such as `decision`, `profile`, `continuation_index`, cumulative model/tool/token/cost/elapsed counters, `soft_slice_exhausted`, `resumable`, checkpoint/goal fields, verification evidence, permission state, and team progress; raw event JSON stays in secondary details.
+- Task event streams include goal, context budget/compaction, task-budget decisions, transitions, checkpoints, tool lifecycle, coding evidence, provider, hook, subagent/team, and final events. A bounded hot suffix serves SSE while an append-only redacted archive preserves the full task sequence, hash chain, and periodic source-range snapshots. `archive_replay` means the durable archive recovered an old hot cursor; `cursor_expired` now means the archive itself has a real gap. `clawcli events/watch`, reports, replay export, and browser task details consume these versioned events; raw event JSON stays in secondary details. See [`docs/task_event_archive_contract.md`](docs/task_event_archive_contract.md).
 - `clawcli run-skill <skill_name> --args-json '{...}'` submits explicit `kind=run_skill` work without natural-language routing; add `--wait` to poll the same `task_id`.
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` and `clawcli permission capability` read flattened capability/policy metadata. Add `--json` when another script should consume the response.
 - `clawcli replay export/run/diff` supports redacted recorded-only replay bundles for debugging and CI comparison without live model or tool calls; `replay run --coverage` exposes recorded coverage, `replay run --view llm|tools|checkpoints|summary` filters recorded evidence, and `replay diff` includes taxonomy tokens such as `route_changed`, `plan_changed`, `permission_changed`, and `final_status_changed`. See `docs/clawcli_exec_replay.md`.
@@ -489,7 +489,8 @@ flowchart LR
     C --> D[watch / wait / get]
     D --> E{task_lifecycle}
     E -->|terminal| F[report / review<br/>exec artifact index]
-    F --> R[replay export / run --view]
+    F --> R[replay export<br/>archived versioned events]
+    R --> R2[replay run --view / diff<br/>recorded-only]
     E -->|waiting/background| G[resume.json + resume_hint]
     G --> H[continue / resume-task / pause-task / cancel-task]
     D --> I[events / logs / subagents / permission inspect]
@@ -561,7 +562,7 @@ flowchart TD
     H2 --> H3[agent_team_started / subagent_started / subagent_finished / subagent_failed / agent_team_aggregated]
     X -->|active| I[final status]
     I --> I1[task_final]
-    B --> Z[event_stream]
+    B --> Z[Versioned event admission]
     C1 --> Z
     C2 --> Z
     D1 --> Z
@@ -576,7 +577,17 @@ flowchart TD
     H2 --> Z
     H3 --> Z
     I1 --> Z
-    Z --> Y[CLI/UI render machine fields<br/>raw JSON in secondary details]
+    Z --> Z1[task_event_stream<br/>bounded hot suffix]
+    Z --> Z2[task_event_archive<br/>append-only redacted hash chain]
+    Z2 --> Z3[Periodic + terminal snapshots<br/>source range + SHA-256]
+    Z1 --> Z4[SSE broadcast wake-up]
+    Z2 --> Z5[Cursor replay in bounded pages]
+    Z5 -->|archive covers cursor| Z6[archive_replay]
+    Z5 -->|archive prefix missing| Z7[cursor_expired machine gap]
+    Z4 --> Y[CLI/UI render machine fields<br/>raw JSON in secondary details]
+    Z6 --> Y
+    Z7 --> Y
+    Z2 --> Z8[clawcli replay export<br/>recorded-only bundle]
 ```
 
 Context budget and compaction flow:

@@ -104,6 +104,13 @@ fn cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner() {
     let state = test_state();
     let task_id = format!("task-cost-cleanup-{}", Uuid::new_v4().simple());
     insert_task(&state, &task_id, "succeeded", Some(&json!({})));
+    crate::task_event_transport::publish_event(
+        &state,
+        &task_id,
+        "task_final",
+        json!({"status": "succeeded"}),
+    )
+    .expect("publish archived event");
     {
         let db = state.core.db.get().expect("get db");
         db.execute(
@@ -135,8 +142,24 @@ fn cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner() {
             |row| row.get(0),
         )
         .expect("count retained cost rows");
+    let archived_event_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM task_event_archive WHERE task_id=?1",
+            rusqlite::params![task_id],
+            |row| row.get(0),
+        )
+        .expect("count retained archive rows");
+    let archived_snapshot_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM task_event_snapshots WHERE task_id=?1",
+            rusqlite::params![task_id],
+            |row| row.get(0),
+        )
+        .expect("count retained snapshot rows");
     assert_eq!(task_count, 0);
     assert_eq!(cost_count, 0);
+    assert_eq!(archived_event_count, 0);
+    assert_eq!(archived_snapshot_count, 0);
 }
 
 #[test]
