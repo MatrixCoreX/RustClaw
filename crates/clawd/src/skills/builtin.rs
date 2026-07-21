@@ -6,6 +6,8 @@ use crate::{AppState, ClaimedTask};
 
 #[path = "builtin_child_task_patch.rs"]
 mod builtin_child_task_patch;
+#[path = "builtin_code_index.rs"]
+mod builtin_code_index;
 #[path = "builtin_run_cmd.rs"]
 mod builtin_run_cmd;
 #[path = "builtin_schedule.rs"]
@@ -168,6 +170,32 @@ pub(crate) async fn execute_builtin_skill_with_task(
     let map = ensure_args_object(args)?;
 
     match skill_name {
+        "code_index" => {
+            let workspace_root = state.skill_rt.workspace_root.clone();
+            let args = args.clone();
+            tokio::task::spawn_blocking(move || builtin_code_index::execute(&workspace_root, &args))
+                .await
+                .map_err(|error| {
+                    builtin_error(
+                        "code_index",
+                        "worker_join_failed",
+                        format!("code_index.worker_join_failed error={error}"),
+                        None,
+                        None,
+                        None,
+                    )
+                })?
+                .map_err(|error| {
+                    builtin_error(
+                        "code_index",
+                        error.code,
+                        error.detail,
+                        None,
+                        None,
+                        error.extra,
+                    )
+                })
+        }
         "read_file" => {
             ensure_only_keys(map, &["path"])?;
             let path = required_string(map, "path")?;

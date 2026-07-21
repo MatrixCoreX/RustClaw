@@ -94,6 +94,33 @@ fn assert_workspace_mutation(output: &str, action: &str, target_path: &str) -> V
 }
 
 #[tokio::test]
+async fn code_index_builtin_dispatch_returns_structured_definition_ranges() {
+    let root = TempDirGuard::new("code_index_dispatch");
+    fs::create_dir_all(root.path.join("src")).expect("create source directory");
+    fs::write(
+        root.path.join("src/lib.rs"),
+        "pub fn indexed_entry() -> bool { true }\n",
+    )
+    .expect("write source");
+    let state = test_state(root.path.clone());
+
+    let output = execute_builtin_skill(
+        &state,
+        "code_index",
+        &json!({"action": "find_definitions", "symbol": "indexed_entry"}),
+    )
+    .await
+    .expect("code index dispatch");
+    let result: Value = serde_json::from_str(&output).expect("structured code index result");
+
+    assert_eq!(result["kind"], "repository_code_index");
+    assert_eq!(
+        result["data"]["definitions"][0]["range_handle"]["read_capability"],
+        "filesystem.read_text_range"
+    );
+}
+
+#[tokio::test]
 async fn run_cmd_permission_preview_never_executes_command() {
     let root = TempDirGuard::new("run_cmd_permission_preview");
     let target = root.path.join("must_not_exist");

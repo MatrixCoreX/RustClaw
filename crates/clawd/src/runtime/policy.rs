@@ -312,6 +312,7 @@ impl ToolsPolicy {
             "full" => vec!["*"],
             "coding" => vec![
                 "skill:run_cmd",
+                "skill:code_index",
                 "skill:fs_basic",
                 "skill:config_basic",
                 "skill:config_edit",

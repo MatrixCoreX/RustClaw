@@ -10,6 +10,7 @@ pub(super) fn default_skill_max_concurrency() -> usize {
 pub fn base_skill_names() -> &'static [&'static str] {
     &[
         "run_cmd",
+        "code_index",
         "fs_basic",
         "config_basic",
         "config_edit",
@@ -32,6 +33,7 @@ pub fn base_skill_names() -> &'static [&'static str] {
 pub fn core_skills_always_enabled() -> &'static [&'static str] {
     &[
         "run_cmd",
+        "code_index",
         "fs_basic",
         "config_basic",
         "config_edit",
@@ -54,6 +56,7 @@ pub(super) fn default_skills_list() -> Vec<String> {
     // Keep in sync with `configs/skills_registry.toml` [[skills]] names (no-registry fallback baseline).
     vec![
         "run_cmd".to_string(),
+        "code_index".to_string(),
         "fs_basic".to_string(),
         "config_basic".to_string(),
         "config_edit".to_string(),
