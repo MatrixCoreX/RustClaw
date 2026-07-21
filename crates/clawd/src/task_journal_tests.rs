@@ -23,6 +23,8 @@ mod contract_coverage;
 
 #[path = "task_journal_tests/answer_verifier_envelope.rs"]
 mod answer_verifier_envelope;
+#[path = "task_journal_tests/capability_attribution.rs"]
+mod capability_attribution;
 #[path = "task_journal_tests/event_stream_hooks.rs"]
 mod event_stream_hooks;
 #[path = "task_journal_tests/failure_attribution.rs"]

@@ -298,8 +298,12 @@ pub(super) struct RequestedPlanCapability {
     pub(super) action_type: String,
     pub(super) capability: String,
     pub(super) resolved_capability: Option<String>,
+    pub(super) resolved_tool_or_skill: Option<String>,
     pub(super) action_ref: Option<String>,
     pub(super) args_fingerprint: Option<String>,
+    pub(super) round_no: Option<usize>,
+    pub(super) step_in_round: Option<usize>,
+    pub(super) dispatch_executed: bool,
 }
 
 pub(super) fn raw_plan_steps(raw_plan_text: &str) -> Vec<Value> {
@@ -347,8 +351,12 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
         action_type: action_type.to_string(),
         capability: capability.to_string(),
         resolved_capability: None,
+        resolved_tool_or_skill: None,
         action_ref: None,
         args_fingerprint: None,
+        round_no: None,
+        step_in_round: None,
+        dispatch_executed: false,
     })
 }
 
@@ -365,8 +373,12 @@ fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPla
                     action_type: normalized_step.action_type.clone(),
                     capability: normalized_step.skill.clone(),
                     resolved_capability: None,
+                    resolved_tool_or_skill: None,
                     action_ref: None,
                     args_fingerprint: None,
+                    round_no: None,
+                    step_in_round: None,
+                    dispatch_executed: false,
                 });
             if requested.action_ref.is_none() {
                 requested.action_ref = plan_step_action_ref(normalized_step);
@@ -381,7 +393,12 @@ pub(super) fn requested_capability_sequence(journal: &TaskJournal) -> Vec<Reques
     let mut requested = Vec::new();
     for round in &journal.rounds {
         if let Some(plan) = round.plan_result.as_ref() {
-            requested.extend(requested_capabilities_for_plan(plan));
+            let mut round_requested = requested_capabilities_for_plan(plan);
+            for (step_index, item) in round_requested.iter_mut().enumerate() {
+                item.round_no = Some(round.round_no);
+                item.step_in_round = Some(step_index + 1);
+            }
+            requested.extend(round_requested);
         }
     }
     if requested.is_empty() {
@@ -390,6 +407,7 @@ pub(super) fn requested_capability_sequence(journal: &TaskJournal) -> Vec<Reques
         }
     }
     attach_dispatch_capability_resolutions(&mut requested, &journal.task_observations);
+    attach_executed_dispatches(&mut requested, &journal.task_observations);
     requested
 }
 
@@ -397,30 +415,112 @@ fn attach_dispatch_capability_resolutions(
     requested: &mut [RequestedPlanCapability],
     observations: &[Value],
 ) {
-    let mut resolutions = observations
+    let resolutions = observations
         .iter()
         .filter(|value| {
             value.get("observation_kind").and_then(Value::as_str) == Some("capability_resolution")
         })
         .filter_map(|value| {
             let requested = value.get("requested_capability")?.as_str()?.trim();
-            let resolved = value.get("resolved_capability")?.as_str()?.trim();
-            (!requested.is_empty() && !resolved.is_empty())
-                .then(|| (requested.to_string(), resolved.to_string()))
+            (!requested.is_empty()).then(|| {
+                (
+                    value
+                        .get("round_no")
+                        .and_then(Value::as_u64)
+                        .map(|value| value as usize),
+                    value
+                        .get("step_in_round")
+                        .and_then(Value::as_u64)
+                        .map(|value| value as usize),
+                    requested.to_string(),
+                    value
+                        .get("resolved_capability")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string),
+                    value
+                        .get("resolved_tool_or_skill")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string),
+                )
+            })
         })
         .collect::<Vec<_>>();
     for item in requested
         .iter_mut()
         .filter(|item| item.action_type == "call_capability")
     {
-        let Some(index) = resolutions
-            .iter()
-            .position(|(requested, _)| capability_machine_token_eq(requested, &item.capability))
+        let Some((_, _, _, resolved, resolved_tool_or_skill)) =
+            resolutions
+                .iter()
+                .find(|(round_no, step_in_round, requested, _, _)| {
+                    round_no == &item.round_no
+                        && step_in_round == &item.step_in_round
+                        && capability_machine_token_eq(requested, &item.capability)
+                })
         else {
             continue;
         };
-        item.resolved_capability = Some(resolutions.remove(index).1);
+        item.resolved_capability.clone_from(resolved);
+        item.resolved_tool_or_skill
+            .clone_from(resolved_tool_or_skill);
     }
+}
+
+fn attach_executed_dispatches(requested: &mut [RequestedPlanCapability], observations: &[Value]) {
+    for observation in observations
+        .iter()
+        .filter(|value| value.get("event_type").and_then(Value::as_str) == Some("post_tool_use"))
+    {
+        let round_no = observation
+            .get("round_no")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize);
+        let step_in_round = observation
+            .get("step_in_round")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize);
+        let tool_or_skill = observation
+            .get("tool_or_skill")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(item) = requested.iter_mut().find(|item| {
+            item.round_no == round_no
+                && item.step_in_round == step_in_round
+                && tool_or_skill
+                    .is_none_or(|executed| requested_capability_matches_executed(item, executed))
+        }) else {
+            continue;
+        };
+        item.dispatch_executed = true;
+    }
+}
+
+fn resolved_executable_name(value: &str) -> &str {
+    value
+        .strip_prefix("tool:")
+        .or_else(|| value.strip_prefix("skill:"))
+        .unwrap_or(value)
+}
+
+fn requested_capability_matches_executed(
+    requested: &RequestedPlanCapability,
+    executed: &str,
+) -> bool {
+    requested
+        .resolved_tool_or_skill
+        .as_deref()
+        .map(resolved_executable_name)
+        .is_some_and(|resolved| resolved.eq_ignore_ascii_case(executed))
+        || requested
+            .action_ref
+            .as_deref()
+            .and_then(|action_ref| action_ref.split_once('.'))
+            .is_some_and(|(skill, _)| skill.eq_ignore_ascii_case(executed))
 }
 
 fn capability_machine_token_eq(left: &str, right: &str) -> bool {
@@ -514,7 +614,14 @@ pub(super) fn next_requested_capability(
     }
     let requested_idx = requested
         .iter()
-        .position(|candidate| requested_capability_matches_step(candidate, step))
+        .position(|candidate| {
+            candidate.dispatch_executed && requested_capability_matches_step(candidate, step)
+        })
+        .or_else(|| {
+            requested
+                .iter()
+                .position(|candidate| requested_capability_matches_step(candidate, step))
+        })
         .unwrap_or(0);
     Some(requested.remove(requested_idx))
 }
@@ -528,6 +635,9 @@ fn requested_capability_matches_step(
         return false;
     }
     if requested.capability.eq_ignore_ascii_case(step_skill) {
+        return true;
+    }
+    if requested_capability_matches_executed(requested, step_skill) {
         return true;
     }
     if requested
