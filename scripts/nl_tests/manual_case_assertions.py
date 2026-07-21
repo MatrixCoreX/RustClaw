@@ -272,6 +272,21 @@ def observed_machine_field_values(
     return values
 
 
+def observed_machine_field_exists(result: dict[str, Any], field: str) -> bool:
+    for step in actual_call_steps(result):
+        observed = step.get("observed_evidence")
+        items = observed.get("items") if isinstance(observed, dict) else None
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            observed_leaf = str(item.get("field") or "").rsplit(".", maxsplit=1)[-1]
+            if observed_leaf == field:
+                return True
+    return False
+
+
 def structural_assertions(
     tags: str,
     text: str,
@@ -372,6 +387,17 @@ def structural_assertions(
                 "actual": actual,
                 "observed_values": observed_values,
                 "ok": observed_machine_field_matches(result, required_field, actual),
+            }
+        )
+
+    required_observed_fields = token_tags(tags, "observed_field")
+    for required_field in required_observed_fields:
+        details.append(
+            {
+                "kind": "tag",
+                "tag": "observed_field",
+                "expected": required_field,
+                "ok": observed_machine_field_exists(result, required_field),
             }
         )
 
