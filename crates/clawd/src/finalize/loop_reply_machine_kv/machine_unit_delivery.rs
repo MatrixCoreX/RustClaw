@@ -57,7 +57,21 @@ fn labeled_machine_field_value<'a>(line: &'a str, key: &str) -> Option<&'a str> 
         .strip_prefix('=')
         .or_else(|| rest.strip_prefix(':'))?
         .trim();
+    let value = strip_paired_markdown_scalar(value);
     (!value.is_empty()).then_some(value)
+}
+
+fn strip_paired_markdown_scalar(value: &str) -> &str {
+    let value = value.trim();
+    for delimiter in ["`", "**", "__"] {
+        if value.len() > delimiter.len() * 2
+            && value.starts_with(delimiter)
+            && value.ends_with(delimiter)
+        {
+            return value[delimiter.len()..value.len() - delimiter.len()].trim();
+        }
+    }
+    value
 }
 
 pub(super) fn latest_publishable_delivery_with_requested_machine_units(
