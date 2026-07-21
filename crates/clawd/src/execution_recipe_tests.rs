@@ -262,6 +262,34 @@ fn classify_run_cmd_combined_mutation_and_validation() {
 }
 
 #[test]
+fn registry_generic_run_cmd_pipeline_remains_mutation_guarded() {
+    let state = test_state_with_registry(
+        r#"
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+side_effect = true
+planner_capabilities = [
+  { name = "run_cmd", effect = "external", required = ["command"], idempotent = false },
+]
+"#,
+        &["run_cmd"],
+    );
+    let effect = classify_skill_action_effect(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "find logs -type f -printf '%s %p\\n' 2>/dev/null | sort -rn | head -3 | awk '{print $1, $2}'"
+        }),
+    );
+
+    assert!(effect.mutates);
+    assert!(!effect.validates);
+}
+
+#[test]
 fn structured_validation_marks_custom_run_cmd_as_code_validation() {
     let state = test_state();
     let args = json!({
