@@ -1,7 +1,7 @@
 use super::{
     planner_user_text, production_verify_mode, verifier_confirmation_gate_requires_checkpoint,
     verifier_gate_missing_slots, verifier_gate_needs_clarification,
-    verifier_gate_should_stop_round,
+    verifier_gate_requires_immediate_response, verifier_gate_should_stop_round,
 };
 
 #[test]
@@ -106,4 +106,26 @@ fn confirmation_requirement_stops_production_round_before_execution() {
     assert!(verifier_confirmation_gate_requires_checkpoint(
         &verify_result
     ));
+}
+
+#[test]
+fn repairable_argument_rejection_skips_user_response_composition() {
+    let verify_result = verify_result_with_issue(
+        production_verify_mode(),
+        crate::verifier::VerifyIssueKind::InvalidArgumentValue,
+    );
+
+    assert!(verifier_gate_should_stop_round(&verify_result));
+    assert!(!verifier_gate_requires_immediate_response(&verify_result));
+}
+
+#[test]
+fn policy_denial_keeps_immediate_user_response_boundary() {
+    let verify_result = verify_result_with_issue(
+        production_verify_mode(),
+        crate::verifier::VerifyIssueKind::SandboxPolicyDenied,
+    );
+
+    assert!(verifier_gate_should_stop_round(&verify_result));
+    assert!(verifier_gate_requires_immediate_response(&verify_result));
 }
