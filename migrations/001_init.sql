@@ -217,22 +217,40 @@ CREATE TABLE IF NOT EXISTS task_event_artifacts (
 );
 
 CREATE TABLE IF NOT EXISTS task_mutation_ledger (
-    task_id            TEXT NOT NULL,
-    fingerprint_hash   TEXT NOT NULL,
-    action_ref         TEXT NOT NULL,
-    status             TEXT NOT NULL CHECK (status IN ('started', 'completed', 'uncertain')),
-    execution_token    TEXT NOT NULL,
-    lease_owner        TEXT NOT NULL,
-    claim_attempt      INTEGER NOT NULL,
-    outcome_hash       TEXT,
-    outcome_json       TEXT,
-    started_at         INTEGER NOT NULL,
-    updated_at         INTEGER NOT NULL,
-    completed_at       INTEGER,
+    task_id             TEXT NOT NULL,
+    fingerprint_hash    TEXT NOT NULL,
+    action_ref          TEXT NOT NULL,
+    phase               TEXT NOT NULL CHECK (phase IN (
+        'intent_recorded',
+        'attempt_started',
+        'receipt_recorded',
+        'verification_pending',
+        'verified',
+        'reconciliation_required',
+        'reconciled',
+        'committed'
+    )),
+    idempotency_key     TEXT NOT NULL,
+    attempt_no          INTEGER NOT NULL DEFAULT 0,
+    execution_token     TEXT NOT NULL,
+    lease_owner         TEXT NOT NULL,
+    claim_attempt       INTEGER NOT NULL,
+    receipt_hash        TEXT,
+    receipt_json        TEXT,
+    verification_json   TEXT,
+    reconciliation_json TEXT,
+    started_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL,
+    receipt_at          INTEGER,
+    verified_at         INTEGER,
+    reconciled_at       INTEGER,
+    committed_at        INTEGER,
     PRIMARY KEY (task_id, fingerprint_hash)
 );
-CREATE INDEX IF NOT EXISTS idx_task_mutation_ledger_status_updated
-    ON task_mutation_ledger(status, updated_at);
+-- This restart-safe index only uses a column shared by the legacy v1 and v2
+-- ledgers. The v2 phase index is installed by ensure_task_mutation_ledger_schema.
+CREATE INDEX IF NOT EXISTS idx_task_mutation_ledger_updated
+    ON task_mutation_ledger(updated_at);
 
 CREATE TABLE IF NOT EXISTS task_checkpoint_actions (
     task_id              TEXT NOT NULL,

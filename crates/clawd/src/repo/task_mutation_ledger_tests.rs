@@ -66,6 +66,21 @@ fn insert_active_task(pool: &crate::db_init::DbPool, task_id: &str) {
 }
 
 #[test]
+fn initial_migration_remains_restart_safe_after_ledger_schema_upgrade() {
+    let mut db = rusqlite::Connection::open_in_memory().expect("open database");
+    db.execute_batch(crate::INIT_SQL)
+        .expect("apply initial migration");
+    super::ensure_task_mutation_ledger_schema(&mut db).expect("ensure v2 ledger schema");
+
+    db.execute_batch(crate::INIT_SQL)
+        .expect("reapply initial migration after ledger upgrade");
+    assert!(super::table_has_column(&db, "task_mutation_ledger", "phase")
+        .expect("inspect ledger columns"));
+    assert!(!super::table_has_column(&db, "task_mutation_ledger", "status")
+        .expect("inspect legacy ledger column"));
+}
+
+#[test]
 fn completed_mutation_is_not_acquired_again() {
     let temp = TempDir::new();
     let pool = file_pool(&temp.0.join("tasks.sqlite"));

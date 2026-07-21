@@ -399,6 +399,8 @@ async fn direct_run_skill_confirmation_persists_and_consumes_exact_grant() {
     )
     .expect("approve request")
     .expect("approval update");
+    let (requeued_status, _) = task_status_and_result(&state, task_id);
+    assert_eq!(requeued_status, "queued");
     state
         .core
         .db
