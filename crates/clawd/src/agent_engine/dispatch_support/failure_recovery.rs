@@ -204,6 +204,17 @@ fn planner_can_repair_structured_skill_error(err: &str) -> bool {
                 | "wait_failed"
                 | "output_read_failed"
                 | "status_unavailable"
+                | "patch_context_mismatch"
+                | "invalid_patch"
+                | "invalid_patch_size"
+                | "empty_patch"
+                | "invalid_patch_stat"
+                | "duplicate_patch_path"
+                | "rename_not_supported"
+                | "invalid_precondition_hashes"
+                | "precondition_path_not_in_patch"
+                | "invalid_precondition_hash"
+                | "patch_precondition_failed"
         )
     })
 }

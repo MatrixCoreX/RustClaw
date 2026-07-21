@@ -1427,6 +1427,63 @@ async fn missing_target_failure_publishes_bounded_replan_progress() {
 }
 
 #[tokio::test]
+async fn patch_context_mismatch_publishes_bounded_replan_progress() {
+    let state = test_state();
+    let task = test_task();
+    let mut loop_state = LoopState::new();
+    loop_state.round_no = 1;
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "workspace_patch",
+            "error_kind": "patch_context_mismatch",
+            "error_text": "patch check failed",
+            "extra": {"error_code": "patch_context_mismatch"}
+        })
+    );
+    let step = failed_step("step_1", "workspace_patch", &err);
+    let args = serde_json::json!({
+        "action": "apply_patch",
+        "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new"
+    });
+    let actions = vec![crate::AgentAction::CallSkill {
+        skill: "workspace_patch".to_string(),
+        args: args.clone(),
+    }];
+
+    let stop = handle_skill_step_failure(
+        &state,
+        &task,
+        &step,
+        &actions,
+        &["skill(workspace_patch)".to_string()],
+        &mut loop_state,
+        0,
+        1,
+        1,
+        "Apply a workspace patch.",
+        "Apply a workspace patch.",
+        &test_policy(),
+        "workspace_patch",
+        Some(&args),
+        &err,
+        "skill",
+    )
+    .await
+    .expect("patch contract failure should remain in the agent loop");
+
+    assert_eq!(stop.as_deref(), Some("recoverable_failure_continue_round"));
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("failed_step.error_kind")
+            .map(String::as_str),
+        Some("patch_context_mismatch")
+    );
+    assert!(loop_state.progress_messages[1].contains("telegram.progress.retry_replan"));
+}
+
+#[tokio::test]
 async fn recoverable_protocol_failure_publishes_replan_progress() {
     let state = test_state();
     let task = test_task();
