@@ -393,8 +393,8 @@ def main() -> int:
                     )
                 ],
                 text=(
-                    "- **path**: /workspace/README.md\n"
-                    "- `exists`: false\n"
+                    "- **path**: `/workspace/README.md`\n"
+                    "- `exists`: `false`\n"
                     "- error_code: path_not_found"
                 ),
             ),

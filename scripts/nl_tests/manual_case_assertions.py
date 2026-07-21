@@ -152,6 +152,18 @@ def final_text_has_machine_field(text: str, field: str) -> bool:
     return final_text_machine_field_value(text, field) is not None
 
 
+def unwrap_markdown_scalar(value: str) -> str:
+    normalized = value.strip()
+    for wrapper in ("`", "**", "__"):
+        if (
+            normalized.startswith(wrapper)
+            and normalized.endswith(wrapper)
+            and len(normalized) > len(wrapper) * 2
+        ):
+            return normalized[len(wrapper) : -len(wrapper)].strip()
+    return normalized
+
+
 def structured_mapping_from_text(text: str) -> dict[str, Any] | None:
     candidates = [text.strip()]
     candidates.extend(
@@ -186,12 +198,12 @@ def final_text_machine_field_value(text: str, field: str) -> str | None:
         text,
     )
     if match is not None:
-        return match.group(1).strip()
+        return unwrap_markdown_scalar(match.group(1))
     match = re.search(
         rf"(?:^|[;\s]){re.escape(field)}\s*=\s*(.*?)(?=\s+[a-zA-Z0-9_.-]+\s*=|$)",
         text,
     )
-    return match.group(1).strip() if match is not None else None
+    return unwrap_markdown_scalar(match.group(1)) if match is not None else None
 
 
 def observed_machine_field_matches(
