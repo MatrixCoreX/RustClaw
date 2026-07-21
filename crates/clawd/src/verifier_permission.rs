@@ -387,6 +387,9 @@ pub(super) fn workspace_filesystem_mutation_can_run_autonomously(
     normalized_skill: &str,
     args: &Value,
 ) -> bool {
+    if normalized_skill == "run_cmd" {
+        return workspace_greenfield_run_cmd_can_run_autonomously(state, args);
+    }
     if normalized_skill != "fs_basic"
         || !matches!(
             fs_basic_action(args).as_deref(),
@@ -398,6 +401,128 @@ pub(super) fn workspace_filesystem_mutation_can_run_autonomously(
     path_args(args)
         .into_iter()
         .any(|path| path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root))
+}
+
+fn workspace_greenfield_run_cmd_can_run_autonomously(state: &AppState, args: &Value) -> bool {
+    if !matches!(
+        state.skill_rt.tools_policy.sandbox_mode,
+        claw_core::config::ToolSandboxMode::WorkspaceWrite
+            | claw_core::config::ToolSandboxMode::IsolatedWorktree
+    ) || crate::execution_recipe::action_targets_external_workspace(state, "run_cmd", args)
+    {
+        return false;
+    }
+    let Some(command) = args
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    !crate::skills::command_requests_sudo(command)
+        && crate::execution_recipe::action_satisfies_greenfield_creation(state, "run_cmd", args)
+        && autonomous_greenfield_shell_shape(command)
+}
+
+fn autonomous_greenfield_shell_shape(command: &str) -> bool {
+    let command_lines = shell_command_lines_without_heredoc_bodies(command);
+    if command_lines.is_empty() {
+        return false;
+    }
+    let mut saw_write = false;
+    for line in command_lines {
+        if line.contains("$(") || line.contains('`') || line.contains('$') {
+            return false;
+        }
+        for segment in split_shell_control_segments(&line) {
+            let segment = segment.trim();
+            if segment.is_empty() {
+                continue;
+            }
+            let Some(program) = segment.split_whitespace().next() else {
+                continue;
+            };
+            match program {
+                "mkdir" | "touch" => saw_write = true,
+                "cat" | "printf" | "echo" => {
+                    if !segment.contains('>') {
+                        return false;
+                    }
+                    saw_write = true;
+                }
+                "cd" | "pwd" | "ls" | "test" | "[" => {}
+                _ => return false,
+            }
+        }
+    }
+    saw_write
+}
+
+fn shell_command_lines_without_heredoc_bodies(command: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut heredoc_end: Option<String> = None;
+    for raw_line in command.lines() {
+        if let Some(end) = heredoc_end.as_deref() {
+            if raw_line.trim() == end {
+                heredoc_end = None;
+            }
+            continue;
+        }
+        lines.push(raw_line.to_string());
+        heredoc_end = heredoc_delimiter(raw_line);
+    }
+    lines
+}
+
+fn heredoc_delimiter(line: &str) -> Option<String> {
+    let (_, tail) = line.split_once("<<")?;
+    let token = tail
+        .trim_start()
+        .trim_start_matches('-')
+        .split_whitespace()
+        .next()?
+        .trim_matches(|ch| matches!(ch, '\'' | '"'));
+    (!token.is_empty()).then(|| token.to_string())
+}
+
+fn split_shell_control_segments(line: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in line.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && quote != Some('\'') {
+            current.push(ch);
+            escaped = true;
+            continue;
+        }
+        if matches!(ch, '\'' | '"') {
+            if quote == Some(ch) {
+                quote = None;
+            } else if quote.is_none() {
+                quote = Some(ch);
+            }
+            current.push(ch);
+            continue;
+        }
+        if quote.is_none() && matches!(ch, ';' | '|' | '&') {
+            if !current.trim().is_empty() {
+                segments.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if !current.trim().is_empty() {
+        segments.push(current);
+    }
+    segments
 }
 
 pub(super) fn validation_run_cmd_can_run_autonomously(

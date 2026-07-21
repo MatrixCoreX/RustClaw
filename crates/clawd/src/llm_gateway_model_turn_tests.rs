@@ -32,3 +32,31 @@ fn tool_delta_event_exposes_shape_without_argument_fragment() {
     assert_eq!(payload["arguments_delta_bytes"], 23);
     assert!(payload.get("arguments_delta").is_none());
 }
+
+#[test]
+fn teaching_log_keeps_native_text_and_tool_calls_together() {
+    let turn = ModelTurnResponse {
+        text: "I will inspect the workspace.".to_string(),
+        tool_calls: vec![claw_core::model_turn::ModelToolCall {
+            id: "call-1".to_string(),
+            name: "call_capability".to_string(),
+            arguments: json!({
+                "capability": "filesystem.list_entries",
+                "args": {"path": "."}
+            }),
+        }],
+        usage: None,
+        finish_reason: claw_core::model_turn::ModelFinishReason::ToolCalls,
+        reasoning_metadata: Default::default(),
+        events: Vec::new(),
+    };
+
+    let logged: serde_json::Value = serde_json::from_str(&model_turn_log_response(&turn)).unwrap();
+    assert_eq!(logged["text"], "I will inspect the workspace.");
+    assert_eq!(logged["tool_calls"][0]["name"], "call_capability");
+    assert_eq!(
+        logged["tool_calls"][0]["arguments"]["capability"],
+        "filesystem.list_entries"
+    );
+    assert_eq!(logged["finish_reason"], "tool_calls");
+}

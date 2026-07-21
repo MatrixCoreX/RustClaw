@@ -257,10 +257,15 @@ pub(crate) async fn run_native_model_turn_with_fallback(
 }
 
 fn model_turn_log_response(turn: &ModelTurnResponse) -> String {
-    if !turn.text.trim().is_empty() {
+    if turn.tool_calls.is_empty() {
         return turn.text.clone();
     }
-    serde_json::to_string(&turn.tool_calls).unwrap_or_default()
+    json!({
+        "text": turn.text,
+        "tool_calls": turn.tool_calls,
+        "finish_reason": turn.finish_reason,
+    })
+    .to_string()
 }
 
 fn provider_message_key(kind: ProviderErrorKind) -> &'static str {

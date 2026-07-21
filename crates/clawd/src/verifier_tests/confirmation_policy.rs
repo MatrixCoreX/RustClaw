@@ -206,6 +206,84 @@ fn workspace_validation_run_cmd_is_low_risk_without_confirmation() {
 }
 
 #[test]
+fn sandboxed_workspace_greenfield_run_cmd_does_not_require_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let command = "mkdir -p run/new_calc && cd run/new_calc && cat > calc.py <<'EOF'\ndef add(a, b):\n    return a + b\nEOF\nls -la";
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: Some("create a new project"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({"command": command}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+}
+
+#[test]
+fn greenfield_run_cmd_keeps_confirmation_for_destructive_or_unsandboxed_commands() {
+    let task = test_task();
+    for (sandbox_mode, command) in [
+        (
+            claw_core::config::ToolSandboxMode::WorkspaceWrite,
+            "mkdir -p run/new_calc && rm -rf run/existing",
+        ),
+        (
+            claw_core::config::ToolSandboxMode::DangerFull,
+            "mkdir -p run/new_calc && touch run/new_calc/calc.py",
+        ),
+    ] {
+        let mut tools_config = ToolsConfig::default();
+        tools_config.sandbox_mode = sandbox_mode;
+        let mut state = test_state();
+        state.skill_rt.tools_policy =
+            Arc::new(ToolsPolicy::from_config(&tools_config).expect("sandbox tools policy"));
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                output_contract: Some(&route_result()),
+                request_text: Some("create a new project"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({"command": command}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+        assert!(result.approved, "issues: {:?}", result.issues);
+        assert!(result.needs_confirmation, "issues: {:?}", result.issues);
+    }
+}
+
+#[test]
 fn workspace_inline_python_probe_run_cmd_is_low_risk_without_confirmation() {
     let state = test_state();
     let task = test_task();
