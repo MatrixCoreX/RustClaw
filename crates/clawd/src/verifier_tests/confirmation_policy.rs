@@ -209,7 +209,7 @@ fn workspace_validation_run_cmd_is_low_risk_without_confirmation() {
 fn sandboxed_workspace_greenfield_run_cmd_does_not_require_confirmation() {
     let state = test_state();
     let task = test_task();
-    let command = "set -e\nmkdir -p run/new_calc && cd run/new_calc && cat > calc.py <<'EOF'\ndef add(a, b):\n    return a + b\nEOF\nls -la";
+    let command = "set -e\nmkdir -p run/new_calc && cd run/new_calc && cat > calc.py <<'EOF'\ndef add(a, b):\n    return a + b\nEOF\nls -la\necho '---RUN TEST---'\npython3 test_calc.py\necho \"EXIT_CODE=$?\"";
     let result = verify_plan(
         &state,
         &task,
@@ -256,6 +256,10 @@ fn greenfield_run_cmd_keeps_confirmation_for_destructive_or_unsandboxed_commands
         (
             claw_core::config::ToolSandboxMode::WorkspaceWrite,
             "set +e; mkdir -p run/new_calc && touch run/new_calc/calc.py",
+        ),
+        (
+            claw_core::config::ToolSandboxMode::WorkspaceWrite,
+            "mkdir -p run/new_calc && curl https://example.com/test > run/new_calc/input",
         ),
     ] {
         let mut tools_config = ToolsConfig::default();

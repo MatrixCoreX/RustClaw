@@ -432,7 +432,7 @@ fn autonomous_greenfield_shell_shape(command: &str) -> bool {
     }
     let mut saw_write = false;
     for line in command_lines {
-        if line.contains("$(") || line.contains('`') || line.contains('$') {
+        if line.contains("$(") || line.contains('`') {
             return false;
         }
         for segment in split_shell_control_segments(&line) {
@@ -440,24 +440,66 @@ fn autonomous_greenfield_shell_shape(command: &str) -> bool {
             if segment.is_empty() {
                 continue;
             }
+            if shell_segment_has_unsafe_expansion(segment) {
+                return false;
+            }
             let Some(program) = segment.split_whitespace().next() else {
                 continue;
             };
             match program {
                 "mkdir" | "touch" => saw_write = true,
-                "cat" | "printf" | "echo" => {
+                "cat" => {
                     if !segment.contains('>') {
                         return false;
                     }
                     saw_write = true;
                 }
+                "printf" | "echo" => {
+                    if segment.contains('>') {
+                        saw_write = true;
+                    }
+                }
                 "set" if safe_fail_fast_shell_options(segment) => {}
                 "cd" | "pwd" | "ls" | "test" | "[" => {}
+                _ if local_validation_program(program)
+                    && crate::execution_recipe::run_cmd_looks_validation(segment) => {}
                 _ => return false,
             }
         }
     }
     saw_write
+}
+
+fn shell_segment_has_unsafe_expansion(segment: &str) -> bool {
+    let mut chars = segment.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '$' {
+            continue;
+        }
+        if chars.next() != Some('?') {
+            return true;
+        }
+    }
+    false
+}
+
+fn local_validation_program(program: &str) -> bool {
+    matches!(
+        program,
+        "python"
+            | "python3"
+            | "pytest"
+            | "cargo"
+            | "npm"
+            | "pnpm"
+            | "yarn"
+            | "bun"
+            | "go"
+            | "make"
+            | "just"
+            | "mvn"
+            | "gradle"
+    )
 }
 
 fn safe_fail_fast_shell_options(segment: &str) -> bool {
