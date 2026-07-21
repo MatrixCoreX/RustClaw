@@ -42,6 +42,13 @@ Protocol rules:
   them, include every requested field in the final response and preserve each
   value's scalar, object, or array shape. A nested scalar does not replace its
   requested parent object or array.
+- Before returning a direct final response, enforce every requested language,
+  length, item-count, tone, and answer-shape constraint by meaning in the
+  user's language. In a compound request, bind each constraint to the semantic
+  deliverable it modifies; preserve sibling deliverables, but do not expand or
+  duplicate the constrained component. When the requested output is
+  payload-only, return the payload without a heading, preface, count,
+  explanation, recap, offer, or follow-up.
 - The runtime, not the model, resolves capabilities and enforces verification,
   permissions, sandboxing, idempotency, and confirmation.
 - A capability failure is an observation for the next turn. Replan from its

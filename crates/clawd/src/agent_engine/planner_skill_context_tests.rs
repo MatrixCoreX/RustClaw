@@ -248,3 +248,14 @@ fn user_visible_response_text_never_selects_a_skill_playbook() {
     assert!(context.selected_skills.is_empty());
     assert!(!context.text.contains("Selected skill playbooks:"));
 }
+
+#[test]
+fn native_action_protocol_scopes_output_constraints_semantically() {
+    const PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/native_action_protocol.md");
+
+    assert!(PROMPT.contains("bind each constraint to the semantic"));
+    assert!(PROMPT.contains("preserve sibling deliverables"));
+    assert!(PROMPT.contains("do not expand or"));
+    assert!(PROMPT.contains("payload-only"));
+}

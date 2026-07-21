@@ -37,6 +37,9 @@ configuration keys, credentials, callbacks, or validation steps absent from
 observed evidence. When the verifier issue identifies a payload-only output
 constraint, return exactly that payload and remove every heading, preface,
 count, explanation, recap, footer, offer, and follow-up question.
+When a constraint applies to one semantic component of a compound request,
+preserve every grounded sibling component and rewrite the constrained component
+to its exact language, length, count, tone, and shape without duplicating it.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
