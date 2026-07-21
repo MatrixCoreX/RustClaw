@@ -30,32 +30,42 @@ pub(crate) fn enqueue_child_task_specs(
     max_parallel: usize,
     recursion_depth: usize,
 ) -> anyhow::Result<Value> {
-    let (scheduled_specs, scheduler) = schedule_child_specs(specs, max_parallel, recursion_depth);
-    if scheduled_specs.is_empty() {
+    let scheduler_boundary =
+        child_scheduler_decision(specs.len(), specs.len().max(1), recursion_depth);
+    if scheduler_boundary
+        .get("scheduled_child_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+        == 0
+    {
         return Ok(json!({
             "schema_version": CHILD_TASK_SCHEMA_VERSION,
             "parent_task_id": parent.parent_task_id,
             "status": "not_scheduled",
             "queued_child_count": 0,
             "child_task_ids": [],
-            "scheduler": scheduler,
+            "scheduler": scheduler_boundary,
         }));
     }
+    let graph = super::child_task_graph::prepare_child_task_graph(specs, max_parallel)?;
+    let scheduler = graph_scheduler_projection(&graph, scheduler_boundary);
 
     let now = now_ts();
-    let db = state
+    let mut db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let tx = db.transaction()?;
+    super::child_task_graph::persist_child_task_graph(&tx, &graph, &now)?;
     let mut queued_child_ids = Vec::new();
-    for spec in scheduled_specs {
+    for spec in specs {
         if spec.parent_task_id != parent.parent_task_id {
             anyhow::bail!("child_parent_mismatch");
         }
         let payload = child_task_payload(spec)?;
         let result_json = queued_child_task_result(spec);
-        db.execute(
+        tx.execute(
             "INSERT INTO tasks (
                 task_id, user_id, chat_id, user_key, channel, external_user_id,
                 external_chat_id, message_id, kind, payload_json, status,
@@ -77,7 +87,18 @@ pub(crate) fn enqueue_child_task_specs(
         )?;
         queued_child_ids.push(spec.child_task_id.clone());
     }
-    append_parent_child_enqueue_progress(&db, parent, &queued_child_ids, &scheduler, &now)?;
+    append_parent_child_enqueue_progress(&tx, parent, &queued_child_ids, &scheduler, &now)?;
+    tx.commit()?;
+    let graph_snapshot = super::child_task_graph::graph_snapshot(&db, &parent.parent_task_id)?;
+    drop(db);
+    if let Some(snapshot) = graph_snapshot.as_ref() {
+        let _ = crate::task_event_transport::publish_event(
+            state,
+            &parent.parent_task_id,
+            "subagent_graph",
+            snapshot.clone(),
+        );
+    }
     Ok(json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
         "parent_task_id": parent.parent_task_id,
@@ -85,7 +106,60 @@ pub(crate) fn enqueue_child_task_specs(
         "queued_child_count": queued_child_ids.len(),
         "child_task_ids": queued_child_ids,
         "scheduler": scheduler,
+        "child_task_graph": graph_snapshot,
     }))
+}
+
+fn graph_scheduler_projection(
+    graph: &super::child_task_graph::PreparedChildTaskGraph<'_>,
+    mut boundary: Value,
+) -> Value {
+    let ready_child_task_ids = graph
+        .nodes
+        .iter()
+        .filter(|node| node.readiness == "ready")
+        .map(|node| node.spec.child_task_id.clone())
+        .collect::<Vec<_>>();
+    let blocked_child_tasks = graph
+        .nodes
+        .iter()
+        .filter(|node| node.readiness != "ready")
+        .map(|node| {
+            json!({
+                "child_task_id": node.spec.child_task_id,
+                "readiness": node.readiness,
+            })
+        })
+        .collect::<Vec<_>>();
+    if let Some(object) = boundary.as_object_mut() {
+        object.insert("decision".to_string(), json!("persisted_graph"));
+        object.insert(
+            "scheduled_child_count".to_string(),
+            json!(graph.nodes.len()),
+        );
+        object.insert(
+            "ready_child_count".to_string(),
+            json!(ready_child_task_ids.len()),
+        );
+        object.insert(
+            "blocked_child_count".to_string(),
+            json!(blocked_child_tasks.len()),
+        );
+        object.insert(
+            "ready_child_task_ids".to_string(),
+            json!(ready_child_task_ids),
+        );
+        object.insert(
+            "blocked_child_tasks".to_string(),
+            json!(blocked_child_tasks),
+        );
+        object.insert(
+            "dependency_edge_count".to_string(),
+            json!(graph.edges.len()),
+        );
+        object.insert("path_ownership_enforced".to_string(), Value::Bool(true));
+    }
+    boundary
 }
 
 fn schedule_child_specs<'a>(
@@ -287,7 +361,34 @@ pub(crate) fn record_child_task_terminal_projection(
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
     {
+        let graph_snapshot = super::child_task_graph::record_child_graph_terminal(
+            &db,
+            parent_task_id,
+            task_id,
+            &status,
+            &now_ts(),
+        )?;
         refresh_parent_child_task_merge_from_db(&db, parent_task_id)?;
+        drop(db);
+        if let Some(snapshot) = graph_snapshot {
+            let _ = crate::task_event_transport::publish_event(
+                state,
+                parent_task_id,
+                "subagent_graph",
+                snapshot.clone(),
+            );
+            let _ = crate::task_event_transport::publish_event(
+                state,
+                task_id,
+                "subagent_node",
+                json!({
+                    "schema_version": CHILD_TASK_SCHEMA_VERSION,
+                    "parent_task_id": parent_task_id,
+                    "child_task_id": task_id,
+                    "graph": snapshot,
+                }),
+            );
+        }
     }
     Ok(true)
 }
@@ -435,6 +536,7 @@ fn refresh_parent_child_task_merge_from_db(
         "ready" => "child_tasks_merged",
         _ => "required_child_failed",
     };
+    let graph_snapshot = super::child_task_graph::graph_snapshot(db, parent_task_id)?;
     let projection = json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
         "source": "child_task_parent_merge",
@@ -446,6 +548,7 @@ fn refresh_parent_child_task_merge_from_db(
         "pending_child_ids": pending_child_ids,
         "missing_child_ids": missing_child_ids,
         "merge": merge,
+        "child_task_graph": graph_snapshot,
         "parent_continuation": {
             "status": continuation_status,
             "reason_code": reason_code,

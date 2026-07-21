@@ -326,7 +326,7 @@ fn parent_child_merge_recovers_child_ids_from_nested_journal_observations() {
 }
 
 #[test]
-fn scheduler_limits_local_worktree_children_across_writer_role_aliases() {
+fn scheduler_persists_and_serializes_overlapping_local_worktree_children() {
     let temp = TempDirGuard::new("writer_profile_capacity");
     let db_path = temp.path.join("tasks.sqlite");
     let state = file_backed_state_with_schema(&db_path);
@@ -359,11 +359,16 @@ fn scheduler_limits_local_worktree_children_across_writer_role_aliases() {
     let scheduled = enqueue_child_task_specs(&state, &parent, &[writer, worker], 4, 1)
         .expect("schedule bounded writer children");
 
-    assert_eq!(scheduled["queued_child_count"], 1);
-    assert_eq!(scheduled["scheduler"]["scheduled_child_count"], 1);
-    assert_eq!(scheduled["scheduler"]["skipped_child_count"], 1);
+    assert_eq!(scheduled["queued_child_count"], 2);
+    assert_eq!(scheduled["scheduler"]["scheduled_child_count"], 2);
+    assert_eq!(scheduled["scheduler"]["ready_child_count"], 1);
+    assert_eq!(scheduled["scheduler"]["blocked_child_count"], 1);
     assert_eq!(
-        scheduled["scheduler"]["skipped_child_tasks"][0]["reason_code"],
-        "child_profile_capacity_exceeded"
+        scheduled["scheduler"]["blocked_child_tasks"][0]["readiness"],
+        "blocked_dependency"
+    );
+    assert_eq!(
+        scheduled["child_task_graph"]["edges"][0]["edge_kind"],
+        "path_ownership_serialization"
     );
 }

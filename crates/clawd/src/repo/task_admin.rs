@@ -183,14 +183,31 @@ pub(crate) fn resume_task_with_input(
         anyhow::bail!("resume_user_message_too_large");
     }
     let now_ts = crate::now_ts_u64() as i64;
-    update_paused_checkpoint_schedule(
+    let update = update_paused_checkpoint_schedule(
         state,
         &input.task_id,
         now_ts,
         now_ts,
         TASK_RESUMED_MESSAGE_KEY,
         Some(&input),
-    )
+    )?;
+    if update.is_some() {
+        let db = state
+            .core
+            .db
+            .get()
+            .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
+        let _ = super::child_task_graph::record_child_graph_steering(
+            &db,
+            &input.task_id,
+            input.checkpoint_id.as_deref(),
+            input.resume_trigger.status_code(),
+            input.user_message.as_deref(),
+            input.new_constraints.as_ref(),
+            &now_ts.to_string(),
+        )?;
+    }
+    Ok(update)
 }
 
 pub(crate) fn pause_task_by_id(
@@ -267,6 +284,16 @@ fn cancel_task_records_with_reason(
         )?;
         affected += count as i64;
         if count > 0 {
+            let parent_graph_cancelled =
+                super::child_task_graph::mark_parent_graph_cancelled(db, &record.task_id, now)?;
+            if !parent_graph_cancelled {
+                let _ = super::child_task_graph::record_child_graph_task_terminal(
+                    db,
+                    &record.task_id,
+                    "canceled",
+                    now,
+                )?;
+            }
             state.worker.cancel_active_task(&record.task_id);
         }
     }

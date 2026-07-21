@@ -968,6 +968,8 @@ impl AppState {
         crate::repo::ensure_key_auth_schema(&conn)
             .expect("ensure_key_auth_schema for test main db");
         crate::ensure_channel_schema(&conn).expect("ensure_channel_schema for test main db");
+        crate::repo::child_task_graph::ensure_child_task_graph_schema(&conn)
+            .expect("child_task_graph_schema_test");
         drop(conn);
         self
     }

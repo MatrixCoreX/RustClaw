@@ -75,7 +75,7 @@ fn record_subagent_batch_action_with_config(
             Some(child.required),
             None,
         ));
-        let Some(role) = SubagentRole::parse_token(role_token) else {
+        let Some(role) = config.resolve_role(role_token) else {
             rejected_count += 1;
             if child.required {
                 required_failed_count += 1;
@@ -109,40 +109,6 @@ fn record_subagent_batch_action_with_config(
             child_results.push(child_result);
             continue;
         };
-        if !config.role_allowed(role) {
-            rejected_count += 1;
-            if child.required {
-                required_failed_count += 1;
-            } else {
-                optional_failed_count += 1;
-            }
-            let child_result = rejected_child_result(
-                child_run_id.as_str(),
-                role.as_token(),
-                child.required,
-                "subagent_role_disabled_by_config",
-            );
-            team_children.push(agent_team_child_spec(
-                child_run_id.as_str(),
-                role.as_token(),
-                role.default_scope_token(),
-                child.required,
-                None,
-                "rejected",
-            ));
-            team_lifecycle_events.push(team_lifecycle_event(
-                "subagent_failed",
-                parallel_batch_id.as_str(),
-                Some(child_run_id.as_str()),
-                "rejected",
-                Some(role.as_token()),
-                Some(child.required),
-                Some("subagent_role_disabled_by_config"),
-            ));
-            child_summaries.push(child_summary_from_result(&child_result));
-            child_results.push(child_result);
-            continue;
-        }
         if completed_count >= max_parallel_readonly {
             skipped_count += 1;
             if child.required {
@@ -152,14 +118,14 @@ fn record_subagent_batch_action_with_config(
             }
             let child_result = rejected_child_result(
                 child_run_id.as_str(),
-                role.as_token(),
+                &role.token,
                 child.required,
                 "subagent_parallel_limit_exceeded",
             );
             team_children.push(agent_team_child_spec(
                 child_run_id.as_str(),
-                role.as_token(),
-                role.default_scope_token(),
+                &role.token,
+                &role.default_scope,
                 child.required,
                 None,
                 "skipped",
@@ -169,7 +135,7 @@ fn record_subagent_batch_action_with_config(
                 parallel_batch_id.as_str(),
                 Some(child_run_id.as_str()),
                 "skipped",
-                Some(role.as_token()),
+                Some(&role.token),
                 Some(child.required),
                 Some("subagent_parallel_limit_exceeded"),
             ));
@@ -212,13 +178,13 @@ fn record_subagent_batch_action_with_config(
             "status": "completed",
             "result_status": "completed",
             "outcome_code": "subagent_inline_readonly_completed",
-            "role": role.as_token(),
-            "role_family": role.family_token(),
+            "role": role.token,
+            "role_family": role.family,
             "required": child.required,
             "context_ref_count": context_ref_count,
             "allowed_capability_count": allowed_capability_count,
             "result_contract_present": child.options.result_contract.is_some(),
-            "result_contract_required": role.result_contract_required(),
+            "result_contract_required": role.result_contract_required,
             "content_excerpt_present": content_excerpt_present,
             "findings": findings,
             "finding_count": finding_count,
@@ -229,8 +195,8 @@ fn record_subagent_batch_action_with_config(
         completed_count += 1;
         team_children.push(agent_team_child_spec(
             child_run_id.as_str(),
-            role.as_token(),
-            role.default_scope_token(),
+            &role.token,
+            &role.default_scope,
             child.required,
             timeout_ms,
             "completed",
@@ -240,7 +206,7 @@ fn record_subagent_batch_action_with_config(
             parallel_batch_id.as_str(),
             Some(child_run_id.as_str()),
             "completed",
-            Some(role.as_token()),
+            Some(&role.token),
             Some(child.required),
             None,
         ));

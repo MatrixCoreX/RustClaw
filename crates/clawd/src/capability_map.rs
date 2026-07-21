@@ -353,7 +353,14 @@ fn build_capability_map_for_task_with_detail(
         "Current capability map (derived from the currently enabled skills):".to_string(),
         "Use this as routing guidance, not as a full tool schema.".to_string(),
         "Do not plan or call capabilities marked `runtime_availability: unavailable`; choose another available capability or explain the dependency gap.".to_string(),
-        crate::agent_runtime_contract::runtime_protocol_hint_line(),
+        crate::agent_runtime_contract::runtime_protocol_hint_line(
+            &crate::agent_runtime_contract::load_subagent_role_definitions(
+                &state
+                    .skill_rt
+                    .workspace_root
+                    .join("configs/agent_guard.toml"),
+            ),
+        ),
         crate::async_job_contract::async_job_protocol_hint_line(),
     ];
 

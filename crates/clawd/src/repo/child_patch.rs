@@ -10,6 +10,7 @@ pub(crate) struct ChildPatchRecord {
     pub(crate) terminal_status: String,
     pub(crate) permission_profile: String,
     pub(crate) allowed_capabilities: Vec<String>,
+    pub(crate) owned_paths: Vec<String>,
     pub(crate) patch_artifact: Value,
     pub(crate) verification_artifact: Option<Value>,
     pub(crate) patch_disposition: Option<Value>,
@@ -44,7 +45,10 @@ pub(crate) fn load_child_patch_record(
         )
         .optional()?
         .ok_or_else(|| anyhow::anyhow!("child_patch_task_not_found"))?;
-    child_patch_record_from_row(parent_task_id, child_task_id, row)
+    let mut record = child_patch_record_from_row(parent_task_id, child_task_id, row)?;
+    record.owned_paths =
+        load_and_validate_graph_ownership(&db, parent_task_id, child_task_id, &record)?;
+    Ok(record)
 }
 
 pub(crate) fn record_child_patch_disposition(
@@ -81,7 +85,9 @@ pub(crate) fn record_child_patch_disposition(
         )
         .optional()?
         .ok_or_else(|| anyhow::anyhow!("child_patch_task_not_found"))?;
-    let _record = child_patch_record_from_row(parent_task_id, child_task_id, row.clone())?;
+    let mut record = child_patch_record_from_row(parent_task_id, child_task_id, row.clone())?;
+    record.owned_paths =
+        load_and_validate_graph_ownership(&transaction, parent_task_id, child_task_id, &record)?;
     let mut child_result = parse_object(row.2.as_deref());
     let scope = child_result
         .as_object_mut()
@@ -209,10 +215,85 @@ fn child_patch_record_from_row(
         terminal_status: row.0,
         permission_profile: permission_profile.to_string(),
         allowed_capabilities,
+        owned_paths: Vec::new(),
         patch_artifact,
         verification_artifact,
         patch_disposition,
     })
+}
+
+fn load_and_validate_graph_ownership(
+    db: &rusqlite::Connection,
+    parent_task_id: &str,
+    child_task_id: &str,
+    record: &ChildPatchRecord,
+) -> anyhow::Result<Vec<String>> {
+    let row = db
+        .query_row(
+            "SELECT parent_task_id, permission_profile, readiness, owned_paths_json
+             FROM child_task_graph_nodes
+             WHERE child_task_id = ?1
+             LIMIT 1",
+            params![child_task_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| anyhow::anyhow!("child_patch_graph_node_missing"))?;
+    if row.0 != parent_task_id {
+        anyhow::bail!("child_patch_graph_parent_mismatch");
+    }
+    if row.1 != record.permission_profile {
+        anyhow::bail!("child_patch_graph_profile_mismatch");
+    }
+    if !matches!(
+        row.2.as_str(),
+        "succeeded" | "failed" | "timeout" | "canceled"
+    ) {
+        anyhow::bail!("child_patch_graph_node_not_terminal");
+    }
+    let owned_paths = serde_json::from_str::<Vec<String>>(&row.3)
+        .map_err(|_| anyhow::anyhow!("child_patch_graph_ownership_invalid"))?;
+    if owned_paths.is_empty() {
+        anyhow::bail!("child_patch_graph_ownership_missing");
+    }
+    let changed_files = record
+        .patch_artifact
+        .get("changed_files")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("child_patch_changed_files_missing"))?;
+    for changed_file in changed_files {
+        let changed_file = changed_file
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("child_patch_changed_file_invalid"))?;
+        if !owned_paths
+            .iter()
+            .any(|owned_path| path_within_owned_scope(changed_file, owned_path))
+        {
+            anyhow::bail!("child_patch_path_ownership_mismatch");
+        }
+    }
+    Ok(owned_paths)
+}
+
+fn path_within_owned_scope(path: &str, owned_path: &str) -> bool {
+    let path = path.trim().trim_start_matches("./").trim_end_matches('/');
+    let owned_path = owned_path
+        .trim()
+        .trim_start_matches("./")
+        .trim_end_matches('/');
+    owned_path.is_empty()
+        || owned_path == "."
+        || path == owned_path
+        || path
+            .strip_prefix(owned_path)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn machine_capability_token(value: &str) -> bool {

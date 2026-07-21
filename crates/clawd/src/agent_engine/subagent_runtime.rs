@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 use super::{AppState, LoopState};
-use crate::agent_runtime_contract::SubagentRole;
+use crate::agent_runtime_contract::SubagentRoleDefinition;
 
 pub(super) const SUBAGENT_STOP_SIGNAL_INVALID_ROLE: &str = "subagent_invalid_role";
 pub(super) const SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED: &str =
@@ -29,7 +29,7 @@ use subagent_runtime_context::{
 
 #[derive(Debug, Clone)]
 pub(super) struct SubagentRuntimeConfig {
-    allowed_roles: Vec<String>,
+    role_definitions: Vec<SubagentRoleDefinition>,
     max_parallel_readonly: u64,
     default_timeout_ms: Option<u64>,
     context_evidence_root: Option<PathBuf>,
@@ -38,10 +38,7 @@ pub(super) struct SubagentRuntimeConfig {
 impl Default for SubagentRuntimeConfig {
     fn default() -> Self {
         Self {
-            allowed_roles: SubagentRole::all_tokens()
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
+            role_definitions: crate::agent_runtime_contract::default_subagent_role_definitions(),
             max_parallel_readonly: DEFAULT_MAX_PARALLEL_READONLY,
             default_timeout_ms: None,
             context_evidence_root: None,
@@ -50,16 +47,24 @@ impl Default for SubagentRuntimeConfig {
 }
 
 impl SubagentRuntimeConfig {
-    fn role_allowed(&self, role: SubagentRole) -> bool {
-        self.allowed_roles
+    pub(super) fn resolve_role(&self, token: &str) -> Option<&SubagentRoleDefinition> {
+        let token = normalize_machine_token(token);
+        self.role_definitions
             .iter()
-            .any(|allowed| allowed == role.as_token())
+            .find(|definition| definition.token == token)
     }
 
     fn trace_summary(&self) -> Value {
         json!({
             "schema_version": 1,
-            "allowed_roles": self.allowed_roles,
+            "allowed_roles": self.role_definitions
+                .iter()
+                .map(|definition| definition.token.as_str())
+                .collect::<Vec<_>>(),
+            "role_definitions": self.role_definitions
+                .iter()
+                .map(role_definition_summary)
+                .collect::<Vec<_>>(),
             "max_parallel_readonly": self.max_parallel_readonly,
             "default_timeout_ms": self.default_timeout_ms,
             "context_evidence_enabled": self.context_evidence_root.is_some(),
@@ -99,20 +104,7 @@ fn load_subagent_runtime_config_from_path(path: &Path) -> SubagentRuntimeConfig 
     else {
         return config;
     };
-    if let Some(roles) = subagents
-        .get("allowed_roles")
-        .and_then(toml::Value::as_array)
-    {
-        let allowed = roles
-            .iter()
-            .filter_map(toml::Value::as_str)
-            .map(normalize_machine_token)
-            .filter(|token| SubagentRole::parse_token(token).is_some())
-            .collect::<Vec<_>>();
-        if !allowed.is_empty() {
-            config.allowed_roles = allowed;
-        }
-    }
+    config.role_definitions = crate::agent_runtime_contract::load_subagent_role_definitions(path);
     if let Some(value) = subagents
         .get("max_parallel_readonly")
         .and_then(toml::Value::as_integer)
@@ -161,30 +153,17 @@ pub(super) fn record_subagent_action_with_config(
     config: &SubagentRuntimeConfig,
 ) -> Option<&'static str> {
     let role_token = role.trim();
-    let Some(role) = SubagentRole::parse_token(role_token) else {
+    let Some(role) = config.resolve_role(role_token).cloned() else {
         loop_state.task_observations.push(json!({
             "schema_version": 1,
             "owner_layer": "subagent_runtime",
             "status": "rejected",
             "error_code": "subagent_role_not_allowed",
             "role": role_token,
-            "allowed_roles": SubagentRole::all_tokens(),
-            "write_enabled": false,
-            "external_publish_enabled": false,
-            "global_step": global_step,
-            "step_in_round": step_in_round,
-            "round_no": loop_state.round_no,
-        }));
-        return Some(SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
-    };
-    if !config.role_allowed(role) {
-        loop_state.task_observations.push(json!({
-            "schema_version": 1,
-            "owner_layer": "subagent_runtime",
-            "status": "rejected",
-            "error_code": "subagent_role_disabled_by_config",
-            "role": role.as_token(),
-            "allowed_roles": config.allowed_roles,
+            "allowed_roles": config.role_definitions
+                .iter()
+                .map(|definition| definition.token.as_str())
+                .collect::<Vec<_>>(),
             "runtime_config": config.trace_summary(),
             "write_enabled": false,
             "external_publish_enabled": false,
@@ -193,18 +172,16 @@ pub(super) fn record_subagent_action_with_config(
             "round_no": loop_state.round_no,
         }));
         return Some(SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
-    }
+    };
     let child_run_id = format!(
         "subagent:{}:{}:{}",
-        loop_state.round_no,
-        step_in_round,
-        role.as_token()
+        loop_state.round_no, step_in_round, role.token
     );
     let context_refs = safe_context_refs(context_refs);
     let allowed_capabilities = safe_machine_token_list(&options.allowed_capabilities);
     let context_ref_count = context_refs.len();
     let allowed_capability_count = allowed_capabilities.len();
-    let role_metadata = role_metadata_summary(role, config);
+    let role_metadata = role_metadata_summary(&role, config);
     let budget_summary = subagent_budget_summary(options.budget.as_ref(), config);
     let timeout_policy = subagent_timeout_policy(&budget_summary);
     let cancellation_policy = subagent_cancellation_policy(&timeout_policy);
@@ -218,7 +195,7 @@ pub(super) fn record_subagent_action_with_config(
         "status": "accepted",
         "execution_mode": "inline_readonly_child_run",
         "child_run_id": child_run_id.as_str(),
-        "role": role.as_token(),
+        "role": role.token,
         "role_metadata": role_metadata,
         "objective_present": !objective.trim().is_empty(),
         "objective_char_count": objective.chars().count(),
@@ -235,7 +212,7 @@ pub(super) fn record_subagent_action_with_config(
         "result_contract": result_contract_summary(options.result_contract.as_ref()),
         "child_request": child_request_envelope(
             child_run_id.as_str(),
-            role,
+            &role,
             context_ref_count,
             allowed_capability_count,
             options.budget.as_ref(),
@@ -261,10 +238,10 @@ pub(super) fn record_subagent_action_with_config(
             "status": "completed",
             "result_status": "completed",
             "trace_merge_status": "merged",
-            "role": role.as_token(),
+            "role": role.token,
             "context_ref_count": context_ref_count,
             "allowed_capability_count": allowed_capability_count,
-            "role_family": role.family_token(),
+            "role_family": role.family,
             "write_enabled": false,
             "external_publish_enabled": false,
             "failure_isolated": true
@@ -274,12 +251,12 @@ pub(super) fn record_subagent_action_with_config(
             "status": "completed",
             "result_status": "completed",
             "outcome_code": "subagent_inline_readonly_completed",
-            "role": role.as_token(),
-            "role_family": role.family_token(),
+            "role": role.token,
+            "role_family": role.family,
             "context_ref_count": context_ref_count,
             "allowed_capability_count": allowed_capability_count,
             "result_contract_present": options.result_contract.is_some(),
-            "result_contract_required": role.result_contract_required(),
+            "result_contract_required": role.result_contract_required,
             "write_enabled": false,
             "external_publish_enabled": false,
             "failure_isolated": true
@@ -569,18 +546,31 @@ fn subagent_budget_summary(budget: Option<&Value>, config: &SubagentRuntimeConfi
     })
 }
 
-fn role_metadata_summary(role: SubagentRole, config: &SubagentRuntimeConfig) -> Value {
+fn role_metadata_summary(role: &SubagentRoleDefinition, config: &SubagentRuntimeConfig) -> Value {
     json!({
         "schema_version": 1,
-        "role": role.as_token(),
-        "role_family": role.family_token(),
-        "default_scope": role.default_scope_token(),
+        "role": role.token,
+        "role_family": role.family,
+        "default_scope": role.default_scope,
         "tool_permission_profile": "read_only",
         "parallel_eligible": config.max_parallel_readonly > 1,
         "max_parallel_readonly": config.max_parallel_readonly,
-        "result_contract_required": role.result_contract_required(),
+        "result_contract_required": role.result_contract_required,
         "write_enabled": false,
         "external_publish_enabled": false,
+    })
+}
+
+fn role_definition_summary(role: &SubagentRoleDefinition) -> Value {
+    json!({
+        "role": role.token,
+        "role_family": role.family,
+        "default_scope": role.default_scope,
+        "default_permission_profile": role.default_permission_profile,
+        "allowed_permission_profiles": role.allowed_permission_profiles,
+        "result_contract_required": role.result_contract_required,
+        "model_policy": role.model_policy,
+        "tool_policy": role.tool_policy,
     })
 }
 
@@ -639,7 +629,7 @@ fn context_slice_summary(context_slice: Option<&Value>) -> Value {
 
 fn child_request_envelope(
     child_run_id: &str,
-    role: SubagentRole,
+    role: &SubagentRoleDefinition,
     context_ref_count: usize,
     allowed_capability_count: usize,
     budget: Option<&Value>,
@@ -650,7 +640,7 @@ fn child_request_envelope(
     json!({
         "schema_version": 1,
         "request_ref": child_run_id,
-        "role": role.as_token(),
+        "role": role.token,
         "role_metadata": role_metadata_summary(role, config),
         "runtime_config": config.trace_summary(),
         "state": "completed",

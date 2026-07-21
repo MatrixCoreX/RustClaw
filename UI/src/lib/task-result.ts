@@ -827,6 +827,48 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
     };
   }
 
+  if (eventType === "subagent_graph") {
+    const nodeCount = Array.isArray(payload?.nodes) ? payload.nodes.length : 0;
+    const edgeCount = Array.isArray(payload?.edges) ? payload.edges.length : 0;
+    const graphStatus = field("status");
+    return {
+      eventType,
+      title: tLocal("子任务图", "Subagent task graph"),
+      detail: tLocal(
+        `${nodeCount} 个节点，${edgeCount} 条依赖；状态 ${graphStatus || "active"}。`,
+        `${nodeCount} node(s), ${edgeCount} dependency edge(s); status ${graphStatus || "active"}.`,
+      ),
+      tone: graphStatus.startsWith("parent_") || graphStatus === "canceled" ? "failed" : tone,
+      meta,
+    };
+  }
+
+  if (eventType === "subagent_node") {
+    const childTaskId = field("child_task_id");
+    const graph = payload?.graph;
+    const nodes =
+      graph && typeof graph === "object" && Array.isArray((graph as Record<string, unknown>).nodes)
+        ? ((graph as Record<string, unknown>).nodes as unknown[])
+        : [];
+    const matchingNode = nodes.find(
+      (node) =>
+        node &&
+        typeof node === "object" &&
+        (node as Record<string, unknown>).child_task_id === childTaskId,
+    );
+    const readiness =
+      matchingNode && typeof matchingNode === "object"
+        ? String((matchingNode as Record<string, unknown>).readiness || "")
+        : "";
+    return {
+      eventType,
+      title: tLocal("子任务节点", "Subagent task node"),
+      detail: [childTaskId, readiness].filter(Boolean).join(" · ") || eventType,
+      tone: ["failed", "canceled", "timeout"].includes(readiness) ? "failed" : tone,
+      meta,
+    };
+  }
+
   return {
     eventType,
     title: tLocal("任务事件", "Task event"),

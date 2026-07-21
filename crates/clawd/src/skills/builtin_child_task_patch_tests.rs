@@ -253,6 +253,27 @@ fn parent_dirty_change_blocks_child_patch_and_preserves_review_artifacts() {
 }
 
 #[test]
+fn persisted_path_ownership_blocks_out_of_scope_child_patch() {
+    let fixture = ChildPatchFixture::new("ownership");
+    let db = fixture.state.core.db.get().expect("get db");
+    db.execute(
+        "UPDATE child_task_graph_nodes
+         SET owned_paths_json = '[\"src\"]'
+         WHERE child_task_id = ?1",
+        rusqlite::params![fixture.child_task_id],
+    )
+    .expect("narrow child ownership");
+    drop(db);
+
+    let error = fixture
+        .run("review_child_patch")
+        .expect_err("README patch must exceed src ownership");
+    assert!(error.contains("child_patch_path_ownership_mismatch"));
+    assert!(fixture.worktree_root.exists());
+    assert!(fixture.artifact_path.exists());
+}
+
+#[test]
 fn overlapping_child_patches_require_parent_resolution() {
     let fixture = ChildPatchFixture::new("overlap");
     let second_child_task_id = "child-overlap-second";
@@ -566,6 +587,46 @@ fn insert_task(
         rusqlite::params![task_id, payload.to_string(), status, result.to_string()],
     )
     .expect("insert task");
+    if payload.get("task_role").and_then(Value::as_str) == Some("subagent_child") {
+        let contract = payload
+            .get("child_task_contract")
+            .and_then(Value::as_object)
+            .expect("child contract");
+        let parent_task_id = contract["parent_task_id"].as_str().expect("parent task id");
+        let role = contract["role"].as_str().expect("role");
+        let permission_profile = contract["permission_profile"]
+            .as_str()
+            .expect("permission profile");
+        let required = contract["required"].as_bool().expect("required");
+        db.execute(
+            "INSERT INTO child_task_graphs (
+                parent_task_id, schema_version, status, max_parallel, created_at, updated_at
+             ) VALUES (?1, 1, 'active', 4, '1', '1')
+             ON CONFLICT(parent_task_id) DO NOTHING",
+            rusqlite::params![parent_task_id],
+        )
+        .expect("insert graph");
+        db.execute(
+            "INSERT INTO child_task_graph_nodes (
+                parent_task_id, child_task_id, role, required, readiness,
+                permission_profile, merge_policy, owned_paths_json, budget_json,
+                model_policy_json, tool_policy_json, result_contract_json,
+                steering_version, steering_json, created_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, 'structured_findings', '[\".\"]',
+                '{}', '{}', '{}', '{}', 0, '{}', '1', '1'
+             )",
+            rusqlite::params![
+                parent_task_id,
+                task_id,
+                role,
+                required,
+                status,
+                permission_profile
+            ],
+        )
+        .expect("insert graph node");
+    }
 }
 
 fn stored_result_json(state: &crate::AppState, task_id: &str) -> Value {

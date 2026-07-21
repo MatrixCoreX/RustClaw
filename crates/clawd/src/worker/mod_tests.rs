@@ -35,6 +35,7 @@ fn memory_tasks_db() -> rusqlite::Connection {
         "CREATE TABLE tasks (
             task_id TEXT PRIMARY KEY,
             status TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
             result_json TEXT,
             error_text TEXT,
             created_at TEXT NOT NULL,
@@ -259,6 +260,68 @@ fn startup_recovery_times_out_expired_worker_lease() {
     assert_eq!(
         result_json["task_lifecycle"]["worker_events"][0]["event_type"],
         "lease_reclaimed"
+    );
+}
+
+#[test]
+fn startup_recovery_requeues_expired_child_claim_for_new_generation() {
+    let db = memory_tasks_db();
+    let now = crate::now_ts_u64() as i64;
+    let payload = json!({
+        "task_role": "subagent_child",
+        "child_task_contract": {
+            "parent_task_id": "parent-restart",
+            "child_task_id": "child-restart"
+        }
+    });
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, status, payload_json, result_json, error_text,
+            created_at, updated_at, lease_owner, lease_expires_at,
+            claim_attempt, claimed_at
+         )
+         VALUES (
+            'child-restart', 'running', ?1, '{}', NULL, ?2, ?2,
+            'worker:stale', ?3, 4, ?4
+         )",
+        rusqlite::params![
+            payload.to_string(),
+            now.to_string(),
+            now.saturating_sub(1),
+            now.saturating_sub(120)
+        ],
+    )
+    .expect("insert stale child");
+
+    let recovered =
+        super::recover_stale_running_tasks_on_startup(&db, 60).expect("recover child claim");
+    assert_eq!(recovered, vec!["child-restart".to_string()]);
+    let row: (String, Option<String>, i64, i64, String) = db
+        .query_row(
+            "SELECT status, lease_owner, lease_expires_at, claim_attempt, result_json
+             FROM tasks WHERE task_id = 'child-restart'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .expect("read requeued child");
+    assert_eq!(row.0, "queued");
+    assert_eq!(row.1, None);
+    assert_eq!(row.2, 0);
+    assert_eq!(row.3, 4, "next claim owns generation 5");
+    let result: serde_json::Value = serde_json::from_str(&row.4).expect("parse result");
+    assert_eq!(result["status_code"], "child_claim_requeued");
+    assert_eq!(result["task_lifecycle"]["state"], "queued");
+    assert_eq!(
+        result["task_lifecycle"]["worker_events"][0]["event_type"],
+        "child_claim_requeued"
     );
 }
 
