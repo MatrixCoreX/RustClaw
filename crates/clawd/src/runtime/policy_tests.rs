@@ -54,6 +54,22 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
         assert!(policy.is_any_allowed(&["skill:schedule", &capability_token], None));
     }
     assert!(!policy.is_allowed("skill:schedule", None));
+    assert!(policy.is_allowed("capability:service_control", None));
+    assert!(policy.is_any_allowed(
+        &["skill:service_control", "capability:service_control"],
+        None
+    ));
+    for capability in [
+        "service.logs",
+        "service.start",
+        "service.stop",
+        "service.restart",
+        "service_control.start",
+        "service_control.stop",
+        "service_control.restart",
+    ] {
+        assert!(!policy.is_allowed(&format!("capability:{capability}"), None));
+    }
     for capability in [
         "schedule.create",
         "schedule.delete",

@@ -135,6 +135,20 @@ fn answer_verifier_prompt_preserves_compound_deliverables_on_retry() {
 }
 
 #[test]
+fn answer_verifier_prompts_enforce_payload_only_without_runtime_phrase_matching() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const RETRY_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
+
+    assert!(VERIFIER_PROMPT.contains("payload-only output"));
+    assert!(VERIFIER_PROMPT.contains("Judge this constraint from meaning"));
+    assert!(VERIFIER_PROMPT.contains("without another tool call"));
+    assert!(RETRY_PROMPT.contains("return exactly that payload"));
+    assert!(RETRY_PROMPT.contains("remove every heading"));
+}
+
+#[test]
 fn answer_verifier_gap_is_high_confidence_only() {
     let low = AnswerVerifierOut {
         pass: false,

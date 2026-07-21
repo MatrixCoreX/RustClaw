@@ -357,6 +357,7 @@ impl ToolsPolicy {
                 "skill:fs_search",
                 "skill:health_check",
                 "skill:log_analyze",
+                "capability:service_control",
                 "skill:task_control",
                 "skill:doc_parse",
                 "skill:transform",
