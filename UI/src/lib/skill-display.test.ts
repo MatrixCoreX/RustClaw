@@ -6,6 +6,7 @@ import {
   filterSkillNamesBySearch,
   formatCapabilityToken,
   groupSkillNames,
+  hasCuratedSkillUsageExamples,
   isUiHiddenSkill,
   isVisibleSkillName,
   normalizeSkillSearchQuery,
@@ -15,8 +16,19 @@ import {
   skillPlannerCapabilityLabel,
   skillRiskLabel,
   skillRuntimeIssue,
+  skillUsageExamples,
   visibleSkillNames,
 } from "./skill-display.ts";
+
+const CURRENT_REGISTRY_SKILLS = [
+  "run_cmd", "read_file", "write_file", "workspace_patch", "list_dir", "make_dir", "remove_file", "fs_basic",
+  "code_index", "config_basic", "config_edit", "schedule", "x", "system_basic", "http_basic", "git_basic",
+  "install_module", "process_basic", "package_manager", "archive_basic", "db_basic", "docker_basic", "fs_search",
+  "rss_fetch", "image_vision", "image_generate", "image_edit", "audio_transcribe", "audio_synthesize", "video_generate",
+  "music_generate", "health_check", "log_analyze", "service_control", "task_control", "config_guard", "crypto", "stock",
+  "weather", "map_merchant", "doc_parse", "transform", "invest_copy", "web_search_extract", "kb", "browser_web",
+  "photo_organize", "extension_manager",
+];
 
 test("filters hidden UI-only skills", () => {
   assert.equal(isUiHiddenSkill("chat"), true);
@@ -92,6 +104,27 @@ test("formats skill descriptions and risk labels", () => {
   assert.equal(skillDescription("unknown_skill", "en", " Registry text "), "Registry text");
   assert.equal(skillRiskLabel("high", "en"), "High risk");
   assert.equal(skillRiskLabel(null, "zh"), "风险未声明");
+});
+
+test("provides three to five curated usage examples for every registry skill", () => {
+  for (const name of CURRENT_REGISTRY_SKILLS) {
+    assert.equal(hasCuratedSkillUsageExamples(name), true, `${name} should have curated examples`);
+    for (const lang of ["zh", "en"] as const) {
+      const examples = skillUsageExamples(name, lang);
+      assert.ok(examples.length >= 3 && examples.length <= 5, `${name}/${lang} should have 3-5 examples`);
+      assert.ok(examples.every((example) => example.trim().length > 0));
+    }
+  }
+});
+
+test("uses localized curated examples and external-skill fallbacks", () => {
+  assert.equal(skillUsageExamples("schedule", "zh")[0], "先解析‘每周一上午九点提醒我开周会’，不要创建任务。");
+  assert.equal(skillUsageExamples("schedule", "en")[0], "Parse 'remind me every Monday at 9 AM' without creating it.");
+  assert.deepEqual(skillUsageExamples("custom_skill", "en", "Process custom records"), [
+    "Help me with this request: Process custom records",
+    "Check whether this can be completed without performing side effects: Process custom records",
+    "Complete this task and tell me the result and next step: Process custom records",
+  ]);
 });
 
 test("formats runtime and planner capabilities", () => {

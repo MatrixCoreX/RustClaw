@@ -1,4 +1,4 @@
-import { AlertCircle, Database, Loader2, RefreshCw, Trash2, Wrench } from "lucide-react";
+import { AlertCircle, CircleHelp, Database, Loader2, RefreshCw, Trash2, Wrench } from "lucide-react";
 
 import {
   skillCapabilityLabel,
@@ -7,6 +7,7 @@ import {
   skillPlannerCapabilityLabel,
   skillRiskLabel,
   skillRuntimeIssue,
+  skillUsageExamples,
   type UiLanguage,
 } from "../lib/skill-display";
 import type { SkillListItem, SkillsConfigResponse } from "../types/api";
@@ -100,6 +101,8 @@ export function SkillSwitchPanel({
     const isLockedSkill = lockedSkillNamesSet.has(name);
     const isToolSkill = toolSkillNamesSet.has(name);
     const isUninstalling = skillUninstallingName === name;
+    const usageExamples = skillUsageExamples(name, lang, skillItem?.description);
+    const usageExamplesId = `skill-usage-examples-${name}`;
     const statusMeta = [
       isToolSkill ? t("系统工具", "Tool") : null,
       baseSkillNamesSet.has(name) && !isToolSkill ? t("系统基础能力", "Core capability") : null,
@@ -114,12 +117,22 @@ export function SkillSwitchPanel({
         key={name}
         className={
           isRecentImport
-            ? "flex flex-col gap-2 rounded-lg border border-sky-400/40 bg-sky-500/10 px-2.5 py-2 text-xs shadow-[0_0_0_1px_rgba(56,189,248,0.18)] sm:flex-row sm:items-center sm:justify-between"
-            : "flex flex-col gap-2 rounded-lg border border-white/10 bg-[#12151f] px-2.5 py-2 text-xs sm:flex-row sm:items-center sm:justify-between"
+            ? "group relative flex flex-col gap-2 rounded-lg border border-sky-400/40 bg-sky-500/10 px-2.5 py-2 text-xs shadow-[0_0_0_1px_rgba(56,189,248,0.18)] hover:z-40 focus-within:z-40 sm:flex-row sm:items-center sm:justify-between"
+            : "group relative flex flex-col gap-2 rounded-lg border border-white/10 bg-[#12151f] px-2.5 py-2 text-xs hover:z-40 focus-within:z-40 sm:flex-row sm:items-center sm:justify-between"
         }
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-white/90">{name}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="block min-w-0 truncate text-sm text-white/90">{name}</span>
+            <button
+              type="button"
+              aria-describedby={usageExamplesId}
+              aria-label={t("查看自然语言调用示例", "View natural-language examples")}
+              className="inline-flex shrink-0 cursor-help text-white/35 outline-none hover:text-white/70 focus:text-white/70"
+            >
+              <CircleHelp className="h-3.5 w-3.5" />
+            </button>
+          </span>
           <span className="mt-0.5 block break-words text-[11px] leading-4 text-white/50">
             {skillDescription(name, lang, skillItem?.description)}
           </span>
@@ -232,6 +245,22 @@ export function SkillSwitchPanel({
               {t("卸载", "Uninstall")}
             </button>
           ) : null}
+        </span>
+        <span
+          id={usageExamplesId}
+          role="tooltip"
+          className="pointer-events-none invisible absolute left-2 right-2 top-full z-50 mt-1 block border border-white/15 bg-[#181b25] px-3 py-2.5 text-left opacity-0 shadow-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+        >
+          <span className="block text-[11px] font-semibold text-white/85">
+            {t("自然语言调用示例", "Natural-language examples")}
+          </span>
+          <span className="mt-1.5 block space-y-1 text-[11px] leading-4 text-white/65">
+            {usageExamples.map((example) => (
+              <span key={example} className="block before:mr-1.5 before:content-['•']">
+                {example}
+              </span>
+            ))}
+          </span>
         </span>
       </label>
     );
