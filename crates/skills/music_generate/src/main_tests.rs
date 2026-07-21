@@ -63,6 +63,7 @@ fn dry_run_can_generate_with_prompt_only_by_enabling_lyrics_optimizer() {
         extra["pending_async_job_contract"]["cancel_ref"]
     );
     assert_eq!(extra["pending_async_job_contract"]["retryable"], true);
+    assert_eq!(extra["async_contract"], extra["pending_async_job_contract"]);
     assert!(extra.get("pending_async_job").is_none());
     assert!(extra["outputs"].as_array().unwrap().is_empty());
 }

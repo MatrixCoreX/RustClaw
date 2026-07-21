@@ -597,7 +597,7 @@ quality_violation_reason() {
   local prompt="${2:-}"
   local expected="${3:-}"
   local case_tags="${4:-}"
-  python3 - "$file" "$prompt" "$expected" "$case_tags" <<'PY'
+  python3 - "$file" "$prompt" "$expected" "$case_tags" "$NL_TEST_SCRIPT_DIR" <<'PY'
 import json
 import re
 import sys
@@ -607,6 +607,9 @@ obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 prompt = sys.argv[2]
 expected = sys.argv[3] if len(sys.argv) > 3 else ""
 case_tags = sys.argv[4] if len(sys.argv) > 4 else ""
+sys.path.insert(0, sys.argv[5])
+from manual_case_assertions import structural_assertions
+
 prompt_l = prompt.lower()
 tagset = {part.strip().lower() for part in re.split(r"[,;]", case_tags) if part.strip()}
 for segment in case_tags.split(";"):
@@ -642,6 +645,18 @@ for item in result.get("messages") or []:
         texts.append(str(item.get("text") or ""))
 text = "\n".join(part for part in texts if part).strip()
 text_l = text.lower()
+
+failed_structural_assertions = [
+    detail
+    for detail in structural_assertions(case_tags, final_visible, result)
+    if not detail.get("ok")
+]
+if failed_structural_assertions:
+    print(
+        "case_structural_assertion_failed:"
+        + json.dumps(failed_structural_assertions[0], ensure_ascii=False, sort_keys=True)
+    )
+    raise SystemExit(0)
 
 internal_context_markers = [
     "### ACTIVE_EXECUTION_ANCHOR",

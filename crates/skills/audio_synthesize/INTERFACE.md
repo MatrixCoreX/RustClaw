@@ -73,6 +73,7 @@ Provider notes:
 - `dry_run`: present and `true` for dry-run validation responses.
 - `planned_outputs`: planned file outputs for dry-run validation responses.
 - `pending_async_job_contract`: async-preferred job contract for dry-run planning; includes `poll_adapter.kind=media_job_poll`.
+- `async_contract`: stable alias of the same dry-run async job contract for planner-requested response fields.
 - `async_poll_adapter_result`: machine-readable poll adapter result for `poll` actions.
 - `async_cancel_adapter_result`: machine-readable cancellation adapter result for `cancel` actions.
 - `provider_cancel_contract`: provider-neutral cancellation request evidence for `cancel` actions.

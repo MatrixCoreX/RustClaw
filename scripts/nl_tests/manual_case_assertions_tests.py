@@ -74,6 +74,12 @@ def capability_step(
     }
 
 
+def preview_capability_step_without_dry_run_evidence() -> dict:
+    step = capability_step(dry_run=False, capability="fixture.preview_render")
+    step["requested_action_ref"] = "fixture.preview_render"
+    return step
+
+
 def write_result(root: Path, name: str, value: dict) -> Path:
     import json
 
@@ -131,13 +137,29 @@ def main() -> int:
         missing_dry_run = write_result(
             root,
             "missing-dry-run.json",
-            result_with_steps([capability_step(dry_run=False), terminal_step()]),
+            result_with_steps(
+                [
+                    capability_step(dry_run=False, capability="fixture.generate"),
+                    terminal_step(),
+                ]
+            ),
         )
         missing_dry_run_row = row_for(
             missing_dry_run,
             "requires_tool_call=true;dry_run,no_external_side_effect",
         )
         assert missing_dry_run_row["assertion"] == "fail"
+
+        preview_dry_run = write_result(
+            root,
+            "preview-dry-run.json",
+            result_with_steps([preview_capability_step_without_dry_run_evidence()]),
+        )
+        preview_dry_run_row = row_for(
+            preview_dry_run,
+            "requires_tool_call=true;dry_run,no_external_side_effect",
+        )
+        assert preview_dry_run_row["assertion"] == "pass"
 
         no_tool = row_for(
             direct,
@@ -221,6 +243,119 @@ def main() -> int:
             expect="",
         )
         assert matched_observed_field_row["assertion"] == "pass"
+
+        one_line_machine_fields = write_result(
+            root,
+            "one-line-machine-fields.json",
+            result_with_steps(
+                [
+                    capability_step(
+                        observed_fields={
+                            "provider": "fixture",
+                            "model": "fixture-v1",
+                        }
+                    )
+                ],
+                text="provider=fixture model=fixture-v1",
+            ),
+        )
+        one_line_machine_fields_row = row_for(
+            one_line_machine_fields,
+            "final_observed_field:provider;final_observed_field:model",
+            expect="",
+        )
+        assert one_line_machine_fields_row["assertion"] == "pass"
+
+        composite_fields = write_result(
+            root,
+            "composite-fields.json",
+            result_with_steps(
+                [
+                    {
+                        **capability_step(dry_run=False),
+                        "observed_evidence": {
+                            "items": [
+                                {
+                                    "field": "extra.async_contract",
+                                    "kind": "object",
+                                    "keys": ["status", "poll_adapter"],
+                                    "key_count": 2,
+                                },
+                                {
+                                    "field": "extra.planned_outputs",
+                                    "kind": "array",
+                                    "count": 1,
+                                },
+                            ]
+                        },
+                    }
+                ],
+                text=(
+                    'planned_outputs=[{"path":"out.mp4","type":"video_file"}] '
+                    'async_contract={"poll_adapter":{"kind":"media_job_poll"},"status":"accepted"}'
+                ),
+            ),
+        )
+        composite_fields_row = row_for(
+            composite_fields,
+            "final_observed_field:planned_outputs;final_observed_field:async_contract",
+            expect="",
+        )
+        assert composite_fields_row["assertion"] == "pass"
+
+        yaml_composite_fields = write_result(
+            root,
+            "yaml-composite-fields.json",
+            result_with_steps(
+                [
+                    {
+                        **capability_step(
+                            dry_run=False,
+                            observed_fields={"provider": "fixture"},
+                        ),
+                        "observed_evidence": {
+                            "items": [
+                                {
+                                    "field": "extra.provider",
+                                    "kind": "string",
+                                    "excerpt": "fixture",
+                                },
+                                {
+                                    "field": "extra.planned_outputs",
+                                    "kind": "array",
+                                    "count": 1,
+                                },
+                                {
+                                    "field": "extra.async_contract",
+                                    "kind": "object",
+                                    "keys": ["status", "poll_adapter"],
+                                    "key_count": 2,
+                                },
+                            ]
+                        },
+                    }
+                ],
+                text=(
+                    "```yaml\n"
+                    "provider: fixture\n"
+                    "planned_outputs:\n"
+                    "  - type: video_file\n"
+                    "    path: out.mp4\n"
+                    "async_contract:\n"
+                    "  status: accepted\n"
+                    "  poll_adapter:\n"
+                    "    kind: media_job_poll\n"
+                    "```\n\nRendered explanation."
+                ),
+            ),
+        )
+        yaml_composite_fields_row = row_for(
+            yaml_composite_fields,
+            "final_observed_field:provider;final_observed_field:planned_outputs;"
+            "final_observed_field:async_contract",
+            expect="",
+        )
+        assert yaml_composite_fields_row["assertion"] == "pass"
 
         normalized_path = write_result(
             root,

@@ -359,6 +359,15 @@ fn execute_generate(
         let poll_after_seconds = music_poll_after_seconds(obj);
         let expires_at = music_expires_at(obj);
         let dry_run_job_id = provider_music_job_id(provider_name, "dry_run");
+        let async_contract = music_pending_async_job_contract(
+            provider_name,
+            &model,
+            &dry_run_job_id,
+            "dry_run",
+            &output,
+            poll_after_seconds,
+            expires_at,
+        );
         return Ok((
             "MUSIC_GENERATE_DRY_RUN".to_string(),
             json!({
@@ -371,15 +380,8 @@ fn execute_generate(
                 "output_path": output,
                 "outputs": [],
                 "planned_outputs": [{"type":"audio_file","path": output}],
-                "pending_async_job_contract": music_pending_async_job_contract(
-                    provider_name,
-                    &model,
-                    &dry_run_job_id,
-                    "dry_run",
-                    &output,
-                    poll_after_seconds,
-                    expires_at,
-                ),
+                "pending_async_job_contract": async_contract,
+                "async_contract": async_contract,
             }),
         ));
     }

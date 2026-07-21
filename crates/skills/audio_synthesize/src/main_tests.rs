@@ -80,6 +80,7 @@ fn dry_run_returns_machine_payload_without_writing_file() {
         extra["pending_async_job_contract"]["poll_adapter"]["kind"],
         "media_job_poll"
     );
+    assert_eq!(extra["async_contract"], extra["pending_async_job_contract"]);
     assert_eq!(
         extra["planned_outputs"][0]["path"].as_str(),
         Some(out.to_string_lossy().as_ref())

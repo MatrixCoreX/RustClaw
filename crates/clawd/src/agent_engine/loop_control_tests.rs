@@ -7,10 +7,12 @@ use super::{
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
     record_agent_loop_decision_envelope_output_vars, retry_verifier_accepts_rewritten_answer,
-    should_stop_for_observed_finalize, structured_field_selector_observation_can_finalize,
+    round_model_finished, should_stop_for_observed_finalize,
+    structured_field_selector_observation_can_finalize,
     structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_structurally_satisfied, terminal_user_answer_stop_signal,
     text_has_exact_marker_line, try_recover_inconsistent_boundary_clarify, AgentLoopGuardPolicy,
+    RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -37,6 +39,32 @@ fn success_marker_matching_requires_exact_line() {
         "status=ok\nVALIDATION_PASSED\nnext=done",
         "VALIDATION_PASSED",
     ));
+}
+
+#[test]
+fn zero_action_verifier_replan_round_is_not_model_finished() {
+    let outcome = RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("recoverable_failure_continue_round".to_string()),
+        next_goal_hint: Some("replan_from_verifier_signal".to_string()),
+        no_progress: false,
+    };
+
+    assert!(!round_model_finished(Some(&outcome)));
+}
+
+#[test]
+fn zero_action_terminal_round_is_model_finished() {
+    let outcome = RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("respond".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    };
+
+    assert!(round_model_finished(Some(&outcome)));
 }
 
 fn route_result(shape: OutputResponseShape) -> IntentOutputContract {
