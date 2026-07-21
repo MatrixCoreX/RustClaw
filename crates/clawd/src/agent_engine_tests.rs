@@ -424,7 +424,15 @@ fn loop_state_checkpoint_seed_restores_machine_resume_state() {
     let checkpoint = crate::task_lifecycle::TaskCheckpoint {
         schema_version: 1,
         checkpoint_id: "ckpt-loop-1".to_string(),
-        boundary_context: json!({"source": "test"}),
+        boundary_context: json!({
+            "source": "test",
+            "task_budget_slice": crate::task_budget_contract::TaskBudgetSlice::new(
+                crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
+                30_000,
+                crate::task_budget_contract::BudgetHardCeilings::default(),
+            )
+            .to_machine_json(),
+        }),
         last_successful_round: Some(3),
         last_successful_step: Some("step_4".to_string()),
         pending_action: None,
@@ -467,6 +475,20 @@ fn loop_state_checkpoint_seed_restores_machine_resume_state() {
     assert_eq!(loop_state.round_no, 3);
     assert_eq!(loop_state.total_steps_executed, 5);
     assert_eq!(loop_state.tool_calls_total, 2);
+    assert_eq!(
+        loop_state
+            .task_budget_slice
+            .as_ref()
+            .map(|slice| slice.continuation_index),
+        Some(1)
+    );
+    assert_eq!(
+        loop_state
+            .task_budget_slice
+            .as_ref()
+            .map(|slice| slice.profile),
+        Some(crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace)
+    );
     assert!(loop_state.has_tool_or_skill_output);
     assert_eq!(
         loop_state

@@ -80,6 +80,11 @@ fn pending_async_job_extra_rejects_missing_machine_fields() {
 #[test]
 fn pending_async_job_checkpoint_uses_poll_resume_entrypoint() {
     let mut loop_state = LoopState::new(4);
+    loop_state.task_budget_slice = Some(crate::task_budget_contract::TaskBudgetSlice::new(
+        crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
+        30_000,
+        crate::task_budget_contract::BudgetHardCeilings::default(),
+    ));
     loop_state.round_no = 2;
     loop_state.total_steps_executed = 3;
     loop_state.tool_calls_total = 2;
@@ -137,6 +142,14 @@ fn pending_async_job_checkpoint_uses_poll_resume_entrypoint() {
     assert_eq!(
         payload["task_checkpoint"]["completed_side_effect_refs"][0],
         "skill:video_basic:action:start_generation"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["task_budget_slice"]["profile"],
+        "multi_step_workspace"
+    );
+    assert_eq!(
+        payload["task_lifecycle"]["task_budget_slice"]["soft_slice_ms"],
+        30_000
     );
 }
 

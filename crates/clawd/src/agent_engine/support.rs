@@ -686,6 +686,10 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
         "source": "agent_loop_soft_budget",
         "task_id": task.task_id,
         "resume_reason": resume_reason,
+        "task_budget_slice": loop_state
+            .task_budget_slice
+            .as_ref()
+            .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
         "context_compaction_trigger": context_compaction_checkpoint_trigger_json(resume_reason),
     });
     if let (Some(obj), Some(message_key)) = (boundary_context.as_object_mut(), message_key) {
@@ -745,6 +749,10 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
         "progress_messages": loop_state.progress_messages,
         "task_lifecycle": lifecycle,
         "task_checkpoint": checkpoint.to_machine_json(),
+        "task_budget_slice": loop_state
+            .task_budget_slice
+            .as_ref()
+            .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
     })
 }
 
@@ -812,6 +820,10 @@ fn build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
             "tool_or_skill": tool_or_skill,
             "action_ref": action_ref,
             "message_key": "clawd.agent_hook.confirmation_required",
+            "task_budget_slice": loop_state
+                .task_budget_slice
+                .as_ref()
+                .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
         }),
         last_successful_round: (loop_state.round_no > 0)
             .then_some(saturating_u32(loop_state.round_no)),
@@ -856,6 +868,10 @@ fn build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
             "tool_or_skill": tool_or_skill,
             "action_ref": action_ref,
             "budget": budget,
+            "task_budget_slice": loop_state
+                .task_budget_slice
+                .as_ref()
+                .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
         },
         "task_checkpoint": checkpoint.to_machine_json(),
     })
@@ -924,6 +940,9 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
     args: &Value,
     step_in_round: usize,
 ) -> Result<(), String> {
+    if let Some(slice) = loop_state.task_budget_slice.as_mut() {
+        slice.set_decision(crate::task_budget_contract::BudgetDecision::NeedsUser);
+    }
     let now_ts = crate::now_ts_u64() as i64;
     let budget = checkpoint_budget_counters(
         loop_state,
@@ -1017,6 +1036,9 @@ pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(
     fingerprint_hash: &str,
     ledger_status: &str,
 ) {
+    if let Some(slice) = loop_state.task_budget_slice.as_mut() {
+        slice.set_decision(crate::task_budget_contract::BudgetDecision::NeedsUser);
+    }
     let now_ts = crate::now_ts_u64() as i64;
     let budget = checkpoint_budget_counters(
         loop_state,
@@ -1046,6 +1068,10 @@ pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(
             "fingerprint_hash": fingerprint_hash,
             "ledger_status": ledger_status,
             "requires_reconciliation": true,
+            "task_budget_slice": loop_state
+                .task_budget_slice
+                .as_ref()
+                .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
         }),
         last_successful_round: (loop_state.round_no > 0)
             .then_some(saturating_u32(loop_state.round_no)),

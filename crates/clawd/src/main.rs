@@ -85,6 +85,7 @@ mod skill_availability;
 mod skills;
 mod system_health;
 mod task_admin_routes;
+mod task_budget_contract;
 mod task_context_builder;
 mod task_contract;
 mod task_event_transport;

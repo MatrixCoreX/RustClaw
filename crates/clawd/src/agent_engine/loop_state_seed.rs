@@ -21,6 +21,16 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
     loop_state.round_no = loop_state.round_no.max(restored_round);
     loop_state.total_steps_executed = loop_state.total_steps_executed.max(restored_step);
     loop_state.tool_calls_total = loop_state.tool_calls_total.max(restored_tool_calls);
+    loop_state.task_budget_slice = checkpoint
+        .boundary_context
+        .get("task_budget_slice")
+        .and_then(crate::task_budget_contract::TaskBudgetSlice::from_machine_json)
+        .map(crate::task_budget_contract::TaskBudgetSlice::resumed);
+    loop_state.task_budget_slice_base_elapsed_ms = loop_state
+        .task_budget_slice
+        .as_ref()
+        .map(|slice| slice.cumulative_elapsed_ms)
+        .unwrap_or_default();
 
     let mut completed_side_effect_count = 0usize;
     for fingerprint in &checkpoint.completed_side_effect_refs {
