@@ -259,6 +259,51 @@ pub(super) async fn plan_round_actions(
         native_turn_context.version.as_deref(),
         Some(loop_state.round_no),
     );
+    crate::prompt_budget::publish_prompt_section_budget_report(
+        state,
+        task,
+        "agent_loop_planner",
+        &[
+            crate::prompt_budget::PromptSection {
+                name: "native_protocol_template",
+                text: &native_protocol.template,
+                cacheability: "stable_prefix",
+                provenance: "prompt_registry",
+                omission_reason: None,
+            },
+            crate::prompt_budget::PromptSection {
+                name: "tool_spec",
+                text: &tool_spec_template,
+                cacheability: "registry_snapshot",
+                provenance: "capability_registry",
+                omission_reason: None,
+            },
+            crate::prompt_budget::PromptSection {
+                name: "skill_quick_index",
+                text: &skill_context.quick_index_text,
+                cacheability: "registry_snapshot",
+                provenance: "skill_registry",
+                omission_reason: None,
+            },
+            crate::prompt_budget::PromptSection {
+                name: "selected_skill_playbooks",
+                text: &skill_context.playbook_text,
+                cacheability: "task_scoped",
+                provenance: "generated_skill_prompts",
+                omission_reason: skill_context
+                    .playbook_text
+                    .is_empty()
+                    .then_some("not_selected"),
+            },
+            crate::prompt_budget::PromptSection {
+                name: "turn_context",
+                text: &native_user_prompt,
+                cacheability: "dynamic_turn",
+                provenance: "agent_loop_state",
+                omission_reason: None,
+            },
+        ],
+    );
     let native_prompt = format!("{native_system_prompt}\n\n{native_user_prompt}");
     let native_prompt_source = format!("{}+{}", native_protocol.source, native_turn_context.source);
     let provider_timeout_seconds = loop_state
