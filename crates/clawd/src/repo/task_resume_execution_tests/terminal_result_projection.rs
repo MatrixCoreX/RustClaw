@@ -674,6 +674,26 @@ fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
     );
     seed["text"] = json!("old confirmation reply");
     seed["messages"] = json!(["old confirmation reply"]);
+    seed["task_journal"] = json!({
+        "summary": {
+            "coding_workflow": {
+                "changed_file_count": 2,
+                "changed_files": ["src/lib.rs", "tests/lib.rs"],
+                "verification_command_count": 1,
+                "verification_commands": ["cargo test"],
+                "verification_status": "verified"
+            }
+        },
+        "trace": {
+            "coding_workflow": {
+                "changed_file_count": 2,
+                "changed_files": ["src/lib.rs", "tests/lib.rs"],
+                "verification_command_count": 1,
+                "verification_commands": ["cargo test"],
+                "verification_status": "verified"
+            }
+        }
+    });
     insert_task(&state, task_id, "running", Some(&seed), now);
     activate_resume_owner(&state, task_id, checkpoint_id, now, now + 30);
 
@@ -714,7 +734,27 @@ fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
                 "result_projection_state": "project_seeded_loop_completed",
                 "final_result_json": {
                     "text": "new resumed result",
-                    "messages": ["new resumed result"]
+                    "messages": ["new resumed result"],
+                    "task_journal": {
+                        "summary": {
+                            "coding_workflow": {
+                                "changed_file_count": 0,
+                                "changed_files": [],
+                                "verification_command_count": 0,
+                                "verification_commands": [],
+                                "verification_status": "not_applicable"
+                            }
+                        },
+                        "trace": {
+                            "coding_workflow": {
+                                "changed_file_count": 0,
+                                "changed_files": [],
+                                "verification_command_count": 0,
+                                "verification_commands": [],
+                                "verification_status": "not_applicable"
+                            }
+                        }
+                    }
                 }
             }),
             now + 2,
@@ -727,6 +767,14 @@ fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
     assert_eq!(error_text, None);
     assert_eq!(result["text"], "new resumed result");
     assert_eq!(result["messages"][0], "new resumed result");
+    assert_eq!(
+        result["task_journal"]["summary"]["coding_workflow"]["verification_status"],
+        "verified"
+    );
+    assert_eq!(
+        result["task_journal"]["trace"]["coding_workflow"]["changed_files"],
+        json!(["src/lib.rs", "tests/lib.rs"])
+    );
 }
 
 #[test]

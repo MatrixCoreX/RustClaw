@@ -910,8 +910,10 @@ fn append_lifecycle_product_contract_fields(
         obj.entry("async_job_message_key".to_string())
             .or_insert(json!(job.message_key.as_str()));
     }
-    append_lifecycle_open_issue_fields(obj, &checkpoint);
-    append_lifecycle_provider_blocker_fields(obj, &checkpoint);
+    if lifecycle_state_token_is_active(state) {
+        append_lifecycle_open_issue_fields(obj, &checkpoint);
+        append_lifecycle_provider_blocker_fields(obj, &checkpoint);
+    }
 }
 
 fn append_bounded_string_ref_projection(
