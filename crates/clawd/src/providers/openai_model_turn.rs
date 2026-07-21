@@ -391,8 +391,7 @@ impl OpenAiStreamAccumulator {
                 .name
                 .filter(|name| !name.trim().is_empty())
                 .ok_or_else(|| format!("model_turn_tool_name_missing index={index}"))?;
-            let arguments = serde_json::from_str(&pending.arguments)
-                .map_err(|_| format!("model_turn_tool_arguments_invalid index={index}"))?;
+            let arguments = parse_tool_arguments(&pending.arguments);
             let call = ModelToolCall {
                 id: pending.id.unwrap_or_else(|| format!("tool_call_{index}")),
                 name,
@@ -821,8 +820,7 @@ fn parse_tool_call(value: &Value, index: usize) -> Result<ModelToolCall, String>
         .filter(|name| !name.is_empty())
         .ok_or_else(|| format!("model_turn_tool_name_missing index={index}"))?;
     let arguments = match function.get("arguments") {
-        Some(Value::String(arguments)) => serde_json::from_str(arguments)
-            .map_err(|_| format!("model_turn_tool_arguments_invalid index={index}"))?,
+        Some(Value::String(arguments)) => parse_tool_arguments(arguments),
         Some(Value::Object(arguments)) => Value::Object(arguments.clone()),
         _ => return Err(format!("model_turn_tool_arguments_missing index={index}")),
     };
@@ -838,6 +836,10 @@ fn parse_tool_call(value: &Value, index: usize) -> Result<ModelToolCall, String>
         name: name.to_string(),
         arguments,
     })
+}
+
+fn parse_tool_arguments(arguments: &str) -> Value {
+    serde_json::from_str(arguments).unwrap_or_else(|_| Value::String(arguments.to_string()))
 }
 
 fn openai_finish_reason(reason: &str) -> ModelFinishReason {
