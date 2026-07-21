@@ -984,6 +984,42 @@ fn task_query_lifecycle_projects_open_issue_machine_fields() {
 }
 
 #[test]
+fn terminal_lifecycle_does_not_reopen_checkpoint_issues_or_provider_blockers() {
+    let mut checkpoint = checkpoint_value("ckpt-terminal-complete", vec![]);
+    checkpoint["repair_signal"] = json!({
+        "source": "runtime",
+        "status_code": "agent_loop_checkpoint",
+        "reason_code": "checkpoint_resume_recovery",
+        "next_recovery_kind": "wait_background",
+        "retryable": true,
+        "repair_envelope": {
+            "issue_codes": ["checkpoint_resume_recovery", "agent_loop_checkpoint"],
+            "next_recovery_kind": "wait_background",
+            "provider_status": {
+                "status_code": "agent_loop_checkpoint",
+                "external_provider_blocked": true
+            }
+        }
+    });
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "succeeded",
+            "resume_reason": "seeded_loop_completed",
+            "checkpoint_id": "ckpt-terminal-complete"
+        },
+        "task_checkpoint": checkpoint
+    });
+
+    let lifecycle = task_query_lifecycle_projection("succeeded", Some(&result), Some(4567));
+
+    assert_eq!(lifecycle["state"], "succeeded");
+    assert!(lifecycle.get("open_issue_codes").is_none());
+    assert!(lifecycle.get("open_issue_count").is_none());
+    assert!(lifecycle.get("provider_blocker_active").is_none());
+}
+
+#[test]
 fn task_query_lifecycle_reads_journal_summary_payload() {
     let result = json!({
         "task_journal": {

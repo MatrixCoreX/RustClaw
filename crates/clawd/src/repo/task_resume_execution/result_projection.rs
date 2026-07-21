@@ -939,10 +939,16 @@ fn preserve_task_journal_for_terminal_projection(
     executor_action: &str,
     executor_result_status: &str,
 ) {
-    if terminal_result
-        .get("task_journal")
-        .is_some_and(Value::is_object)
+    if let Some(current_journal) = terminal_result
+        .get_mut("task_journal")
+        .filter(|value| value.is_object())
     {
+        if let Some(prior_journal) = source_result_json
+            .get("task_journal")
+            .filter(|value| value.is_object())
+        {
+            preserve_prior_coding_workflow(current_journal, prior_journal);
+        }
         return;
     }
     let Some(journal) = terminal_projection_task_journal(
@@ -954,6 +960,48 @@ fn preserve_task_journal_for_terminal_projection(
         return;
     };
     terminal_result.insert("task_journal".to_string(), journal);
+}
+
+fn preserve_prior_coding_workflow(current_journal: &mut Value, prior_journal: &Value) {
+    for section in ["summary", "trace"] {
+        let Some(current_section) = current_journal
+            .get_mut(section)
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        if current_section
+            .get("coding_workflow")
+            .is_some_and(coding_workflow_has_current_slice_activity)
+        {
+            continue;
+        }
+        let Some(prior_workflow) = prior_journal
+            .get(section)
+            .and_then(|value| value.get("coding_workflow"))
+            .filter(|value| coding_workflow_has_current_slice_activity(value))
+            .cloned()
+        else {
+            continue;
+        };
+        current_section.insert("coding_workflow".to_string(), prior_workflow);
+    }
+}
+
+fn coding_workflow_has_current_slice_activity(workflow: &Value) -> bool {
+    workflow
+        .get("changed_file_count")
+        .and_then(Value::as_u64)
+        .is_some_and(|count| count > 0)
+        || workflow
+            .get("verification_command_count")
+            .and_then(Value::as_u64)
+            .is_some_and(|count| count > 0)
+        || workflow
+            .get("verification_status")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|status| !status.is_empty() && status != "not_applicable")
 }
 
 fn terminal_projection_task_journal(
