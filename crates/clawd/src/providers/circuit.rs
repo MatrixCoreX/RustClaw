@@ -25,7 +25,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// 连续 N 次失败触发 Open。
 const FAILURE_THRESHOLD: u32 = 3;
@@ -53,7 +53,7 @@ impl State {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct CircuitBreakerSnapshot {
     pub(crate) state: String,
     pub(crate) consecutive_failures: u32,
