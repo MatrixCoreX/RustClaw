@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn referenced_transform_step_answer_ignores_earlier_directory_observation() {
         let state = AppState::test_default_with_fixture_provider();
-        let mut loop_state = LoopState::new(3);
+        let mut loop_state = LoopState::new();
         loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",

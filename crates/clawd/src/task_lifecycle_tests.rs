@@ -16,7 +16,7 @@ fn lifecycle_projection_marks_paused_checkpoint_resume_due_from_machine_time() {
         "task_lifecycle": {
             "schema_version": 1,
             "state": "waiting",
-            "resume_reason": "agent_loop_max_rounds",
+            "resume_reason": "task_budget_slice_exhausted",
             "next_check_after": 1,
             "checkpoint_id": "ckpt-due"
         }
@@ -951,7 +951,7 @@ fn task_query_lifecycle_projects_open_issue_machine_fields() {
         "task_lifecycle": {
             "schema_version": 1,
             "state": "waiting",
-            "resume_reason": "agent_loop_no_progress_limit",
+            "resume_reason": "task_budget_slice_exhausted",
             "next_check_after": 1781800460,
             "checkpoint_id": "ckpt-open-issue"
         },

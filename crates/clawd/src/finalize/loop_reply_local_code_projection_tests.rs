@@ -46,7 +46,7 @@ fn context_with_required_machine_fields(fields: serde_json::Value) -> AgentRunCo
 
 #[test]
 fn finalizer_attaches_local_code_projection_before_observed_fallback() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -118,7 +118,7 @@ fn finalizer_attaches_local_code_projection_before_observed_fallback() {
 
 #[test]
 fn finalizer_observed_fallback_defers_local_code_json_until_validation() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -148,7 +148,7 @@ fn finalizer_observed_fallback_defers_local_code_json_until_validation() {
 
 #[test]
 fn local_code_projection_replaces_stale_auxiliary_observe_delivery() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.delivery_messages.push(
         "message_key=clawd.msg.fs_search.observed\nreason_code=fs_search_no_match\nmatched=false"
             .to_string(),
@@ -223,7 +223,7 @@ fn local_code_projection_replaces_stale_auxiliary_observe_delivery() {
 
 #[test]
 fn local_code_projection_syncs_final_delivery_after_generic_renderers() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.delivery_messages.push(
         "message_key=clawd.msg.fs_search.observed\nreason_code=fs_search_no_match\nmatched=false"
             .to_string(),
@@ -290,7 +290,7 @@ fn local_code_projection_syncs_final_delivery_after_generic_renderers() {
 
 #[test]
 fn local_code_projection_replaces_readonly_machine_kv_with_requested_json() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.delivery_messages.push(
         "project_dir=/workspace functions=[\"add\",\"sub\",\"safe_div\"] error_codes=[\"division_by_zero\"] test_status=passed evidence_files=[\"/workspace/calc_core.py\",\"/workspace/test_calc_core.py\"]"
             .to_string(),
@@ -355,7 +355,7 @@ fn local_code_projection_replaces_readonly_machine_kv_with_requested_json() {
 
 #[test]
 fn recorded_local_code_projection_syncs_stale_final_delivery() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let projected = r#"{"evidence_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"functions":["add","sub","safe_div"],"error_codes":["division_by_zero"],"project_dir":"/workspace","test_status":"passed"}"#;
     loop_state.output_vars.insert(
         "agent_loop.strict_json_projection_publishable".to_string(),
@@ -398,7 +398,7 @@ fn recorded_local_code_projection_syncs_stale_final_delivery() {
 
 #[test]
 fn recorded_local_code_projection_does_not_sync_non_code_payload() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.strict_json_projection_publishable".to_string(),
         "true".to_string(),
@@ -426,7 +426,7 @@ fn recorded_local_code_projection_does_not_sync_non_code_payload() {
 
 #[test]
 fn latest_synthesis_local_code_projection_replaces_file_read_delivery() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let synthesis = r#"{"changed_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"error_codes":["division_by_zero"],"functions":["add","sub","mul","safe_div"],"test_command":["python3 test_calc_core.py","python3 - <<'PY'\nimport calc_core\nresult = calc_core.safe_div(1, 0)\nprint(result)\nassert result == {\"ok\": False, \"error_code\": \"division_by_zero\"}\nPY"],"test_status":"passed"}"#;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -497,7 +497,7 @@ fn latest_synthesis_local_code_projection_replaces_file_read_delivery() {
 
 #[test]
 fn local_code_request_fields_prefer_structured_state_patch_over_user_surface() {
-    let loop_state = LoopState::new(1);
+    let loop_state = LoopState::new();
     let context =
         context_with_required_machine_fields(json!(["functions", "error_codes", "test_status"]));
     let user_text =
@@ -526,7 +526,7 @@ fn local_code_request_fields_prefer_structured_state_patch_over_user_surface() {
 
 #[test]
 fn local_code_projection_keeps_existing_satisfying_json_delivery() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let existing = r#"{"changed_files":["calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed","functions":["add","sub","mul"]}"#;
     loop_state.delivery_messages.push(existing.to_string());
     loop_state.output_vars.insert(
@@ -570,7 +570,7 @@ fn local_code_projection_keeps_existing_satisfying_json_delivery() {
 
 #[test]
 fn local_code_projection_marks_equivalent_existing_json_delivery() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let existing = r#"{"functions":["add","sub","mul"],"changed_files":["/workspace/calc_core.py"],"test_status":"passed","test_command":"python3 test_calc_core.py"}"#;
     loop_state.delivery_messages.push(existing.to_string());
     loop_state.output_vars.insert(
@@ -628,7 +628,7 @@ fn local_code_projection_marks_equivalent_existing_json_delivery() {
 
 #[test]
 fn local_code_projection_replaces_structurally_valid_but_less_complete_json_delivery() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.delivery_messages.push(
         r#"{"changed_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"test_command":["python3 test_calc_core.py","python3 - <<'PY'\nfrom calc_core import safe_div\nprint(safe_div(1,0))\nPY"],"test_status":"ALL_TESTS_PASSED","functions":["safe_div"],"error_codes":["division_by_zero"]}"#
             .to_string(),
@@ -698,7 +698,7 @@ fn local_code_projection_replaces_structurally_valid_but_less_complete_json_deli
 
 #[test]
 fn local_code_projection_replaces_unresolved_existing_json_delivery() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.delivery_messages.push(
         r#"{"changed_files":["calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"not_observed","functions":["add","sub","mul"]}"#
             .to_string(),
@@ -746,7 +746,7 @@ fn local_code_projection_replaces_unresolved_existing_json_delivery() {
 
 #[test]
 fn local_code_projection_replaces_file_delivery_for_current_json_request() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.delivery_messages.push(
         "FILE:/workspace/project/test_calc_core.py\nfrom calc_core import safe_div".to_string(),
     );

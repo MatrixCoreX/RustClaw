@@ -132,7 +132,7 @@ fn planner_overlays_reserve_scalar_shape_for_one_atomic_result() {
 
 #[test]
 fn incremental_prompt_carries_structured_failed_attempt_for_planner_repair() {
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     let err = crate::skills::structured_skill_error_from_parts(
         "fs_basic",
         "missing_required_field",

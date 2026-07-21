@@ -1,6 +1,6 @@
 #[test]
 fn direct_scalar_prefers_unique_exact_fs_search_match_path() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -13,7 +13,7 @@ fn direct_scalar_prefers_unique_exact_fs_search_match_path() {
 }
 #[test]
 fn direct_scalar_uses_locator_hint_when_fs_search_output_omits_pattern() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -33,7 +33,7 @@ fn direct_scalar_uses_locator_hint_when_fs_search_output_omits_pattern() {
 
 #[test]
 fn direct_scalar_does_not_collapse_ambiguous_fs_search_to_count() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -47,7 +47,7 @@ fn direct_scalar_does_not_collapse_ambiguous_fs_search_to_count() {
 
 #[test]
 fn direct_scalar_prefers_locator_extension_when_fs_search_pattern_is_broad() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -67,7 +67,7 @@ fn direct_scalar_prefers_locator_extension_when_fs_search_pattern_is_broad() {
 
 #[test]
 fn fs_search_file_paths_contract_filters_with_structured_pattern() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -90,7 +90,7 @@ fn fs_search_file_paths_contract_filters_with_structured_pattern() {
 
 #[test]
 fn fs_search_file_paths_contract_uses_planner_output_contract() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -113,7 +113,7 @@ fn fs_search_file_paths_contract_uses_planner_output_contract() {
 
 #[test]
 fn fs_search_file_paths_contract_preserves_multi_candidates_when_not_decisive() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -145,7 +145,7 @@ fn fs_search_file_paths_contract_preserves_multi_candidates_when_not_decisive() 
 
 #[test]
 fn fs_search_file_paths_contract_i18n_expands_to_five_full_paths() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -179,7 +179,7 @@ fn fs_search_file_paths_contract_i18n_expands_to_five_full_paths() {
 
 #[test]
 fn direct_scalar_count_uses_latest_fs_search_count() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -284,7 +284,7 @@ fn fs_search_grep_text_direct_answer_returns_matching_lines_when_listing_allowed
 
 #[test]
 fn exact_observation_output_grep_text_direct_answer_returns_matching_lines() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -332,7 +332,7 @@ fn fs_search_grep_text_direct_answer_uses_name_matches_when_content_empty() {
 
 #[test]
 fn virtual_fs_basic_grep_text_output_can_direct_answer_file_paths() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -378,7 +378,7 @@ fn fs_search_grep_text_observed_body_keeps_name_match_fallback() {
 
 #[test]
 fn fs_search_find_ext_unclassified_contract_keeps_observed_file_paths() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -403,7 +403,7 @@ fn fs_search_find_ext_unclassified_contract_keeps_observed_file_paths() {
 
 #[test]
 fn virtual_fs_basic_find_ext_unclassified_contract_keeps_observed_file_paths() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -428,7 +428,7 @@ fn virtual_fs_basic_find_ext_unclassified_contract_keeps_observed_file_paths() {
 
 #[test]
 fn multi_status_json_direct_answer_keeps_all_observed_status_files() {
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -514,7 +514,7 @@ fn fs_search_direct_answer_prefers_exact_match_before_confirmation() {
 
 #[test]
 fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -591,7 +591,7 @@ fn fs_search_path_only_direct_answer_keeps_ambiguous_ranked_list_when_allowed() 
 
 #[test]
 fn observed_entries_keep_latest_listing_plus_recent_non_listing_steps() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "a.md\nb.md\nc.md\n"));
@@ -634,7 +634,7 @@ fn normalized_listing_trims_blank_lines() {
 
 #[test]
 fn observed_entries_use_read_range_excerpt_body_instead_of_raw_json() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
@@ -651,7 +651,7 @@ fn observed_entries_use_read_range_excerpt_body_instead_of_raw_json() {
 
 #[test]
 fn observed_entries_keep_read_range_runtime_log_excerpt_for_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -668,7 +668,7 @@ fn observed_entries_keep_read_range_runtime_log_excerpt_for_synthesis() {
 
 #[test]
 fn observed_entries_preserve_full_find_name_results_for_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -769,7 +769,7 @@ fn observed_bilingual_templates_defer_non_bilingual_missing_field_answers() {
 
 #[test]
 fn path_inspection_defers_non_bilingual_answer_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -927,7 +927,7 @@ fn single_file_delivery_uses_path_batch_fact_as_file_token() {
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = file.display().to_string();
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -983,7 +983,7 @@ fn single_file_delivery_ignores_prior_read_range_rejections_after_path_fact() {
     route.locator_hint = file.display().to_string();
 
     let contract_error = "__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.read_range` is rejected by contract `generic_delivery` (rejected_not_allowed)\",\"extra\":{\"action\":\"system_basic.read_range\",\"contract_match\":\"generic_delivery\",\"decision\":\"rejected_not_allowed\"},\"skill\":\"system_basic\"}";
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(error_step("step_1", "system_basic", contract_error));
@@ -1064,7 +1064,7 @@ fn strict_plain_observation_contract_requires_synthesis() {
     let route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     assert!(route_requires_synthesized_delivery(&route));
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "run_cmd",
@@ -1097,7 +1097,7 @@ fn exact_observation_contract_allows_observation_passthrough() {
 
 #[test]
 fn direct_observation_passthrough_detector_matches_raw_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));

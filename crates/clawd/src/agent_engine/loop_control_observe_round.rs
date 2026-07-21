@@ -7,8 +7,7 @@ pub(in crate::agent_engine) fn observation_round_needs_planner(
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    loop_state.round_no < loop_state.max_rounds
-        && observe_only_round_should_continue(output_contract, loop_state, actions)
+    observe_only_round_should_continue(output_contract, loop_state, actions)
 }
 
 pub(super) fn read_observe_round_should_continue(
@@ -25,8 +24,7 @@ pub(in crate::agent_engine) fn observe_only_round_should_continue(
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    loop_state.round_no < loop_state.max_rounds
-        && !super::has_discussion_followup_action(actions)
+    !super::has_discussion_followup_action(actions)
         && !super::has_authoritative_delivery(loop_state)
         && actions_are_observe_only_machine_steps(actions)
 }

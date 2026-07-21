@@ -69,12 +69,7 @@ fn claimed_task() -> crate::ClaimedTask {
 fn test_policy() -> super::AgentLoopGuardPolicy {
     super::AgentLoopGuardPolicy {
         max_steps: 16,
-        max_rounds: 2,
-        max_tool_calls: 12,
-        recoverable_failure_extra_rounds: 1,
         repeat_action_limit: 4,
-        no_progress_limit: 1,
-        multi_round_enabled: true,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         fast_read: Default::default(),
@@ -120,7 +115,7 @@ failure_policy = "deny"
     let mut state = super::tests::test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let task = claimed_task();
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     let exec_args = json!({"action": "read_text", "path": "README.md"});
     let action = crate::AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -195,7 +190,7 @@ failure_policy = "deny"
 
 #[test]
 fn post_tool_hook_records_safe_run_cmd_machine_args() {
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     loop_state.round_no = 1;
 
     super::record_post_tool_use_observation(
@@ -265,7 +260,7 @@ failure_policy = "deny"
     let mut state = super::tests::test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let task = claimed_task();
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     let exec_args = json!({"action": "read_text", "path": "README.md"});
     let action = crate::AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -358,7 +353,7 @@ failure_policy = "deny"
     let mut state = super::tests::test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let task = claimed_task();
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
 
     super::record_post_tool_use_hook_observations(
         &state,
@@ -419,7 +414,7 @@ failure_policy = "deny"
     let mut state = super::tests::test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let task = claimed_task();
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
 
     let evaluation = super::record_permission_request_hook(
         &state,

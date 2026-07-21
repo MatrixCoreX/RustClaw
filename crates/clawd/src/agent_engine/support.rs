@@ -12,10 +12,7 @@ use crate::{repo, AgentAction, AppState, ClaimedTask};
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct LoopRecipeOverrides {
     pub(super) max_steps: Option<usize>,
-    pub(super) max_rounds: Option<usize>,
-    pub(super) max_tool_calls: Option<usize>,
     pub(super) repeat_action_limit: Option<usize>,
-    pub(super) no_progress_limit: Option<usize>,
     pub(super) max_repairs: Option<usize>,
     pub(super) run_cmd_timeout_seconds: Option<u64>,
     pub(super) run_cmd_validation_timeout_seconds: Option<u64>,
@@ -105,12 +102,7 @@ impl AnswerVerifierRequiredEvidenceScope {
 #[derive(Debug, Clone)]
 pub(super) struct AgentLoopGuardPolicy {
     pub(super) max_steps: usize,
-    pub(super) max_rounds: usize,
-    pub(super) max_tool_calls: usize,
-    pub(super) recoverable_failure_extra_rounds: usize,
     pub(super) repeat_action_limit: usize,
-    pub(super) no_progress_limit: usize,
-    pub(super) multi_round_enabled: bool,
     pub(super) answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope,
     pub(super) registry_idempotency_guard_scope: RegistryIdempotencyGuardScope,
     pub(super) fast_read: LoopRecipeOverrides,
@@ -223,17 +215,8 @@ impl AgentLoopGuardPolicy {
         if let Some(max_steps) = overrides.max_steps {
             policy.max_steps = max_steps;
         }
-        if let Some(max_rounds) = overrides.max_rounds {
-            policy.max_rounds = max_rounds;
-        }
-        if let Some(max_tool_calls) = overrides.max_tool_calls {
-            policy.max_tool_calls = max_tool_calls;
-        }
         if let Some(repeat_action_limit) = overrides.repeat_action_limit {
             policy.repeat_action_limit = repeat_action_limit;
-        }
-        if let Some(no_progress_limit) = overrides.no_progress_limit {
-            policy.no_progress_limit = no_progress_limit;
         }
         policy
     }
@@ -279,20 +262,6 @@ fn parse_usize_from_toml(root: &TomlValue, path: &[&str], fallback: usize) -> us
         .unwrap_or(fallback)
 }
 
-fn parse_usize_allow_zero_from_toml(root: &TomlValue, path: &[&str], fallback: usize) -> usize {
-    let mut cursor = root;
-    for key in path {
-        let Some(next) = cursor.get(*key) else {
-            return fallback;
-        };
-        cursor = next;
-    }
-    cursor
-        .as_integer()
-        .and_then(|v| usize::try_from(v).ok())
-        .unwrap_or(fallback)
-}
-
 fn parse_optional_usize_from_toml(root: &TomlValue, path: &[&str]) -> Option<usize> {
     let mut cursor = root;
     for key in path {
@@ -319,17 +288,6 @@ fn parse_optional_u64_from_toml(root: &TomlValue, path: &[&str]) -> Option<u64> 
         .as_integer()
         .and_then(|v| u64::try_from(v).ok())
         .filter(|v| *v >= 1)
-}
-
-fn parse_bool_from_toml(root: &TomlValue, path: &[&str], fallback: bool) -> bool {
-    let mut cursor = root;
-    for key in path {
-        let Some(next) = cursor.get(*key) else {
-            return fallback;
-        };
-        cursor = next;
-    }
-    cursor.as_bool().unwrap_or(fallback)
 }
 
 fn parse_answer_verifier_required_evidence_scope(
@@ -369,14 +327,8 @@ fn parse_registry_idempotency_guard_scope(root: &TomlValue) -> RegistryIdempoten
 fn parse_loop_recipe_overrides(root: &TomlValue, path: &[&str]) -> LoopRecipeOverrides {
     let mut max_steps_path = path.to_vec();
     max_steps_path.push("max_steps");
-    let mut max_rounds_path = path.to_vec();
-    max_rounds_path.push("max_rounds");
-    let mut max_tool_calls_path = path.to_vec();
-    max_tool_calls_path.push("max_tool_calls");
     let mut repeat_action_limit_path = path.to_vec();
     repeat_action_limit_path.push("repeat_action_limit");
-    let mut no_progress_limit_path = path.to_vec();
-    no_progress_limit_path.push("no_progress_limit");
     let mut max_repairs_path = path.to_vec();
     max_repairs_path.push("max_repairs");
     let mut run_cmd_timeout_path = path.to_vec();
@@ -386,10 +338,7 @@ fn parse_loop_recipe_overrides(root: &TomlValue, path: &[&str]) -> LoopRecipeOve
 
     LoopRecipeOverrides {
         max_steps: parse_optional_usize_from_toml(root, &max_steps_path),
-        max_rounds: parse_optional_usize_from_toml(root, &max_rounds_path),
-        max_tool_calls: parse_optional_usize_from_toml(root, &max_tool_calls_path),
         repeat_action_limit: parse_optional_usize_from_toml(root, &repeat_action_limit_path),
-        no_progress_limit: parse_optional_usize_from_toml(root, &no_progress_limit_path),
         max_repairs: parse_optional_usize_from_toml(root, &max_repairs_path),
         run_cmd_timeout_seconds: parse_optional_u64_from_toml(root, &run_cmd_timeout_path),
         run_cmd_validation_timeout_seconds: parse_optional_u64_from_toml(
@@ -417,31 +366,10 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             &["agent", "loop_guard", "max_steps"],
             crate::AGENT_MAX_STEPS,
         ),
-        max_rounds: parse_usize_from_toml(&parsed, &["agent", "loop_guard", "max_rounds"], 2),
-        max_tool_calls: parse_usize_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "max_tool_calls"],
-            12,
-        ),
-        recoverable_failure_extra_rounds: parse_usize_allow_zero_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "recoverable_failure_extra_rounds"],
-            1,
-        ),
         repeat_action_limit: parse_usize_from_toml(
             &parsed,
             &["agent", "loop_guard", "repeat_action_limit"],
             4,
-        ),
-        no_progress_limit: parse_usize_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "no_progress_limit"],
-            1,
-        ),
-        multi_round_enabled: parse_bool_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "multi_round_enabled"],
-            true,
         ),
         answer_verifier_enforce_required_scope,
         registry_idempotency_guard_scope,
@@ -625,9 +553,7 @@ fn checkpoint_artifact_refs(loop_state: &super::LoopState) -> Vec<String> {
 
 fn checkpoint_resume_message_key(resume_reason: &str) -> Option<&'static str> {
     match resume_reason {
-        "agent_loop_max_rounds" => Some("clawd.task.agent_loop_max_rounds"),
-        "agent_loop_no_progress_limit" => Some("clawd.task.agent_loop_no_progress_limit"),
-        "budget_near_exhaustion" => Some("clawd.task.budget_near_exhaustion"),
+        "task_budget_slice_exhausted" => Some("clawd.task.task_budget_slice_exhausted"),
         _ => None,
     }
 }
@@ -716,12 +642,6 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
                 &checkpoint_id,
                 ResumeEntrypoint::NextPlannerRound,
                 signal,
-            )
-            .with_loop_budget(
-                loop_state.round_no,
-                loop_state.max_rounds,
-                loop_state.consecutive_no_progress,
-                true,
             )
             .to_json()
         }),

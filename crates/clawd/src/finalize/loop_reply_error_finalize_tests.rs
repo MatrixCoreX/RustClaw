@@ -11,7 +11,7 @@ async fn finalize_loop_reply_returns_graceful_result_for_permission_denied_conte
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond =
         Some("我还没能根据现有证据生成可靠最终答案。".to_string());
@@ -82,7 +82,7 @@ async fn finalize_loop_reply_treats_structured_run_cmd_failure_as_user_result() 
             "output_truncated": false
         }
     });
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
@@ -133,7 +133,7 @@ async fn finalize_loop_reply_sanitizes_contract_rejection_error() {
             "contract_match": "generic_path_content"
         }
     });
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(err_step_result(
         "step_1",

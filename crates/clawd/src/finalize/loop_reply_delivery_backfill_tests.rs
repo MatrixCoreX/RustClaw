@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn backfill_delivery_prefers_contractual_last_respond_over_synthesis() {
     let task = claimed_task("task-contractual-last-respond");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some("/home/guagua/rustclaw".to_string());
     loop_state.last_publishable_synthesis_output =
@@ -33,7 +33,7 @@ fn backfill_delivery_prefers_contractual_last_respond_over_synthesis() {
 fn backfill_delivery_accepts_exact_multiline_exact_observation_respond() {
     let task = claimed_task("task-contractual-multiline-raw-command");
     let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(observed.trim().to_string());
     loop_state
@@ -61,7 +61,7 @@ fn backfill_delivery_uses_free_answer_respond_step() {
     let task = claimed_task("task-free-answer-respond-step");
     let answer =
         "Dry run - RepairEnvelope recovery keeps structured verifier fields and excludes skill text.";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_output = Some(answer.to_string());
     loop_state
@@ -88,7 +88,7 @@ fn backfill_delivery_uses_free_answer_respond_step() {
 #[test]
 fn backfill_delivery_defers_structured_dry_run_payload_to_finalizer_projection() {
     let task = claimed_task("task-dry-run-projection-defer");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_publishable_synthesis_output = Some(
         "Dry-run summary: provider minimax, model speech-2.8-turbo, output path present."
@@ -122,7 +122,7 @@ fn backfill_delivery_defers_structured_dry_run_payload_to_finalizer_projection()
 fn backfill_delivery_accepts_strict_json_projection_marker() {
     let task = claimed_task("task-strict-json-projection");
     let answer = r#"{"created_files":["/workspace/calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_publishable_synthesis_output = Some(answer.to_string());
     loop_state.output_vars.insert(
@@ -170,7 +170,7 @@ fn backfill_delivery_uses_terminal_contract_respond_without_observed_execution()
     "cancel_ref": "run_cmd:cancel:ckpt-<runtime-uuid>"
   }
 }"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_output = Some(answer.to_string());
     loop_state
@@ -198,7 +198,7 @@ fn backfill_delivery_uses_terminal_contract_respond_without_observed_execution()
 fn backfill_delivery_does_not_use_respond_step_for_content_evidence_route() {
     let task = claimed_task("task-content-evidence-respond-step");
     let answer = "Dry run - content evidence routes must not backfill from a plain respond step.";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_output = Some(answer.to_string());
     loop_state
@@ -222,7 +222,7 @@ fn backfill_delivery_does_not_use_respond_step_for_content_evidence_route() {
 fn backfill_delivery_prefers_content_evidence_synthesis_over_locator_respond() {
     let task = claimed_task("task-content-evidence-synthesis-over-locator");
     let synthesis = "The query returned rows from the orders table.";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some("test_contract.sqlite".to_string());
     loop_state.executed_step_results.push(ok_step_result(
@@ -255,7 +255,7 @@ fn backfill_delivery_prefers_content_evidence_synthesis_over_locator_respond() {
 async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
     let state = test_state();
     let task = claimed_task("task-single-line-observed-respond");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some("/home/guagua/rustclaw".to_string());
     loop_state.last_publishable_synthesis_output =
@@ -305,7 +305,7 @@ async fn finalize_loop_reply_keeps_exact_multiline_exact_observation_observed_re
     let state = test_state();
     let task = claimed_task("task-multiline-raw-command-observed-respond");
     let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(observed.trim().to_string());
     loop_state
@@ -340,7 +340,7 @@ async fn finalize_loop_reply_keeps_exact_multiline_exact_observation_observed_re
 async fn finalize_loop_reply_uses_publishable_synthesis_output() {
     let state = test_state();
     let task = claimed_task("task-synth-finalize");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -387,7 +387,7 @@ async fn finalize_loop_reply_uses_publishable_synthesis_output() {
 async fn finalize_loop_reply_prefers_synthesis_over_raw_delivery_listing() {
     let state = test_state();
     let task = claimed_task("task-synth-over-raw-listing");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let raw_listing = "Untitled\nauth-key.sh\ncheck_no_nl_hardmatch.py\nnl_tests\n";
     let synthesis = "该 scripts 目录主要包含用于测试、回归、代码检查和运行时验证的脚本。";
     loop_state.has_tool_or_skill_output = true;
@@ -441,7 +441,7 @@ async fn finalize_loop_reply_prefers_latest_synthesis_for_compound_observations(
     let task = claimed_task("task-compound-observation-synth");
     let partial_table = "| name | score |\n| --- | --- |\n| beta | 12 |";
     let synthesis = "Log section reports warn=2 and error=1. Document section reports Service Notes. Markdown table ranks beta above gamma and alpha.";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push(partial_table.to_string());
     loop_state.last_user_visible_respond = Some(partial_table.to_string());
@@ -490,7 +490,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delive
     let state = test_state();
     let task = claimed_task("task-content-excerpt-title-delivery");
     let synthesis = "文件存在；读取到 20 行；标题中出现 RustClaw。";
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push("README.md".to_string());
     loop_state.last_user_visible_respond = Some("README.md".to_string());
@@ -542,7 +542,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_respond_synthesis_over_titl
     let task = claimed_task("task-content-excerpt-respond-title-delivery");
     let synthesis =
         "1. 文件是否存在：是。\n2. 读取到的行数：20 行。\n3. 标题中是否出现 RustClaw：是。";
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push("README.md".to_string());
     loop_state.last_user_visible_respond = Some("README.md".to_string());
@@ -583,7 +583,7 @@ async fn finalize_loop_reply_prefers_db_rows_synthesis_over_locator_title_delive
     let state = test_state();
     let task = claimed_task("task-db-rows-synthesis-over-locator-title");
     let synthesis = "对 test_contract.sqlite 执行的只读查询结果如下：\n\n- 被查询表：按名称排序的第一个表 `orders`\n- SQL：`SELECT * FROM orders LIMIT 5;`（仅 SELECT，未执行写入语句）\n- 共返回 2 行，列结构为 `id, user_id, amount, status`\n\n具体行内容：\n\n| id | user_id | amount | status |\n|----|---------|--------|--------|\n| 1  | 1       | 19.9   | paid   |\n| 2  | 2       | 42.5   | pending |\n\n表不为空，行数已少于 5 行上限，因此无需截断。整个过程仅使用只读 SELECT，未触发任何写入 SQL。";
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .delivery_messages
@@ -633,7 +633,7 @@ async fn finalize_loop_reply_uses_multi_locator_route_for_compound_synthesis() {
     let task = claimed_task("task-compound-route-locator-synth");
     let partial_table = "| name | score |\n| --- | --- |\n| beta | 12 |";
     let synthesis = "### 1. Log analysis\n\nWARN count is 2 and ERROR count is 1.\n\n### 2. Service Notes\n\nThe document describes a small control panel and troubleshooting order.\n\n### 3. Markdown table\n\n| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push(partial_table.to_string());
     loop_state.last_user_visible_respond = Some(partial_table.to_string());
@@ -678,7 +678,7 @@ async fn finalize_loop_reply_replaces_direct_read_observation_delivery_with_late
     let state = test_state();
     let task = claimed_task("task-raw-read-delivery-synthesis");
     let raw_read = r#"{"action":"read_range","mode":"head","excerpt":"1|alpha\n2|beta\n3|gamma","path":"/tmp/app.log"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -729,7 +729,7 @@ async fn finalize_loop_reply_prefers_exact_sentence_synthesis_over_raw_read() {
     .to_string();
     let synthesis =
         "RustClaw is a local Rust agent runtime. It is centered on clawd. It supports channel and skill execution.";
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -786,7 +786,7 @@ async fn finalize_loop_reply_keeps_strict_exact_tail_read_delivery_over_synthesi
     })
     .to_string();
     let synthesis = "planned fallback text";
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -838,7 +838,7 @@ async fn finalize_loop_reply_keeps_strict_exact_tail_read_delivery_over_synthesi
 async fn finalize_loop_reply_preserves_model_synthesis_after_path_observation() {
     let state = test_state();
     let task = claimed_task("task-path-fact-after-repair");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -891,7 +891,7 @@ async fn finalize_loop_reply_preserves_model_synthesis_after_path_observation() 
 async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
     let state = test_state();
     let task = claimed_task("task-synth-over-raw");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .output_vars
@@ -950,7 +950,7 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
 async fn finalize_loop_reply_keeps_article_synthesis_after_repair_success() {
     let state = test_state();
     let task = claimed_task("task-synth-after-repair");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1020,7 +1020,7 @@ async fn finalize_loop_reply_keeps_article_synthesis_after_repair_success() {
 async fn finalize_loop_reply_replaces_template_placeholder_with_synthesis() {
     let state = test_state();
     let task = claimed_task("task-synth-placeholder");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .delivery_messages

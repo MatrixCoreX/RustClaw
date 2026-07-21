@@ -314,7 +314,7 @@ fn paused_checkpoint_result(state: &str, next_check_after: i64, checkpoint_id: &
             "schema_version": 1,
             "state": state,
             "source": "agent_loop_soft_budget",
-            "resume_reason": "agent_loop_max_rounds",
+            "resume_reason": "task_budget_slice_exhausted",
             "next_check_after": next_check_after,
             "checkpoint_id": checkpoint_id,
             "can_poll": true,
@@ -909,7 +909,7 @@ fn paused_checkpoint_resume_work_item_is_machine_payload() {
             },
         resume_directive: "run_next_planner_round".to_string(),
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let seed_report = crate::agent_engine::seed_loop_state_for_agent_run(
         &mut loop_state,
         None,

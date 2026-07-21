@@ -1,6 +1,6 @@
 #[test]
 fn direct_answer_defers_http_basic_one_sentence_summary_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "http_basic",
@@ -28,7 +28,7 @@ fn direct_answer_defers_http_basic_one_sentence_summary_to_llm() {
 
 #[test]
 fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let body = "status=200\n{\"ok\":true}\n";
     loop_state
         .executed_step_results
@@ -55,7 +55,7 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
 
 #[test]
 fn direct_answer_preserves_http_status_machine_value_without_domain_rendering() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let body = "status=200\n{\"ok\":true,\"data\":{\"version\":\"0.1.7\",\"worker_state\":\"running\",\"queue_length\":0,\"bound_channel_count\":3}}\n";
     loop_state
         .executed_step_results
@@ -87,7 +87,7 @@ fn direct_answer_preserves_http_status_machine_value_without_domain_rendering() 
 
 #[test]
 fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "service_control",
@@ -115,7 +115,7 @@ fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
 
 #[test]
 fn direct_answer_defers_service_control_status_summary_for_english_request() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "service_control",
@@ -143,7 +143,7 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
 
 #[test]
 fn direct_answer_uses_generic_selector_for_service_control_machine_value() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "service_control",
@@ -174,7 +174,7 @@ fn direct_answer_uses_generic_selector_for_service_control_machine_value() {
 
 #[test]
 fn observed_entries_compact_log_analyze_json_into_summary() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "log_analyze",
@@ -190,7 +190,7 @@ fn observed_entries_compact_log_analyze_json_into_summary() {
 
 #[test]
 fn observed_entries_keep_log_analyze_tail_evidence() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "log_analyze",

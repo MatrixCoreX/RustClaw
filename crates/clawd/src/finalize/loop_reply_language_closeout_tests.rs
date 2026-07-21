@@ -3,7 +3,7 @@ use super::*;
 
 #[test]
 fn execution_recipe_closeout_note_mentions_external_workspace_for_english_code_change() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
@@ -32,7 +32,7 @@ fn execution_recipe_closeout_note_mentions_external_workspace_for_english_code_c
 
 #[test]
 fn execution_recipe_closeout_note_quotes_machine_validation_result() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::PackageChange,
@@ -62,7 +62,7 @@ fn execution_recipe_closeout_note_quotes_machine_validation_result() {
 
 #[test]
 fn execution_recipe_closeout_prefixes_greenfield_plain_text_delivery() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
@@ -99,7 +99,7 @@ fn execution_recipe_closeout_prefixes_greenfield_plain_text_delivery() {
 
 #[test]
 fn execution_recipe_closeout_does_not_infer_success_marker_from_user_text() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
@@ -137,7 +137,7 @@ fn execution_recipe_closeout_does_not_infer_success_marker_from_user_text() {
 
 #[test]
 fn execution_recipe_closeout_prefixes_current_repo_plain_text_delivery() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
@@ -173,7 +173,7 @@ fn execution_recipe_closeout_prefixes_current_repo_plain_text_delivery() {
 
 #[test]
 fn execution_recipe_closeout_note_mentions_system_scope_for_english_ops() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
@@ -201,7 +201,7 @@ fn execution_recipe_closeout_note_mentions_system_scope_for_english_ops() {
 
 #[test]
 fn execution_recipe_closeout_note_skips_apply_phase_without_validation() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
@@ -223,7 +223,7 @@ fn execution_recipe_closeout_note_skips_apply_phase_without_validation() {
 
 #[test]
 fn execution_recipe_closeout_skips_file_token_delivery() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::ConfigChange,
@@ -253,7 +253,7 @@ fn execution_recipe_closeout_skips_file_token_delivery() {
 
 #[test]
 fn execution_recipe_closeout_skips_scalar_route_delivery() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
@@ -283,7 +283,7 @@ fn execution_recipe_closeout_skips_scalar_route_delivery() {
 
 #[test]
 fn execution_recipe_closeout_skips_scalar_route_when_marker_is_only_user_text() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
@@ -347,7 +347,7 @@ fn delivery_success_marker_matching_requires_exact_line() {
 
 #[test]
 fn missing_requested_success_marker_does_not_scan_user_text() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         phase: crate::execution_recipe::ExecutionRecipePhase::Done,
@@ -373,7 +373,7 @@ fn missing_requested_success_marker_does_not_scan_user_text() {
 
 #[test]
 fn requested_success_marker_allows_recipe_success_when_present() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         phase: crate::execution_recipe::ExecutionRecipePhase::Done,
@@ -399,7 +399,7 @@ fn requested_success_marker_allows_recipe_success_when_present() {
 
 #[test]
 fn auto_requested_success_marker_stays_off_without_structured_request() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         phase: crate::execution_recipe::ExecutionRecipePhase::Done,
@@ -425,7 +425,7 @@ fn auto_requested_success_marker_stays_off_without_structured_request() {
 
 #[test]
 fn auto_requested_success_marker_stays_off_before_recipe_done() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         phase: crate::execution_recipe::ExecutionRecipePhase::Apply,

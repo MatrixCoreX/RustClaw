@@ -50,7 +50,7 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
 
 #[test]
 fn resolve_arg_string_replaces_trimmed_double_brace_placeholders() {
-    let mut loop_state = LoopState::new(1);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("last_output[1]".to_string(), "clawd.log".to_string());
@@ -70,7 +70,7 @@ fn resolve_arg_string_replaces_trimmed_double_brace_placeholders() {
 
 #[test]
 fn resolve_arg_string_replaces_last_output_listing_entry_path_reference() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -85,7 +85,7 @@ fn resolve_arg_string_replaces_last_output_listing_entry_path_reference() {
 
 #[test]
 fn resolve_arg_string_replaces_steps_output_listing_entry_path_reference() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -109,7 +109,7 @@ fn resolve_arg_string_replaces_steps_output_listing_entry_path_reference() {
 
 #[test]
 fn resolve_arg_value_maps_file_placeholder_path_segment_from_latest_listing() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -135,7 +135,7 @@ fn resolve_arg_value_maps_file_placeholder_path_segment_from_latest_listing() {
 
 #[test]
 fn resolve_arg_value_maps_file_placeholder_array_items_from_latest_listing_names() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
@@ -160,7 +160,7 @@ fn resolve_arg_value_maps_file_placeholder_array_items_from_latest_listing_names
 
 #[test]
 fn resolve_arg_value_maps_recent_placeholder_path_segment_from_latest_listing() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -181,7 +181,7 @@ fn resolve_arg_value_maps_recent_placeholder_path_segment_from_latest_listing() 
 
 #[test]
 fn resolve_arg_value_maps_recent_file_placeholder_to_first_listing_entry() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -210,7 +210,7 @@ fn auto_locator_rewrites_system_basic_file_path() {
     let readme = root.path.join("README.md");
     fs::write(&readme, "# title\n").expect("write readme");
     let readme_path = readme.display().to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("auto_locator_path".to_string(), readme_path.clone());
@@ -237,7 +237,7 @@ fn auto_locator_rewrites_config_basic_read_field_path() {
     let cargo_toml = root.path.join("Cargo.toml");
     fs::write(&cargo_toml, "[package]\nversion = \"0.1.0\"\n").expect("write config");
     let target_path = cargo_toml.display().to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("auto_locator_path".to_string(), target_path.clone());
@@ -263,7 +263,7 @@ fn auto_locator_rewrites_directory_root_for_find_path() {
     let document = root.path.join("document");
     fs::create_dir_all(&document).expect("create document");
     let document_path = document.display().to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("auto_locator_path".to_string(), document_path.clone());
@@ -721,7 +721,7 @@ fn auto_locator_sets_missing_fs_search_root() {
     let search_root = root.path.join("stem_unique");
     fs::create_dir_all(&search_root).expect("create search root");
     let search_root_path = search_root.display().to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("auto_locator_path".to_string(), search_root_path.clone());
@@ -753,7 +753,7 @@ fn auto_locator_overwrites_missing_fs_search_root() {
     let search_root = root.path.join("case_only");
     fs::create_dir_all(&search_root).expect("create search root");
     let search_root_path = search_root.display().to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("auto_locator_path".to_string(), search_root_path.clone());
@@ -789,7 +789,7 @@ fn auto_locator_preserves_explicit_existing_path() {
     let notes = root.path.join("notes.md");
     fs::write(&readme, "# readme\n").expect("write readme");
     fs::write(&notes, "# notes\n").expect("write notes");
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("auto_locator_path".to_string(), notes.display().to_string());
@@ -809,7 +809,7 @@ fn auto_locator_preserves_existing_structured_field_path() {
     let cargo = root.path.join("Cargo.toml");
     fs::write(&package, r#"{"name":"react-example"}"#).expect("write package");
     fs::write(&cargo, "[package]\nname=\"clawd\"\n").expect("write cargo");
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "auto_locator_path".to_string(),
         package.display().to_string(),
@@ -837,7 +837,7 @@ fn auto_locator_preserves_conflicting_missing_file_name() {
     let root = TempDirGuard::new("auto_locator_conflicting_missing_name");
     let agents = root.path.join("AGENTS.md");
     fs::write(&agents, "# rules\n").expect("write agents");
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "auto_locator_path".to_string(),
         agents.display().to_string(),
@@ -867,7 +867,7 @@ fn broad_current_workspace_auto_locator_does_not_overwrite_missing_inventory_pat
     let root = TempDirGuard::new("broad_current_workspace");
     let root_path = root.path.display().to_string();
     let explicit_missing = root.path.join("archive").display().to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("auto_locator_path".to_string(), root_path);
@@ -901,7 +901,7 @@ fn concrete_auto_locator_still_overwrites_missing_inventory_path() {
     let archive = root.path.join("docs_archive");
     fs::create_dir_all(&archive).expect("create archive");
     let archive_path = archive.display().to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .output_vars
         .insert("auto_locator_path".to_string(), archive_path.clone());

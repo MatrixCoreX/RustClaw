@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn artifact_renderer_dispatch_records_structured_trace_when_skipped() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
 
     let rendered = normalize_file_token_delivery_from_observed_paths(&state, &mut loop_state, None);
 

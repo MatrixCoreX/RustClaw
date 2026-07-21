@@ -22,7 +22,7 @@ async fn finalize_loop_reply_accepts_terminal_machine_json_envelope() {
         }
     })
     .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -78,7 +78,7 @@ async fn finalize_loop_reply_promotes_machine_json_last_respond_to_delivery() {
         }
     })
     .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -134,7 +134,7 @@ async fn finalize_loop_reply_promotes_machine_json_step_output_to_delivery() {
         }
     })
     .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -194,7 +194,7 @@ async fn finalize_loop_reply_prefers_subagent_machine_envelope_over_later_prose(
     .to_string();
     let later_prose =
         "execution_mode=inline_readonly_child_run finding_refs=subagent-batch:1:3:1:explorer";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -263,7 +263,7 @@ async fn finalize_loop_reply_projects_subagent_child_model_result_from_runtime_e
         "child_model_result": child_result.clone()
     })
     .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results

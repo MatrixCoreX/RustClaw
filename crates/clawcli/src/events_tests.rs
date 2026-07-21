@@ -110,6 +110,46 @@ fn compact_model_turn_event_exposes_only_safe_lifecycle_fields() {
 }
 
 #[test]
+fn compact_budget_decision_event_exposes_machine_progress_fields() {
+    let raw = serde_json::json!({
+        "seq": 11,
+        "event_type": "budget_decision",
+        "payload": {
+            "decision": "checkpoint_requeue",
+            "profile": "multi_step_workspace",
+            "soft_slice_ms": 900000,
+            "continuation_index": 2,
+            "cumulative_model_turns": 7,
+            "cumulative_tool_calls": 15,
+            "cumulative_input_tokens": 12000,
+            "cumulative_output_tokens": 2400,
+            "cumulative_cost_usd_nanos": 42000000,
+            "cumulative_elapsed_ms": 901000,
+            "stagnation_tolerance": 4,
+            "provider_timeout_class": "standard",
+            "tool_timeout_class": "long_tail",
+            "observed_progress": true,
+            "soft_slice_exhausted": true,
+            "resumable": true
+        }
+    });
+
+    let line =
+        live_task_event_output_line(&raw, LiveEventOutputMode::Compact, &EventFilters::default())
+            .expect("compact render")
+            .expect("compact line");
+
+    assert!(line.contains("type=budget_decision"));
+    assert!(line.contains("decision=checkpoint_requeue"));
+    assert!(line.contains("profile=multi_step_workspace"));
+    assert!(line.contains("cumulative_model_turns=7"));
+    assert!(line.contains("cumulative_tool_calls=15"));
+    assert!(line.contains("continuation_index=2"));
+    assert!(line.contains("soft_slice_exhausted=true"));
+    assert!(line.contains("resumable=true"));
+}
+
+#[test]
 fn agent_hook_events_preserve_handler_execution_fields() {
     let data = serde_json::json!({
         "result_json": {

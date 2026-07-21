@@ -14,12 +14,7 @@ use std::sync::{Arc, RwLock};
 fn test_policy(registry_idempotency_guard_enabled: bool) -> super::AgentLoopGuardPolicy {
     super::AgentLoopGuardPolicy {
         max_steps: 8,
-        max_rounds: 2,
-        max_tool_calls: 12,
-        recoverable_failure_extra_rounds: 0,
         repeat_action_limit: 1,
-        no_progress_limit: 1,
-        multi_round_enabled: true,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: if registry_idempotency_guard_enabled {
             RegistryIdempotencyGuardScope::All
@@ -93,7 +88,7 @@ planner_capabilities = [
 
 #[test]
 fn observed_output_alone_does_not_mark_plan_exhausted_user_visible() {
-    let loop_state = super::LoopState::new(2);
+    let loop_state = super::LoopState::new();
     let snapshot = capture_round_progress_snapshot(&loop_state);
     let outcome = finalize_execute_round_outcome(&loop_state, &snapshot, 1, 1, false, None);
     assert!(outcome.stop_signal.is_none());
@@ -101,7 +96,7 @@ fn observed_output_alone_does_not_mark_plan_exhausted_user_visible() {
 
 #[test]
 fn explicit_user_visible_output_marks_plan_exhausted() {
-    let loop_state = super::LoopState::new(2);
+    let loop_state = super::LoopState::new();
     let snapshot = capture_round_progress_snapshot(&loop_state);
     let outcome = finalize_execute_round_outcome(&loop_state, &snapshot, 1, 1, true, None);
     assert_eq!(
@@ -111,7 +106,7 @@ fn explicit_user_visible_output_marks_plan_exhausted() {
 }
 
 #[test]
-fn max_tool_call_budget_counts_only_external_calls() {
+fn administrator_tool_counter_counts_only_external_calls() {
     assert!(action_counts_as_tool_call(&crate::AgentAction::CallTool {
         tool: "system_basic".to_string(),
         args: serde_json::json!({})
@@ -138,7 +133,7 @@ fn max_tool_call_budget_counts_only_external_calls() {
 
 #[test]
 fn terminal_synthesis_skips_only_placeholder_delivery_suffix() {
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     loop_state.last_publishable_synthesis_output = Some(r#"{"test_status":"OK"}"#.to_string());
     let action = crate::AgentAction::SynthesizeAnswer {
         evidence_refs: vec!["s4".to_string()],
@@ -160,7 +155,7 @@ fn terminal_synthesis_skips_only_placeholder_delivery_suffix() {
 
 #[test]
 fn terminal_synthesis_skips_non_json_delivery_suffix_for_strict_json_contract() {
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     loop_state.last_publishable_synthesis_output = Some(r#"{"test_status":"OK"}"#.to_string());
     loop_state.output_contract = Some(crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
@@ -186,7 +181,7 @@ fn terminal_synthesis_skips_non_json_delivery_suffix_for_strict_json_contract() 
 
 #[test]
 fn terminal_synthesis_does_not_skip_concrete_or_executable_suffix() {
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     loop_state.last_publishable_synthesis_output = Some(r#"{"test_status":"OK"}"#.to_string());
     let action = crate::AgentAction::SynthesizeAnswer {
         evidence_refs: vec!["s4".to_string()],
@@ -211,7 +206,7 @@ fn terminal_synthesis_does_not_skip_concrete_or_executable_suffix() {
 
 #[test]
 fn complete_structured_observation_skips_terminal_discussion_actions() {
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
         selection: crate::OutputSelectionContract {
@@ -266,7 +261,7 @@ fn complete_structured_observation_skips_terminal_discussion_actions() {
 
 #[test]
 fn incomplete_structured_observation_keeps_terminal_discussion_actions() {
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
         selection: crate::OutputSelectionContract {
@@ -347,7 +342,7 @@ fn done_recipe_does_not_allow_repeating_successful_observe_effect() {
 fn repeat_guard_allows_repeated_respond_delivery() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture("task-repeat-respond");
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     let action = crate::AgentAction::Respond {
         content: "final answer".to_string(),
     };
@@ -375,7 +370,7 @@ fn repeat_guard_allows_repeated_respond_delivery() {
 fn repeat_guard_blocks_identical_non_respond_after_limit() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture("task-repeat-run-cmd");
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     let action = crate::AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: serde_json::json!({"command": "pwd"}),
@@ -414,7 +409,7 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
 fn repeat_guard_allows_successful_observe_repeat_until_limit() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture("task-repeat-observe");
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     let action = crate::AgentAction::CallSkill {
         skill: "git_basic".to_string(),
         args: serde_json::json!({"action": "status"}),
@@ -469,7 +464,7 @@ fn repeat_guard_allows_successful_observe_repeat_until_limit() {
 fn registry_idempotency_guard_records_repeat_block_attribution() {
     let state = state_with_registry(registry_governance_fixture(), &["config_edit"]);
     let task = task_fixture("task-registry-repeat");
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     let action = crate::AgentAction::CallSkill {
         skill: "config_edit".to_string(),
         args: serde_json::json!({
@@ -530,7 +525,7 @@ fn registry_idempotency_guard_records_repeat_block_attribution() {
 fn registry_args_dedup_allows_multiple_distinct_filesystem_writes() {
     let state = state_with_registry(filesystem_write_registry_fixture(), &["fs_basic"]);
     let task = task_fixture("task-registry-write-multiple-files");
-    let mut loop_state = super::LoopState::new(2);
+    let mut loop_state = super::LoopState::new();
     let first = crate::AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: serde_json::json!({

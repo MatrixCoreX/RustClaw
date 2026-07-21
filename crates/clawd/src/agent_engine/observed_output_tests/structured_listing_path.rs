@@ -1,6 +1,6 @@
 #[test]
 fn structured_keys_exact_selector_uses_generic_capability_result() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let extra = serde_json::json!({
         "action": "structured_keys",
         "exists": true,
@@ -33,7 +33,7 @@ fn structured_keys_exact_selector_uses_generic_capability_result() {
 
 #[test]
 fn structured_array_identity_selector_uses_generic_capability_result() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let extra = serde_json::json!({
         "action": "structured_keys",
         "exists": true,
@@ -66,7 +66,7 @@ fn structured_array_identity_selector_uses_generic_capability_result() {
 
 #[test]
 fn structured_keys_one_sentence_defers_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -94,7 +94,7 @@ fn structured_keys_one_sentence_defers_to_synthesis() {
 
 #[test]
 fn direct_answer_formats_extract_fields_result_without_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -122,7 +122,7 @@ fn direct_answer_formats_extract_fields_result_without_llm() {
 
 #[test]
 fn direct_answer_uses_inventory_dir_names_for_system_basic() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -150,7 +150,7 @@ fn direct_answer_uses_inventory_dir_names_for_system_basic() {
 
 #[test]
 fn direct_answer_uses_inventory_dir_names_for_fs_basic() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -178,7 +178,7 @@ fn direct_answer_uses_inventory_dir_names_for_fs_basic() {
 
 #[test]
 fn direct_answer_uses_inventory_dir_entry_sizes_when_names_only_is_false() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -206,7 +206,7 @@ fn direct_answer_uses_inventory_dir_entry_sizes_when_names_only_is_false() {
 
 #[test]
 fn direct_answer_does_not_apply_listing_limit_from_resolved_intent_text() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -234,7 +234,7 @@ fn direct_answer_does_not_apply_listing_limit_from_resolved_intent_text() {
 
 #[test]
 fn direct_answer_does_not_apply_listing_limit_from_current_turn_request_text() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -263,7 +263,7 @@ fn direct_answer_does_not_apply_listing_limit_from_current_turn_request_text() {
 
 #[test]
 fn scalar_listing_gate_does_not_repair_count_from_request_text_limit() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "a\nb\nc\n"));
@@ -294,7 +294,7 @@ fn scalar_listing_gate_does_not_repair_count_from_request_text_limit() {
 
 #[test]
 fn direct_answer_uses_latest_list_dir_entries_for_act_free_shape() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "README.txt\nnotes.md\n"));
@@ -320,7 +320,7 @@ fn direct_answer_uses_latest_list_dir_entries_for_act_free_shape() {
 
 #[test]
 fn direct_answer_uses_latest_list_dir_even_after_synthesis_step() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "alpha.md\nbeta.md\n"));
@@ -352,7 +352,7 @@ fn direct_answer_uses_latest_list_dir_even_after_synthesis_step() {
 
 #[test]
 fn direct_answer_preserves_list_dir_entries_without_request_text_limit() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "a\nb\nc\nd\n"));
@@ -378,7 +378,7 @@ fn direct_answer_preserves_list_dir_entries_without_request_text_limit() {
 
 #[test]
 fn ordinary_path_inspection_defers_system_basic_path_facts_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -408,7 +408,7 @@ fn ordinary_path_inspection_defers_system_basic_path_facts_to_model_synthesis() 
 
 #[test]
 fn ordinary_path_inspection_defers_multiple_path_observations_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -436,7 +436,7 @@ fn ordinary_path_inspection_defers_multiple_path_observations_to_model_synthesis
 
 #[test]
 fn ordinary_path_kind_inspection_defers_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -462,7 +462,7 @@ fn ordinary_path_kind_inspection_defers_to_model_synthesis() {
 
 #[test]
 fn ordinary_multi_path_inspection_defers_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -484,7 +484,7 @@ fn ordinary_multi_path_inspection_defers_to_model_synthesis() {
 
 #[test]
 fn ordinary_scalar_like_existence_request_uses_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -514,7 +514,7 @@ fn ordinary_scalar_like_existence_request_uses_model_synthesis() {
 
 #[test]
 fn ordinary_path_metadata_observation_does_not_use_fixed_runtime_reply() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -536,7 +536,7 @@ fn ordinary_path_metadata_observation_does_not_use_fixed_runtime_reply() {
 
 #[test]
 fn ordinary_missing_path_observation_defers_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -581,7 +581,7 @@ fn run_cmd_yes_text_is_not_parsed_into_a_path_verdict() {
         .to_string_lossy()
         .to_string();
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "yes\n"));
@@ -626,7 +626,7 @@ fn run_cmd_exists_text_is_not_parsed_into_a_path_verdict() {
         .to_string_lossy()
         .to_string();
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "exists\n"));
@@ -671,7 +671,7 @@ fn ordinary_find_name_path_observation_defers_to_model_synthesis() {
         .to_string_lossy()
         .to_string();
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",

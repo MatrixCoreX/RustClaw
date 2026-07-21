@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn synthesize_failure_observed_facts_include_recent_execution_outputs() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "alpha.md\nbeta.md\n"));
@@ -18,7 +18,7 @@ fn synthesize_failure_observed_facts_include_recent_execution_outputs() {
 
 #[test]
 fn synthesize_failure_after_observation_allows_one_replan() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "read_file",

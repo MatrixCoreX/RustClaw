@@ -44,7 +44,7 @@ planner_capabilities = [
 #[test]
 fn evidence_policy_preflight_requires_explicit_run_cmd_dry_run_field() {
     let state = test_state();
-    let loop_state = LoopState::new(2);
+    let loop_state = LoopState::new();
     let args = serde_json::json!({
         "command": "sleep 2 && echo RUSTCLAW_ASYNC_DRY_RUN",
         "async_start": true,

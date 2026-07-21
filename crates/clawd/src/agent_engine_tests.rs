@@ -200,7 +200,7 @@ fn seed_loop_state_extracts_file_delivery_target_candidates() {
         user_request: Some(format!("deliver active file\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -214,7 +214,7 @@ fn seed_loop_state_extracts_file_delivery_target_candidates() {
 
 #[test]
 fn loop_state_seeds_session_alias_targets_from_original_request() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let ctx = AgentRunContext {
         session_alias_bindings: vec![
             crate::conversation_state::SessionAliasBinding {
@@ -256,7 +256,7 @@ fn loop_state_seeds_session_alias_targets_from_original_request() {
 
 #[test]
 fn loop_state_seeds_session_alias_targets_from_context_alias_block() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let ctx = AgentRunContext {
         context_bundle_summary: Some(
             "resolved_prompt=列一下甲目录里的名字，再顺手说乙文件主要在提醒什么\n\n\
@@ -292,7 +292,7 @@ fn loop_state_seeds_session_alias_targets_from_context_alias_block() {
 
 #[test]
 fn loop_state_does_not_count_alias_block_lines_as_current_mentions() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let ctx = AgentRunContext {
         context_bundle_summary: Some(
             "resolved_prompt=列一下甲目录里的名字\n\n\
@@ -333,7 +333,7 @@ fn loop_state_does_not_count_alias_block_lines_as_current_mentions() {
 
 #[test]
 fn loop_state_seeds_active_bound_targets_from_boundary_observation_block() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let observation = json!({
         "kind": "agent_loop_boundary_observations",
         "schema_version": 1,
@@ -414,7 +414,7 @@ fn loop_state_seeds_active_bound_targets_from_boundary_observation_block() {
 
 #[test]
 fn loop_state_checkpoint_seed_restores_machine_resume_state() {
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.total_steps_executed = 2;
     loop_state.tool_calls_total = 1;
@@ -543,7 +543,7 @@ fn loop_state_checkpoint_seed_restores_machine_resume_state() {
 
 #[test]
 fn loop_state_agent_run_seed_combines_resume_checkpoint_and_context() {
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     let checkpoint = crate::task_lifecycle::TaskCheckpoint {
         schema_version: 1,
         checkpoint_id: "ckpt-agent-run".to_string(),
@@ -702,7 +702,7 @@ fn turn_analysis_prompt_block_includes_boundary_without_route_policy() {
 
 #[test]
 fn register_step_output_indexes_inventory_names_for_followup_paths() {
-    let mut loop_state = LoopState::new(1);
+    let mut loop_state = LoopState::new();
     register_step_output(
         &mut loop_state,
         1,

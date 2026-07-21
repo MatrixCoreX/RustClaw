@@ -3,7 +3,7 @@ use crate::{AgentAction, PlanKind, PlanResult};
 
 #[test]
 fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -64,7 +64,7 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
 
 #[test]
 fn synthesize_direct_fallback_allows_explicit_scalar_extraction() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -96,7 +96,7 @@ fn synthesize_direct_fallback_allows_explicit_scalar_extraction() {
 
 #[test]
 fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -124,7 +124,7 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
 
 #[test]
 fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -155,7 +155,7 @@ fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
 
 #[test]
 fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",

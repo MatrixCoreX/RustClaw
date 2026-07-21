@@ -9,7 +9,9 @@ wiring and intended ownership.
 
 ## Summary
 
-- Core loop budgets and budget profiles are wired through
+- Interactive task slices and administrator hard ceilings are wired through
+  `task_budget_contract::load_task_budget_policy()`. Per-plan action capacity,
+  repetition, verifier, and recipe controls remain in
   `agent_engine::support::load_agent_loop_guard_policy()`.
 - Route-authority runtime switches have been removed from
   `AgentLoopGuardPolicy`; old route-authority, canary, and `agent_decides_*`
@@ -31,19 +33,17 @@ wiring and intended ownership.
 
 | Config path | Current wiring | Category | Owner | Next action |
 | --- | --- | --- | --- | --- |
-| `agent.loop_guard.max_steps` | Parsed by `load_agent_loop_guard_policy()` and consumed by agent planning/loop budgets. | Wired behavior. | Boundary Layer budget guard. | Keep. Test with `cargo test -p clawd support -- --nocapture` and loop tests. |
-| `agent.loop_guard.max_rounds` | Parsed and applied to `LoopState.max_rounds`. | Wired behavior. | Boundary Layer budget guard. | Keep task-class profile overrides; avoid removing config. |
-| `agent.loop_guard.recoverable_failure_extra_rounds` | Parsed and used by recoverable failure loop extension. | Wired behavior. | Loop budget/repair guard. | Keep; observe LLM cost in canaries. |
-| `agent.loop_guard.multi_round_enabled` | Parsed and logged/used by loop planning path. | Wired behavior. | Loop coordinator. | Keep as emergency rollback toward single-round behavior. |
+| `agent.loop_guard.max_steps` | Parsed by `load_agent_loop_guard_policy()` as per-plan action capacity. It is not a whole-task planner-round or tool-call completion limit. | Wired behavior. | Plan execution guard. | Keep; tune only when verified plans cannot represent a coherent phase. |
 | `agent.loop_guard.answer_verifier_retry_limit` | Physically removed. Final-answer recovery permits exactly one bounded synthesis retry selected by structured verifier fields. | Removed legacy key. | Answer Verifier evidence boundary. | Do not restore a configurable retry count or generated-prose repair loop. |
 | `agent.loop_guard.repeat_action_limit` | Parsed and used in repeat guard. | Wired behavior. | Loop repeat guard. | Keep. |
-| `agent.loop_guard.no_progress_limit` | Parsed and used in no-progress stop logic. | Wired behavior. | Loop progress guard. | Keep task-class overrides. |
-| `agent.loop_guard.max_tool_calls` | Parsed and used in execution loop tool-call guard. | Wired behavior. | Boundary Layer budget guard. | Keep. |
 | `agent.loop_guard.repeat_same_action_limit` | Parsed into policy. | Wired behavior / compatibility. | Loop repeat guard. | Keep until dedup cleanup verifies no duplicate meaning. |
-| `agent.loop_guard.budget_profiles.fast_read` | Parsed and selected for fast read/status tasks. | Wired behavior. | Budget profile selector. | Keep. |
-| `agent.loop_guard.budget_profiles.grounded_summary` | Parsed and selected for summary/evidence tasks. | Wired behavior. | Budget profile selector. | Keep. |
-| `agent.loop_guard.budget_profiles.multi_step_workspace` | Parsed and selected for workspace/write/delivery tasks. | Wired behavior. | Budget profile selector. | Keep. |
-| `agent.loop_guard.ops_closed_loop` | Parsed and selected for `ops_closed_loop` execution recipes. | Wired behavior. | Ops closed-loop budget/repair guard. | Keep. |
+| `agent.task_budget.admin_max_*` | Parsed by `load_task_budget_policy()` into cumulative model-turn, tool-call, token, cost, elapsed, continuation, and non-resumable runtime ceilings. | Wired behavior. | Administrator safety boundary. | Keep high enough to remain an emergency boundary; model output cannot raise it. |
+| `agent.task_budget.profiles.*.soft_slice_seconds` | Parsed into resumable wall-time slices and bounded by the worker timeout reserve. | Wired behavior. | Task budget coordinator. | Tune latency/checkpoint cadence, not task complexity. |
+| `agent.task_budget.profiles.*.stagnation_tolerance` | Parsed as structured consecutive non-progress tolerance. | Wired behavior. | Progress evaluator. | Keep above one so a single inconclusive round is not terminal. |
+| `agent.task_budget.profiles.*.provider_timeout_class` | Parsed as a machine timeout class for provider-call policy/observability. | Wired behavior. | Provider budget policy. | Keep `short`, `standard`, or `long_tail`. |
+| `agent.task_budget.profiles.*.tool_timeout_class` | Parsed as a machine timeout class for tool policy/observability. | Wired behavior. | Tool budget policy. | Long-tail work must expose async/checkpoint state when resumable. |
+| `agent.loop_guard.max_rounds`, `max_tool_calls`, `no_progress_limit`, `recoverable_failure_extra_rounds`, `multi_round_enabled` | Physically removed from interactive config, parser, loop state, stop signals, and profile overrides. | Removed legacy keys. | Task-budget migration guard. | Do not restore. Explicit caps belong only to non-interactive/child request contracts. |
+| `agent.loop_guard.budget_profiles.*` loop thresholds | Replaced by `[agent.task_budget.profiles.*]` soft slices plus `max_steps` action capacity overrides where needed. | Removed legacy semantics. | Task-budget migration guard. | Do not reintroduce round/tool thresholds under profile names. |
 | `agent.loop_guard.answer_verifier_enforce_required_scope` | Parsed as final machine token `all`; missing or non-`all` historical values normalize to `all`, so required-evidence force-failure behavior is not gated by route class. | Wired behavior. | Answer Verifier evidence boundary. | Keep verifier attribution review active; fix false blocks through evidence contracts, extractors, registry metadata, or planner prompts rather than disabling the guard. |
 | `agent.loop_guard.answer_verifier_enforce_required` | Historical bool name; current runtime config loader does not parse it. | Ignored legacy key. | Config migration. | Do not document or extend as a config field; use `answer_verifier_enforce_required_scope`. |
 | `agent.loop_guard.semantic_route_authority` | Retired historical key; current runtime config loader must not parse it. | Removed legacy key. | Config migration guard. | Do not add to new configs; `check_route_authority_legacy_keys.py` rejects production/config reentry. |

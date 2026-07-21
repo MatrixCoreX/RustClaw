@@ -15,7 +15,7 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> crate::executor::StepExe
 #[test]
 fn scratch_cleanup_requires_observed_write_in_same_root() {
     let workspace_root = Path::new("/workspace");
-    let mut loop_state = LoopState::new(1);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -37,7 +37,7 @@ fn scratch_cleanup_requires_observed_write_in_same_root() {
 #[test]
 fn scratch_cleanup_accepts_observed_archive_in_same_root() {
     let workspace_root = Path::new("/workspace");
-    let mut loop_state = LoopState::new(1);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "archive_basic",

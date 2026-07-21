@@ -68,7 +68,7 @@ fn child_task_row(state: &crate::AppState, task_id: &str) -> (String, serde_json
 
 #[test]
 fn subagent_action_records_safe_machine_observation() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
 
     let stop_signal = record_subagent_action(
@@ -114,7 +114,7 @@ fn subagent_action_records_safe_machine_observation() {
 
 #[test]
 fn subagent_action_rejects_unknown_role_as_machine_state() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     let stop_signal = record_subagent_action(
         &mut loop_state,
@@ -140,7 +140,7 @@ fn subagent_action_rejects_unknown_role_as_machine_state() {
 
 #[test]
 fn subagent_action_from_args_records_child_summary_and_machine_contract() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 4;
     let args = serde_json::json!({
         "role": "test",
@@ -253,7 +253,7 @@ fn subagent_action_projects_workspace_context_evidence() {
     )
     .expect("write plan");
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 8;
     let config = SubagentRuntimeConfig {
         context_evidence_root: Some(temp.path().to_path_buf()),
@@ -321,7 +321,7 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
         payload_json: serde_json::json!({"text": "parent task"}).to_string(),
     };
     insert_running_parent_task(&state, &task);
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let args = serde_json::json!({
         "execution_mode": "persistent_child_task",
@@ -416,7 +416,7 @@ fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
         payload_json: serde_json::json!({"text": "parent task"}).to_string(),
     };
     insert_running_parent_task(&state, &task);
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     let args = serde_json::json!({
         "execution_mode": "persistent_child_task",
         "role": "writer",
@@ -468,7 +468,7 @@ fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
 
 #[test]
 fn subagent_model_child_result_merges_into_runtime_observation() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 3;
     let args = serde_json::json!({
         "role": "review",
@@ -536,7 +536,7 @@ fn subagent_model_child_parser_rejects_partial_nested_array_as_result() {
 
 #[test]
 fn subagent_new_role_tokens_preserve_readonly_policy() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     let stop_signal = record_subagent_action(
         &mut loop_state,
@@ -566,7 +566,7 @@ fn subagent_new_role_tokens_preserve_readonly_policy() {
 
 #[test]
 fn subagent_runtime_config_supplies_default_timeout_and_parallel_budget() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let config = SubagentRuntimeConfig {
         allowed_roles: SubagentRole::all_tokens()
             .into_iter()
@@ -607,7 +607,7 @@ fn subagent_runtime_config_supplies_default_timeout_and_parallel_budget() {
 
 #[test]
 fn subagent_runtime_config_rejects_disabled_role_as_machine_state() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let config = SubagentRuntimeConfig {
         allowed_roles: vec!["observe".to_string()],
         max_parallel_readonly: 1,
@@ -645,7 +645,7 @@ fn subagent_runtime_config_rejects_disabled_role_as_machine_state() {
 
 #[test]
 fn subagent_batch_records_bounded_parallel_aggregation() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 5;
     let args = serde_json::json!({
         "children": [
@@ -827,7 +827,7 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
 
 #[test]
 fn subagent_batch_records_conflicting_findings_for_parent_decision() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 6;
     let args = serde_json::json!({
         "children": [
@@ -914,7 +914,7 @@ fn subagent_batch_records_conflicting_findings_for_parent_decision() {
 
 #[test]
 fn subagent_batch_isolates_optional_child_failures_and_parallel_limit() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let config = SubagentRuntimeConfig {
         allowed_roles: SubagentRole::all_tokens()
             .into_iter()
@@ -965,7 +965,7 @@ fn subagent_batch_isolates_optional_child_failures_and_parallel_limit() {
 
 #[test]
 fn subagent_batch_required_child_failure_stops_parent_loop() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let args = serde_json::json!({
         "children": [
             {
@@ -1002,7 +1002,7 @@ fn subagent_batch_required_child_failure_stops_parent_loop() {
 
 #[test]
 fn subagent_batch_expected_required_child_failure_dry_run_is_delivered() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let args = serde_json::json!({
         "dry_run": true,
         "expected_failure": true,

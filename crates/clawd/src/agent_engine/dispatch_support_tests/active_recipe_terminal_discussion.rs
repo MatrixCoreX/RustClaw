@@ -19,7 +19,7 @@ fn test_task(task_id: &str) -> crate::ClaimedTask {
 }
 
 fn active_apply_recipe_loop_state() -> LoopState {
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
         phase: crate::execution_recipe::ExecutionRecipePhase::Apply,

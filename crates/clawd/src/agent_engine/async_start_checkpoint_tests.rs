@@ -79,7 +79,7 @@ fn pending_async_job_extra_rejects_missing_machine_fields() {
 
 #[test]
 fn pending_async_job_checkpoint_uses_poll_resume_entrypoint() {
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.task_budget_slice = Some(crate::task_budget_contract::TaskBudgetSlice::new(
         crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
         30_000,
@@ -155,7 +155,7 @@ fn pending_async_job_checkpoint_uses_poll_resume_entrypoint() {
 
 #[test]
 fn pending_async_job_visible_reply_carries_checkpoint_markers() {
-    let loop_state = LoopState::new(4);
+    let loop_state = LoopState::new();
     let job = pending_async_job_ref_from_extra(Some(&json!({
         "pending_async_job": {
             "job_id": "job-visible",
@@ -195,7 +195,7 @@ fn pending_async_job_visible_reply_carries_checkpoint_markers() {
 
 #[test]
 fn pending_async_job_checkpoint_persists_skill_poll_adapter() {
-    let loop_state = LoopState::new(4);
+    let loop_state = LoopState::new();
     let extra = json!({
         "pending_async_job": {
             "job_id": "provider:video_generate:minimax:task-1",

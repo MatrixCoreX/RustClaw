@@ -467,7 +467,7 @@ fn checkpointed_nonterminal_lifecycle_requires_matching_checkpoint() {
     journal.record_task_lifecycle(json!({
         "state": "waiting",
         "checkpoint_id": "ckpt-1",
-        "resume_reason": "budget_near_exhaustion"
+        "resume_reason": "task_budget_slice_exhausted"
     }));
     journal.record_task_checkpoint(json!({
         "checkpoint_id": "ckpt-1",

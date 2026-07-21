@@ -14,7 +14,7 @@ fn matrix_exact_path_list_prefers_latest_path_result() {
     route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = "plan".to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
@@ -56,7 +56,7 @@ fn exact_path_observed_answer_replaces_step_status_after_fallback_success() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "read_file",
@@ -108,7 +108,7 @@ fn non_exact_path_locator_does_not_replace_model_output_with_observed_listing() 
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "read_file",
@@ -151,7 +151,7 @@ fn non_exact_strict_path_locator_does_not_replace_model_output() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "read_file",
@@ -195,7 +195,7 @@ fn scalar_path_observed_answer_replaces_step_status_after_broad_fallback_search(
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "read_file",
@@ -242,7 +242,7 @@ fn scalar_observed_answer_replaces_run_cmd_step_status_after_fallback_success() 
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let err = format!(
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
@@ -297,7 +297,7 @@ fn scalar_exact_observation_keeps_written_file_path_synthesis() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -349,7 +349,7 @@ fn exact_scalar_path_keeps_plain_written_path_synthesis() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -404,7 +404,7 @@ fn exact_scalar_path_replaces_write_status_with_written_path() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -467,7 +467,7 @@ fn exact_scalar_path_projects_only_media_dry_run_path() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "image_generate",
@@ -522,7 +522,7 @@ fn exact_scalar_path_projects_only_media_dry_run_path() {
         direct_exact_scalar_path_from_dry_run_payload(&loop_state, Some(&scalar_context)).is_none()
     );
 
-    let mut audio_loop_state = crate::agent_engine::LoopState::new(3);
+    let mut audio_loop_state = crate::agent_engine::LoopState::new();
     audio_loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "audio_synthesize",
@@ -537,7 +537,7 @@ fn exact_scalar_path_projects_only_media_dry_run_path() {
     );
     assert!(audio_summary.contract_ok);
 
-    let mut music_loop_state = crate::agent_engine::LoopState::new(3);
+    let mut music_loop_state = crate::agent_engine::LoopState::new();
     music_loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "music_generate",
@@ -568,7 +568,7 @@ fn exact_scalar_path_prefers_latest_path_synthesis_over_run_cmd_status() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let status =
         "exit=0 command=echo \"Current working directory: $(pwd)\" > /home/guagua/rustclaw/pwd_line_abs.txt"
             .to_string();
@@ -599,7 +599,7 @@ fn exact_scalar_path_prefers_latest_path_synthesis_over_run_cmd_status() {
 
 #[test]
 fn loop_contract_path_observed_answer_replaces_status_and_drops_progress_summary() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut contract = scalar_route_result();
     contract.response_shape = OutputResponseShape::Strict;
     contract.selection.structured_field_selector = Some("path".to_string());
@@ -656,7 +656,7 @@ fn loop_contract_observed_answer_preserves_publishable_terminal_summary_for_free
         ..crate::agent_engine::AgentRunContext::default()
     };
 
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut step_contract = scalar_route_result();
     step_contract.selection.structured_field_selector = Some("fs_basic.planner_kind".to_string());
     loop_state.output_contract = Some(step_contract);
@@ -686,7 +686,7 @@ fn loop_contract_observed_answer_preserves_publishable_terminal_summary_for_free
 
 #[test]
 fn loop_contract_observed_answer_preserves_explicit_json_delivery() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut contract = scalar_route_result();
     contract.selection.structured_field_selector = Some("path".to_string());
     loop_state.output_contract = Some(contract);
@@ -732,7 +732,7 @@ fn grounded_terminal_respond_replaces_structured_json_delivery() {
         ..crate::agent_engine::AgentRunContext::default()
     };
     let raw = r#"{"arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -791,7 +791,7 @@ fn grounded_latest_synthesis_replaces_structured_json_delivery() {
     };
     let raw = r#"{"system_health":{"kernel_release":"6.17.0-29-generic"},"workspace_root":"/home/guagua/rustclaw"}"#;
     let answer = "6.17.0-29-generic";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -834,7 +834,7 @@ fn grounded_terminal_respond_rejects_ungrounded_content() {
         ..crate::agent_engine::AgentRunContext::default()
     };
     let raw = r#"{"arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -875,7 +875,7 @@ fn grounded_terminal_respond_rejects_ungrounded_content() {
 
 #[test]
 fn loop_contract_observed_answer_requires_contract_evidence_completeness() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut contract = scalar_route_result();
     contract.response_shape = crate::OutputResponseShape::Scalar;
     loop_state.output_contract = Some(contract);
@@ -904,7 +904,7 @@ fn loop_contract_observed_answer_requires_contract_evidence_completeness() {
 
 #[test]
 fn loop_contract_observed_answer_requires_matrix_strict_extractor_when_route_is_available() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
     route.selection.structured_field_selector = Some("count".to_string());
@@ -940,7 +940,7 @@ fn loop_contract_observed_answer_requires_matrix_strict_extractor_when_route_is_
 
 #[test]
 fn loop_contract_observed_answer_does_not_hide_later_failure() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut contract = scalar_route_result();
     contract.selection.structured_field_selector = Some("path".to_string());
     loop_state.output_contract = Some(contract);
@@ -975,7 +975,7 @@ fn exact_observed_answer_does_not_replace_mixed_failure_summary() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", "BREAK_A\n"));
@@ -1009,7 +1009,7 @@ fn exact_observed_answer_does_not_replace_mixed_failure_summary() {
 #[test]
 fn scalar_contract_projects_explicit_structured_field_over_planned_delivery() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push(
         "true (workspace inherited -- root workspace defines the actual version number)"
@@ -1071,7 +1071,7 @@ fn scalar_contract_projects_explicit_structured_field_over_planned_delivery() {
 #[test]
 fn scalar_contract_replaces_multi_line_read_fields_delivery_with_unique_observed_scalar() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     let polluted_delivery =
         "scripts: {\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}\nname: rustclaw-nl-fixture";
@@ -1121,7 +1121,7 @@ fn scalar_contract_replaces_multi_line_read_fields_delivery_with_unique_observed
 #[test]
 fn strict_scalar_count_keeps_planned_explanatory_answer() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", "55\n"));
@@ -1161,7 +1161,7 @@ fn strict_scalar_count_keeps_planned_explanatory_answer() {
 #[test]
 fn unclassified_strict_summary_preserves_publishable_model_answer() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
     let synthesis =
         "The current working directory is /home/guagua/rustclaw. The logged-in user is guagua. The hostname is ThinkPad-X1.";

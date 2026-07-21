@@ -4,7 +4,7 @@ use crate::finalize::loop_reply::successful_content_observation_should_precede_s
 #[test]
 fn deterministic_observed_execution_status_answer_reports_mixed_results() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "health_check",
@@ -40,7 +40,7 @@ fn agent_loop_rich_content_precedes_status_summary_without_legacy_content_flag()
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -91,7 +91,7 @@ fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_pat
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
@@ -125,7 +125,7 @@ fn deterministic_missing_observed_target_uses_generic_machine_shape() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -162,7 +162,7 @@ fn deterministic_missing_observed_target_machine_payload_is_language_neutral() {
         ),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -196,7 +196,7 @@ fn deterministic_missing_observed_target_answer_skips_after_later_fallback_succe
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
@@ -228,7 +228,7 @@ fn deterministic_missing_observed_target_answer_skips_after_later_fallback_succe
 #[test]
 fn deterministic_observed_execution_status_answer_uses_structured_run_cmd_stderr() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let err = format!(
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
@@ -270,7 +270,7 @@ fn deterministic_observed_execution_status_answer_uses_structured_run_cmd_stderr
 fn deterministic_observed_execution_status_answer_attaches_before_llm_fallback() {
     let state = test_state();
     let task = claimed_task("task-deterministic-observed-status");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "health_check",
@@ -314,7 +314,7 @@ fn observed_fallback_allowed_for_matrix_route_after_planned_synthesis() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -341,7 +341,7 @@ fn content_answer_candidate_prevents_status_summary_replacement() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -366,7 +366,7 @@ fn content_answer_candidate_prevents_status_summary_replacement() {
 fn deterministic_observed_execution_status_answer_replaces_bad_synthesis() {
     let state = test_state();
     let task = claimed_task("task-deterministic-observed-status-replace");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("步骤2未观察到执行结果，因此无法确认成功或失败。".to_string());
@@ -406,7 +406,7 @@ fn deterministic_observed_execution_status_answer_replaces_bad_synthesis() {
 fn deterministic_observed_execution_status_keeps_recovered_content_answer() {
     let state = test_state();
     let task = claimed_task("task-deterministic-observed-status-recovered");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let answer =
         "目标文件不存在；候选路径：plan/llm_first_agent_convergence_plan_20260511_已完成.md"
             .to_string();
@@ -446,7 +446,7 @@ fn deterministic_observed_execution_status_keeps_recovered_content_answer() {
 fn deterministic_observed_execution_status_keeps_planned_failed_step_answer() {
     let state = test_state();
     let task = claimed_task("task-deterministic-observed-status-keep-planned");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -522,7 +522,7 @@ fn deterministic_observed_execution_status_keeps_planned_failed_step_answer() {
 fn model_failure_delivery_is_not_replaced_by_generic_status() {
     let state = test_state();
     let task = claimed_task("task-deterministic-failed-step-only");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -594,7 +594,7 @@ fn structured_failure_request_prefers_final_respond_over_synthesis_stdout() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(
         "step_2: definitely_missing_command_rustclaw_render_ko_0605 failed with exit code 127"
@@ -625,7 +625,7 @@ fn structured_failure_request_prefers_final_respond_over_synthesis_stdout() {
 fn generic_execution_status_ignores_contract_gap_errors() {
     let state = test_state();
     let task = claimed_task("task-deterministic-failed-step-contract-gap");
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("Step 1 failed. Step 3 failed: `exit0=$?`.".to_string());
@@ -688,7 +688,7 @@ fn generic_execution_status_ignores_contract_gap_errors() {
 fn deterministic_observed_execution_status_replaces_raw_success_output() {
     let state = test_state();
     let task = claimed_task("task-deterministic-observed-status-replace-raw");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("THINK_BREAK_CN".to_string());

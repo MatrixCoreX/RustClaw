@@ -10,7 +10,7 @@ fn file_delivery_fallback_uses_ranked_inventory_after_placeholder_plan() {
     fs::write(&newest, "new").expect("write newest");
     fs::write(&older, "old").expect("write older");
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -87,7 +87,7 @@ fn file_delivery_fallback_uses_single_find_entries_result() {
     let mut state = test_state();
     state.skill_rt.workspace_root = dir.path().to_path_buf();
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -132,7 +132,7 @@ fn compound_content_file_delivery_appends_token_after_summary() {
     let mut state = test_state();
     state.skill_rt.workspace_root = dir.path().to_path_buf();
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("observed summary".to_string());
@@ -172,7 +172,7 @@ fn unclassified_content_evidence_file_delivery_appends_token_after_summary() {
     let mut state = test_state();
     state.skill_rt.workspace_root = dir.path().to_path_buf();
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("observed summary".to_string());
@@ -208,7 +208,7 @@ fn unclassified_content_evidence_file_delivery_appends_token_after_summary() {
 fn compound_content_file_delivery_preserves_summary_after_existing_token() {
     let file_token = "FILE:/tmp/rustclaw-config.toml";
     let summary = "observed summary";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push(file_token.to_string());
     loop_state
         .executed_step_results
@@ -244,7 +244,7 @@ fn compound_content_file_delivery_preserves_summary_after_existing_token() {
 fn compound_content_file_delivery_preserves_summary_without_delivery_intent() {
     let file_token = "FILE:/tmp/rustclaw-config.toml";
     let summary = "observed summary";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push(file_token.to_string());
     loop_state
         .executed_step_results
@@ -277,7 +277,7 @@ fn compound_content_file_delivery_backfills_bounded_read_content_before_token() 
     let file_token = "FILE:/tmp/rustclaw-config.toml";
     let summary = "observed summary";
     let observed_content = "[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\"\nport = 8787";
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push(summary.to_string());
     loop_state.delivery_messages.push(file_token.to_string());
     loop_state.executed_step_results.push(ok_step_result(
@@ -343,7 +343,7 @@ async fn compound_content_file_delivery_enforce_preserves_synthesis_before_token
     let task = claimed_task("compound-content-enforce");
     let synthesis = "observed summary";
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
     loop_state.last_user_visible_respond = Some(synthesis.to_string());
@@ -391,7 +391,7 @@ async fn generated_delivery_existing_file_content_synthesis_enforce_preserves_su
     let task = claimed_task("generated-delivery-content-synthesis");
     let summary = "observed summary";
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_publishable_synthesis_output = Some(summary.to_string());
     loop_state.last_user_visible_respond = Some(summary.to_string());
@@ -453,7 +453,7 @@ fn generated_delivery_existing_file_content_synthesis_ignores_write_plans() {
     state.skill_rt.workspace_root = dir.path().to_path_buf();
     let summary = "observed summary";
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_publishable_synthesis_output = Some(summary.to_string());
     loop_state.executed_step_results.push(ok_step_result(
@@ -509,7 +509,7 @@ fn file_delivery_fallback_uses_last_inventory_selection_from_placeholder_plan() 
     fs::write(&first, "first").expect("write first");
     fs::write(&last, "last").expect("write last");
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -586,7 +586,7 @@ fn file_delivery_fallback_defers_ambiguous_unranked_inventory() {
     fs::write(dir.path().join("a.txt"), "a").expect("write a");
     fs::write(dir.path().join("b.txt"), "b").expect("write b");
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -646,7 +646,7 @@ fn file_token_auto_locator_normalizes_delivery_messages() {
             .unwrap_or(file_path.clone())
             .display()
     );
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.last_user_visible_respond = Some("report.txt".to_string());
     loop_state.delivery_messages.push("report.txt".to_string());
 
@@ -680,7 +680,7 @@ fn file_token_auto_locator_recovers_from_observed_bare_filename() {
             .unwrap_or(file_path.clone())
             .display()
     );
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", "report.txt\n"));
@@ -724,7 +724,7 @@ fn file_token_observed_path_normalizes_bare_filename_delivery() {
     state.skill_rt.workspace_root = temp.path().to_path_buf();
     state.skill_rt.default_locator_search_dir = temp.path().to_path_buf();
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.last_user_visible_respond = Some("FILE:report.txt".to_string());
     loop_state
         .delivery_messages
@@ -788,7 +788,7 @@ async fn finalize_loop_reply_returns_file_token_from_path_batch_after_read_rejec
     };
 
     let contract_error = "__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.read_range` is rejected by contract `generic_delivery` (rejected_not_allowed)\",\"extra\":{\"action\":\"system_basic.read_range\",\"contract_match\":\"generic_delivery\",\"decision\":\"rejected_not_allowed\"},\"skill\":\"system_basic\"}";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.has_recoverable_failure_context = true;
     loop_state.executed_step_results.push(StepExecutionResult {

@@ -81,7 +81,7 @@ fn visible_answer_machine_payload_detection_is_structural() {
 
 #[test]
 fn visible_answer_machine_projection_detection_uses_observed_json() {
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -104,7 +104,7 @@ fn visible_answer_machine_projection_detection_uses_observed_json() {
 
 #[test]
 fn priority_last_respond_does_not_override_qualified_delivery_after_tool_observation() {
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("完整观察答案，包含日志分析、文档摘要和表格".to_string());
@@ -128,7 +128,7 @@ fn priority_last_respond_does_not_override_qualified_delivery_after_tool_observa
 
 #[test]
 fn priority_last_respond_does_not_override_delivery_when_summary_is_missing() {
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("完整观察答案，包含日志分析、文档摘要和表格".to_string());
@@ -148,7 +148,7 @@ fn priority_last_respond_does_not_override_delivery_when_summary_is_missing() {
 
 #[test]
 fn priority_last_respond_keeps_explicit_respond_step_priority() {
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("older delivery".to_string());
@@ -441,7 +441,7 @@ fn finalization_prefers_latest_planner_contract_over_initial_context() {
         output_contract: Some(free_route_result()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.output_contract = Some(scalar_route_result());
 
     let effective = effective_agent_run_context_for_finalization(Some(&context), &loop_state)
@@ -518,7 +518,7 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
         }),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.output_contract = Some(planner_output_contract);
     loop_state.delivery_messages.push("# RustClaw".to_string());
     loop_state.output_vars.insert(
@@ -586,7 +586,7 @@ async fn finalize_loop_reply_does_not_attach_control_envelope_without_structured
         output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push("# RustClaw".to_string());
     loop_state.output_vars.insert(
         "agent_loop.first_act_decision_envelope".to_string(),
@@ -641,7 +641,7 @@ async fn finalize_loop_reply_does_not_attach_control_envelope_from_route_machine
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push("# RustClaw".to_string());
     loop_state.output_vars.insert(
         "agent_loop.first_act_decision_envelope".to_string(),

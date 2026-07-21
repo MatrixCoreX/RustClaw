@@ -4,7 +4,7 @@ use super::*;
 fn deterministic_fallback_renderer_dispatch_records_structured_trace_when_skipped() {
     let state = test_state();
     let task = claimed_task("task-compatibility-renderer-trace");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut finalizer_summary = None;
 
     let rendered = run_deterministic_fallback_renderer_registry(

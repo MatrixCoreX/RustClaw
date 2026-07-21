@@ -234,7 +234,7 @@ fn summary_json_preserves_task_lifecycle_checkpoint_machine_fields() {
         "schema_version": 1,
         "state": "waiting",
         "source": "agent_loop_soft_budget",
-        "resume_reason": "agent_loop_no_progress_limit",
+        "resume_reason": "task_budget_slice_exhausted",
         "checkpoint_id": "ckpt-1"
     }));
     journal.record_task_checkpoint(json!({
@@ -250,7 +250,7 @@ fn summary_json_preserves_task_lifecycle_checkpoint_machine_fields() {
         summary
             .pointer("/task_lifecycle/resume_reason")
             .and_then(Value::as_str),
-        Some("agent_loop_no_progress_limit")
+        Some("task_budget_slice_exhausted")
     );
     assert_eq!(
         trace

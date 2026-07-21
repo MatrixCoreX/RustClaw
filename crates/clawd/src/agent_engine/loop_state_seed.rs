@@ -31,6 +31,11 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
         .as_ref()
         .map(|slice| slice.cumulative_elapsed_ms)
         .unwrap_or_default();
+    loop_state.consecutive_no_progress = loop_state
+        .task_budget_slice
+        .as_ref()
+        .map(|slice| slice.progress.stagnation_count as usize)
+        .unwrap_or(loop_state.consecutive_no_progress);
 
     let mut completed_side_effect_count = 0usize;
     for fingerprint in &checkpoint.completed_side_effect_refs {

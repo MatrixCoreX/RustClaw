@@ -20,7 +20,7 @@ use std::sync::{Arc, RwLock};
 
 #[test]
 fn checkpoint_continuation_keeps_only_unexecuted_verified_actions() {
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.active_verified_actions = vec![
         crate::AgentAction::CallCapability {
             capability: "system.run_command".to_string(),
@@ -62,50 +62,33 @@ fn checkpoint_continuation_keeps_only_unexecuted_verified_actions() {
 fn base_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
         max_steps: 32,
-        max_rounds: 2,
-        max_tool_calls: 12,
-        recoverable_failure_extra_rounds: 1,
         repeat_action_limit: 4,
-        no_progress_limit: 1,
-        multi_round_enabled: true,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         fast_read: LoopRecipeOverrides {
             max_steps: Some(16),
-            max_rounds: Some(2),
-            max_tool_calls: Some(6),
             repeat_action_limit: Some(3),
-            no_progress_limit: Some(1),
             max_repairs: None,
             run_cmd_timeout_seconds: None,
             run_cmd_validation_timeout_seconds: None,
         },
         grounded_summary: LoopRecipeOverrides {
             max_steps: Some(40),
-            max_rounds: Some(4),
-            max_tool_calls: Some(16),
             repeat_action_limit: Some(5),
-            no_progress_limit: Some(2),
             max_repairs: None,
             run_cmd_timeout_seconds: None,
             run_cmd_validation_timeout_seconds: None,
         },
         multi_step_workspace: LoopRecipeOverrides {
             max_steps: Some(56),
-            max_rounds: Some(6),
-            max_tool_calls: Some(24),
             repeat_action_limit: Some(6),
-            no_progress_limit: Some(2),
             max_repairs: None,
             run_cmd_timeout_seconds: None,
             run_cmd_validation_timeout_seconds: None,
         },
         ops_closed_loop: LoopRecipeOverrides {
             max_steps: Some(48),
-            max_rounds: Some(4),
-            max_tool_calls: Some(24),
             repeat_action_limit: Some(6),
-            no_progress_limit: Some(2),
             max_repairs: Some(3),
             run_cmd_timeout_seconds: Some(180),
             run_cmd_validation_timeout_seconds: Some(90),
@@ -205,7 +188,7 @@ planner_capabilities = [
 #[test]
 fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     let task = support_test_task();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 2;
     loop_state.total_steps_executed = 3;
     loop_state.tool_calls_total = 2;
@@ -228,12 +211,17 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
             started_at: 100,
             finished_at: 102,
         });
-    loop_state.last_stop_signal = Some("max_rounds".to_string());
+    loop_state.last_stop_signal = Some("task_budget_slice_exhausted".to_string());
+    loop_state.task_budget_slice = Some(crate::task_budget_contract::TaskBudgetSlice::new(
+        crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
+        30_000,
+        crate::task_budget_contract::BudgetHardCeilings::default(),
+    ));
 
     let payload = build_agent_loop_checkpoint_progress_payload(
         &task,
         &loop_state,
-        "agent_loop_max_rounds",
+        "task_budget_slice_exhausted",
         1_781_800_000,
         1_781_800_060,
     );
@@ -241,11 +229,11 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     assert_eq!(payload["task_lifecycle"]["state"], "waiting");
     assert_eq!(
         payload["task_lifecycle"]["resume_reason"],
-        "agent_loop_max_rounds"
+        "task_budget_slice_exhausted"
     );
     assert_eq!(
         payload["task_lifecycle"]["message_key"],
-        "clawd.task.agent_loop_max_rounds"
+        "clawd.task.task_budget_slice_exhausted"
     );
     assert_eq!(payload["task_lifecycle"]["next_check_after"], 1_781_800_060);
     assert_eq!(
@@ -259,7 +247,7 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     assert_eq!(
         payload["task_checkpoint"]["boundary_context"]["context_compaction_trigger"]
             ["resume_reason"],
-        "agent_loop_max_rounds"
+        "task_budget_slice_exhausted"
     );
     assert_eq!(payload["task_checkpoint"]["budget"]["round"], 2);
     assert_eq!(payload["task_checkpoint"]["budget"]["step"], 3);
@@ -291,7 +279,7 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     );
     assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["signal"],
-        "max_rounds"
+        "task_budget_slice_exhausted"
     );
     assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["repair_class"],
@@ -307,34 +295,18 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     );
     assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["stop_reason_code"],
-        "max_rounds"
+        "task_budget_slice_exhausted"
     );
     assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["round_no"],
-        2
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["repair_attempt"],
-        2
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["max_attempts"],
-        2
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["no_progress_count"],
-        0
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["budget_exhausted"],
-        true
+        payload["task_checkpoint"]["boundary_context"]["task_budget_slice"]["profile"],
+        "multi_step_workspace"
     );
 }
 
 #[test]
 fn provider_blocker_checkpoint_payload_records_background_resume_contract() {
     let task = support_test_task();
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 2;
     loop_state.last_stop_signal = Some("recoverable_failure_continue_round".to_string());
     let err = crate::skills::structured_skill_error_from_parts(
@@ -413,7 +385,7 @@ fn provider_blocker_checkpoint_payload_records_background_resume_contract() {
 #[test]
 fn verification_failure_checkpoint_payload_records_structured_attempt_evidence() {
     let task = support_test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 2;
     loop_state.total_steps_executed = 5;
     loop_state.tool_calls_total = 3;
@@ -443,7 +415,7 @@ fn verification_failure_checkpoint_payload_records_structured_attempt_evidence()
     let payload = build_agent_loop_checkpoint_progress_payload(
         &task,
         &loop_state,
-        "agent_loop_max_rounds",
+        "task_budget_slice_exhausted",
         1_781_800_000,
         1_781_800_060,
     );
@@ -479,7 +451,7 @@ fn verification_failure_checkpoint_payload_records_structured_attempt_evidence()
 #[test]
 fn user_input_checkpoint_payload_records_hook_confirmation_state() {
     let task = support_test_task();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.tool_calls_total = 1;
     loop_state
@@ -539,88 +511,32 @@ fn user_input_checkpoint_payload_records_hook_confirmation_state() {
 }
 
 #[test]
-fn no_progress_checkpoint_payload_records_repair_budget_state() {
+fn task_budget_slice_checkpoint_payload_records_message_key() {
     let task = support_test_task();
-    let mut loop_state = LoopState::new(4);
-    loop_state.round_no = 3;
-    loop_state.consecutive_no_progress = 2;
-    loop_state.last_stop_signal = Some("no_progress".to_string());
-
-    let payload = build_agent_loop_checkpoint_progress_payload(
-        &task,
-        &loop_state,
-        "agent_loop_no_progress_limit",
-        1_781_800_000,
-        1_781_800_060,
-    );
-
-    assert_eq!(payload["task_lifecycle"]["state"], "waiting");
-    assert_eq!(
-        payload["task_lifecycle"]["resume_reason"],
-        "agent_loop_no_progress_limit"
-    );
-    assert_eq!(
-        payload["task_lifecycle"]["message_key"],
-        "clawd.task.agent_loop_no_progress_limit"
-    );
-    assert_eq!(payload["task_lifecycle"]["next_check_after"], 1_781_800_060);
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_class"],
-        "checkpoint_resume_repair"
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["next_recovery_kind"],
-        "wait_background"
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["stop_reason_code"],
-        "no_progress"
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["round_no"],
-        3
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["max_attempts"],
-        4
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["no_progress_count"],
-        2
-    );
-    assert_eq!(
-        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["budget_exhausted"],
-        true
-    );
-}
-
-#[test]
-fn budget_near_exhaustion_checkpoint_payload_records_message_key() {
-    let task = support_test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 2;
     loop_state.total_steps_executed = 3;
-    loop_state.last_stop_signal = Some("budget_near_exhaustion".to_string());
+    loop_state.last_stop_signal = Some("task_budget_slice_exhausted".to_string());
 
     let payload = build_agent_loop_checkpoint_progress_payload(
         &task,
         &loop_state,
-        "budget_near_exhaustion",
+        "task_budget_slice_exhausted",
         1_781_800_000,
         1_781_800_060,
     );
 
     assert_eq!(
         payload["task_lifecycle"]["resume_reason"],
-        "budget_near_exhaustion"
+        "task_budget_slice_exhausted"
     );
     assert_eq!(
         payload["task_lifecycle"]["message_key"],
-        "clawd.task.budget_near_exhaustion"
+        "clawd.task.task_budget_slice_exhausted"
     );
     assert_eq!(
         payload["task_checkpoint"]["boundary_context"]["message_key"],
-        "clawd.task.budget_near_exhaustion"
+        "clawd.task.task_budget_slice_exhausted"
     );
 }
 
@@ -671,7 +587,7 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
         repair_signal: None,
         resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
     };
-    let mut loop_state = LoopState::new(8);
+    let mut loop_state = LoopState::new();
 
     let report = seed_loop_state_for_agent_run(&mut loop_state, None, Some(&checkpoint))
         .expect("checkpoint seed report");
@@ -764,7 +680,7 @@ fn seed_loop_state_extracts_current_request_locator_boundary_observation() {
         user_request: Some(format!("read docs readme\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -811,7 +727,7 @@ fn seed_loop_state_ignores_missing_referent_when_current_request_locator_is_conc
         user_request: Some(format!("read README.md\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -845,7 +761,7 @@ fn seed_loop_state_extracts_active_plan_file_targets_boundary_observation() {
         user_request: Some(format!("review plan\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -876,7 +792,7 @@ fn seed_loop_state_extracts_default_main_config_contract_boundary_observation() 
         user_request: Some(format!("audit config\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -925,7 +841,7 @@ fn seed_loop_state_extracts_registry_capability_contract_boundary_observation() 
         user_request: Some(format!("query kb\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -964,7 +880,7 @@ fn seed_loop_state_extracts_contract_repair_candidate_boundary_observation() {
         user_request: Some(format!("inspect database\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -992,7 +908,7 @@ fn seed_loop_state_extracts_pre_loop_clarify_candidates() {
         user_request: Some(format!("logs\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -1021,7 +937,7 @@ fn seed_loop_state_extracts_boundary_observation_needs_clarify() {
         user_request: Some(format!("ambiguous delivery\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -1052,7 +968,7 @@ fn seed_loop_state_extracts_pending_user_boundary() {
         user_request: Some(format!("followup\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -1086,7 +1002,7 @@ fn seed_loop_state_treats_missing_referent_as_boundary_clarify() {
         user_request: Some(format!("continue previous project\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -1129,7 +1045,7 @@ fn seed_loop_state_ignores_missing_referent_when_auto_locator_boundary_ready() {
         user_request: Some(format!("check file\n{block}")),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
 
     seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
 
@@ -1645,10 +1561,7 @@ fn ops_closed_loop_policy_uses_override_budget() {
     });
     let adjusted = policy.adjusted_for_context(recipe, None);
     assert_eq!(adjusted.max_steps, 48);
-    assert_eq!(adjusted.max_rounds, 4);
-    assert_eq!(adjusted.max_tool_calls, 24);
     assert_eq!(adjusted.repeat_action_limit, 6);
-    assert_eq!(adjusted.no_progress_limit, 2);
     assert_eq!(
         adjusted.run_cmd_timeout_override(recipe, crate::execution_recipe::ActionEffect::mutate()),
         Some(180)
@@ -1671,9 +1584,7 @@ fn planner_contract_selects_grounded_summary_budget() {
         LoopBudgetProfile::GroundedSummary
     );
     let adjusted = policy.adjusted_for_context(recipe, Some(&route));
-    assert_eq!(adjusted.max_rounds, 4);
-    assert_eq!(adjusted.max_tool_calls, 16);
-    assert_eq!(adjusted.no_progress_limit, 2);
+    assert_eq!(adjusted.max_steps, 40);
 }
 
 #[test]
@@ -1701,9 +1612,7 @@ fn workspace_delivery_contract_selects_multi_step_budget() {
         LoopBudgetProfile::MultiStepWorkspace
     );
     let adjusted = policy.adjusted_for_context(recipe, Some(&route));
-    assert_eq!(adjusted.max_rounds, 6);
     assert_eq!(adjusted.max_steps, 56);
-    assert_eq!(adjusted.max_tool_calls, 24);
 }
 
 #[test]
@@ -1735,7 +1644,7 @@ fn append_delivery_message_sanitizes_structured_skill_errors() {
 
 #[test]
 fn external_workspace_progress_hints_include_mode_and_ready_once() {
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.execution_recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
         kind: ExecutionRecipeKind::OpsClosedLoop,
         target_scope: ExecutionRecipeTargetScope::ExternalWorkspace,
@@ -1760,7 +1669,7 @@ fn external_workspace_progress_hints_include_mode_and_ready_once() {
 
 #[test]
 fn greenfield_progress_hints_include_mode_and_creation_ready_once() {
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.execution_recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
         kind: ExecutionRecipeKind::OpsClosedLoop,
         target_scope: ExecutionRecipeTargetScope::Greenfield,

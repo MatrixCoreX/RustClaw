@@ -878,7 +878,7 @@ fn config_read_fields_capability_normalizes_machine_field_aliases() {
                 "agent.hooks.handlers",
                 "agent.subagents.allowed_roles",
                 "agent.subagents.max_parallel_readonly",
-                "agent.loop_guard.max_rounds"
+                "agent.task_budget.admin_max_model_turns"
             ]
         }),
     );

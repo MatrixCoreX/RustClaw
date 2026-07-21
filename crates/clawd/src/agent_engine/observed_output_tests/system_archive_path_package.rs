@@ -1,6 +1,6 @@
 #[test]
 fn direct_answer_defers_system_basic_info_summary_to_llm_for_brief_request() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -31,7 +31,7 @@ fn direct_answer_defers_system_basic_info_summary_to_llm_for_brief_request() {
 
 #[test]
 fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "archive_basic",
@@ -63,7 +63,7 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
 
 #[test]
 fn direct_scalar_reads_unique_scalar_from_multi_read_fields_with_container_noise() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "config_basic",
@@ -86,7 +86,7 @@ fn direct_scalar_reads_unique_scalar_from_multi_read_fields_with_container_noise
 
 #[test]
 fn direct_scalar_keeps_multi_read_fields_ambiguous_when_multiple_scalars_exist() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "config_basic",
@@ -109,7 +109,7 @@ fn direct_scalar_keeps_multi_read_fields_ambiguous_when_multiple_scalars_exist()
 
 #[test]
 fn direct_answer_defers_system_basic_info_summary_without_action_field() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -140,7 +140,7 @@ fn direct_answer_defers_system_basic_info_summary_without_action_field() {
 
 #[test]
 fn direct_answer_defers_system_basic_info_for_free_shape_request() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -171,7 +171,7 @@ fn direct_answer_defers_system_basic_info_for_free_shape_request() {
 
 #[test]
 fn direct_answer_defers_system_basic_info_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
@@ -200,7 +200,7 @@ fn direct_answer_defers_system_basic_info_to_synthesis() {
 
 #[test]
 fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -231,7 +231,7 @@ fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() 
 
 #[test]
 fn direct_scalar_extracts_cwd_from_system_basic_info_without_action_field() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -262,7 +262,7 @@ fn direct_scalar_extracts_cwd_from_system_basic_info_without_action_field() {
 
 #[test]
 fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw"));
@@ -303,7 +303,7 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
 
 #[test]
 fn generic_workspace_summary_is_not_hard_summarized_by_observed_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "list_dir",
@@ -331,7 +331,7 @@ fn generic_workspace_summary_is_not_hard_summarized_by_observed_output() {
 
 #[test]
 fn direct_scalar_uses_latest_list_dir_entries_when_listing_is_latest_step() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "README.txt\n"));
@@ -352,7 +352,7 @@ fn exact_path_selector_uses_auto_locator_full_path_for_unique_list_dir_match() {
     let file_path = temp_dir.join("Report.MD");
     std::fs::write(&file_path, "hello").unwrap();
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "Report.MD\n"));
@@ -397,7 +397,7 @@ fn exact_path_selector_uses_rooted_full_path_for_unique_find_name_match() {
     let file_path = temp_dir.join("Report.MD");
     std::fs::write(&file_path, "hello").unwrap();
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
@@ -438,7 +438,7 @@ fn exact_path_selector_uses_rooted_full_path_for_unique_find_name_match() {
 
 #[test]
 fn exact_path_selector_prefers_resolved_path_from_path_batch_facts() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -469,7 +469,7 @@ fn exact_path_selector_prefers_resolved_path_from_path_batch_facts() {
 
 #[test]
 fn path_fact_without_exact_selector_defers_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
@@ -494,7 +494,7 @@ fn path_fact_without_exact_selector_defers_to_model_synthesis() {
 
 #[test]
 fn path_fact_without_exact_path_selector_does_not_direct_render() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.last_user_visible_respond = Some("/tmp/case_only/Report.MD".to_string());
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -522,7 +522,7 @@ fn path_fact_without_exact_path_selector_does_not_direct_render() {
 
 #[test]
 fn direct_scalar_does_not_passthrough_multiline_list_dir_listing() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "README.txt\nnotes.md\n"));
@@ -534,7 +534,7 @@ fn direct_scalar_does_not_passthrough_multiline_list_dir_listing() {
 
 #[test]
 fn direct_scalar_counts_multiline_list_dir_when_route_requests_count() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "a\nb\nc\n"));
@@ -563,7 +563,7 @@ fn direct_scalar_counts_multiline_list_dir_when_route_requests_count() {
 
 #[test]
 fn direct_scalar_uses_inventory_dir_count_for_scalar_count() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -594,7 +594,7 @@ fn direct_scalar_uses_inventory_dir_count_for_scalar_count() {
 
 #[test]
 fn non_scalar_count_observation_waits_for_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -624,7 +624,7 @@ fn non_scalar_count_observation_waits_for_model_synthesis() {
 
 #[test]
 fn exact_path_selector_projects_inventory_directory_path() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",

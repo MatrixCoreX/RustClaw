@@ -16,7 +16,7 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
         ..Default::default()
     };
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.has_recoverable_failure_context = true;
     loop_state.executed_step_results.push(ok_step_result(
@@ -61,7 +61,7 @@ async fn finalize_loop_reply_replaces_scalar_machine_assignment_with_observed_va
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -107,7 +107,7 @@ async fn finalize_loop_reply_preserves_publishable_evidence_summary_over_scalar_
         ..Default::default()
     };
     let summary = "Working directory: /home/guagua/rustclaw. A clawd process and a listening port are both visible in the current task evidence.";
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -197,7 +197,7 @@ async fn scalar_contract_restores_complete_terminal_multi_machine_record() {
         ..Default::default()
     };
     let complete = "field_a=0\nfield_b=0\nfield_c=0\nfield_d=0";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -240,7 +240,7 @@ async fn scalar_contract_keeps_single_line_publishable_multi_machine_record() {
         ..Default::default()
     };
     let complete = "field_a=0, field_b=0, field_c=0, field_d=0";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -283,7 +283,7 @@ async fn finalize_loop_reply_replaces_wrapped_runtime_status_scalar_delivery() {
         ..Default::default()
     };
     let wrapped = r#"{"extra":{"action":"runtime_status","command_output":"guagua","field_value":"guagua","kind":"current_user","value":"guagua"},"text":"{\"action\":\"runtime_status\",\"command_output\":\"guagua\",\"field_value\":\"guagua\",\"kind\":\"current_user\",\"value\":\"guagua\"}"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -334,7 +334,7 @@ async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
         ..Default::default()
     };
     let wrapped = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw","size_bytes":4096},"path":"/home/guagua/rustclaw"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw\",\"size_bytes\":4096},\"path\":\"/home/guagua/rustclaw\"}],\"include_missing\":true}"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -372,7 +372,7 @@ async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_obs
     let observed = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw/.","size_bytes":4096},"path":"."}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw/.\",\"size_bytes\":4096},\"path\":\".\"}],\"include_missing\":true}"}"#;
     let failure_candidate =
         "observed candidate path: /home/guagua/rustclaw; checkpoint_state=waiting";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.has_recoverable_failure_context = true;
     loop_state
@@ -412,7 +412,7 @@ async fn finalize_loop_reply_preserves_richer_generic_path_facts_delivery() {
     };
     let richer_answer =
         "same_path=false\nservice_notes.md exists=true\nrelease_checklist.md exists=true";
-    let mut loop_state = crate::agent_engine::LoopState::new(5);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -459,7 +459,7 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_pat
         ..Default::default()
     };
     let observed = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw/.","size_bytes":4096},"path":"."}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw/.\",\"size_bytes\":4096},\"path\":\".\"}],\"include_missing\":true}"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -494,7 +494,7 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_terminal_pat
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -559,7 +559,7 @@ async fn finalize_loop_reply_projects_file_basename_from_capability_result() {
         "text": "untrusted fallback"
     })
     .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -613,7 +613,7 @@ async fn finalize_loop_reply_projects_selected_scalar_from_wrapped_capability_ou
         ..Default::default()
     };
     let wrapped = r#"{"extra":{"action":"quote","content_excerpt":"BTCUSDT | Price sources:\n- BINANCE $67216.010000","quote":{"exchange":"binance","price_usd":67216.01,"source":"binance_api","symbol":"BTCUSDT"}},"text":"BTCUSDT | Price sources:\n- BINANCE $67216.010000"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -638,7 +638,7 @@ async fn finalize_loop_reply_projects_selected_scalar_from_wrapped_capability_ou
 
 #[test]
 fn direct_scalar_finalize_uses_structured_extract_field_missing_message() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -670,7 +670,7 @@ fn direct_scalar_finalize_uses_structured_extract_field_missing_message() {
 
 #[test]
 fn direct_scalar_finalize_uses_structured_read_field_missing_message() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "config_basic".to_string(),
@@ -702,7 +702,7 @@ fn direct_scalar_finalize_uses_structured_read_field_missing_message() {
 
 #[test]
 fn direct_structured_observed_answer_skips_multi_evidence_content_routes() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -750,7 +750,7 @@ fn direct_structured_observed_answer_skips_multi_evidence_content_routes() {
 
 #[test]
 fn direct_structured_observed_answer_preserves_publishable_respond_for_content_routes() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -789,7 +789,7 @@ fn direct_structured_observed_answer_preserves_publishable_respond_for_content_r
 #[test]
 fn direct_structured_observed_answer_skips_observed_passthrough_for_strict_exact_sentence() {
     let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "process_basic".to_string(),
@@ -816,7 +816,7 @@ fn direct_structured_observed_answer_skips_observed_passthrough_for_strict_exact
 #[test]
 fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
     let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .output_vars
         .insert("last_skill_name".to_string(), "process_basic".to_string());
@@ -848,7 +848,7 @@ fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
 
 #[test]
 fn direct_structured_observed_answer_skips_ambiguous_multi_structured_scalars() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -887,7 +887,7 @@ fn direct_structured_observed_answer_skips_ambiguous_multi_structured_scalars() 
 
 #[test]
 fn direct_scalar_finalize_defers_health_check_summary_to_synthesis() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "health_check".to_string(),
@@ -914,7 +914,7 @@ fn direct_scalar_finalize_defers_health_check_summary_to_synthesis() {
 #[test]
 fn direct_scalar_finalize_reports_missing_path_before_extracting_path_field() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -953,7 +953,7 @@ fn direct_scalar_finalize_reports_missing_path_before_extracting_path_field() {
 
 #[test]
 fn direct_scalar_finalize_does_not_repair_limited_listing_from_drifted_scalar_count() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -986,7 +986,7 @@ fn direct_scalar_finalize_does_not_repair_limited_listing_from_drifted_scalar_co
 
 #[test]
 fn direct_scalar_finalize_preserves_planned_count_inventory_breakdown() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -1036,7 +1036,7 @@ fn direct_scalar_finalize_preserves_planned_count_inventory_breakdown() {
 
 #[test]
 fn direct_scalar_finalize_uses_total_count_without_component_plan() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
@@ -1063,7 +1063,7 @@ fn direct_scalar_finalize_uses_total_count_without_component_plan() {
 
 #[test]
 fn direct_scalar_finalize_uses_wrapped_count_inventory_total() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -1091,7 +1091,7 @@ fn direct_scalar_finalize_uses_wrapped_count_inventory_total() {
 
 #[test]
 fn scalar_count_contract_projects_find_ext_count_from_machine_field() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -1126,7 +1126,7 @@ fn scalar_count_contract_projects_find_ext_count_from_machine_field() {
 
 #[test]
 fn one_sentence_count_waits_for_model_synthesis() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -1146,7 +1146,7 @@ fn one_sentence_count_waits_for_model_synthesis() {
 
 #[test]
 fn direct_structured_finalize_defers_path_inspection_to_model_synthesis() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -1177,7 +1177,7 @@ fn direct_structured_finalize_defers_path_inspection_to_model_synthesis() {
 #[test]
 fn direct_non_builtin_finalize_preserves_raw_skill_text() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .output_vars
         .insert("last_skill_name".to_string(), "crypto".to_string());
@@ -1214,7 +1214,7 @@ fn direct_non_builtin_finalize_preserves_raw_skill_text() {
 #[test]
 fn direct_non_builtin_finalize_skips_structured_machine_output() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .output_vars
         .insert("last_skill_name".to_string(), "stock".to_string());
@@ -1242,7 +1242,7 @@ fn direct_non_builtin_finalize_skips_structured_machine_output() {
 async fn direct_publishable_observed_answer_accepts_plain_observation_without_exact_contract() {
     let state = test_state();
     let task = claimed_task("task-no-raw-run-cmd-passthrough");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1275,7 +1275,7 @@ async fn direct_publishable_observed_answer_accepts_plain_observation_without_ex
 async fn direct_publishable_observed_answer_accepts_exact_plain_observation() {
     let state = test_state();
     let task = claimed_task("task-strict-run-cmd-format");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1324,7 +1324,7 @@ fn unclassified_output_allows_model_language_fallback() {
 async fn unclassified_output_can_publish_grounded_observation() {
     let state = test_state();
     let task = claimed_task("task-matrix-strict-no-raw-publishable");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1354,7 +1354,7 @@ async fn unclassified_output_can_publish_grounded_observation() {
 
 #[test]
 fn direct_scalar_finalize_accepts_strict_single_line_observation() {
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1385,7 +1385,7 @@ fn direct_scalar_finalize_accepts_strict_single_line_observation() {
 
 #[test]
 fn direct_scalar_finalize_skips_strict_exact_observation_output_contract() {
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1412,7 +1412,7 @@ fn direct_scalar_finalize_skips_strict_exact_observation_output_contract() {
 #[test]
 fn raw_structured_passthrough_is_dropped_for_scalar_contract() {
     let raw = r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(raw.to_string());
     loop_state.delivery_messages.push(raw.to_string());
@@ -1443,7 +1443,7 @@ fn raw_structured_passthrough_is_dropped_for_scalar_contract() {
 #[test]
 fn structured_user_input_delivery_is_not_dropped_as_observed_passthrough() {
     let message = "Please provide the source directory.";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.pending_user_input_required = true;
     loop_state.last_user_visible_respond = Some(message.to_string());
@@ -1474,7 +1474,7 @@ fn structured_user_input_delivery_is_not_dropped_as_observed_passthrough() {
 
 #[test]
 fn qualified_scalar_passthrough_is_not_dropped() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some("rustclaw".to_string());
     loop_state.delivery_messages.push("rustclaw".to_string());
@@ -1505,7 +1505,7 @@ fn qualified_scalar_passthrough_is_not_dropped() {
 #[test]
 fn scalar_path_from_write_file_is_not_dropped_as_meta_placeholder() {
     let path = "/home/guagua/rustclaw/document/pwd_line.txt";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(path.to_string());
     loop_state.delivery_messages.push(path.to_string());
@@ -1546,7 +1546,7 @@ fn scalar_path_from_write_file_is_not_dropped_as_meta_placeholder() {
 
 #[test]
 fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_queries() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_search".to_string(),
@@ -1580,7 +1580,7 @@ fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_quer
 
 #[test]
 fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some("exit=0".to_string());
     loop_state.delivery_messages.push("exit=0".to_string());

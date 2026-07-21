@@ -11,7 +11,7 @@ async fn content_evidence_step_failure_answer_reports_real_error() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -68,7 +68,7 @@ async fn content_evidence_step_failure_answer_preserves_plan_path_without_locato
         original_user_request: Some("读 /etc/shadow 第一行".to_string()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .round_traces
@@ -138,7 +138,7 @@ async fn content_evidence_recoverable_crypto_account_error_is_completion() {
         ..Default::default()
     };
     let err = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -185,7 +185,7 @@ async fn content_evidence_wrapped_crypto_account_error_is_completion() {
             "extra": null
         })
     );
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -240,7 +240,7 @@ async fn content_evidence_crypto_credential_error_is_completion() {
             }
         })
     );
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -287,7 +287,7 @@ async fn finalize_loop_reply_treats_wrapped_crypto_account_error_as_success() {
             "extra": null
         })
     );
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.has_recoverable_failure_context = true;
     loop_state
@@ -339,7 +339,7 @@ async fn content_evidence_db_query_error_is_completion() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .round_traces
@@ -407,7 +407,7 @@ async fn finalize_loop_reply_treats_missing_read_target_as_user_result() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -489,7 +489,7 @@ async fn missing_read_target_reply_prefers_original_user_language() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -548,7 +548,7 @@ async fn missing_read_target_scalar_contract_keeps_failure_answer_not_path_only(
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -607,7 +607,7 @@ async fn finalize_loop_reply_treats_read_file_not_found_marker_as_user_result() 
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),

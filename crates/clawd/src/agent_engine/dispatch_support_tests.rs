@@ -315,7 +315,7 @@ fn invalid_file_delivery_token_detects_embedded_runtime_observation() {
 }
 
 #[test]
-fn failure_at_round_cap_with_terminal_discussion_remaining_finalizes() {
+fn failure_at_plan_capacity_with_terminal_discussion_remaining_finalizes() {
     let state = test_state_with_registry();
     let actions = vec![
         AgentAction::CallSkill {
@@ -877,7 +877,7 @@ fn terminal_direct_respond_publishes_even_when_last_output_matches() {
         payload_json: String::new(),
     };
     let policy = crate::agent_engine::support::load_agent_loop_guard_policy(&state);
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let content = r#"{"cancel_ref":"dry-run","adapter_kind":"local_process_poll","status":"cancelled","terminal_projection":{"state":"cancelled"}}"#;
     loop_state.last_output = Some(content.to_string());
@@ -940,7 +940,7 @@ fn synthesize_answer_direct_fallback_only_for_single_last_output() {
 #[test]
 fn synthesize_direct_fallback_uses_scalar_path_observation() {
     let state = test_state_with_registry();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
@@ -973,7 +973,7 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
 #[test]
 fn contract_matrix_synthesis_defers_multiple_count_observations_to_model() {
     let state = test_state_with_registry();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -1010,7 +1010,7 @@ fn contract_matrix_synthesis_defers_multiple_count_observations_to_model() {
 #[test]
 fn synthesize_direct_fallback_defers_multiple_count_observations_to_model() {
     let state = test_state_with_registry();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -1042,7 +1042,7 @@ fn synthesize_direct_fallback_defers_multiple_count_observations_to_model() {
 #[test]
 fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model() {
     let state = test_state_with_registry();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -1080,7 +1080,7 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
 #[test]
 fn generic_content_synthesis_defers_multiline_excerpt_to_model() {
     let state = test_state_with_registry();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -1116,7 +1116,7 @@ fn generic_content_synthesis_defers_multiline_excerpt_to_model() {
 #[test]
 fn unclassified_strict_evidence_contract_defers_direct_fallback_to_synthesis() {
     let state = test_state_with_registry();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));
@@ -1251,7 +1251,7 @@ fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
 #[test]
 fn strict_exact_tail_read_uses_direct_observed_fallback_before_composer() {
     let state = test_state_with_registry();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",

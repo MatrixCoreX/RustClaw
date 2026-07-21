@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn requested_machine_kv_summary_preserves_exact_required_field_json() {
     let task = claimed_task("task-machine-kv-required-json");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let current = r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
     let mut delivery_messages = vec![current.to_string()];
     loop_state.last_user_visible_respond = Some(current.to_string());
@@ -35,7 +35,7 @@ fn requested_machine_kv_summary_preserves_exact_required_field_json() {
 #[test]
 fn requested_machine_kv_summary_preserves_requested_token_json_without_state_patch() {
     let task = claimed_task("task-machine-kv-request-token-json");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let current = r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
     let mut delivery_messages = vec![current.to_string()];
     loop_state.last_user_visible_respond = Some(current.to_string());
@@ -55,7 +55,7 @@ fn requested_machine_kv_summary_preserves_requested_token_json_without_state_pat
 #[test]
 fn requested_machine_kv_summary_restores_latest_requested_token_json() {
     let task = claimed_task("task-machine-kv-restore-latest-json");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let json_answer = r#"{"changed_files":["calc_core.py","test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed","functions":["add","sub","mul"]}"#;
     loop_state.last_publishable_synthesis_output = Some(json_answer.to_string());
     let mut delivery_messages = vec![

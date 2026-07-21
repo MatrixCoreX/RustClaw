@@ -32,8 +32,8 @@ fn post_write_validation_reserve_uses_latest_plan_observe_validate_actions_only(
         AskReply::non_llm(r#"{"changed_files":["calc_core.py","test_calc_core.py"]}"#.to_string())
             .with_task_journal(journal);
 
-    let mut loop_state = LoopState::new(2);
-    loop_state.last_stop_signal = Some("max_tool_calls".to_string());
+    let mut loop_state = LoopState::new();
+    loop_state.last_stop_signal = Some("post_write_validation_required".to_string());
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -160,8 +160,8 @@ fn readback_only_code_validation_reserve_runs_unexecuted_probe_only() {
         AskReply::non_llm(r#"{"changed_files":["calc_core.py","test_calc_core.py"]}"#.to_string())
             .with_task_journal(journal);
 
-    let mut loop_state = LoopState::new(2);
-    loop_state.last_stop_signal = Some("max_tool_calls".to_string());
+    let mut loop_state = LoopState::new();
+    loop_state.last_stop_signal = Some("post_write_validation_required".to_string());
     loop_state.output_vars.insert(
         "agent_loop.run_cmd_commands".to_string(),
         serde_json::json!(["python3 test_calc_core.py"]).to_string(),
@@ -244,8 +244,8 @@ fn readback_only_code_validation_reserve_runs_planned_validation_when_requested(
         ));
     let reply = AskReply::non_llm("readback only".to_string()).with_task_journal(journal);
 
-    let mut loop_state = LoopState::new(2);
-    loop_state.last_stop_signal = Some("max_tool_calls".to_string());
+    let mut loop_state = LoopState::new();
+    loop_state.last_stop_signal = Some("post_write_validation_required".to_string());
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -333,8 +333,8 @@ fn readback_only_code_validation_reserve_ignores_plain_read_without_validation()
         ));
     let reply = AskReply::non_llm("readback only".to_string()).with_task_journal(journal);
 
-    let mut loop_state = LoopState::new(2);
-    loop_state.last_stop_signal = Some("max_tool_calls".to_string());
+    let mut loop_state = LoopState::new();
+    loop_state.last_stop_signal = Some("post_write_validation_required".to_string());
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {

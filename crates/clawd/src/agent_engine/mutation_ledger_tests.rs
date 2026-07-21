@@ -128,7 +128,7 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture();
     insert_active_task_claim(&state, &task);
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.round_no = 1;
     let record = crate::repo::TaskMutationRecord {
         task_id: task.task_id.clone(),

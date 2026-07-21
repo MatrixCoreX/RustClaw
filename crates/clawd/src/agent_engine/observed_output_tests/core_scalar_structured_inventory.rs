@@ -16,7 +16,7 @@ fn observed_outputs_include_structured_run_cmd_error() {
             }
         })
     );
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(error_step("step_1", "run_cmd", &err));
@@ -38,7 +38,7 @@ fn observed_outputs_include_structured_run_cmd_error() {
 
 #[test]
 fn observed_outputs_exclude_synthesis_steps() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -91,7 +91,7 @@ fn structured_field_selector_projects_scalar_from_any_capability_output() {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "market_probe",
@@ -132,7 +132,7 @@ fn structured_field_selector_projects_scalar_from_capability_result_extra() {
         "action": "detect",
         "manager": "apt-get",
     });
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_probe",
@@ -186,7 +186,7 @@ fn config_read_uses_generic_capability_result_selector() {
         "value_text": "minimax",
         "value_type": "string",
     });
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .capability_results
         .push(crate::capability_result::successful_execution_envelope(
@@ -236,7 +236,7 @@ fn config_mutation_exact_field_uses_generic_capability_result_selector() {
         "applied": true,
         "validated": true,
     });
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .capability_results
         .push(crate::capability_result::successful_execution_envelope(
@@ -284,7 +284,7 @@ fn config_validation_exact_field_uses_generic_capability_result_selector() {
         "valid": true,
         "root_type": "object",
     });
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .capability_results
         .push(crate::capability_result::successful_execution_envelope(
@@ -332,7 +332,7 @@ fn document_title_uses_generic_capability_result_selector() {
         "title": "Service Notes",
         "exists": true,
     });
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .capability_results
         .push(crate::capability_result::successful_execution_envelope(
@@ -381,7 +381,7 @@ fn document_title_is_not_projected_without_explicit_selector() {
         "title": "Service Notes",
         "exists": true,
     });
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .capability_results
         .push(crate::capability_result::successful_execution_envelope(
@@ -496,7 +496,7 @@ fn database_version_uses_generic_capability_result_selector() {
         "action": "schema_version",
         "schema_version": 7,
     });
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .capability_results
         .push(crate::capability_result::successful_execution_envelope(
@@ -547,7 +547,7 @@ fn database_table_list_uses_generic_exact_field_selector() {
         "text": "untrusted fallback",
     })
     .to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "db_basic", &wrapped));
@@ -625,7 +625,7 @@ fn git_fields_use_generic_capability_result_selectors() {
             output_contract: Some(route),
             ..AgentRunContext::default()
         };
-        let mut loop_state = LoopState::new(2);
+        let mut loop_state = LoopState::new();
         loop_state
             .capability_results
             .push(crate::capability_result::successful_execution_envelope(
@@ -673,7 +673,7 @@ fn archive_members_use_generic_exact_field_selector() {
         "member_count": 2,
         "members": ["notes.txt", "nested/config.ini"],
     });
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .capability_results
         .push(crate::capability_result::successful_execution_envelope(
@@ -726,7 +726,7 @@ fn archive_paths_use_generic_scalar_field_selector() {
             output_contract: Some(route),
             ..AgentRunContext::default()
         };
-        let mut loop_state = LoopState::new(2);
+        let mut loop_state = LoopState::new();
         loop_state
             .capability_results
             .push(crate::capability_result::successful_execution_envelope(
@@ -767,7 +767,7 @@ fn scalar_output_does_not_guess_an_unselected_structured_field() {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "crypto",
@@ -786,7 +786,7 @@ fn scalar_output_does_not_guess_an_unselected_structured_field() {
 
 #[test]
 fn multi_count_observation_guard_lists_all_count_rows() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -824,7 +824,7 @@ fn multi_count_observation_guard_lists_all_count_rows() {
 
 #[test]
 fn compound_listing_content_delivery_guard_lists_observed_names() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -853,7 +853,7 @@ fn names_only_inventory_direct_answer_does_not_need_llm_synthesis() {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -917,7 +917,7 @@ fn names_only_inventory_free_shape_defers_to_llm_synthesis() {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -976,7 +976,7 @@ fn dirs_only_inventory_names_by_kind_can_direct_answer_observation_only_plan() {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -1021,7 +1021,7 @@ fn dirs_only_inventory_names_by_kind_can_direct_answer_observation_only_plan() {
 
 #[test]
 fn observed_entries_project_wrapped_inventory_names_by_kind_files() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -1047,7 +1047,7 @@ fn observed_entries_project_wrapped_inventory_names_by_kind_files() {
 
 #[test]
 fn observed_outputs_keep_latest_content_read_for_same_path() {
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -1148,7 +1148,7 @@ fn recent_generated_output_extracts_internal_merge_block() {
 #[test]
 fn cross_turn_observed_entries_require_reuse_active_context() {
     let merged = "Current task:\nlook at that docs dir\n\nMost recent generated output:\narchive\nrelease_checklist.md\nservice_notes.md\n\nContinuity rules:\n- keep scope";
-    let loop_state = LoopState::new(1);
+    let loop_state = LoopState::new();
     let allowed = reuse_active_context(merged);
 
     let entries = cross_turn_observed_output_entries(&loop_state, Some(&allowed));
@@ -1173,7 +1173,7 @@ fn cross_turn_observed_entries_require_reuse_active_context() {
 
 #[test]
 fn direct_scalar_ignores_exit_zero_prefix() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "machine_probe", "exit=0\nready\n"));
@@ -1193,7 +1193,7 @@ fn direct_scalar_extracts_system_basic_runtime_status_value() {
         output_contract: Some(route_result.clone()),
         ..Default::default()
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
@@ -1208,7 +1208,7 @@ fn direct_scalar_extracts_system_basic_runtime_status_value() {
 
 #[test]
 fn observed_entries_include_structured_extract_field_outputs() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -1228,7 +1228,7 @@ fn observed_entries_include_structured_extract_field_outputs() {
 
 #[test]
 fn direct_scalar_ignores_shell_locale_warning_noise() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "run_cmd",
@@ -1242,7 +1242,7 @@ fn direct_scalar_ignores_shell_locale_warning_noise() {
 
 #[test]
 fn direct_scalar_reads_extract_field_value_from_structured_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -1256,7 +1256,7 @@ fn direct_scalar_reads_extract_field_value_from_structured_output() {
 
 #[test]
 fn direct_scalar_reads_read_field_value_from_structured_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1270,7 +1270,7 @@ fn direct_scalar_reads_read_field_value_from_structured_output() {
 
 #[test]
 fn direct_scalar_defers_container_read_field_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1284,7 +1284,7 @@ fn direct_scalar_defers_container_read_field_to_synthesis() {
 
 #[test]
 fn direct_scalar_returns_container_read_field_json_for_scalar_contract() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1306,7 +1306,7 @@ fn direct_scalar_returns_container_read_field_json_for_scalar_contract() {
 
 #[test]
 fn direct_scalar_preserves_resolved_extract_field_label_for_non_exact_match() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1328,7 +1328,7 @@ fn direct_scalar_preserves_resolved_extract_field_label_for_non_exact_match() {
 
 #[test]
 fn direct_scalar_reads_array_identity_field_value_without_label() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1350,7 +1350,7 @@ fn direct_scalar_reads_array_identity_field_value_without_label() {
 
 #[test]
 fn direct_answer_reads_array_identity_extract_field_value_without_label() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1372,7 +1372,7 @@ fn direct_answer_reads_array_identity_extract_field_value_without_label() {
 
 #[test]
 fn direct_answer_reads_config_basic_extract_field_value() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1395,7 +1395,7 @@ fn direct_answer_reads_config_basic_extract_field_value() {
 
 #[test]
 fn direct_answer_reads_config_basic_read_fields_values() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1417,7 +1417,7 @@ fn direct_answer_reads_config_basic_read_fields_values() {
 
 #[test]
 fn structured_keys_without_explicit_selector_defers_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1439,7 +1439,7 @@ fn structured_keys_without_explicit_selector_defers_to_synthesis() {
 
 #[test]
 fn direct_answer_defers_container_extract_field_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1460,7 +1460,7 @@ fn direct_answer_defers_container_extract_field_to_synthesis() {
 
 #[test]
 fn direct_answer_formats_schema_enum_extract_field_with_resolved_path() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1485,7 +1485,7 @@ fn direct_answer_formats_schema_enum_extract_field_with_resolved_path() {
 
 #[test]
 fn direct_scalar_defers_multiple_structured_scalars_without_semantic_contract() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "config_basic",
@@ -1521,7 +1521,7 @@ fn direct_scalar_defers_multiple_structured_scalars_without_semantic_contract() 
 
 #[test]
 fn structured_pair_answer_does_not_infer_fields_from_read_file_outputs() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "read_file",
@@ -1557,7 +1557,7 @@ version.workspace = true
 
 #[test]
 fn direct_scalar_reports_missing_extract_field_as_readable_message() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -1572,7 +1572,7 @@ fn direct_scalar_reports_missing_extract_field_as_readable_message() {
 #[test]
 fn internal_missing_sentinel_uses_structured_extract_field_evidence() {
     let state = AppState::test_default_with_fixture_provider();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -1603,7 +1603,7 @@ fn internal_missing_sentinel_uses_structured_extract_field_evidence() {
 
 #[test]
 fn direct_scalar_missing_field_language_uses_original_request_before_resolved_prompt() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",

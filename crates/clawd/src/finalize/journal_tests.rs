@@ -40,7 +40,7 @@ fn build_from_loop_state_records_budget_stop_signal() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.last_stop_signal = Some("recipe_repair_budget_exhausted".to_string());
 
     let journal = build_from_loop_state(
@@ -78,7 +78,7 @@ fn build_from_loop_state_records_finalizer_recovered_terminal_stop_signal() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.last_stop_signal = Some("synthesize_answer_failed".to_string());
     let finalizer_summary = TaskJournalFinalizerSummary {
         disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
@@ -119,7 +119,7 @@ fn build_from_loop_state_records_rollout_switches() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "rollout_switches_enabled".to_string(),
         "registry_idempotency_guard_scope,answer_verifier_enforce_required_scope".to_string(),
@@ -173,7 +173,7 @@ fn build_from_loop_state_records_task_observations() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.task_observations.push(serde_json::json!({
         "schema_version": 1,
         "owner_layer": "agent_hooks",
@@ -218,7 +218,7 @@ async fn terminal_builder_executes_stop_and_session_end_at_real_owner() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.last_stop_signal = Some("completed".to_string());
 
     let journal = build_terminal_from_loop_state(
@@ -258,12 +258,12 @@ fn build_from_loop_state_persists_lifecycle_checkpoint_projection() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.task_lifecycle = Some(serde_json::json!({
         "schema_version": 1,
         "state": "waiting",
         "source": "agent_loop_soft_budget",
-        "resume_reason": "agent_loop_max_rounds",
+        "resume_reason": "task_budget_slice_exhausted",
         "next_check_after": 1781800060,
         "checkpoint_id": "ckpt-soft-budget"
     }));
@@ -319,7 +319,7 @@ fn build_from_loop_state_records_rollout_attribution() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.rollout_attribution.push(
         crate::task_journal::TaskJournalRolloutAttribution::registry_idempotency_guard_block(
             "registry_idempotency_repeat_completed_action",

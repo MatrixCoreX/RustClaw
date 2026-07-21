@@ -1,6 +1,6 @@
 #[test]
 fn structured_scalar_observation_ignores_visible_text_json_payload() {
-    let mut loop_state = LoopState::new(1);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "config_basic",
@@ -24,7 +24,7 @@ fn structured_scalar_observation_ignores_visible_text_json_payload() {
 
 #[test]
 fn structured_scalar_observation_reads_extra_payload() {
-    let mut loop_state = LoopState::new(1);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "config_basic",

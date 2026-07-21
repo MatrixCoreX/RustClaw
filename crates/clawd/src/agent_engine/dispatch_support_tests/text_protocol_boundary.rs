@@ -3,7 +3,7 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 
 #[test]
 fn multiline_read_range_passthrough_guard_ignores_visible_text_json_payload() {
-    let mut loop_state = LoopState::new(1);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",

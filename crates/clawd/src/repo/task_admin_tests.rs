@@ -110,7 +110,7 @@ fn paused_checkpoint_result(checkpoint_id: &str, next_check_after: i64) -> Value
         "task_lifecycle": {
             "schema_version": 1,
             "state": "waiting",
-            "resume_reason": "agent_loop_max_rounds",
+            "resume_reason": "task_budget_slice_exhausted",
             "next_check_after": next_check_after,
             "checkpoint_id": checkpoint_id
         },

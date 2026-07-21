@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn final_answer_renderer_dispatch_records_structured_trace_when_skipped() {
     let task = claimed_task("task-final-answer-renderer-trace");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut finalizer_summary = None;
     let mut delivery_messages = Vec::new();
 
@@ -53,7 +53,7 @@ fn machine_kv_renderer_restores_http_status_output_path_over_file_token() {
         ..crate::agent_engine::AgentRunContext::default()
     };
     let observed_answer = format!("status=200\noutput_path={output_path}");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(crate::executor::StepExecutionResult {
@@ -116,7 +116,7 @@ fn machine_kv_renderer_restores_http_status_output_path_over_file_token() {
 #[test]
 fn machine_kv_renderer_replaces_field_selector_with_structured_value() {
     let task = claimed_task("task-config-field-selector-value");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(crate::executor::StepExecutionResult {
@@ -164,7 +164,7 @@ fn machine_kv_renderer_does_not_expand_missing_path_into_domain_template() {
         ),
         ..crate::agent_engine::AgentRunContext::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(crate::executor::StepExecutionResult {

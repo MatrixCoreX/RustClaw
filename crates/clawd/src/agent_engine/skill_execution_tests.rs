@@ -181,12 +181,7 @@ fn admin_task() -> ClaimedTask {
 pub(super) fn test_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
         max_steps: 16,
-        max_rounds: 2,
-        max_tool_calls: 12,
-        recoverable_failure_extra_rounds: 1,
         repeat_action_limit: 4,
-        no_progress_limit: 1,
-        multi_round_enabled: true,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         fast_read: Default::default(),
@@ -199,7 +194,7 @@ pub(super) fn test_policy() -> AgentLoopGuardPolicy {
 #[test]
 fn subagent_step_execution_promotes_runtime_observation_to_step_output() {
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 2;
     loop_state.task_observations.push(serde_json::json!({
         "schema_version": 1,
@@ -297,7 +292,7 @@ fn unresolved_runtime_template_arg_is_detected_structurally() {
 fn preflight_failure_records_generic_capability_result() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let args = serde_json::json!({"action": "stat_paths", "paths": "{{s1.paths}}"});
     let err = unresolved_runtime_template_argument_error("fs_basic", &args, &args)
         .expect("structured preflight error");
@@ -328,7 +323,7 @@ fn preflight_failure_records_generic_capability_result() {
 #[test]
 fn evidence_policy_preflight_does_not_reject_action_from_semantic_matrix_only() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
@@ -348,7 +343,7 @@ fn evidence_policy_preflight_does_not_reject_action_from_semantic_matrix_only() 
 #[test]
 fn evidence_policy_preflight_allows_runtime_async_job_start_marker() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -371,7 +366,7 @@ fn evidence_policy_preflight_allows_runtime_async_job_start_marker() {
 #[test]
 fn evidence_policy_preflight_allows_bounded_planner_async_start_without_runtime_marker() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -393,7 +388,7 @@ fn evidence_policy_preflight_allows_bounded_planner_async_start_without_runtime_
 #[test]
 fn evidence_policy_preflight_rejects_unbounded_async_start_without_runtime_marker() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -433,7 +428,7 @@ planner_capabilities = [
 "#,
         &["config_edit"],
     );
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
@@ -472,7 +467,7 @@ planner_capabilities = [
 #[test]
 fn evidence_policy_preflight_rejects_generated_media_run_cmd() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Scalar,
@@ -547,7 +542,7 @@ fn evidence_policy_preflight_rejects_generated_media_run_cmd() {
 #[test]
 fn evidence_policy_preflight_does_not_block_literal_media_run_cmd() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Scalar,
@@ -620,7 +615,7 @@ planner_capabilities = [
 #[test]
 fn evidence_policy_preflight_allows_user_named_output_path_marker() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
         requires_content_evidence: true,
@@ -646,7 +641,7 @@ fn evidence_policy_preflight_allows_user_named_output_path_marker() {
 #[test]
 fn active_ops_recipe_preflight_allows_backing_mutation_despite_summary_contract() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Scalar,
@@ -674,7 +669,7 @@ fn active_ops_recipe_preflight_allows_backing_mutation_despite_summary_contract(
 #[test]
 fn evidence_policy_preflight_allows_internal_synthesis_actions() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         ..crate::IntentOutputContract::default()
@@ -708,7 +703,7 @@ fn evidence_policy_preflight_allows_internal_synthesis_actions() {
 #[test]
 fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         response_shape: crate::OutputResponseShape::Strict,
@@ -762,7 +757,7 @@ fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
 #[test]
 fn evidence_policy_preflight_allows_virtual_find_entries_backing_action() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
@@ -783,7 +778,7 @@ fn evidence_policy_preflight_allows_virtual_find_entries_backing_action() {
 #[test]
 fn evidence_policy_preflight_allows_virtual_make_dir_runtime_tool() {
     let state = test_state();
-    let loop_state = LoopState::new(2);
+    let loop_state = LoopState::new();
     let args = serde_json::json!({"path": "document/nl_skill_tmp"});
 
     assert!(
@@ -1063,7 +1058,7 @@ failure_policy = "deny"
             "path": restricted_path.clone()
         })),
     );
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
 
     let stop = try_auto_sudo_retry_after_permission_denied(
@@ -1258,7 +1253,7 @@ pub(super) fn unique_suffix() -> u128 {
 async fn policy_block_failure_appends_user_visible_delivery() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let err = crate::skills::policy_block_error(
         "path_outside_workspace",
@@ -1302,7 +1297,7 @@ async fn policy_block_failure_appends_user_visible_delivery() {
 async fn non_recoverable_failure_preserves_resume_context_and_user_error() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let err = "planner schema mismatch: missing field `path`";
     let step = failed_step("step_1", "fragile_skill", err);
@@ -1361,7 +1356,7 @@ async fn non_recoverable_failure_preserves_resume_context_and_user_error() {
 async fn missing_target_failure_without_fallback_publishes_failure_only() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let err = format!(
         "__RC_SKILL_ERROR__:{}",
@@ -1438,7 +1433,7 @@ async fn missing_target_failure_without_fallback_publishes_failure_only() {
 async fn recoverable_protocol_failure_publishes_replan_progress() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let err = format!(
         "__RC_SKILL_ERROR__:{}",
@@ -1519,7 +1514,7 @@ async fn recoverable_protocol_failure_publishes_replan_progress() {
 async fn validation_failure_records_failed_output_and_advances_recipe_repair() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -1612,7 +1607,7 @@ async fn validation_failure_records_failed_output_and_advances_recipe_repair() {
 async fn successful_skill_user_input_signal_finalizes_as_clarify_delivery() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
 
     let output = "Please provide the directory path.";
@@ -1654,7 +1649,7 @@ async fn successful_skill_user_input_signal_finalizes_as_clarify_delivery() {
 async fn successful_validation_step_records_machine_result_for_closeout() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -1714,7 +1709,7 @@ async fn successful_validation_step_records_machine_result_for_closeout() {
 async fn run_cmd_validation_failed_marker_advances_recipe_repair_without_success_fingerprint() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 2;
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -1784,7 +1779,7 @@ async fn run_cmd_validation_failed_marker_advances_recipe_repair_without_success
 async fn successful_external_workspace_step_records_scope_progress() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -1826,7 +1821,7 @@ async fn successful_external_workspace_step_records_scope_progress() {
 async fn successful_greenfield_creation_step_records_scope_progress() {
     let state = test_state();
     let task = test_task();
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,

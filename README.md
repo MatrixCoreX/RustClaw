@@ -58,7 +58,12 @@ flowchart TD
     V --> W[Evidence coverage + answer-shape check]
     W -->|repair / missing evidence| WR[RepairEnvelope<br/>issue codes + attempt ledger]
     WR --> J
-    W -->|complete| X[Observed-output finalizer]
+    W -->|round observed| BD{BudgetDecision<br/>progress + deadline + policy + hard ceilings}
+    BD -->|continue| J
+    BD -->|finish| X[Observed-output finalizer]
+    BD -->|checkpoint_requeue / waiting / needs_user| BC[Persist TaskBudgetSlice + task_checkpoint<br/>release exact claim]
+    BC --> ASP
+    BD -->|terminal| X
     R --> Y[User-visible message assembly]
     X --> Y
     Y --> Z[Output-contract guard + task result]
@@ -104,11 +109,12 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
 - `Async job start`: long-tail tool work can publish a machine reply with `checkpoint_id`, `poll_ref`, `next_check_after`, `can_poll`, and `can_cancel` while the task remains recoverable through checkpoint polling. Media skills expose this shape through registry capabilities such as `image.generate` / `image.poll` / `image.cancel`, `audio.synthesize` / `audio.poll` / `audio.cancel`, `video.generate` / `video.poll` / `video.cancel`, and `music.generate` / `music.poll` / `music.cancel`.
 - `Evidence coverage`: tool, skill, and synthesis outputs become loop observations. Missing evidence or recoverable failures go back into the loop with compact attempted-method history.
+- `TaskBudgetSlice / BudgetDecision`: interactive work is governed by resumable soft wall-time slices and structured progress, not ordinary `max_rounds` or `max_tool_calls` completion thresholds. After each observed model/tool result, runtime chooses `continue`, `finish`, `checkpoint_requeue`, `waiting`, `needs_user`, or `terminal` from verifier-approved plan facts, evidence/artifact progress, continuation state, policy, cancellation, deadlines, and administrator hard ceilings. The model can request continuation but cannot raise cost, permission, time, or resource ceilings.
 - `RepairEnvelope`: repair is bounded loop recovery. Runtime supplies machine fields such as `repair_source`, `issue_codes`, `missing_evidence`, `permission_decision`, `provider_status`, `attempt_fingerprint`, `side_effect_fingerprint`, `checkpoint_id`, and `next_recovery_kind`; planner/finalizer can use those fields to replan, clarify, wait in background, or fail structurally without parsing localized prose.
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
-- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. CLI and UI render these fields directly, including `goal_status`, `goal_status_source`, `budget_tier`, `included_ref_count`, `excluded_ref_count`, `record_count`, `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, hook handler/trust/failure/attempt/timing fields, coding counts, verification command counts/tokens, verification status/failure-kind tokens, `projection_revision`, `latest_verification_step_ref`, historical failure fields, unverified-risk tokens, subagent team ids, read-only policy tokens, conflict counts, recommended next action tokens, and step timing, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
+- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. CLI and UI render these fields directly, including the budget profile/decision, continuation index, cumulative model/tool/token/cost/elapsed counters, soft-slice state, goal and checkpoint fields, hook fields, coding verification fields, and team progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
 
 ### Planner, LLM, And Capability Flow
 
@@ -403,13 +409,13 @@ flowchart TD
     ZAP --> ZB
     ZA -->|terminal success/failure| ZB[Persist result_json/status]
     J --> ZC[Heartbeat + process ask/run_skill]
-    ZC --> ZD{agent loop outcome}
-    ZD -->|soft budget/provider wait/async job| ZE[task_lifecycle<br/>waiting/background + task_checkpoint + repair_signal]
+    ZC --> ZD{BudgetDecision + agent loop outcome}
+    ZD -->|checkpoint_requeue/provider wait/async job| ZE[task_lifecycle<br/>waiting/background + task_checkpoint + TaskBudgetSlice]
     ZE --> D
     ZE --> ZEE[checkpoint_created event<br/>checkpoint_ref + pending_async_job_id]
     ZD -->|needs user| S
     ZD -->|complete| ZB
-    ZC --> ZCE[tool_started / tool_finished / coding_checkpoint / coding_evidence events]
+    ZC --> ZCE[budget_decision / tool_started / tool_finished<br/>coding_checkpoint / coding_evidence events]
     ZB --> ZF[Channel delivery + session update]
     ZB --> ZG[Task journal trace + event_stream]
     ZG --> ZW[CLI / UI watch + report]
@@ -459,7 +465,7 @@ clawcli goal clear task-123
 ```
 
 - `clawcli llm-trace <task_id> [--raw] [--limit N]` reads the task debug endpoint and prints numbered LLM calls with `llm_call_ref=LLM#1..N`, flow/code attribution, provider/model/status tokens, usage tokens, and optional raw request/response fields.
-- Task event streams include goal, context budget, context compaction, transition, checkpoint, tool lifecycle, coding checkpoint/evidence, provider, hook, subagent/team, and final events. `clawcli events/watch`, `clawcli report`, `clawcli review`, `clawcli subagents`, `clawcli permission inspect`, and the browser task details render machine fields such as `goal_status`, `goal_status_source`, `budget_tier`, `included_ref_count`, `excluded_ref_count`, `record_count`, `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, `step_ref`, `handler_id`, `handler_kind`, `blocking`, `failure_policy`, `trust_status`, `duration_ms`, `attempts`, `output_truncated`, `changed_file_count`, `test_count`, `verification_command_count`, `verification_command`, `verification_commands`, `verification_status`, `verification_failure_kinds`, `coding_current_phase_hint`, `coding_next_step`, `completed_side_effect_count`, `requires_idempotency_guard`, `unverified_risk`, `prompt_label`, `llm_call_count`, `prompt_truncation_count`, `prompt_bytes_before_max`, `llm_budget_status`, `team_id`, `child_run_id`, `finding_refs`, `conflict_count`, `recommended_next_action`, `tool_permission_profile`, `read_only_enforced`, `write_isolation_status`, `permission_decision`, `command_policy`, `isolation_profile`, `sandbox_source`, `started_at`, and `finished_at`; raw event JSON stays in secondary details.
+- Task event streams include goal, context budget/compaction, task-budget decisions, transitions, checkpoints, tool lifecycle, coding evidence, provider, hook, subagent/team, and final events. `clawcli events/watch`, reports, and browser task details render stable fields such as `decision`, `profile`, `continuation_index`, cumulative model/tool/token/cost/elapsed counters, `soft_slice_exhausted`, `resumable`, checkpoint/goal fields, verification evidence, permission state, and team progress; raw event JSON stays in secondary details.
 - `clawcli run-skill <skill_name> --args-json '{...}'` submits explicit `kind=run_skill` work without natural-language routing; add `--wait` to poll the same `task_id`.
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` and `clawcli permission capability` read flattened capability/policy metadata. Add `--json` when another script should consume the response.
 - `clawcli replay export/run/diff` supports redacted recorded-only replay bundles for debugging and CI comparison without live model or tool calls; `replay run --coverage` exposes recorded coverage, `replay run --view llm|tools|checkpoints|summary` filters recorded evidence, and `replay diff` includes taxonomy tokens such as `route_changed`, `plan_changed`, `permission_changed`, and `final_status_changed`. See `docs/clawcli_exec_replay.md`.
@@ -485,7 +491,7 @@ flowchart LR
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and publish an accepted machine reply with `checkpoint_id`, `poll_ref`, and `next_check_after`. Poll and cancel actions should be exposed as structured capabilities when the provider or dry-run adapter can support them. Worker recovery later polls through `poll_async_job`.
 - Terminal async poll projection preserves an existing visible ask reply. If the ask task has only machine executor output, projection adds a machine JSON reply with `checkpoint_id`, `poll_ref`, `task_id`, and `final_result_json`.
-- Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
+- Seeded resume restores the persisted `TaskBudgetSlice`, cumulative model/tool/token/cost/elapsed counters, continuation index, observations, artifact refs, repair state, and completed side-effect fingerprints before re-entering the agent loop. A healthy task may cross the former 4-round/12-tool values when structured progress continues; only repeat/stagnation, cancellation, policy, or administrator hard ceilings stop it.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 - Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; every foreground and resume-executor write is fenced by the exact task-row `(lease_owner, claim_attempt)`. Heartbeat only renews that claim, checkpoint recovery advances the generation, and stale workers cannot publish claimed process events or terminal results.
 
