@@ -390,17 +390,65 @@ pub(super) fn workspace_filesystem_mutation_can_run_autonomously(
     if normalized_skill == "run_cmd" {
         return workspace_coding_run_cmd_can_run_autonomously(state, args);
     }
-    if normalized_skill != "fs_basic"
-        || !matches!(
-            fs_basic_action(args).as_deref(),
-            Some("make_dir" | "write_text" | "append_text")
-        )
-    {
+    if normalized_skill != "fs_basic" {
+        return false;
+    }
+    if fs_basic_action(args).as_deref() == Some("apply_patch") {
+        return workspace_patch_can_run_autonomously(state, args);
+    }
+    if !matches!(
+        fs_basic_action(args).as_deref(),
+        Some("make_dir" | "write_text" | "append_text")
+    ) {
         return false;
     }
     path_args(args)
         .into_iter()
         .any(|path| path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root))
+}
+
+fn workspace_patch_can_run_autonomously(state: &AppState, args: &Value) -> bool {
+    if !matches!(
+        state.skill_rt.tools_policy.sandbox_mode,
+        claw_core::config::ToolSandboxMode::WorkspaceWrite
+            | claw_core::config::ToolSandboxMode::IsolatedWorktree
+    ) {
+        return false;
+    }
+    let Some(patch) = args
+        .get("patch")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|patch| !patch.is_empty())
+    else {
+        return false;
+    };
+    let mut saw_workspace_target = false;
+    for line in patch.lines() {
+        let Some(raw_path) = line
+            .strip_prefix("--- ")
+            .or_else(|| line.strip_prefix("+++ "))
+        else {
+            continue;
+        };
+        let raw_path = raw_path.split('\t').next().unwrap_or(raw_path).trim();
+        if raw_path == "/dev/null" {
+            continue;
+        }
+        if raw_path.starts_with('"') || raw_path.ends_with('"') {
+            return false;
+        }
+        let path = raw_path
+            .strip_prefix("a/")
+            .or_else(|| raw_path.strip_prefix("b/"))
+            .unwrap_or(raw_path);
+        if path.is_empty() || !path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root)
+        {
+            return false;
+        }
+        saw_workspace_target = true;
+    }
+    saw_workspace_target
 }
 
 fn workspace_coding_run_cmd_can_run_autonomously(state: &AppState, args: &Value) -> bool {
