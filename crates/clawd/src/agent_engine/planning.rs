@@ -261,7 +261,15 @@ pub(super) async fn plan_round_actions(
     );
     let native_prompt = format!("{native_system_prompt}\n\n{native_user_prompt}");
     let native_prompt_source = format!("{}+{}", native_protocol.source, native_turn_context.source);
-    let native_request = native_planner_request(&native_system_prompt, &native_user_prompt);
+    let provider_timeout_seconds = loop_state
+        .task_budget_slice
+        .as_ref()
+        .map(crate::task_budget_contract::TaskBudgetSlice::provider_call_timeout_seconds);
+    let native_request = native_planner_request(
+        &native_system_prompt,
+        &native_user_prompt,
+        provider_timeout_seconds,
+    );
     if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback(
         state,
         task,
@@ -280,11 +288,15 @@ pub(super) async fn plan_round_actions(
         log_plan_split(task, loop_state, &plan_result);
         return Ok(plan_result);
     }
-    let plan_raw = llm_gateway::run_with_fallback_with_prompt_source(
+    let plan_raw = llm_gateway::run_with_fallback_with_hints(
         state,
         task,
         &prompt_text,
         &prompt_source,
+        crate::ChatRequestHints {
+            timeout_seconds: provider_timeout_seconds,
+            ..Default::default()
+        },
     )
     .await?;
     info!(
@@ -314,6 +326,7 @@ pub(super) async fn plan_round_actions(
             &attempt_ledger,
             &plan_raw,
             loop_state.round_no,
+            provider_timeout_seconds,
         )
         .await?;
         let repaired_actions = parse_single_plan_actions(&repaired, state, task)
@@ -352,7 +365,18 @@ pub(super) async fn plan_round_actions(
     Ok(plan_result)
 }
 
-fn native_planner_request(system_prompt: &str, user_prompt: &str) -> ModelTurnRequest {
+fn native_planner_request(
+    system_prompt: &str,
+    user_prompt: &str,
+    provider_timeout_seconds: Option<u64>,
+) -> ModelTurnRequest {
+    let mut metadata = std::collections::BTreeMap::new();
+    if let Some(timeout_seconds) = provider_timeout_seconds {
+        metadata.insert(
+            "provider_timeout_seconds".to_string(),
+            Value::Number(timeout_seconds.into()),
+        );
+    }
     ModelTurnRequest {
         messages: vec![
             ModelMessage::text(ModelRole::System, system_prompt),
@@ -380,7 +404,7 @@ fn native_planner_request(system_prompt: &str, user_prompt: &str) -> ModelTurnRe
         }],
         response_schema: None,
         stream: true,
-        metadata: Default::default(),
+        metadata,
     }
 }
 

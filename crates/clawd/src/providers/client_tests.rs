@@ -192,6 +192,14 @@ async fn provider_call_future_is_bounded_by_dispatch_timeout() {
     assert!(err.message.contains("timeout_seconds=1"));
 }
 
+#[test]
+fn request_timeout_can_only_reduce_provider_timeout() {
+    assert_eq!(super::effective_provider_timeout_seconds(300, None), 300);
+    assert_eq!(super::effective_provider_timeout_seconds(300, Some(60)), 60);
+    assert_eq!(super::effective_provider_timeout_seconds(30, Some(600)), 30);
+    assert_eq!(super::effective_provider_timeout_seconds(0, Some(0)), 1);
+}
+
 #[tokio::test]
 async fn model_turn_timeout_cancels_the_inflight_future() {
     struct DropSignal(Arc<AtomicBool>);

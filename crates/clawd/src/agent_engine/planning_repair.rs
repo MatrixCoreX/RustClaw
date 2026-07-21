@@ -17,6 +17,7 @@ pub(super) async fn repair_plan_actions(
     attempt_ledger: &str,
     raw_plan: &str,
     round_no: usize,
+    provider_timeout_seconds: Option<u64>,
 ) -> Result<String, String> {
     let runtime_os = runtime_os_label();
     let runtime_shell = runtime_shell_label();
@@ -59,11 +60,15 @@ pub(super) async fn repair_plan_actions(
         resolved_prompt.version.as_deref(),
         Some(round_no),
     );
-    let repaired = llm_gateway::run_with_fallback_with_prompt_source(
+    let repaired = llm_gateway::run_with_fallback_with_hints(
         state,
         task,
         &prompt,
         &resolved_prompt.source,
+        crate::ChatRequestHints {
+            timeout_seconds: provider_timeout_seconds,
+            ..Default::default()
+        },
     )
     .await?;
     info!(
