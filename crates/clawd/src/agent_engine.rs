@@ -119,7 +119,8 @@ use self::skill_execution::execute_prepared_skill_action;
 use self::support::{
     action_fingerprint_for_policy, append_progress_hint, build_safe_skill_args_summary,
     encode_progress_i18n, load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint,
-    registry_idempotency_guard_attribution, AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
+    registry_dedup_scope_for_action, registry_idempotency_guard_attribution, AgentLoopGuardPolicy,
+    PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 pub(crate) use self::support::{
     append_delivery_message, publish_agent_loop_user_input_checkpoint_progress,

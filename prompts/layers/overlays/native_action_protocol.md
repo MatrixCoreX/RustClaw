@@ -28,6 +28,10 @@ Protocol rules:
 - Once a successful capability observation contains the requested fields,
   synthesize the answer. Do not call the capability again merely to confirm or
   restate the same successful result.
+- When the request explicitly names machine fields and the observation contains
+  them, include every requested field in the final response and preserve each
+  value's scalar, object, or array shape. A nested scalar does not replace its
+  requested parent object or array.
 - The runtime, not the model, resolves capabilities and enforces verification,
   permissions, sandboxing, idempotency, and confirmation.
 - A capability failure is an observation for the next turn. Replan from its

@@ -63,6 +63,32 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("restate the same successful result"));
     assert!(prompt.contains("Copy the complete capability name exactly"));
     assert!(prompt.contains("Never derive a capability name by combining a skill name"));
+    assert!(prompt.contains("preserve each"));
+    assert!(prompt.contains("scalar, object, or array shape"));
+}
+
+#[test]
+fn final_synthesis_prompts_preserve_named_machine_field_shapes() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    for relative_path in [
+        "observed_answer_fallback_prompt.md",
+        "answer_verifier_prompt.md",
+    ] {
+        let prompt =
+            std::fs::read_to_string(overlays.join(relative_path)).expect("read synthesis prompt");
+        assert!(
+            prompt.contains("explicitly names machine fields"),
+            "{relative_path} must recognize explicit machine-field delivery"
+        );
+        assert!(
+            prompt.contains("scalar, object, or array shape"),
+            "{relative_path} must preserve structured value shapes"
+        );
+        assert!(
+            prompt.contains("nested scalar"),
+            "{relative_path} must reject collection flattening"
+        );
+    }
 }
 
 #[test]

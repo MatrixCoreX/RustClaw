@@ -55,6 +55,19 @@ fn zero_action_verifier_replan_round_is_not_model_finished() {
 }
 
 #[test]
+fn zero_action_observation_ready_round_is_not_model_finished() {
+    let outcome = RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("structured_observation_already_ready".to_string()),
+        next_goal_hint: None,
+        no_progress: true,
+    };
+
+    assert!(!round_model_finished(Some(&outcome)));
+}
+
+#[test]
 fn zero_action_terminal_round_is_model_finished() {
     let outcome = RoundOutcome {
         executed_actions: 0,

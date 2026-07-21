@@ -18,7 +18,7 @@ REGISTRIES = [
 
 ALLOWED_EFFECTS = {"observe", "validate", "mutate", "external"}
 ALLOWED_RISK_LEVELS = {"low", "medium", "high", "unknown"}
-ALLOWED_DEDUP_SCOPES = {"args", "action", "none"}
+ALLOWED_DEDUP_SCOPES = {"args", "action", "resource"}
 
 
 def load_registry(path: Path) -> list[dict[str, Any]]:
@@ -50,6 +50,7 @@ def check_capability(
     risk_level = capability.get("risk_level")
     idempotent = capability.get("idempotent")
     dedup_scope = capability.get("dedup_scope")
+    dedup_fields = capability.get("dedup_fields")
     once_per_task = capability.get("once_per_task")
 
     if effect not in ALLOWED_EFFECTS:
@@ -60,6 +61,23 @@ def check_capability(
         findings.append(f"{prefix}: idempotent_must_be_bool value={idempotent!r}")
     if dedup_scope not in ALLOWED_DEDUP_SCOPES:
         findings.append(f"{prefix}: invalid_or_missing_dedup_scope={dedup_scope!r}")
+    if dedup_scope == "resource":
+        declared_args = {
+            token
+            for raw in [*(capability.get("required") or []), *(capability.get("optional") or [])]
+            for token in str(raw).split("|")
+        }
+        if not isinstance(dedup_fields, list) or not dedup_fields:
+            findings.append(f"{prefix}: resource_dedup_requires_fields")
+        elif any(
+            not isinstance(field, str)
+            or not field.strip()
+            or field not in declared_args
+            for field in dedup_fields
+        ):
+            findings.append(f"{prefix}: resource_dedup_field_not_declared={dedup_fields!r}")
+    elif dedup_fields:
+        findings.append(f"{prefix}: dedup_fields_require_resource_scope")
 
     controlled_side_effect = effect == "mutate" or risk_level == "high"
     if controlled_side_effect:
@@ -123,6 +141,15 @@ def run_self_test() -> int:
         "idempotent": True,
         "dedup_scope": "bad_scope",
     }
+    bad_resource_capability = {
+        "name": "bad.resource",
+        "effect": "observe",
+        "risk_level": "low",
+        "idempotent": True,
+        "dedup_scope": "resource",
+        "optional": ["path"],
+        "dedup_fields": ["missing"],
+    }
     missing_surface = {"name": "visible_without_capabilities"}
     if check_capability(registry_path, good_skill, 0, good_skill["planner_capabilities"][0]):
         print("SELF_TEST_FAIL good_policy_metadata_false_positive", file=sys.stderr)
@@ -141,6 +168,12 @@ def run_self_test() -> int:
     }
     if not expected_tokens.issubset(observed_tokens):
         print(f"SELF_TEST_FAIL missing_bad_policy_findings:{bad_findings}", file=sys.stderr)
+        return 1
+    resource_findings = check_capability(
+        registry_path, {"name": "bad_resource_skill"}, 0, bad_resource_capability
+    )
+    if not any("resource_dedup_field_not_declared" in finding for finding in resource_findings):
+        print(f"SELF_TEST_FAIL missing_resource_dedup_finding:{resource_findings}", file=sys.stderr)
         return 1
     surface_findings = check_skill_capability_surface(registry_path, missing_surface)
     if not any("planner_visible_enabled_skill_missing_planner_capabilities" in finding for finding in surface_findings):

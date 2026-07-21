@@ -482,7 +482,7 @@ fn registry_resolves_action_governance_from_explicit_fields_effects_and_legacy_d
 	planner_capabilities = [
 	  { name = "config.plan", action = "plan", effect = "observe" },
 	  { name = "config.apply", action = "apply", effect = "mutate" },
-	  { name = "config.preview", action = "preview", effect = "mutate", once_per_task = false, dedup_scope = "args", idempotent = true }
+	  { name = "config.preview", action = "preview", effect = "mutate", optional = ["path"], once_per_task = false, dedup_scope = "resource", dedup_fields = ["path"], idempotent = true }
 	]
 
 	[[skills]]
@@ -520,7 +520,11 @@ fn registry_resolves_action_governance_from_explicit_fields_effects_and_legacy_d
     assert!(!reg.resolved_once_per_task("config_edit", Some("preview")));
     assert_eq!(
         reg.resolved_dedup_scope("config_edit", Some("preview")),
-        RegistryDedupScope::Args
+        RegistryDedupScope::Resource
+    );
+    assert_eq!(
+        reg.resolved_dedup_fields("config_edit", Some("preview")),
+        vec!["path"]
     );
     assert!(reg.resolved_idempotent("config_edit", Some("preview")));
 
