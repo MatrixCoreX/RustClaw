@@ -246,6 +246,94 @@ fn sandboxed_workspace_coding_run_cmd_does_not_require_confirmation() {
 }
 
 #[test]
+fn sandboxed_workspace_patch_does_not_require_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: Some("update workspace code"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({
+                    "action": "apply_patch",
+                    "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+}
+
+#[test]
+fn workspace_patch_keeps_confirmation_for_escape_or_unsandboxed_targets() {
+    let task = test_task();
+    for (sandbox_mode, patch) in [
+        (
+            claw_core::config::ToolSandboxMode::WorkspaceWrite,
+            "--- a/../outside.txt\n+++ b/../outside.txt\n@@ -1 +1 @@\n-old\n+new\n",
+        ),
+        (
+            claw_core::config::ToolSandboxMode::DangerFull,
+            "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n",
+        ),
+    ] {
+        let mut tools_config = ToolsConfig::default();
+        tools_config.sandbox_mode = sandbox_mode;
+        let mut state = test_state();
+        state.skill_rt.tools_policy =
+            Arc::new(ToolsPolicy::from_config(&tools_config).expect("sandbox tools policy"));
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                output_contract: Some(&route_result()),
+                request_text: Some("update workspace code"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({"action": "apply_patch", "patch": patch}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(result.approved, "issues: {:?}", result.issues);
+        assert!(result.needs_confirmation, "issues: {:?}", result.issues);
+        assert_eq!(
+            result
+                .permission_decision
+                .pointer("/steps/0/decision")
+                .and_then(serde_json::Value::as_str),
+            Some("require_confirmation")
+        );
+    }
+}
+
+#[test]
 fn greenfield_run_cmd_keeps_confirmation_for_destructive_or_unsandboxed_commands() {
     let task = test_task();
     for (sandbox_mode, command) in [

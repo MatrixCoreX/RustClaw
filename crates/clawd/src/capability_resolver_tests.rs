@@ -709,6 +709,36 @@ fn filesystem_write_text_capability_normalizes_write_mode_alias() {
 }
 
 #[test]
+fn filesystem_apply_patch_alias_resolves_to_canonical_workspace_patch() {
+    let state = state_with_workspace_registry();
+    let patch = "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.apply_patch",
+        json!({"patch": patch}),
+    );
+
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected fs_basic tool action");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("apply_patch")
+    );
+    assert_eq!(args.get("patch").and_then(Value::as_str), Some(patch));
+    assert_eq!(record.capability_ref, "filesystem.apply_patch");
+    assert_eq!(
+        record.canonical_capability_ref.as_deref(),
+        Some("filesystem.apply_patch")
+    );
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+}
+
+#[test]
 fn workspace_registry_requires_explicit_bare_capability_action() {
     let state = state_with_workspace_registry();
     let (action, record) =
