@@ -435,6 +435,8 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_code_index_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_child_task_graph_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_child_task_graph_contracts.py"
+  python3 "${ROOT_DIR}/scripts/check_task_event_archive_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_task_event_archive_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_runtime_regression_budget_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_runtime_regression_budget_contracts.py"
   python3 "${ROOT_DIR}/scripts/nl_tests/check_runtime_regression_budget.py" --self-test

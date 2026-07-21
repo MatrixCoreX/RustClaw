@@ -338,7 +338,7 @@ fn invalid_event_kind_is_rejected() {
 }
 
 #[test]
-fn bounded_replay_marks_an_expired_cursor() {
+fn bounded_hot_retention_recovers_older_cursor_from_archive() {
     let state = state();
     for index in 0..EVENT_REPLAY_LIMIT + 2 {
         publish_event(
@@ -350,10 +350,116 @@ fn bounded_replay_marks_an_expired_cursor() {
         .unwrap();
     }
     let replay = replay_events_after(&state, "task-retained", 1).unwrap();
-    assert!(replay.cursor_expired);
-    assert_eq!(replay.oldest_seq, Some(3));
+    assert!(!replay.cursor_expired);
+    assert!(replay.archive_recovered);
+    assert_eq!(replay.replay_source, "archive");
+    assert_eq!(replay.oldest_seq, Some(1));
+    assert_eq!(replay.newest_seq, Some(EVENT_REPLAY_LIMIT + 2));
     assert_eq!(replay.events.len(), EVENT_REPLAY_LIMIT as usize);
-    assert_eq!(replay.events.first().unwrap()["seq"], 3);
+    assert_eq!(replay.events.first().unwrap()["seq"], 2);
+    let tail = replay_events_after(&state, "task-retained", EVENT_REPLAY_LIMIT + 1).unwrap();
+    assert_eq!(tail.events.len(), 1);
+    assert_eq!(tail.events[0]["seq"], EVENT_REPLAY_LIMIT + 2);
+}
+
+#[test]
+fn archive_records_hash_chain_payload_version_and_terminal_snapshot() {
+    let state = state();
+    let first = publish_event(
+        &state,
+        "task-archive-chain",
+        "task_goal",
+        json!({"status": "active"}),
+    )
+    .unwrap()
+    .unwrap();
+    let second = publish_event(
+        &state,
+        "task-archive-chain",
+        "task_final",
+        json!({"status": "succeeded", "execution_state": "completed"}),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(first["payload_schema_version"], 1);
+    assert!(first["previous_event_hash"].is_null());
+    assert_eq!(second["previous_event_hash"], first["event_hash"]);
+    let replay = replay_events_after(&state, "task-archive-chain", 0).unwrap();
+    assert_eq!(replay.replay_source, "archive");
+    assert_eq!(replay.events.len(), 2);
+    let snapshot = replay.latest_snapshot.expect("terminal archive snapshot");
+    assert_eq!(snapshot["schema_version"], 1);
+    assert_eq!(snapshot["source_event_range"]["start_seq"], 1);
+    assert_eq!(snapshot["source_event_range"]["end_seq"], 2);
+    assert_eq!(snapshot["source_event_range"]["event_count"], 2);
+    assert_eq!(snapshot["projection"]["task_status"], "succeeded");
+    assert_eq!(snapshot["projection"]["execution_state"], "completed");
+    assert_eq!(snapshot["projection"]["event_type_counts"]["task_goal"], 1);
+    assert_eq!(snapshot["projection"]["event_type_counts"]["task_final"], 1);
+}
+
+#[test]
+fn legacy_hot_suffix_backfill_adds_archive_envelope_versions() {
+    let state = state();
+    let db = state.core.db.get().expect("get db");
+    db.execute_batch(INIT_TASK_EVENT_SQL)
+        .expect("ensure event schema");
+    db.execute(
+        "INSERT INTO task_event_stream (
+            task_id, seq, event_hash, event_json, created_at_ms
+         ) VALUES (?1, 1, 'legacy-hash', ?2, 1000)",
+        rusqlite::params![
+            "task-legacy-hot",
+            json!({
+                "schema_version": 1,
+                "seq": 1,
+                "timestamp_ms": 1000,
+                "task_id": "task-legacy-hot",
+                "event_kind": "task_observation",
+                "event_type": "task_observation",
+                "payload": {"status": "ok"}
+            })
+            .to_string()
+        ],
+    )
+    .expect("insert legacy hot event");
+    drop(db);
+
+    let replay = replay_events_after(&state, "task-legacy-hot", 0).unwrap();
+    assert_eq!(replay.replay_source, "archive");
+    assert_eq!(replay.events[0]["payload_schema_version"], 1);
+    assert_eq!(replay.events[0]["event_hash"], "legacy-hash");
+    assert!(replay.events[0]["previous_event_hash"].is_null());
+}
+
+#[test]
+fn irrecoverable_archive_gap_returns_structured_expired_cursor_state() {
+    let state = state();
+    for index in 0..3 {
+        publish_event(
+            &state,
+            "task-archive-gap",
+            "task_observation",
+            json!({"index": index}),
+        )
+        .unwrap();
+    }
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "DELETE FROM task_event_archive
+         WHERE task_id = 'task-archive-gap' AND seq <= 2",
+        [],
+    )
+    .expect("create archive gap");
+    drop(db);
+
+    let replay = replay_events_after(&state, "task-archive-gap", 1).unwrap();
+    assert!(replay.cursor_expired);
+    assert!(!replay.archive_recovered);
+    assert_eq!(replay.oldest_seq, Some(3));
+    assert_eq!(replay.events.len(), 1);
+    assert_eq!(replay.events[0]["seq"], 3);
 }
 
 #[tokio::test]

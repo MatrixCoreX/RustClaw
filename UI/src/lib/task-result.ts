@@ -357,6 +357,11 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
   if (eventType) meta.push(`type=${eventType}`);
   if (!payload) return meta;
   for (const key of [
+    "requested_cursor",
+    "oldest_available_seq",
+    "newest_available_seq",
+    "replay_mode",
+    "replay_source",
     "status",
     "state",
     "goal_status",
@@ -865,6 +870,37 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       title: tLocal("子任务节点", "Subagent task node"),
       detail: [childTaskId, readiness].filter(Boolean).join(" · ") || eventType,
       tone: ["failed", "canceled", "timeout"].includes(readiness) ? "failed" : tone,
+      meta,
+    };
+  }
+
+  if (eventType === "archive_replay") {
+    const oldest = field("oldest_available_seq");
+    const newest = field("newest_available_seq");
+    return {
+      eventType,
+      title: tLocal("已恢复历史事件", "Archived events restored"),
+      detail:
+        oldest && newest
+          ? tLocal(`可回放范围 ${oldest} 至 ${newest}。`, `Replay range ${oldest} to ${newest}.`)
+          : tLocal(
+              "任务历史已从持久归档恢复。",
+              "Task history was restored from the durable archive.",
+            ),
+      tone: "ok",
+      meta,
+    };
+  }
+
+  if (eventType === "cursor_expired") {
+    const oldest = field("oldest_available_seq");
+    return {
+      eventType,
+      title: tLocal("事件历史存在缺口", "Event history gap"),
+      detail: oldest
+        ? tLocal(`当前最早可用事件为 ${oldest}。`, `The oldest available event is ${oldest}.`)
+        : tLocal("较早的事件已不可用。", "Earlier events are unavailable."),
+      tone: "attention",
       meta,
     };
   }

@@ -272,6 +272,14 @@ bundle, compares stable machine fields, and does not replay live model/tool
 calls. Deep deterministic step replay can be added later using the same bundle
 format.
 
+`replay export` reads the durable task-event archive rather than relying only
+on the compact event projection embedded in the task result. Exported events
+retain redacted raw machine envelopes, sequence numbers, event/payload schema
+versions, timestamps, event hashes, and previous-event hashes. The server
+drains archived events in bounded pages, so exports are not limited by the
+1,024-event hot SSE suffix. When a task has no archived events, the exporter
+keeps the older task-result projection as a bounded fallback.
+
 `replay diff` emits `diff_classes` for release-gate automation:
 
 | Class | Meaning |

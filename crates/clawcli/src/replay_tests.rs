@@ -1,6 +1,6 @@
 use super::{
-    replay_bundle_json, replay_diff_summary, replay_run_summary, replay_view_json, run_diff,
-    run_run, validate_replay_bundle,
+    replay_bundle_json, replay_bundle_json_with_archived_events, replay_diff_summary,
+    replay_run_summary, replay_view_json, run_diff, run_run, validate_replay_bundle,
 };
 
 #[test]
@@ -55,6 +55,48 @@ fn replay_bundle_redacts_secret_and_private_payload_fields() {
     assert!(bundle_text.contains("provider_rate_limited"));
     assert!(!bundle_text.contains("sk-test_abcdefghijklmnopqrstuvwxyz123456"));
     assert!(!bundle_text.contains("private request content"));
+}
+
+#[test]
+fn replay_bundle_prefers_versioned_archived_events() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-archive-replay".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "task_id": "task-archive-replay",
+            "status": "succeeded"
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+    let archived_events = vec![serde_json::json!({
+        "schema_version": 1,
+        "payload_schema_version": 1,
+        "seq": 41,
+        "timestamp_ms": 1000,
+        "event_hash": "hash-41",
+        "previous_event_hash": "hash-40",
+        "event_kind": "task_final",
+        "event_type": "task_final",
+        "payload": {
+            "status": "succeeded",
+            "api_key": {"redacted": true}
+        }
+    })];
+
+    let bundle = replay_bundle_json_with_archived_events(&task, &archived_events);
+
+    assert_eq!(bundle["event_source"], "task_event_archive");
+    assert_eq!(bundle["events"][0]["schema_version"], 1);
+    assert_eq!(bundle["events"][0]["payload_schema_version"], 1);
+    assert_eq!(bundle["events"][0]["seq"], 41);
+    assert_eq!(bundle["events"][0]["event_hash"], "hash-41");
+    assert_eq!(bundle["events"][0]["raw"]["event_kind"], "task_final");
+    assert_eq!(
+        replay_run_summary(&bundle)["event_source"],
+        "task_event_archive"
+    );
 }
 
 #[test]

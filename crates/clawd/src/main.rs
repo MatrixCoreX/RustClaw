@@ -89,6 +89,7 @@ mod task_admin_routes;
 mod task_budget_contract;
 mod task_context_builder;
 mod task_contract;
+mod task_event_archive;
 mod task_event_transport;
 mod task_journal;
 mod task_lifecycle;

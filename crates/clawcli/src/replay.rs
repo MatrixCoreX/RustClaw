@@ -26,7 +26,9 @@ pub(crate) fn run_export(
     json_output: bool,
 ) -> Result<()> {
     let task = task::get_task_status(base_url, key, task_id)?;
-    let bundle = replay_bundle_json(&task);
+    let archived_events = crate::events::read_task_event_snapshot(base_url, key, task_id, 0)
+        .context("task_replay_archive_read_failed")?;
+    let bundle = replay_bundle_json_with_archived_events(&task, &archived_events);
     if let Some(parent) = output_path
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -133,7 +135,50 @@ fn read_replay_bundle(path: &Path) -> Result<Value> {
     Ok(bundle)
 }
 
+#[cfg(test)]
 fn replay_bundle_json(task: &task::TaskStatusView) -> Value {
+    replay_bundle_json_with_archived_events(task, &[])
+}
+
+fn replay_bundle_json_with_archived_events(
+    task: &task::TaskStatusView,
+    archived_events: &[Value],
+) -> Value {
+    let events = if archived_events.is_empty() {
+        task.events
+            .iter()
+            .map(|event| {
+                json!({
+                    "event_type": &event.event_type,
+                    "line": &event.line,
+                    "fields": redact_value(&json!(&event.fields)),
+                })
+            })
+            .collect::<Vec<_>>()
+    } else {
+        archived_events
+            .iter()
+            .filter_map(|raw| {
+                let event = crate::events::task_event_line(raw)?;
+                Some(json!({
+                    "schema_version": raw.get("schema_version").and_then(Value::as_u64),
+                    "payload_schema_version": raw
+                        .get("payload_schema_version")
+                        .and_then(Value::as_u64),
+                    "seq": raw.get("seq").and_then(Value::as_u64),
+                    "timestamp_ms": raw.get("timestamp_ms").and_then(Value::as_u64),
+                    "event_hash": raw.get("event_hash").and_then(Value::as_str),
+                    "previous_event_hash": raw
+                        .get("previous_event_hash")
+                        .and_then(Value::as_str),
+                    "event_type": event.event_type,
+                    "line": event.line,
+                    "fields": redact_value(&json!(event.fields)),
+                    "raw": redact_value(raw),
+                }))
+            })
+            .collect::<Vec<_>>()
+    };
     json!({
         "schema_version": REPLAY_SCHEMA_VERSION,
         "bundle_kind": REPLAY_BUNDLE_KIND,
@@ -146,14 +191,13 @@ fn replay_bundle_json(task: &task::TaskStatusView) -> Value {
         "task_id": task.task_id,
         "status": task.status,
         "lifecycle_state": task.lifecycle_state(),
+        "event_source": if archived_events.is_empty() {
+            "task_result_projection"
+        } else {
+            "task_event_archive"
+        },
         "task": redact_value(&task.raw_data),
-        "events": task.events.iter().map(|event| {
-            json!({
-                "event_type": &event.event_type,
-                "line": &event.line,
-                "fields": redact_value(&json!(&event.fields)),
-            })
-        }).collect::<Vec<_>>(),
+        "events": events,
     })
 }
 
@@ -276,6 +320,7 @@ fn replay_run_summary(bundle: &Value) -> Value {
         "lifecycle_state": bundle.get("lifecycle_state").and_then(Value::as_str)
             .or_else(|| task.pointer("/task_lifecycle/state").and_then(Value::as_str)),
         "event_count": events,
+        "event_source": bundle.get("event_source").and_then(Value::as_str),
         "redaction_policy": bundle.pointer("/redaction/policy").and_then(Value::as_str),
         "result_source": "recorded_bundle",
         "coverage": replay_recording_coverage(bundle),
