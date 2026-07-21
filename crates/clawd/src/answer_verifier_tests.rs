@@ -1,8 +1,9 @@
 use serde_json::json;
 
 use super::{
-    local_missing_evidence_verifier_gap, local_missing_evidence_verifier_gap_for_answer,
-    observed_scalar_values_from_evidence_map, observed_scalar_values_from_evidence_map_for_route,
+    collect_single_path_values_from_json, local_missing_evidence_verifier_gap,
+    local_missing_evidence_verifier_gap_for_answer, observed_scalar_values_from_evidence_map,
+    observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route,
     post_write_content_evidence_missing_before_verifier,
@@ -10,6 +11,23 @@ use super::{
     strict_list_route_allows_observed_subset, structural_satisfaction_can_skip_verifier,
     structurally_satisfies_answer_contract,
 };
+
+#[test]
+fn workspace_root_joins_relative_search_results_as_absolute_path_evidence() {
+    let mut paths = std::collections::BTreeSet::new();
+    collect_single_path_values_from_json(
+        &json!({
+            "action": "find_name",
+            "root": "",
+            "workspace_root": "/workspace/rustclaw",
+            "results": ["AGENTS.md", "patches/open-lark/AGENTS.md"]
+        }),
+        &mut paths,
+    );
+
+    assert!(paths.contains("/workspace/rustclaw/AGENTS.md"));
+    assert!(paths.contains("/workspace/rustclaw/patches/open-lark/AGENTS.md"));
+}
 
 fn route_with_mode() -> crate::answer_verifier::AnswerContract {
     crate::answer_verifier::AnswerContract::new(

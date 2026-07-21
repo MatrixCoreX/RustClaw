@@ -63,6 +63,8 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("restate the same successful result"));
     assert!(prompt.contains("Copy the complete capability name exactly"));
     assert!(prompt.contains("Never derive a capability name by combining a skill name"));
+    assert!(prompt.contains("runtime delivery token (`FILE:<path>`"));
+    assert!(prompt.contains("speculative claim about channel attachment support"));
     assert!(prompt.contains("preserve each"));
     assert!(prompt.contains("scalar, object, or array shape"));
 }
