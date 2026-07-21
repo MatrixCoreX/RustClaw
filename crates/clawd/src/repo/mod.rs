@@ -52,8 +52,10 @@ pub(crate) use task_checkpoint_action::{
 };
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_mutation_ledger::{
-    begin_task_mutation, complete_task_mutation, mark_task_mutation_uncertain,
-    BeginTaskMutationOutcome, TaskMutationClaimRejected, TaskMutationLease, TaskMutationRecord,
+    begin_task_mutation, commit_task_mutation, mark_task_mutation_uncertain,
+    reconcile_task_mutation, record_task_mutation_receipt, record_task_mutation_verification,
+    start_task_mutation_attempt, BeginTaskMutationOutcome, ReconcileTaskMutationOutcome,
+    TaskMutationClaimRejected, TaskMutationLease, TaskMutationReconciliation, TaskMutationRecord,
 };
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;
 pub(crate) use task_resume_execution::{

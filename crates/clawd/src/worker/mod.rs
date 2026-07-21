@@ -16,6 +16,7 @@ mod locator;
 mod resume_replay_executor;
 pub(crate) mod run_capability;
 mod run_skill_finalize;
+mod run_skill_mutation;
 mod run_skill_permission;
 mod runtime_support;
 pub(crate) mod task_budget;
@@ -554,17 +555,63 @@ pub(crate) async fn process_run_skill_task(
         )
         .await;
     }
-    let result = if verification.allowed() {
-        crate::run_skill_with_runner_outcome(
+    let mutation_guard = if verification.allowed() {
+        run_skill_mutation::prepare_direct_run_skill_mutation(
             state,
             task,
             &prepared_input.skill_name,
-            prepared_input.args,
+            &prepared_input.args,
         )
-        .await
+        .map_err(anyhow::Error::msg)?
+    } else {
+        run_skill_mutation::DirectRunSkillMutationGuard::NotRequired
+    };
+    if let run_skill_mutation::DirectRunSkillMutationGuard::ReconciliationRequired(record) =
+        &mutation_guard
+    {
+        return run_skill_mutation::finalize_direct_run_skill_reconciliation(
+            state,
+            task,
+            &prepared_input.skill_name,
+            &record.action_ref,
+            &record.fingerprint_hash,
+        );
+    }
+    let result = if verification.allowed() {
+        match &mutation_guard {
+            run_skill_mutation::DirectRunSkillMutationGuard::ReplaySuppressed(record) => Ok(
+                run_skill_mutation::replay_suppressed_run_skill_outcome(record),
+            ),
+            _ => {
+                let execution_context = mutation_guard.execution_context();
+                crate::skills::run_skill_with_runner_outcome_with_context(
+                    state,
+                    task,
+                    &prepared_input.skill_name,
+                    prepared_input.args,
+                    execution_context.as_ref(),
+                )
+                .await
+            }
+        }
     } else {
         Err(verification.denial_error(&prepared_input.skill_name))
     };
+    if !run_skill_mutation::persist_direct_run_skill_mutation_result(
+        state,
+        &mutation_guard,
+        &result,
+    ) {
+        if let run_skill_mutation::DirectRunSkillMutationGuard::Acquired(lease) = &mutation_guard {
+            return run_skill_mutation::finalize_direct_run_skill_reconciliation(
+                state,
+                task,
+                &prepared_input.skill_name,
+                &lease.record.action_ref,
+                &lease.record.fingerprint_hash,
+            );
+        }
+    }
 
     finalize_run_skill_result(
         state,

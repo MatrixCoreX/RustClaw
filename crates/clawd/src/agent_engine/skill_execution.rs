@@ -11,7 +11,7 @@ use super::{
     AgentLoopGuardPolicy, AppState, ClaimedTask, LoopState, SkillActionOutcome,
     WriteFileEffectivePath, TASK_CANCELED_ERR,
 };
-use crate::{repo, run_skill_with_runner_outcome};
+use crate::repo;
 
 #[path = "child_task_execution_policy.rs"]
 mod child_task_execution_policy;
@@ -1061,6 +1061,14 @@ pub(super) async fn execute_prepared_skill_action(
     let structured_validation_slot = Arc::clone(&structured_validation);
     let structured_extra_slot = Arc::clone(&structured_extra);
     let exec_args_for_run = exec_args.clone();
+    let mutation_execution_context =
+        mutation_guard
+            .as_ref()
+            .map(|lease| crate::skills::SkillExecutionContext {
+                action_ref: lease.record.action_ref.clone(),
+                idempotency_key: lease.record.idempotency_key.clone(),
+                attempt_no: lease.record.attempt_no,
+            });
     let mcp_descriptor = state.mcp_tool(normalized_skill);
     let is_mcp_tool = mcp_descriptor.is_some();
     let mcp_started_at = is_mcp_tool.then(Instant::now);
@@ -1075,6 +1083,7 @@ pub(super) async fn execute_prepared_skill_action(
             let structured_validation_slot = Arc::clone(&structured_validation_slot);
             let structured_extra_slot = Arc::clone(&structured_extra_slot);
             let exec_args_for_run = exec_args_for_run.clone();
+            let mutation_execution_context = mutation_execution_context.clone();
             let execute = async move {
                 if is_mcp_tool {
                     let (raw, extra) =
@@ -1085,9 +1094,14 @@ pub(super) async fn execute_prepared_skill_action(
                     }
                     return Ok(raw);
                 }
-                let outcome =
-                    run_skill_with_runner_outcome(state, task, normalized_skill, exec_args_for_run)
-                        .await?;
+                let outcome = crate::skills::run_skill_with_runner_outcome_with_context(
+                    state,
+                    task,
+                    normalized_skill,
+                    exec_args_for_run,
+                    mutation_execution_context.as_ref(),
+                )
+                .await?;
                 if let Ok(mut slot) = structured_validation_slot.lock() {
                     *slot = outcome.validation.clone();
                 }
@@ -1126,19 +1140,6 @@ pub(super) async fn execute_prepared_skill_action(
         step_execution.status,
     )
     .await;
-    let mutation_completion_persisted = match (&mutation_guard, step_execution.output.as_deref()) {
-        (Some(lease), Some(output)) => super::mutation_ledger::complete_mutation_execution(
-            state,
-            lease,
-            output,
-            structured_extra.as_ref(),
-        ),
-        (Some(lease), None) => {
-            super::mutation_ledger::mark_mutation_execution_uncertain(state, lease);
-            false
-        }
-        (None, _) => true,
-    };
     let action_effect = crate::execution_recipe::effective_action_effect_for_recipe(
         loop_state.execution_recipe,
         raw_action_effect,
@@ -1153,6 +1154,21 @@ pub(super) async fn execute_prepared_skill_action(
         )
     } else {
         crate::execution_recipe::ValidationObservation::Passed
+    };
+    let mutation_completion_persisted = match (&mutation_guard, step_execution.output.as_deref()) {
+        (Some(lease), Some(output)) => super::mutation_ledger::complete_mutation_execution(
+            state,
+            lease,
+            output,
+            structured_extra.as_ref(),
+            &validation_observation,
+            raw_action_effect.validates,
+        ),
+        (Some(lease), None) => {
+            super::mutation_ledger::mark_mutation_execution_uncertain(state, lease);
+            false
+        }
+        (None, _) => true,
     };
     let capability_result = crate::capability_result::envelope_for_step_execution(
         normalized_skill,

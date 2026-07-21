@@ -46,14 +46,23 @@ flowchart TD
     Q -->|respond| R[终端回复]
     Q -->|synthesize_answer| S[基于证据合成]
     Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
-    QP -->|long-tail async_start| AS[Async media/job adapter<br/>pending_async_job + poll/cancel contract + checkpoint]
-    AS --> ASP[进度机器回复<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
-    QP -->|call_tool| T[工具执行]
-    QP -->|call_skill| U[共享技能调度]
+    QP --> MG{非幂等变更?}
     RS --> RSG[不经过 planner / resolver 选择<br/>不做 verifier 语义选择]
-    RSG --> U
-    T --> V[观测结果]
-    U --> V
+    RSG --> MG
+    MG -->|是| MI[调用前持久化 intent + 确定性 idempotency key<br/>再持久化 attempt]
+    MG -->|否| EX{执行 adapter}
+    MI --> EX
+    EX -->|long-tail async_start| AS[Async media/job adapter<br/>pending_async_job + poll/cancel contract + checkpoint]
+    AS --> ASP[进度机器回复<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
+    EX -->|call_tool| T[工具执行]
+    EX -->|call_skill / 直接 run_skill| U[共享技能调度]
+    T --> MR{Mutation receipt 状态}
+    U --> MR
+    MR -->|非变更| V[观测结果]
+    MR -->|收到 receipt| MC[在精确 worker claim 下<br/>持久化 receipt + verification + commit]
+    MR -->|timeout / crash 不确定| MU[Reconciliation checkpoint<br/>不从 prose 猜测]
+    MC --> V
+    MU --> ASP
     S --> V
     V --> W[证据覆盖 + 答案形状检查]
     W -->|修复 / 缺证据| WR[RepairEnvelope<br/>issue codes + attempt ledger]
@@ -106,6 +115,7 @@ flowchart TD
 - `Agent-loop 语义权威`：每个普通自然语言任务都会进入循环，由 planner 决定回复、澄清、调用能力、执行工具或技能、按证据合成、修复、checkpoint 或停止。
 - `CapabilityResolver / PlanVerifier`：把 `call_capability` 解析到当前 tool 或 skill 实现，再检查可见性、必填参数、allowed action、risk/effect、confirmation 和输出契约。
 - `permission_decision`：verifier 和 preflight blocker 输出 `allowed`、`needs_confirmation`、`denied_by_policy`、`dry_run_required`、`external_provider_blocked`、`risk_level`、`action_effect`、registry dedup/idempotency 等机器字段。UI、API、finalizer 和 i18n 应消费这些字段渲染说明，而不是解析 runtime prose。
+- `Side-effect outbox`：planner-owned 执行与显式 `kind=run_skill` 的非幂等变更都会在调用前依次持久化 `intent_recorded` 和 `attempt_started`。由 task 与规范 action fingerprint 推导的确定性 key 会进入 runner context、外部 HTTP `Idempotency-Key`，或受支持本地 adapter 的环境变量。Receipt、verification、reconciliation 和 commit 都由精确 worker claim 隔离；已有 receipt 的状态禁止重放原动作，timeout/crash 结果不确定时建立 `mutation_reconciliation` checkpoint，并且只接受 fingerprint 绑定的结构化 `applied|not_applied|still_unknown` resume constraint。
 - `Async job start`：长尾工具可以先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after`、`can_poll`、`can_cancel` 的机器回复，同时任务仍可通过 checkpoint 轮询恢复。媒体技能通过 registry capability 暴露这类形状，例如 `image.generate` / `image.poll` / `image.cancel`、`audio.synthesize` / `audio.poll` / `audio.cancel`、`video.generate` / `video.poll` / `video.cancel` 和 `music.generate` / `music.poll` / `music.cancel`。
 - `Evidence coverage`：工具、技能和合成输出都会成为循环内观测；缺证据或可恢复失败会带着压缩的已尝试方法历史回到循环。
 - `TaskBudgetSlice / BudgetDecision`：交互任务使用可恢复的软墙钟切片和结构化进度，不再把普通 `max_rounds` 或 `max_tool_calls` 当完成阈值。每次模型/工具结果被观测后，runtime 根据 verifier 通过的计划事实、evidence/artifact 进度、continuation、policy、取消、deadline 和管理员硬上限，选择 `continue`、`finish`、`checkpoint_requeue`、`waiting`、`needs_user` 或 `terminal`。Profile timeout class 会在软切片边界前约束 planner provider 调用和 agent-loop tool/MCP 调用；变更动作超时后进入 reconciliation，而不是盲目重放。模型可以请求续跑，但不能提高成本、权限、时间或资源上限。

@@ -108,6 +108,29 @@ Configured administrator hard ceilings cover cumulative model turns, tool
 calls, tokens, estimated cost, elapsed time, continuations, and non-resumable
 tool runtime. Model output cannot raise them.
 
+## Side-Effect Outbox
+
+Planner-owned calls and explicit `kind=run_skill` calls share the same
+claim-fenced mutation ledger when registry policy marks an action mutating and
+non-idempotent. The authoritative phase sequence is:
+
+`intent_recorded -> attempt_started -> receipt_recorded ->
+verification_pending|verified -> committed`
+
+An ambiguous attempt moves to `reconciliation_required`. A fingerprint-bound
+structured resume constraint may resolve it as `not_applied` (retry with the
+same deterministic key), `applied` (reconciled and committed without replay),
+or `still_unknown` (remain waiting). Runtime must not parse user-visible
+`text` or `error_text` to choose a resolution.
+
+The deterministic idempotency key is derived from task identity plus canonical
+action fingerprint. Supported adapters receive it through runner
+`context.execution`, external HTTP `Idempotency-Key`, or an isolated local
+adapter environment. Receipt, verification, reconciliation, and commit writes
+all require the exact active `(lease_owner, claim_attempt)`. A receipt-bearing
+phase suppresses original-action replay even if the worker restarts before task
+finalization.
+
 ## Recovery Rules
 
 - Ordinary stale `running` tasks can be marked `timeout` from machine timestamps and worker lease state.

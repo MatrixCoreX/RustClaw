@@ -46,14 +46,23 @@ flowchart TD
     Q -->|respond| R[Terminal response]
     Q -->|synthesize_answer| S[Grounded synthesis]
     Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
-    QP -->|long-tail async_start| AS[Async media/job adapter<br/>pending_async_job + poll/cancel contract + checkpoint]
-    AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
-    QP -->|call_tool| T[Tool execution]
-    QP -->|call_skill| U[Shared skill dispatch]
+    QP --> MG{Non-idempotent mutation?}
     RS --> RSG[No planner / resolver choice<br/>no verifier semantic selection]
-    RSG --> U
-    T --> V[Observed result]
-    U --> V
+    RSG --> MG
+    MG -->|yes| MI[Persist intent + deterministic idempotency key<br/>persist attempt before invocation]
+    MG -->|no| EX{Execution adapter}
+    MI --> EX
+    EX -->|long-tail async_start| AS[Async media/job adapter<br/>pending_async_job + poll/cancel contract + checkpoint]
+    AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
+    EX -->|call_tool| T[Tool execution]
+    EX -->|call_skill / direct run_skill| U[Shared skill dispatch]
+    T --> MR{Mutation receipt state}
+    U --> MR
+    MR -->|not a mutation| V[Observed result]
+    MR -->|receipt returned| MC[Persist receipt + verification + commit<br/>under exact worker claim]
+    MR -->|timeout / crash ambiguity| MU[Reconciliation checkpoint<br/>never infer from prose]
+    MC --> V
+    MU --> ASP
     S --> V
     V --> W[Evidence coverage + answer-shape check]
     W -->|repair / missing evidence| WR[RepairEnvelope<br/>issue codes + attempt ledger]
@@ -107,6 +116,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Agent-loop semantic authority`: every ordinary natural-language task enters the loop. The planner decides whether to respond, clarify, call a capability, execute a tool or skill, synthesize from evidence, repair, checkpoint, or stop.
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
+- `Side-effect outbox`: non-idempotent mutations from both planner-owned execution and explicit `kind=run_skill` persist `intent_recorded` and `attempt_started` before invocation. A deterministic key derived from task plus canonical action fingerprint enters runner context, external HTTP `Idempotency-Key`, or supported local-adapter environment. Receipt, verification, reconciliation, and commit transitions are fenced by the exact worker claim. Receipt-bearing states suppress original-action replay; ambiguous timeout/crash state checkpoints as `mutation_reconciliation` and accepts only a fingerprint-bound structured `applied|not_applied|still_unknown` resume constraint.
 - `Async job start`: long-tail tool work can publish a machine reply with `checkpoint_id`, `poll_ref`, `next_check_after`, `can_poll`, and `can_cancel` while the task remains recoverable through checkpoint polling. Media skills expose this shape through registry capabilities such as `image.generate` / `image.poll` / `image.cancel`, `audio.synthesize` / `audio.poll` / `audio.cancel`, `video.generate` / `video.poll` / `video.cancel`, and `music.generate` / `music.poll` / `music.cancel`.
 - `Evidence coverage`: tool, skill, and synthesis outputs become loop observations. Missing evidence or recoverable failures go back into the loop with compact attempted-method history.
 - `TaskBudgetSlice / BudgetDecision`: interactive work is governed by resumable soft wall-time slices and structured progress, not ordinary `max_rounds` or `max_tool_calls` completion thresholds. After each observed model/tool result, runtime chooses `continue`, `finish`, `checkpoint_requeue`, `waiting`, `needs_user`, or `terminal` from verifier-approved plan facts, evidence/artifact progress, continuation state, policy, cancellation, deadlines, and administrator hard ceilings. Profile timeout classes cap planner provider calls and agent-loop tool/MCP calls before the slice boundary; a timed-out mutation enters reconciliation instead of blind replay. The model can request continuation but cannot raise cost, permission, time, or resource ceilings.

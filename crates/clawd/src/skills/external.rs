@@ -17,6 +17,7 @@ pub(crate) async fn execute_external_skill(
     canonical_skill_name: &str,
     args: &Value,
     source: &str,
+    execution_context: Option<&super::SkillExecutionContext>,
 ) -> Result<Value, String> {
     let reg = state
         .get_skills_registry()
@@ -26,14 +27,30 @@ pub(crate) async fn execute_external_skill(
         .ok_or_else(|| "external skill missing external_kind in registry".to_string())?;
     match config.kind {
         "http_json" => {
-            execute_external_http_json(state, task, canonical_skill_name, args, source).await
+            execute_external_http_json(
+                state,
+                task,
+                canonical_skill_name,
+                args,
+                source,
+                execution_context,
+            )
+            .await
         }
         "local_shell_recipe" => {
             execute_external_local_shell_recipe(state, task, canonical_skill_name, args, source)
                 .await
         }
         "local_script" => {
-            execute_external_local_script(state, task, canonical_skill_name, args, source).await
+            execute_external_local_script(
+                state,
+                task,
+                canonical_skill_name,
+                args,
+                source,
+                execution_context,
+            )
+            .await
         }
         "prompt_bundle" => Ok(external_kind_machine_error_response(
             task,
@@ -256,6 +273,7 @@ async fn execute_external_local_script(
     canonical_skill_name: &str,
     args: &Value,
     source: &str,
+    execution_context: Option<&super::SkillExecutionContext>,
 ) -> Result<Value, String> {
     let reg = state
         .get_skills_registry()
@@ -343,6 +361,17 @@ async fn execute_external_local_script(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    if let Some(execution_context) = execution_context {
+        cmd.env(
+            "RUSTCLAW_IDEMPOTENCY_KEY",
+            &execution_context.idempotency_key,
+        )
+        .env("RUSTCLAW_ACTION_REF", &execution_context.action_ref)
+        .env(
+            "RUSTCLAW_MUTATION_ATTEMPT",
+            execution_context.attempt_no.to_string(),
+        );
+    }
 
     let child = cmd
         .spawn()
@@ -592,6 +621,7 @@ async fn execute_external_http_json(
     canonical_skill_name: &str,
     args: &Value,
     source: &str,
+    execution_context: Option<&super::SkillExecutionContext>,
 ) -> Result<Value, String> {
     use claw_core::skill_registry::ExternalSkillConfig;
 
@@ -653,6 +683,12 @@ async fn execute_external_http_json(
         "args": args,
         "task_id": task.task_id,
         "source": source,
+        "execution": execution_context.map(|context| serde_json::json!({
+            "schema_version": 1,
+            "action_ref": context.action_ref,
+            "idempotency_key": context.idempotency_key,
+            "attempt_no": context.attempt_no,
+        })),
     });
 
     let timeout = Duration::from_secs(timeout_secs);
@@ -664,6 +700,9 @@ async fn execute_external_http_json(
         .timeout(timeout);
     if let Some((name, value)) = auth_header {
         req = req.header(name.as_str(), value);
+    }
+    if let Some(execution_context) = execution_context {
+        req = req.header("Idempotency-Key", &execution_context.idempotency_key);
     }
     let res = req.send().await.map_err(|e| {
         let msg = format!("external http_json request failed: {}", e);

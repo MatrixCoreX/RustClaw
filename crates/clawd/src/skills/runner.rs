@@ -108,6 +108,7 @@ pub(crate) async fn run_skill_with_runner_once(
     args: &serde_json::Value,
     source: &str,
     skill_timeout_secs: u64,
+    execution_context: Option<&super::SkillExecutionContext>,
 ) -> Result<serde_json::Value, String> {
     let credential_context = if canonical_skill_name == "crypto" {
         exchange_credential_context_for_task(state, task)
@@ -119,7 +120,8 @@ pub(crate) async fn run_skill_with_runner_once(
         .clone()
         .map(Value::String)
         .unwrap_or(Value::Null);
-    let skill_context = build_runner_skill_context(state, task, source, credential_context);
+    let skill_context =
+        build_runner_skill_context(state, task, source, credential_context, execution_context);
     let req_line = serde_json::json!({
         "request_id": task.task_id,
         "user_id": task.user_id,
@@ -517,6 +519,7 @@ pub(crate) fn build_runner_skill_context(
     task: &ClaimedTask,
     source: &str,
     credential_context: Value,
+    execution_context: Option<&super::SkillExecutionContext>,
 ) -> Value {
     let mut ctx = serde_json::Map::new();
     ctx.insert("source".to_string(), Value::String(source.to_string()));
@@ -545,6 +548,17 @@ pub(crate) fn build_runner_skill_context(
             .unwrap_or(Value::Null),
     );
     ctx.insert("exchange_credentials".to_string(), credential_context);
+    if let Some(execution_context) = execution_context {
+        ctx.insert(
+            "execution".to_string(),
+            serde_json::json!({
+                "schema_version": 1,
+                "action_ref": execution_context.action_ref,
+                "idempotency_key": execution_context.idempotency_key,
+                "attempt_no": execution_context.attempt_no,
+            }),
+        );
+    }
     let locale_tag = super::task_request_locale_tag(state, task);
     ctx.insert("locale".to_string(), Value::String(locale_tag.clone()));
     ctx.insert("language".to_string(), Value::String(locale_tag));

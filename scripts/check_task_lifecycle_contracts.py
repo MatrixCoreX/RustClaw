@@ -145,10 +145,47 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "crates/clawd/src/repo/task_mutation_ledger.rs": (
         "TaskMutationClaimRejected",
+        "enum TaskMutationPhase",
+        "IntentRecorded",
+        "AttemptStarted",
+        "ReceiptRecorded",
+        "VerificationPending",
+        "ReconciliationRequired",
+        "mutation_idempotency_key",
+        "start_task_mutation_attempt",
+        "record_task_mutation_receipt",
+        "record_task_mutation_verification",
+        "reconcile_task_mutation",
+        "commit_task_mutation",
         "require_active_task_claim",
         "lease_owner",
         "claim_attempt",
         "WORKER_LEASE_LOST_STATUS_CODE",
+    ),
+    "crates/clawd/src/agent_engine/mutation_ledger.rs": (
+        "load_task_mutation_reconciliation_directive",
+        '"/task_lifecycle/resume_input/new_constraints/mutation_reconciliation"',
+        '"fingerprint_hash"',
+        '"disposition"',
+        "safe_reconciliation_projection",
+    ),
+    "crates/clawd/src/skills/runner.rs": (
+        '"execution"',
+        '"idempotency_key"',
+        '"attempt_no"',
+    ),
+    "crates/clawd/src/skills/external.rs": (
+        '"Idempotency-Key"',
+        '"RUSTCLAW_IDEMPOTENCY_KEY"',
+        '"execution"',
+    ),
+    "crates/clawd/src/worker/run_skill_mutation.rs": (
+        "prepare_direct_run_skill_mutation",
+        "persist_direct_run_skill_mutation_result",
+        "finalize_direct_run_skill_reconciliation",
+        "DirectRunSkillMutationGuard",
+        "mutation_reconciliation",
+        "update_task_checkpointed_result",
     ),
     "crates/clawd/src/repo/task_resume_execution/resume_lease.rs": (
         "merge_progress_with_active_resume_coordination",
@@ -426,6 +463,15 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
         for token in tokens:
             if token in text:
                 findings.append(f"forbidden_interactive_budget_token:{rel_path}:{token}")
+
+    mutation_ledger = texts.get("crates/clawd/src/repo/task_mutation_ledger.rs") or ""
+    for token in (
+        "status             TEXT NOT NULL CHECK (status IN ('started', 'completed', 'uncertain'))",
+        "BeginTaskMutationOutcome::Completed",
+        "BeginTaskMutationOutcome::Uncertain",
+    ):
+        if token in mutation_ledger:
+            findings.append(f"forbidden_legacy_mutation_ledger_token:{token}")
 
     return findings
 

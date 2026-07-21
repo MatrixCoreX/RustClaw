@@ -1,6 +1,6 @@
 use super::{
-    prepare_mutation_execution, record_completed_without_replay, safe_mutation_outcome_projection,
-    MutationExecutionGuard,
+    load_task_mutation_reconciliation_directive, prepare_mutation_execution,
+    record_completed_without_replay, safe_mutation_outcome_projection, MutationExecutionGuard,
 };
 
 fn task_fixture() -> crate::ClaimedTask {
@@ -134,8 +134,10 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
         task_id: task.task_id.clone(),
         fingerprint_hash: "fingerprint-hash".to_string(),
         action_ref: "skill:run_cmd:action:async_start".to_string(),
-        status: "completed".to_string(),
-        outcome: safe_mutation_outcome_projection(Some(&serde_json::json!({
+        phase: crate::repo::task_mutation_ledger::TaskMutationPhase::Committed,
+        idempotency_key: "stable-idempotency-key".to_string(),
+        attempt_no: 1,
+        receipt: safe_mutation_outcome_projection(Some(&serde_json::json!({
             "pending_async_job": {
                 "job_id": "local_process:/tmp/rustclaw-job-1",
                 "status": "accepted",
@@ -145,6 +147,11 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
                 "message_key": "clawd.task.async_job_pending"
             }
         }))),
+        verification: Some(serde_json::json!({
+            "schema_version": 1,
+            "status": "passed"
+        })),
+        reconciliation: None,
     };
 
     let outcome = record_completed_without_replay(
@@ -185,4 +192,123 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
             .map(String::as_str),
         Some("true")
     );
+}
+
+#[test]
+fn structured_reconciliation_commits_applied_effect_without_replaying_action() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture();
+    insert_active_task_claim(&state, &task);
+    let args = serde_json::json!({
+        "action": "append_text",
+        "path": "notes.txt",
+        "content": "one"
+    });
+    let fingerprint = "skill:fs_basic:append:notes";
+    let first = prepare_mutation_execution(
+        &state,
+        &task,
+        "fs_basic",
+        &args,
+        fingerprint,
+        crate::execution_recipe::ActionEffect::mutate(),
+    )
+    .expect("prepare first mutation");
+    let MutationExecutionGuard::Acquired(lease) = first else {
+        panic!("expected acquired mutation");
+    };
+    super::mark_mutation_execution_uncertain(&state, &lease);
+
+    let result = serde_json::json!({
+        "task_lifecycle": {
+            "resume_input": {
+                "new_constraints": {
+                    "mutation_reconciliation": {
+                        "schema_version": 1,
+                        "fingerprint_hash": lease.record.fingerprint_hash,
+                        "disposition": "applied",
+                        "status_code": "provider_operation_found",
+                        "receipt_ref": "provider-operation-42",
+                        "text": "must not drive reconciliation",
+                        "secret": "must not persist"
+                    }
+                }
+            }
+        }
+    });
+    {
+        let db = state.core.db.get().expect("test db");
+        db.execute(
+            "UPDATE tasks SET result_json = ?2 WHERE task_id = ?1",
+            rusqlite::params![task.task_id, result.to_string()],
+        )
+        .expect("store reconciliation input");
+    }
+
+    let resumed = prepare_mutation_execution(
+        &state,
+        &task,
+        "fs_basic",
+        &args,
+        fingerprint,
+        crate::execution_recipe::ActionEffect::mutate(),
+    )
+    .expect("apply reconciliation");
+    let MutationExecutionGuard::Completed(record) = resumed else {
+        panic!("applied reconciliation must suppress original replay");
+    };
+    assert_eq!(
+        record.phase,
+        crate::repo::task_mutation_ledger::TaskMutationPhase::Committed
+    );
+    assert_eq!(
+        record
+            .reconciliation
+            .as_ref()
+            .and_then(|value| value.get("receipt_ref"))
+            .and_then(serde_json::Value::as_str),
+        Some("provider-operation-42")
+    );
+    let serialized = record
+        .reconciliation
+        .expect("reconciliation projection")
+        .to_string();
+    assert!(!serialized.contains("must not drive reconciliation"));
+    assert!(!serialized.contains("must not persist"));
+}
+
+#[test]
+fn prose_resume_input_cannot_resolve_mutation_without_machine_directive() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture();
+    insert_active_task_claim(&state, &task);
+    {
+        let db = state.core.db.get().expect("test db");
+        db.execute(
+            "UPDATE tasks SET result_json = ?2 WHERE task_id = ?1",
+            rusqlite::params![
+                task.task_id,
+                serde_json::json!({
+                    "task_lifecycle": {
+                        "resume_input": {
+                            "user_message": "applied, please continue",
+                            "new_constraints": {
+                                "mutation_reconciliation": {
+                                    "fingerprint_hash": "different-fingerprint",
+                                    "disposition": "applied"
+                                }
+                            }
+                        }
+                    }
+                })
+                .to_string()
+            ],
+        )
+        .expect("store prose resume input");
+    }
+
+    let directive =
+        load_task_mutation_reconciliation_directive(&state, &task, "expected-fingerprint")
+            .expect("load directive");
+    assert!(directive.is_none());
 }
