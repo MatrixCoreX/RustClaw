@@ -129,6 +129,11 @@ fn first_round_uses_only_budgeted_compact_index() {
         system_basic_line.contains("allowed_kind=current_time|current_user|current_working_directory|host_name|kernel_release"),
         "system_basic_line={system_basic_line}"
     );
+    assert!(
+        system_basic_line
+            .contains("allowed_sort_by=mtime_asc|mtime_desc|name|name_desc|size_asc|size_desc"),
+        "system_basic_line={system_basic_line}"
+    );
     let fs_basic_line = context
         .text
         .lines()
