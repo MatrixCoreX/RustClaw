@@ -954,7 +954,7 @@ async fn run_cmd_command_not_found_uses_exit_code_category() {
 }
 
 #[tokio::test]
-async fn run_safe_command_truncates_noisy_command_output() {
+async fn run_safe_command_externalizes_noisy_command_output() {
     let root = TempDirGuard::new("run_cmd_output_limit");
     let output = super::run_safe_command(
         &root.path,
@@ -966,13 +966,27 @@ async fn run_safe_command_truncates_noisy_command_output() {
         false,
     )
     .await
-    .expect("noisy command should return truncated output");
+    .expect("noisy command should return artifact projection");
+    let projection: serde_json::Value =
+        serde_json::from_str(&output).expect("parse output artifact projection");
 
-    assert!(output.ends_with("..."), "missing ellipsis: {output:?}");
+    assert_eq!(projection["kind"], "tool_output_artifact");
+    assert_eq!(projection["summary"]["output_truncated"], true);
     assert!(
-        output.len() <= 132,
-        "output should be bounded, len={}: {output:?}",
-        output.len()
+        projection["summary"]["excerpt"]
+            .as_str()
+            .is_some_and(|excerpt| excerpt.len() <= 132),
+        "excerpt should stay bounded: {projection}",
+    );
+    let artifact_path = projection["artifact_refs"][0]["path"]
+        .as_str()
+        .expect("artifact path");
+    let full_output =
+        std::fs::read_to_string(root.path.join(artifact_path)).expect("read full artifact output");
+    assert_eq!(full_output.trim().len(), 2000);
+    assert_eq!(
+        projection["range_handles"][0]["read_capability"],
+        "filesystem.read_text_range"
     );
 }
 

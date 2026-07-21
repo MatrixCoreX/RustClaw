@@ -8,6 +8,9 @@ use tokio::sync::mpsc;
 
 use super::*;
 
+#[path = "builtin_run_cmd_artifact.rs"]
+mod output_artifact;
+
 pub(super) fn looks_detached_background_command(command: &str) -> bool {
     let bytes = command.as_bytes();
     let mut saw_terminal_background = false;
@@ -141,7 +144,7 @@ enum CommandOutputEvent {
 fn spawn_command_pipe_reader<R>(
     mut reader: R,
     stream: CommandOutputStream,
-    tx: mpsc::UnboundedSender<CommandOutputEvent>,
+    tx: mpsc::Sender<CommandOutputEvent>,
 ) where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -156,16 +159,19 @@ fn spawn_command_pipe_reader<R>(
                             stream,
                             bytes: buf[..n].to_vec(),
                         })
+                        .await
                         .is_err()
                     {
                         break;
                     }
                 }
                 Err(err) => {
-                    let _ = tx.send(CommandOutputEvent::ReadError {
-                        stream,
-                        error: err.to_string(),
-                    });
+                    let _ = tx
+                        .send(CommandOutputEvent::ReadError {
+                            stream,
+                            error: err.to_string(),
+                        })
+                        .await;
                     break;
                 }
             }
@@ -173,52 +179,24 @@ fn spawn_command_pipe_reader<R>(
     });
 }
 
-fn append_command_output(
-    stream: CommandOutputStream,
-    bytes: &[u8],
-    stdout: &mut Vec<u8>,
-    stderr: &mut Vec<u8>,
-    captured_bytes: &mut usize,
-    max_output_bytes: usize,
-    output_truncated: &mut bool,
-) -> bool {
-    if bytes.is_empty() {
-        return false;
-    }
-    let remaining = max_output_bytes.saturating_sub(*captured_bytes);
-    let take = bytes.len().min(remaining);
-    if take > 0 {
-        match stream {
-            CommandOutputStream::Stdout => stdout.extend_from_slice(&bytes[..take]),
-            CommandOutputStream::Stderr => stderr.extend_from_slice(&bytes[..take]),
-        }
-        *captured_bytes += take;
-    }
-    if take < bytes.len() || *captured_bytes >= max_output_bytes {
-        *output_truncated = true;
-        return true;
-    }
-    false
-}
-
 fn record_command_output_event(
     event: CommandOutputEvent,
     stdout: &mut Vec<u8>,
     stderr: &mut Vec<u8>,
-    captured_bytes: &mut usize,
-    max_output_bytes: usize,
-    output_truncated: &mut bool,
+    artifact_writer: &mut output_artifact::CommandOutputArtifactWriter,
 ) -> Result<bool, String> {
     match event {
-        CommandOutputEvent::Chunk { stream, bytes } => Ok(append_command_output(
-            stream,
-            &bytes,
-            stdout,
-            stderr,
-            captured_bytes,
-            max_output_bytes,
-            output_truncated,
-        )),
+        CommandOutputEvent::Chunk { stream, bytes } => artifact_writer
+            .append(
+                match stream {
+                    CommandOutputStream::Stdout => output_artifact::OutputStream::Stdout,
+                    CommandOutputStream::Stderr => output_artifact::OutputStream::Stderr,
+                },
+                &bytes,
+                stdout,
+                stderr,
+            )
+            .map_err(|error| format!("run_cmd.output_artifact_write_failed error={error}")),
         CommandOutputEvent::ReadError { stream, error } => Err(format!(
             "run_cmd.output_read_failed stream={stream:?} error={error}"
         )),
@@ -258,6 +236,7 @@ pub(super) struct CommandRunFailure {
     stdout: Option<String>,
     stderr: Option<String>,
     output_truncated: bool,
+    output_artifacts: Option<output_artifact::CommandOutputArtifactSummary>,
 }
 
 impl CommandRunFailure {
@@ -270,6 +249,7 @@ impl CommandRunFailure {
             stdout: None,
             stderr: None,
             output_truncated: false,
+            output_artifacts: None,
         }
     }
 
@@ -288,8 +268,16 @@ impl CommandRunFailure {
         self
     }
 
+    fn with_output_artifacts(
+        mut self,
+        output_artifacts: Option<output_artifact::CommandOutputArtifactSummary>,
+    ) -> Self {
+        self.output_artifacts = output_artifacts;
+        self
+    }
+
     pub(super) fn extra(&self, command: &str, cwd: &Path) -> Value {
-        serde_json::json!({
+        let mut extra = serde_json::json!({
             "command": command.trim(),
             "cwd": cwd.display().to_string(),
             "exit_code": self.exit_code,
@@ -298,7 +286,20 @@ impl CommandRunFailure {
             "stdout": self.stdout,
             "stderr": self.stderr,
             "output_truncated": self.output_truncated,
-        })
+        });
+        if let (Some(object), Some(output_artifacts)) =
+            (extra.as_object_mut(), self.output_artifacts.as_ref())
+        {
+            object.insert(
+                "output_artifact_refs".to_string(),
+                Value::Array(output_artifacts.artifact_refs.clone()),
+            );
+            object.insert(
+                "output_total_bytes".to_string(),
+                Value::Number((output_artifacts.total_bytes as u64).into()),
+            );
+        }
+        extra
     }
 }
 
@@ -393,6 +394,7 @@ pub(crate) async fn run_safe_command(
         allow_sudo,
         claw_core::config::ToolSandboxMode::DangerFull,
         cwd,
+        "test-task",
     )
     .await
     .map_err(RunSafeCommandError::into_text)
@@ -419,6 +421,7 @@ pub(crate) async fn run_safe_command_with_sandbox(
         allow_sudo,
         sandbox_mode,
         workspace_root,
+        "direct",
     )
     .await
     .map_err(RunSafeCommandError::into_text)
@@ -434,6 +437,7 @@ pub(super) async fn run_safe_command_detailed(
     allow_sudo: bool,
     sandbox_mode: claw_core::config::ToolSandboxMode,
     workspace_root: &Path,
+    output_artifact_task_id: &str,
 ) -> Result<String, RunSafeCommandError> {
     if command.len() > max_cmd_length {
         return Err(RunSafeCommandError::Command(CommandRunFailure::new(
@@ -488,7 +492,7 @@ pub(super) async fn run_safe_command_detailed(
     })?;
     let child_pid = child.id();
 
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::channel(64);
     if let Some(stdout) = child.stdout.take() {
         spawn_command_pipe_reader(stdout, CommandOutputStream::Stdout, tx.clone());
     }
@@ -504,9 +508,12 @@ pub(super) async fn run_safe_command_detailed(
     tokio::pin!(idle_sleep);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let mut captured_bytes = 0usize;
-    let mut output_truncated = false;
-    let mut output_limit_reached = false;
+    let mut artifact_writer = output_artifact::CommandOutputArtifactWriter::new(
+        workspace_root,
+        output_artifact_task_id,
+        max_output_bytes,
+    );
+    let mut output_hard_limit_reached = false;
     let mut timeout_failure: Option<CommandRunFailure> = None;
     let mut status = None;
     let mut pipes_closed = false;
@@ -525,12 +532,10 @@ pub(super) async fn run_safe_command_detailed(
                         event,
                         &mut stdout,
                         &mut stderr,
-                        &mut captured_bytes,
-                        max_output_bytes,
-                        &mut output_truncated,
+                        &mut artifact_writer,
                     )?;
                     if limit_hit {
-                        output_limit_reached = true;
+                        output_hard_limit_reached = true;
                         break;
                     }
                 }
@@ -545,15 +550,13 @@ pub(super) async fn run_safe_command_detailed(
                     event,
                     &mut stdout,
                     &mut stderr,
-                    &mut captured_bytes,
-                    max_output_bytes,
-                    &mut output_truncated,
+                    &mut artifact_writer,
                 )?;
                 idle_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(idle_timeout));
                 if limit_hit {
-                    output_limit_reached = true;
+                    output_hard_limit_reached = true;
                     tracing::info!(
-                        "run_cmd output limit reached; killing shell (max_output_bytes={}): {}",
+                        "run_cmd output artifact hard limit reached; killing shell (excerpt_bytes={}): {}",
                         max_output_bytes,
                         crate::truncate_for_log(command)
                     );
@@ -594,20 +597,28 @@ pub(super) async fn run_safe_command_detailed(
         }
     }
 
+    let output_artifacts = artifact_writer.finish().map_err(|error| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "output_artifact_finalize_failed",
+            format!("run_cmd.output_artifact_finalize_failed error={error}"),
+        ))
+    })?;
+
     if let Some(failure) = timeout_failure {
-        return Err(RunSafeCommandError::Command(failure));
+        return Err(RunSafeCommandError::Command(
+            failure.with_output_artifacts(output_artifacts),
+        ));
+    }
+    if output_hard_limit_reached {
+        return Err(RunSafeCommandError::Command(
+            CommandRunFailure::new("output_hard_limit", "run_cmd.output_hard_limit")
+                .with_output_artifacts(output_artifacts),
+        ));
     }
 
+    let output_truncated = output_artifacts.is_some();
     let (text, stdout_text, stderr_text) =
         combine_command_output(&stdout, &stderr, output_truncated);
-
-    if output_limit_reached {
-        return if text.trim().is_empty() {
-            Ok(format!("exit=truncated command={}", command.trim()))
-        } else {
-            Ok(text)
-        };
-    }
 
     let status = status.ok_or_else(|| {
         RunSafeCommandError::Command(CommandRunFailure::new(
@@ -617,7 +628,16 @@ pub(super) async fn run_safe_command_detailed(
     })?;
     let exit_code = status.code().unwrap_or(-1);
     if exit_code == 0 {
-        if text.trim().is_empty() {
+        if let Some(output_artifacts) = output_artifacts {
+            serde_json::to_string(&output_artifacts.machine_projection(&text, exit_code)).map_err(
+                |error| {
+                    RunSafeCommandError::Command(CommandRunFailure::new(
+                        "output_artifact_projection_failed",
+                        format!("run_cmd.output_artifact_projection_failed error={error}"),
+                    ))
+                },
+            )
+        } else if text.trim().is_empty() {
             Ok(format!("exit=0 command={}", command.trim()))
         } else {
             Ok(text)
@@ -628,7 +648,8 @@ pub(super) async fn run_safe_command_detailed(
                 "nonzero_exit",
                 format!("run_cmd.nonzero_exit exit_code={exit_code}"),
             )
-            .with_output(exit_code, stdout_text, stderr_text, output_truncated),
+            .with_output(exit_code, stdout_text, stderr_text, output_truncated)
+            .with_output_artifacts(output_artifacts),
         ))
     } else {
         let mut detail = String::new();
@@ -654,7 +675,8 @@ pub(super) async fn run_safe_command_detailed(
                 "nonzero_exit",
                 format!("run_cmd.nonzero_exit exit_code={exit_code}\n{detail}"),
             )
-            .with_output(exit_code, stdout_text, stderr_text, output_truncated),
+            .with_output(exit_code, stdout_text, stderr_text, output_truncated)
+            .with_output_artifacts(output_artifacts),
         ))
     }
 }
