@@ -99,7 +99,7 @@ Returned JSON inside `text` contains:
   - `snippet` (nullable by `include_snippet`)
   - `source` (standardized host)
   - `rank`
-- `extract_urls[]`: URL list ready for `browser_web.open_extract`
+- `extract_urls[]`: URL list ready for `browser.open_extract`
 - `summary`: lightweight result summary (based on result metadata only)
 - `citations[]`: same as result URLs
 - `notes`: boundary hint

@@ -131,6 +131,28 @@ const JSON_EVIDENCE_PRIORITY_KEYS: &[&str] = &[
     "items",
     "results",
 ];
+const OBSERVED_EVIDENCE_STORAGE_PRIORITY_LEAVES: &[&str] = &[
+    "provider",
+    "model",
+    "duration",
+    "planned_outputs",
+    "async_contract",
+    "datetime",
+    "timezone",
+    "title",
+    "path",
+    "exists",
+    "error_code",
+    "count",
+    "names",
+    "line_count",
+    "checkpoint",
+    "diff",
+    "failed_verification",
+    "repair_attempt",
+    "passing_verification",
+    "rewind_references",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskJournalFinalStatus {

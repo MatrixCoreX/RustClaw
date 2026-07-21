@@ -260,73 +260,10 @@ fn registry_mapping_for_capability<'a>(
     skill: &str,
     normalized_capability: &str,
 ) -> Option<&'a PlannerCapabilityMapping> {
-    let mappings = registry.planner_capabilities(skill);
-    if let Some(mapping) = mappings
+    registry
+        .planner_capabilities(skill)
         .iter()
         .find(|mapping| mapping.name == normalized_capability)
-    {
-        return Some(mapping);
-    }
-
-    if let Some((capability_skill, capability_action)) = normalized_capability.split_once('.') {
-        if registry_skill_name_matches(registry, skill, capability_skill) {
-            if let Some(mapping) = registry_mapping_for_action(mappings, capability_action) {
-                return Some(mapping);
-            }
-        }
-    }
-
-    None
-}
-
-fn registry_skill_name_matches(
-    registry: &SkillsRegistry,
-    skill: &str,
-    capability_skill: &str,
-) -> bool {
-    capability_skill == skill
-        || registry
-            .resolve_canonical(capability_skill)
-            .as_deref()
-            .is_some_and(|canonical| canonical == skill)
-}
-
-fn registry_mapping_for_action<'a>(
-    mappings: &'a [PlannerCapabilityMapping],
-    requested_action: &str,
-) -> Option<&'a PlannerCapabilityMapping> {
-    let requested_action = normalize_capability_name(requested_action);
-    if let Some(mapping) = mappings.iter().find(|mapping| {
-        mapping
-            .action
-            .as_deref()
-            .map(normalize_capability_name)
-            .as_deref()
-            == Some(requested_action.as_str())
-    }) {
-        return Some(mapping);
-    }
-
-    let mut aliases = mappings.iter().filter(|mapping| {
-        mapping
-            .name
-            .rsplit_once('.')
-            .map(|(_, action)| normalize_capability_name(action))
-            .as_deref()
-            == Some(requested_action.as_str())
-    });
-    let first = aliases.next()?;
-    let canonical_action = first.action.as_deref().map(normalize_capability_name)?;
-    aliases
-        .all(|mapping| {
-            mapping
-                .action
-                .as_deref()
-                .map(normalize_capability_name)
-                .as_deref()
-                == Some(canonical_action.as_str())
-        })
-        .then_some(first)
 }
 
 fn resolve_candidate_action(candidate: ResolverCandidate, args: Value) -> AgentAction {

@@ -233,7 +233,7 @@ fn complete_structured_observation_skips_terminal_discussion_actions() {
             finished_at: 0,
         });
     let current = crate::AgentAction::CallCapability {
-        capability: "task_control.preview_repair".to_string(),
+        capability: "coding_workflow.preview_repair".to_string(),
         args: serde_json::json!({}),
     };
     let remaining = [
@@ -286,7 +286,7 @@ fn incomplete_structured_observation_keeps_terminal_discussion_actions() {
         None,
         &loop_state,
         &crate::AgentAction::CallCapability {
-            capability: "task_control.preview_repair".to_string(),
+            capability: "coding_workflow.preview_repair".to_string(),
             args: serde_json::json!({}),
         },
         &[crate::AgentAction::SynthesizeAnswer {

@@ -16,6 +16,8 @@ Protocol rules:
 - Do not claim that an action succeeded before its tool result appears in a
   later turn.
 - Use only capability names present in `RUNTIME_CAPABILITY_MAP`.
+- Copy the complete capability name exactly from `RUNTIME_CAPABILITY_MAP`.
+  Never derive a capability name by combining a skill name with an action.
 - Prefer the smallest capability that produces the evidence or effect needed
   for the current step.
 - When the user requests a structured parse, validation, preview, inspection,
@@ -23,6 +25,9 @@ Protocol rules:
   available, call that capability instead of substituting your own inference.
   A direct response is appropriate only when no runtime evidence or effect is
   needed, or after the required capability observations are available.
+- Once a successful capability observation contains the requested fields,
+  synthesize the answer. Do not call the capability again merely to confirm or
+  restate the same successful result.
 - The runtime, not the model, resolves capabilities and enforces verification,
   permissions, sandboxing, idempotency, and confirmation.
 - A capability failure is an observation for the next turn. Replan from its

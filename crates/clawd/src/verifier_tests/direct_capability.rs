@@ -88,17 +88,17 @@ fn direct_workspace_rewind_resolves_but_requires_one_shot_confirmation() {
 }
 
 #[test]
-fn direct_capability_alias_keeps_requested_identity_and_verifies_canonical_mapping() {
+fn direct_canonical_capability_verifies_registry_mapping() {
     let state = registry_confirmation::workspace_registry_state();
     let task = test_task();
     let plan = crate::agent_engine::direct_capability_plan(
         &state,
-        "task_control.preview_repair",
+        "coding_workflow.preview_repair",
         json!({}),
     );
 
     assert_eq!(plan.steps[0].action_type, "call_capability");
-    assert_eq!(plan.steps[0].skill, "task_control.preview_repair");
+    assert_eq!(plan.steps[0].skill, "coding_workflow.preview_repair");
 
     let result = verify_plan(
         &state,
@@ -122,7 +122,7 @@ fn direct_capability_alias_keeps_requested_identity_and_verifies_canonical_mappi
     let resolution = &result.capability_resolutions[0];
     assert_eq!(
         resolution.record.capability_ref,
-        "task_control.preview_repair"
+        "coding_workflow.preview_repair"
     );
     assert_eq!(
         resolution.record.canonical_capability_ref.as_deref(),
