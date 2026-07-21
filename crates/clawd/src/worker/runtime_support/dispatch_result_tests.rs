@@ -242,7 +242,9 @@ fn seeded_agent_loop_with_new_checkpoint_is_deferred_not_terminal() {
     let mut next_checkpoint = claimed.task_checkpoint.clone();
     next_checkpoint.checkpoint_id = "ckpt-seeded-next".to_string();
     journal.record_task_checkpoint(next_checkpoint.to_machine_json());
-    let reply = crate::AskReply::non_llm("waiting".to_string()).with_task_journal(journal);
+    let reply = crate::AskReply::non_llm("waiting".to_string())
+        .with_task_journal(journal)
+        .with_failure("provisional reply must not terminate a valid checkpoint");
 
     let payload = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
         &claimed,
@@ -250,6 +252,7 @@ fn seeded_agent_loop_with_new_checkpoint_is_deferred_not_terminal() {
     )
     .expect("seeded loop deferred payload");
     assert_eq!(payload["executor_result_status"], "seeded_loop_deferred");
+    assert!(payload.get("error_code").is_none());
     assert_eq!(payload["deferred_checkpoint_id"], "ckpt-seeded-next");
     assert_eq!(payload["deferred_lifecycle_state"], "background");
     assert_eq!(
