@@ -48,10 +48,20 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
         assert!(policy.is_any_allowed(&[&skill_token, &capability_token], None));
         assert!(!policy.is_allowed(&skill_token, None));
     }
-    assert!(policy.is_allowed("capability:schedule.preview", None));
-    assert!(policy.is_any_allowed(&["skill:schedule", "capability:schedule.preview"], None));
+    for capability in ["schedule.compile", "schedule.preview", "schedule.list"] {
+        let capability_token = format!("capability:{capability}");
+        assert!(policy.is_allowed(&capability_token, None));
+        assert!(policy.is_any_allowed(&["skill:schedule", &capability_token], None));
+    }
     assert!(!policy.is_allowed("skill:schedule", None));
-    assert!(!policy.is_allowed("capability:schedule.create", None));
+    for capability in [
+        "schedule.create",
+        "schedule.delete",
+        "schedule.pause",
+        "schedule.resume",
+    ] {
+        assert!(!policy.is_allowed(&format!("capability:{capability}"), None));
+    }
 }
 
 #[test]
@@ -64,6 +74,15 @@ fn explicit_skill_deny_overrides_action_capability_allow() {
         &["skill:image_generate", "capability:image.preview_generate"],
         None
     ));
+}
+
+#[test]
+fn explicit_schedule_skill_deny_overrides_observe_capability_allow() {
+    let mut config = ToolsConfig::default();
+    config.deny = vec!["skill:schedule".to_string()];
+    let policy = ToolsPolicy::from_config(&config).expect("tools policy");
+
+    assert!(!policy.is_any_allowed(&["skill:schedule", "capability:schedule.compile"], None));
 }
 
 #[test]

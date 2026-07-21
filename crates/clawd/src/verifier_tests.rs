@@ -1914,6 +1914,9 @@ mod confirmation_policy;
 #[path = "verifier_tests/scope_boundaries.rs"]
 mod scope_boundaries;
 
+#[path = "verifier_tests/schema_types.rs"]
+mod schema_types;
+
 #[path = "verifier_tests/scope_persistence.rs"]
 mod scope_persistence;
 

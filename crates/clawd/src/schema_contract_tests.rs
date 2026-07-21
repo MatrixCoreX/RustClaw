@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{enum_constraint_violations, unknown_argument_violations};
+use super::{enum_constraint_violations, type_constraint_violations, unknown_argument_violations};
 
 #[test]
 fn enum_constraints_accept_exact_machine_values() {
@@ -89,4 +89,58 @@ fn explicitly_open_schemas_allow_extension_arguments() {
     });
 
     assert!(unknown_argument_violations(&schema, &json!({"vendor_extension": true})).is_empty());
+}
+
+#[test]
+fn type_constraints_reject_wrong_optional_field_types() {
+    let schema = json!({
+        "properties": {
+            "action": { "type": "string" },
+            "schedule": { "type": "object" },
+            "dry_run": { "type": "boolean" }
+        }
+    });
+
+    let violations = type_constraint_violations(
+        &schema,
+        &json!({
+            "action": "preview",
+            "schedule": "tomorrow at 09:00",
+            "dry_run": "true"
+        }),
+    );
+    assert_eq!(
+        violations
+            .iter()
+            .map(|violation| (violation.field.as_str(), violation.expected.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("dry_run", "boolean"), ("schedule", "object")]
+    );
+}
+
+#[test]
+fn type_constraints_accept_union_and_numeric_types() {
+    let schema = json!({
+        "properties": {
+            "selector": {
+                "anyOf": [
+                    { "type": "string" },
+                    { "type": "array" }
+                ]
+            },
+            "count": { "oneOf": [{ "type": "integer" }, { "type": "null" }] },
+            "ratio": { "type": "number" }
+        }
+    });
+
+    assert!(type_constraint_violations(
+        &schema,
+        &json!({ "selector": ["a", "b"], "count": 2, "ratio": 0.5 })
+    )
+    .is_empty());
+    assert!(type_constraint_violations(
+        &schema,
+        &json!({ "selector": "name", "count": null, "ratio": 1 })
+    )
+    .is_empty());
 }
