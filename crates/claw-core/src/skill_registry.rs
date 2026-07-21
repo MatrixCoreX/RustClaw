@@ -1493,6 +1493,7 @@ fn to_canonical_key(s: &str) -> String {
 /// `registry_covers_all_required_builtins` 守底，registry 漏一个就红。
 pub const REQUIRED_BUILTIN_SKILLS: &[&str] = &[
     "run_cmd",
+    "code_index",
     "fs_basic",
     "config_basic",
     "read_file",

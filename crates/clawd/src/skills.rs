@@ -1466,6 +1466,7 @@ pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
     matches!(
         name,
         "run_cmd"
+            | "code_index"
             | "fs_basic"
             | "config_basic"
             | "read_file"

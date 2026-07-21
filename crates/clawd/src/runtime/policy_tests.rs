@@ -14,6 +14,7 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
     let policy = ToolsPolicy::from_config(&config).expect("default tools policy");
     for allowed in [
         "skill:run_cmd",
+        "skill:code_index",
         "skill:fs_basic",
         "skill:git_basic",
         "skill:task_control",

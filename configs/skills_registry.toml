@@ -252,6 +252,40 @@ input_schema = { type = "object", required = ["action"], properties = { action =
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
+name = "code_index"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+group = "code"
+primary_fallback_role = "fallback"
+aliases = ["repository_index", "code_repository_index"]
+timeout_seconds = 90
+prompt_file = "prompts/skills/code_index.md"
+output_kind = "text"
+description = "Incremental repository code index using parser-derived Rust symbols, definitions, references, tests, changed-file impact, and bounded context ranges."
+semantic_tags = ["repository_index", "symbol_search", "definition_lookup", "reference_lookup", "test_impact", "bounded_code_context"]
+risk_level = "low"
+auto_invocable = true
+requires_confirmation = false
+side_effect = false
+retryable = true
+capabilities = ["fs.read"]
+preferred_over_run_cmd = true
+supported_os = ["linux", "macos", "windows"]
+platform_notes = ["Rust symbols use syn parser spans. Other recognized source languages participate in the file index until a parser adapter is configured."]
+planner_capabilities = [
+  { name = "code.refresh_index", action = "refresh", effect = "observe", optional = ["max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "code.search_symbols", action = "search_symbols", effect = "observe", required = ["query"], optional = ["mode", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "code.find_definitions", action = "find_definitions", effect = "observe", required = ["symbol"], optional = ["max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "code.find_references", action = "find_references", effect = "observe", required = ["symbol"], optional = ["max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "code.list_tests", action = "list_tests", effect = "observe", optional = ["path", "symbol", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "code.changed_impact", action = "changed_impact", effect = "observe", optional = ["paths", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "code.retrieve_context", action = "retrieve_context", effect = "observe", required = ["symbols|paths"], optional = ["mode", "context_lines", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["refresh", "search_symbols", "find_definitions", "find_references", "list_tests", "changed_impact", "retrieve_context"] }, query = { type = "string" }, symbol = { type = "string" }, symbols = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, path = { type = "string" }, paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, mode = { type = "string", enum = ["exact", "prefix", "contains"] }, context_lines = { type = "integer", minimum = 0, maximum = 20 }, max_results = { type = "integer", minimum = 1, maximum = 200 }, max_files = { type = "integer", minimum = 1, maximum = 50000 } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+
+[[skills]]
 name = "config_basic"
 enabled = true
 kind = "builtin"
