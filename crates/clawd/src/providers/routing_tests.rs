@@ -100,7 +100,7 @@ fn routing_filters_incompatible_modality_context_and_tool_contracts() {
 
     let plan = route_providers(
         vec![text_only, short_context, no_tools, eligible],
-        1_000,
+        "routing prompt",
         &hints,
     );
 
@@ -152,7 +152,7 @@ fn low_cost_and_low_latency_preferences_use_machine_metadata() {
 
     let low_cost = route_providers(
         vec![costly_fast.clone(), cheap_slow.clone()],
-        1_000,
+        "routing prompt",
         &ChatRequestHints {
             routing_preference: LlmRoutingPreference::LowCost,
             ..Default::default()
@@ -160,7 +160,7 @@ fn low_cost_and_low_latency_preferences_use_machine_metadata() {
     );
     let low_latency = route_providers(
         vec![cheap_slow, costly_fast],
-        1_000,
+        "routing prompt",
         &ChatRequestHints {
             routing_preference: LlmRoutingPreference::LowLatency,
             ..Default::default()
@@ -198,7 +198,7 @@ fn routing_uses_observed_latency_and_places_open_breaker_last() {
 
     let plan = route_providers(
         vec![open_breaker, observed_fast],
-        1_000,
+        "routing prompt",
         &ChatRequestHints {
             routing_preference: LlmRoutingPreference::LowLatency,
             ..Default::default()

@@ -24,6 +24,8 @@ const MAX_SCOPED_SKILL_PLAYBOOKS: usize = 2;
 #[derive(Debug, Clone)]
 pub(super) struct PlannerSkillContext {
     pub(super) text: String,
+    pub(super) quick_index_text: String,
+    pub(super) playbook_text: String,
     pub(super) disclosure_mode: &'static str,
     pub(super) selected_skills: Vec<String>,
     pub(super) quick_index_chars: usize,
@@ -331,6 +333,8 @@ pub(super) fn build_planner_skill_context(
     };
     let playbook_chars = playbooks.text.chars().count();
     let selected_skills = playbooks.included_skills;
+    let playbook_text = playbooks.text;
+    let omitted_playbook_count = playbooks.omitted_count;
     let selected_token = if selected_skills.is_empty() {
         "none".to_string()
     } else {
@@ -341,12 +345,12 @@ pub(super) fn build_planner_skill_context(
     );
     if !selected_skills.is_empty() {
         text.push_str("\n\nSelected skill playbooks:\n");
-        text.push_str(&playbooks.text);
+        text.push_str(&playbook_text);
     }
-    if playbooks.omitted_count > 0 {
+    if omitted_playbook_count > 0 {
         text.push_str(&format!(
             "\n\nomitted_selected_playbooks={}; reason=prompt_budget",
-            playbooks.omitted_count
+            omitted_playbook_count
         ));
     }
     info!(
@@ -359,6 +363,8 @@ pub(super) fn build_planner_skill_context(
     );
     PlannerSkillContext {
         text,
+        quick_index_text: quick_index,
+        playbook_text,
         disclosure_mode,
         selected_skills,
         quick_index_chars,

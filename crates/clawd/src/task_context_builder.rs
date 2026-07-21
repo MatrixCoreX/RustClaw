@@ -85,6 +85,23 @@ fn context_slot_present(value: &str) -> bool {
     !trimmed.is_empty() && trimmed != "<none>"
 }
 
+fn context_slot_metadata(slot: &str) -> (&'static str, &'static str) {
+    match slot {
+        "runtime_context" => ("stable_prefix_candidate", "runtime_environment"),
+        "goal_context" => ("task_stable", "task_payload"),
+        "prompt_memory_context" => ("dynamic_turn", "memory_store"),
+        "active_task_context"
+        | "active_execution_anchor_context"
+        | "session_alias_context"
+        | "recent_turns_full"
+        | "last_turn_full" => ("dynamic_turn", "conversation_state"),
+        "recent_execution_anchor" | "recent_execution_context" => ("dynamic_turn", "task_journal"),
+        "compacted_history_context" => ("task_stable", "context_compaction"),
+        "image_context" => ("task_stable", "artifact_registry"),
+        _ => ("dynamic_turn", "runtime_context_builder"),
+    }
+}
+
 const LONG_SESSION_CONTEXT_CHARS: usize = 4096;
 
 fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 12] {
@@ -226,16 +243,49 @@ pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) 
     let included_refs = slots
         .iter()
         .filter(|(_, value)| context_slot_present(value))
-        .map(|(slot, value)| json!({"ref": slot, "char_count": value.chars().count()}))
+        .map(|(slot, value)| {
+            let estimate = crate::token_estimator::estimate_generic_tokens(value);
+            let (cacheability, provenance) = context_slot_metadata(slot);
+            json!({
+                "ref": slot,
+                "char_count": estimate.char_count,
+                "byte_count": estimate.byte_count,
+                "token_estimate": estimate.provider_tokens,
+                "token_safety_estimate": estimate.safety_tokens,
+                "token_estimator": estimate.estimator.as_str(),
+                "cacheability": cacheability,
+                "provenance": provenance,
+            })
+        })
         .collect::<Vec<_>>();
     let excluded_refs = slots
         .iter()
         .filter(|(_, value)| !context_slot_present(value))
-        .map(|(slot, _)| json!({"ref": slot, "reason": "not_included"}))
+        .map(|(slot, _)| {
+            let (cacheability, provenance) = context_slot_metadata(slot);
+            json!({
+                "ref": slot,
+                "reason": "not_included",
+                "cacheability": cacheability,
+                "provenance": provenance,
+            })
+        })
         .collect::<Vec<_>>();
     let char_estimate = included_refs
         .iter()
         .filter_map(|item| item.get("char_count").and_then(Value::as_u64))
+        .sum::<u64>();
+    let byte_estimate = included_refs
+        .iter()
+        .filter_map(|item| item.get("byte_count").and_then(Value::as_u64))
+        .sum::<u64>();
+    let token_estimate = included_refs
+        .iter()
+        .filter_map(|item| item.get("token_estimate").and_then(Value::as_u64))
+        .sum::<u64>();
+    let token_safety_estimate = included_refs
+        .iter()
+        .filter_map(|item| item.get("token_safety_estimate").and_then(Value::as_u64))
         .sum::<u64>();
     json!({
         "schema_version": 1,
@@ -245,7 +295,10 @@ pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) 
         "excluded_ref_count": excluded_refs.len(),
         "excluded_refs": excluded_refs,
         "char_estimate": char_estimate,
-        "token_estimate": (char_estimate / 4).max(1),
+        "byte_estimate": byte_estimate,
+        "token_estimate": token_estimate.max(u64::from(char_estimate > 0)),
+        "token_safety_estimate": token_safety_estimate.max(u64::from(char_estimate > 0)),
+        "token_estimator": crate::token_estimator::TokenEstimatorKind::GenericUnicode.as_str(),
         "truncation_reason": if matches!(view.budget_tier, ExecutionContextBudgetTier::Light) {
             "light_execution_budget"
         } else {

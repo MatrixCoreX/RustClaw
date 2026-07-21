@@ -693,7 +693,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
     let logical_call_index = state.task_llm_call_count(&task.task_id);
     state.note_task_prompt_size_with_label(&task.task_id, prompt_label, prompt.len());
-    let routing_plan = crate::providers::route_providers(providers, prompt.len(), &hints);
+    let routing_plan = crate::providers::route_providers(providers, prompt, &hints);
     state.note_task_provider_routing_plan_with_label(
         &task.task_id,
         prompt_label,

@@ -49,7 +49,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
             .and_then(serde_json::Value::as_u64),
         ..crate::ChatRequestHints::default()
     };
-    let routing_plan = crate::providers::route_providers(task_providers, prompt.len(), &hints);
+    let routing_plan = crate::providers::route_providers(task_providers, prompt, &hints);
     state.note_task_provider_routing_plan_with_label(
         &task.task_id,
         prompt_label,

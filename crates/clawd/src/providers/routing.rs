@@ -46,6 +46,10 @@ pub(crate) struct LlmProviderRouteEvaluation {
     pub(crate) rank: Option<u64>,
     pub(crate) breaker_state: String,
     pub(crate) required_context_window_tokens: usize,
+    pub(crate) estimated_prompt_tokens: usize,
+    pub(crate) prompt_token_estimator: String,
+    pub(crate) prompt_byte_count: usize,
+    pub(crate) prompt_char_count: usize,
     pub(crate) context_window_tokens: Option<usize>,
     pub(crate) input_modalities: Vec<String>,
     pub(crate) native_tools: bool,
@@ -62,16 +66,23 @@ pub(crate) struct LlmProviderRoutingPlan {
 
 pub(crate) fn route_providers(
     providers: Vec<Arc<LlmProviderRuntime>>,
-    prompt_bytes: usize,
+    prompt: &str,
     hints: &ChatRequestHints,
 ) -> LlmProviderRoutingPlan {
-    let required_context_window_tokens = estimated_prompt_tokens(prompt_bytes)
-        .saturating_add(hints.max_tokens.unwrap_or(0) as usize)
-        .max(hints.minimum_context_window_tokens.unwrap_or(0));
     let required_modalities = normalized_modalities(&hints.required_input_modalities);
     let mut candidates = providers
         .into_iter()
         .map(|provider| {
+            let prompt_estimate = crate::token_estimator::estimate_provider_tokens(
+                &provider.config.name,
+                &provider.config.provider_type,
+                &provider.config.model,
+                prompt,
+            );
+            let required_context_window_tokens = prompt_estimate
+                .safety_tokens
+                .saturating_add(hints.max_tokens.unwrap_or(0) as usize)
+                .max(hints.minimum_context_window_tokens.unwrap_or(0));
             let breaker = provider.breaker.snapshot();
             let (latency_sample_count, observed_latency_ms) = provider.latency.snapshot();
             let routing_latency_ms = observed_latency_ms
@@ -105,6 +116,10 @@ pub(crate) fn route_providers(
                 rank: None,
                 breaker_state: breaker.state,
                 required_context_window_tokens,
+                estimated_prompt_tokens: prompt_estimate.provider_tokens,
+                prompt_token_estimator: prompt_estimate.estimator.as_str().to_string(),
+                prompt_byte_count: prompt_estimate.byte_count,
+                prompt_char_count: prompt_estimate.char_count,
                 context_window_tokens: provider.config.context_window_tokens,
                 input_modalities,
                 native_tools: model_capabilities.native_tools,
@@ -164,10 +179,6 @@ fn route_rank_key(
         evaluation.static_priority,
         evaluation.provider.clone(),
     )
-}
-
-fn estimated_prompt_tokens(prompt_bytes: usize) -> usize {
-    prompt_bytes.saturating_add(3) / 4
 }
 
 fn normalized_modalities(values: &[String]) -> Vec<String> {
