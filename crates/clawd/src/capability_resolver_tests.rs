@@ -803,33 +803,22 @@ fn registry_resolves_market_quote_capabilities_without_domain_contracts() {
 }
 
 #[test]
-fn registry_resolves_bare_skill_capability_by_machine_action() {
+fn registry_rejects_bare_skill_capability_even_with_machine_action() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
         "task_control",
         json!({"action": "list", "limit": 5}),
     );
-    let action = action.expect("bare task_control with machine action should resolve");
-    match action {
-        AgentAction::CallTool { tool, args } => {
-            assert_eq!(tool, "task_control");
-            assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
-            assert_eq!(args.get("limit").and_then(Value::as_i64), Some(5));
-        }
-        other => panic!("unexpected resolved action: {other:?}"),
-    }
-    assert_eq!(
-        record.reason_code,
-        "capability_resolver_registry_mapping_resolved"
-    );
-    assert_eq!(record.source, "registry");
+    assert!(action.is_none());
+    assert_eq!(record.reason_code, "capability_unavailable");
+    assert_eq!(record.source, "none");
     assert_eq!(record.capability_ref, "task_control");
-    assert_eq!(record.resolved_ref.as_deref(), Some("tool:task_control"));
+    assert!(record.resolved_ref.is_none());
 }
 
 #[test]
-fn registry_resolves_bare_skill_capability_by_registered_action_alias() {
+fn registry_rejects_bare_virtual_tool_even_with_registered_action_alias() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -841,19 +830,10 @@ fn registry_resolves_bare_skill_capability_by_registered_action_alias() {
         }),
     );
 
-    assert_eq!(
-        record.reason_code,
-        "capability_resolver_registry_mapping_resolved"
-    );
-    let Some(AgentAction::CallTool { tool, args }) = action else {
-        panic!("expected fs_basic tool action, got {action:?}");
-    };
-    assert_eq!(tool, "fs_basic");
-    assert_eq!(args.get("action").and_then(Value::as_str), Some("make_dir"));
-    assert_eq!(
-        args.get("path").and_then(Value::as_str),
-        Some("run/example")
-    );
+    assert!(action.is_none());
+    assert_eq!(record.reason_code, "capability_unavailable");
+    assert_eq!(record.source, "none");
+    assert_eq!(record.capability_ref, "fs_basic");
 }
 
 #[test]
@@ -1166,7 +1146,7 @@ fn registry_resolution_preserves_media_poll_action_arg() {
 }
 
 #[test]
-fn command_like_runtime_status_rewrites_to_run_cmd_capability() {
+fn command_like_runtime_status_does_not_cross_capability_boundary() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -1182,22 +1162,25 @@ fn command_like_runtime_status_rewrites_to_run_cmd_capability() {
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"
     );
-    assert_eq!(record.capability_ref, "system.run_command");
-    assert_eq!(record.resolved_ref.as_deref(), Some("skill:run_cmd"));
-    let Some(AgentAction::CallSkill { skill, args }) = action else {
-        panic!("expected run_cmd skill action, got {action:?}");
+    assert_eq!(record.capability_ref, "system.runtime_status");
+    assert_eq!(record.resolved_ref.as_deref(), Some("tool:system_basic"));
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected system_basic tool action, got {action:?}");
     };
-    assert_eq!(skill, "run_cmd");
+    assert_eq!(tool, "system_basic");
     assert_eq!(
-        args.get("command").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
+        Some("runtime_status")
+    );
+    assert_eq!(args.get("kind").and_then(Value::as_str), Some("run_cmd"));
+    assert_eq!(
+        args.get("shell_command").and_then(Value::as_str),
         Some("python3 test_calc_core.py")
     );
-    assert!(args.get("kind").is_none());
-    assert!(args.get("shell_command").is_none());
 }
 
 #[test]
-fn task_queue_runtime_status_rewrites_to_task_control_list() {
+fn task_queue_runtime_status_does_not_cross_capability_boundary() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -1212,15 +1195,21 @@ fn task_queue_runtime_status_rewrites_to_task_control_list() {
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"
     );
-    assert_eq!(record.capability_ref, "task_control.list");
-    assert_eq!(record.resolved_ref.as_deref(), Some("tool:task_control"));
+    assert_eq!(record.capability_ref, "system.runtime_status");
+    assert_eq!(record.resolved_ref.as_deref(), Some("tool:system_basic"));
     let Some(AgentAction::CallTool { tool, args }) = action else {
-        panic!("expected task_control tool action, got {action:?}");
+        panic!("expected system_basic tool action, got {action:?}");
     };
-    assert_eq!(tool, "task_control");
-    assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
+    assert_eq!(tool, "system_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("runtime_status")
+    );
     assert_eq!(args.get("limit").and_then(Value::as_i64), Some(5));
-    assert!(args.get("kind").is_none());
+    assert_eq!(
+        args.get("kind").and_then(Value::as_str),
+        Some("task_queue_status")
+    );
 }
 
 #[test]
