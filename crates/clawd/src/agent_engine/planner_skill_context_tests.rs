@@ -258,4 +258,6 @@ fn native_action_protocol_scopes_output_constraints_semantically() {
     assert!(PROMPT.contains("preserve sibling deliverables"));
     assert!(PROMPT.contains("do not expand or"));
     assert!(PROMPT.contains("payload-only"));
+    assert!(PROMPT.contains("not by itself a user-visible sibling deliverable"));
+    assert!(PROMPT.contains("apply the constraint to the entire visible answer"));
 }

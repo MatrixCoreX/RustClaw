@@ -40,6 +40,11 @@ count, explanation, recap, footer, offer, and follow-up question.
 When a constraint applies to one semantic component of a compound request,
 preserve every grounded sibling component and rewrite the constrained component
 to its exact language, length, count, tone, and shape without duplicating it.
+Treat inspection, execution, reading, and other evidence collection as internal
+grounding rather than a visible sibling deliverable unless the user separately
+requested raw output or details. If the requested report, summary, conclusion,
+or answer has a whole-answer shape constraint, remove every unrequested command
+output, listing, table, evidence excerpt, and wrapper outside that deliverable.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
