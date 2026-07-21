@@ -86,6 +86,18 @@ def decode_rust_string_literal(value: str) -> str:
     return decoded
 
 
+def rust_string_literals(source_line: str) -> list[str]:
+    """Return string literals without treating Rust char literals as strings."""
+    literals: list[str] = []
+    for match in STRING_RE.finditer(source_line):
+        starts_in_char = match.start() > 0 and source_line[match.start() - 1] == "'"
+        ends_in_char = match.end() < len(source_line) and source_line[match.end()] == "'"
+        if starts_in_char and ends_in_char:
+            continue
+        literals.append(match.group(1))
+    return literals
+
+
 def is_test_path(path: str) -> bool:
     parts = Path(path).parts
     if Path(path).name in ALLOWED_FILE_NAMES:
@@ -123,7 +135,9 @@ def looks_machine_literal(value: str) -> bool:
         return True
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*:\s*[A-Za-z0-9_.:-]+", value):
         return True
-    if re.fullmatch(r"[A-Za-z0-9_.:-]*(?:\{[A-Za-z0-9_]+\}[A-Za-z0-9_.:-]*)+", value):
+    if re.fullmatch(r"[A-Za-z0-9_.:+-]*(?:\{[A-Za-z0-9_]+\}[A-Za-z0-9_.:+-]*)+", value):
+        return True
+    if re.fullmatch(r"\{[A-Za-z0-9_]+\}(?:\s+\{[A-Za-z0-9_]+\})+", value):
         return True
     if re.fullmatch(r"any_of\([A-Za-z0-9_|.:-]+\)", value):
         return True
@@ -180,7 +194,7 @@ def scan_file(path: Path) -> list[Candidate]:
     rel_path = path.relative_to(REPO_ROOT).as_posix()
     candidates: list[Candidate] = []
     for line_no, source_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        for literal in STRING_RE.findall(source_line):
+        for literal in rust_string_literals(source_line):
             decoded = decode_rust_string_literal(literal)
             if looks_sentence_like(decoded):
                 candidates.append(
@@ -221,7 +235,7 @@ def scan_diff(diff_text: str) -> list[Candidate]:
             current_line += 1
             continue
         source_line = raw_line[1:]
-        for literal in STRING_RE.findall(source_line):
+        for literal in rust_string_literals(source_line):
             decoded = decode_rust_string_literal(literal)
             if looks_sentence_like(decoded):
                 candidates.append(
@@ -305,6 +319,9 @@ def run_self_test() -> int:
 +let a = "status_code";
 +let b = "I cannot continue with this plan yet.";
 +let c = "reason_code=provider_gap";
++let d = format!("{native_prompt}\n\n{repair_signal}");
++let e = format!("{native_prompt_source}+inline:native_plan_contract_repair");
++let f = raw_path.starts_with('"') || raw_path.ends_with('"');
 diff --git a/crates/clawd/src/finalize/task_tests.rs b/crates/clawd/src/finalize/task_tests.rs
 +++ b/crates/clawd/src/finalize/task_tests.rs
 @@ -10,0 +11,1 @@
