@@ -499,6 +499,28 @@ fn loop_state_has_checkpoint_handoff(loop_state: &LoopState) -> bool {
     )
 }
 
+fn checkpoint_handoff_reply(
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> AskReply {
+    let mut journal = crate::finalize::build_from_loop_state(
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        None,
+        true,
+        "",
+        crate::task_journal::TaskJournalFinalStatus::Success,
+    );
+    journal.final_answer = None;
+    journal.final_status = None;
+    journal.final_stop_signal = None;
+    AskReply::non_llm(String::new()).with_task_journal(journal)
+}
+
 fn recoverable_provider_blocker_resume_reason(loop_state: &LoopState) -> Option<&'static str> {
     use claw_core::provider_failure_policy::{
         PROVIDER_WAIT_RECOVERY_ACTION, PROVIDER_WAIT_RESUME_REASON,
@@ -1301,6 +1323,14 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                     | crate::task_budget_contract::BudgetDecision::Terminal => break,
                 }
             }
+        }
+        if loop_state_has_checkpoint_handoff(&loop_state) {
+            return Ok(checkpoint_handoff_reply(
+                task,
+                user_text,
+                &loop_state,
+                agent_run_context,
+            ));
         }
         let pre_finalize_loop_state = loop_state.clone();
         let mut reply = crate::finalize::finalize_loop_reply(

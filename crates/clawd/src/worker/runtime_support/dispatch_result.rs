@@ -678,20 +678,22 @@ pub(crate) fn seeded_agent_loop_terminal_dispatch_result_payload(
         return None;
     }
     match result {
-        Ok(answer) if answer.should_fail_task => Some(seeded_agent_loop_failure_payload(
-            claimed,
-            "seeded_loop_answer_marked_failed",
-            "clawd.task.seeded_loop_answer_marked_failed",
-            answer
-                .error_text
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty()),
-        )),
         Ok(answer) => {
             let deferred = answer
                 .task_journal
                 .as_ref()
                 .is_some_and(journal_has_matching_nonterminal_checkpoint);
+            if !deferred && answer.should_fail_task {
+                return Some(seeded_agent_loop_failure_payload(
+                    claimed,
+                    "seeded_loop_answer_marked_failed",
+                    "clawd.task.seeded_loop_answer_marked_failed",
+                    answer
+                        .error_text
+                        .as_deref()
+                        .is_some_and(|value| !value.trim().is_empty()),
+                ));
+            }
             let final_result_json = ask_reply_final_result_json(answer);
             let result_status = if deferred {
                 "seeded_loop_deferred"
