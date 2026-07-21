@@ -37,6 +37,7 @@ pub(crate) fn normalize_target_alias(input: &str) -> String {
     canonical.to_string()
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) fn discover_systemd_candidates(target: &str) -> Vec<String> {
     let target = target.trim().to_lowercase();
     if target.is_empty() {
@@ -82,6 +83,12 @@ pub(crate) fn discover_systemd_candidates(target: &str) -> Vec<String> {
     out_vec
 }
 
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn discover_systemd_candidates(_target: &str) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
 pub(crate) fn discover_service_candidates(target: &str) -> Vec<String> {
     let target = target.trim().to_lowercase();
     if target.is_empty() {
@@ -128,6 +135,115 @@ pub(crate) fn discover_service_candidates(target: &str) -> Vec<String> {
     out_vec.extend(contains);
     out_vec.truncate(DISCOVER_CANDIDATES_MAX);
     out_vec
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn discover_service_candidates(_target: &str) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn detect_linux_manager_for_target(target: &str) -> Option<&'static str> {
+    if let Ok(output) = Command::new("systemctl")
+        .args(["is-active", target])
+        .output()
+    {
+        let state = String::from_utf8_lossy(&output.stdout);
+        let state = state.trim();
+        if output.status.code().is_some()
+            && !state.is_empty()
+            && state.len() < 50
+            && state
+                .chars()
+                .all(|value| value.is_ascii_alphabetic() || " ()".contains(value))
+        {
+            return Some("systemd");
+        }
+    }
+    Command::new("service")
+        .args([target, "status"])
+        .output()
+        .ok()
+        .and_then(|output| output.status.code())
+        .map(|_| "service")
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(super) fn detect_linux_manager_for_target(_target: &str) -> Option<&'static str> {
+    None
+}
+
+pub(super) fn manager_supported_on_current_platform(manager: &str) -> bool {
+    manager_supported_on_platform(manager, std::env::consts::OS)
+}
+
+pub(crate) fn manager_supported_on_platform(manager: &str, platform: &str) -> bool {
+    match manager {
+        "systemd" | "service" => platform == "linux",
+        "launchd" => platform == "macos",
+        "brew_services" | "process_only" | "rustclaw" | "unknown" => true,
+        _ => false,
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn systemctl_output(args: &[&str]) -> std::io::Result<std::process::Output> {
+    Command::new("systemctl").args(args).output()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(super) fn systemctl_output(_args: &[&str]) -> std::io::Result<std::process::Output> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "service_manager_unsupported_platform",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn service_output(args: &[&str]) -> std::io::Result<std::process::Output> {
+    Command::new("service").args(args).output()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(super) fn service_output(_args: &[&str]) -> std::io::Result<std::process::Output> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "service_manager_unsupported_platform",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn sudo_systemctl_output(args: &[&str]) -> std::io::Result<std::process::Output> {
+    Command::new("sudo")
+        .arg("-n")
+        .arg("systemctl")
+        .args(args)
+        .output()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(super) fn sudo_systemctl_output(_args: &[&str]) -> std::io::Result<std::process::Output> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "service_manager_unsupported_platform",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn sudo_service_output(args: &[&str]) -> std::io::Result<std::process::Output> {
+    Command::new("sudo")
+        .arg("-n")
+        .arg("service")
+        .args(args)
+        .output()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(super) fn sudo_service_output(_args: &[&str]) -> std::io::Result<std::process::Output> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "service_manager_unsupported_platform",
+    ))
 }
 
 fn discover_brew_service_candidates(target: &str) -> Vec<String> {
@@ -471,9 +587,15 @@ pub(super) fn fetch_logs_inner(target: &str, manager: &str, tail_lines: usize) -
             if !is_safe_target(target) {
                 return evidence;
             }
+            #[cfg(target_os = "linux")]
             let o = Command::new("journalctl")
                 .args(["-u", target, "-n", &tail_lines.to_string(), "--no-pager"])
                 .output();
+            #[cfg(not(target_os = "linux"))]
+            let o: std::io::Result<std::process::Output> = Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "service_manager_unsupported_platform",
+            ));
             if let Ok(outp) = o {
                 let s = String::from_utf8_lossy(&outp.stdout);
                 let last: String = s.lines().rev().take(10).collect::<Vec<_>>().join(" ");

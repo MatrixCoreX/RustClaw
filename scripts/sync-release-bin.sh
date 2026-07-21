@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/shell_compat.sh"
 SOURCE_DIR="${1:-${RUSTCLAW_RELEASE_SOURCE:-$ROOT_DIR/target/release}}"
 DEST_DIR="${RUSTCLAW_RELEASE_BIN_DIR:-$ROOT_DIR/release-bin}"
 
@@ -23,7 +25,7 @@ fi
 WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
 export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
 
-mapfile -t REQUIRED_BINS < <(
+array_from_command_lines REQUIRED_BINS \
   python3 - <<'PY'
 import json
 import os
@@ -48,7 +50,6 @@ for pkg in data.get("packages", []):
 for name in sorted(bins):
     print(name)
 PY
-)
 
 if [[ "${#REQUIRED_BINS[@]}" -eq 0 ]]; then
   echo "No workspace binaries discovered."

@@ -1135,6 +1135,7 @@ async fn bounded_local_service_validation_runs_in_one_workspace_sandbox() {
         8000,
         false,
         claw_core::config::ToolSandboxMode::WorkspaceWrite,
+        claw_core::config::ToolSandboxBackend::Auto,
         &root.path,
     )
     .await

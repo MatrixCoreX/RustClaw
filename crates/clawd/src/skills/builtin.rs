@@ -658,6 +658,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     &job_id,
                     Path::new(&job_dir),
                     state.skill_rt.tools_policy.sandbox_mode,
+                    state.skill_rt.tools_policy.sandbox_backend,
                     &state.skill_rt.workspace_root,
                 )
                 .await
@@ -684,6 +685,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 max_output_bytes,
                 crate::skills::task_allows_sudo(state, task),
                 state.skill_rt.tools_policy.sandbox_mode,
+                state.skill_rt.tools_policy.sandbox_backend,
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),
             )

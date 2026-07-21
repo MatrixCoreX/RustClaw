@@ -7,6 +7,7 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
     let config = ToolsConfig::default();
     assert_eq!(config.access_profile, "coding");
     assert_eq!(config.sandbox_mode.as_token(), "workspace_write");
+    assert_eq!(config.sandbox_backend.as_token(), "auto");
     assert_eq!(config.approval_policy.as_token(), "on_risk");
     assert!(!config.allow_sudo);
     assert!(!config.allow_path_outside_workspace);
@@ -82,6 +83,7 @@ fn sandbox_mode_and_approval_policy_are_independent() {
     let policy = ToolsPolicy::from_config(&config).expect("tools policy");
 
     assert_eq!(policy.sandbox_mode_token(), "read_only");
+    assert_eq!(policy.sandbox_backend_token(), "auto");
     assert_eq!(policy.approval_policy_token(), "always");
     assert_eq!(
         policy.sandbox_denial(SandboxRequirements {

@@ -393,6 +393,7 @@ pub(crate) async fn run_safe_command(
         cmd_max_output_bytes,
         allow_sudo,
         claw_core::config::ToolSandboxMode::DangerFull,
+        claw_core::config::ToolSandboxBackend::Auto,
         cwd,
         "test-task",
     )
@@ -409,6 +410,7 @@ pub(crate) async fn run_safe_command_with_sandbox(
     cmd_max_output_bytes: usize,
     allow_sudo: bool,
     sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
 ) -> Result<String, String> {
     run_safe_command_detailed(
@@ -420,6 +422,7 @@ pub(crate) async fn run_safe_command_with_sandbox(
         cmd_max_output_bytes,
         allow_sudo,
         sandbox_mode,
+        sandbox_backend,
         workspace_root,
         "direct",
     )
@@ -436,6 +439,7 @@ pub(super) async fn run_safe_command_detailed(
     cmd_max_output_bytes: usize,
     allow_sudo: bool,
     sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     output_artifact_task_id: &str,
 ) -> Result<String, RunSafeCommandError> {
@@ -468,7 +472,7 @@ pub(super) async fn run_safe_command_detailed(
         ));
     }
 
-    let mut cmd = prepare_run_cmd_process(cwd, sandbox_mode, workspace_root)?;
+    let mut cmd = prepare_run_cmd_process(cwd, sandbox_mode, sandbox_backend, workspace_root)?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     cmd.args(["-o", "pipefail", "-lc"]).arg(command);
     cmd.current_dir(cwd)
@@ -694,6 +698,7 @@ pub(super) async fn start_async_command(
     job_id: &str,
     job_dir: &Path,
     sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
 ) -> Result<String, RunSafeCommandError> {
     if command.len() > max_cmd_length {
@@ -734,15 +739,68 @@ pub(super) async fn start_async_command(
     let run_script_path = job_dir.join("run.sh");
     let max_runtime_seconds = max_runtime_seconds.clamp(1, 86_400);
     let script = format!(
-        "#!/usr/bin/env bash\nset +e\nprintf '%s\\n' \"$(date +%s)\" > {}\nif command -v timeout >/dev/null 2>&1; then\n  timeout -k 5 {} bash -o pipefail -lc {} > {} 2> {}\nelse\n  bash -o pipefail -lc {} > {} 2> {}\nfi\ncode=$?\nprintf '%s\\n' \"$code\" > {}\nprintf '%s\\n' \"$(date +%s)\" > {}\n",
+        r#"#!/usr/bin/env bash
+set +e
+printf '%s\n' "$(date +%s)" > {}
+if command -v timeout >/dev/null 2>&1; then
+  timeout -k 5 {} bash -o pipefail -lc {} > {} 2> {}
+elif command -v gtimeout >/dev/null 2>&1; then
+  gtimeout -k 5 {} bash -o pipefail -lc {} > {} 2> {}
+elif command -v python3 >/dev/null 2>&1; then
+  python3 - {} {} {} {} <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+limit = int(sys.argv[1])
+command = sys.argv[2]
+with open(sys.argv[3], "wb") as stdout, open(sys.argv[4], "wb") as stderr:
+    process = subprocess.Popen(
+        ["bash", "-o", "pipefail", "-lc", command],
+        stdout=stdout,
+        stderr=stderr,
+        start_new_session=True,
+    )
+    try:
+        code = process.wait(timeout=limit)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+        code = 124
+sys.exit(code if code >= 0 else 128 - code)
+PY
+else
+  printf '%s\n' 'portable_timeout_backend_unavailable' > {}
+  code=125
+  printf '%s\n' "$code" > {}
+  printf '%s\n' "$(date +%s)" > {}
+  exit "$code"
+fi
+code=$?
+printf '%s\n' "$code" > {}
+printf '%s\n' "$(date +%s)" > {}
+"#,
         shell_single_quote(&started_path.display().to_string()),
         max_runtime_seconds,
         shell_single_quote(command),
         shell_single_quote(&stdout_path.display().to_string()),
         shell_single_quote(&stderr_path.display().to_string()),
+        max_runtime_seconds,
         shell_single_quote(command),
         shell_single_quote(&stdout_path.display().to_string()),
         shell_single_quote(&stderr_path.display().to_string()),
+        max_runtime_seconds,
+        shell_single_quote(command),
+        shell_single_quote(&stdout_path.display().to_string()),
+        shell_single_quote(&stderr_path.display().to_string()),
+        shell_single_quote(&stderr_path.display().to_string()),
+        shell_single_quote(&exit_code_path.display().to_string()),
+        shell_single_quote(&finished_path.display().to_string()),
         shell_single_quote(&exit_code_path.display().to_string()),
         shell_single_quote(&finished_path.display().to_string()),
     );
@@ -752,7 +810,8 @@ pub(super) async fn start_async_command(
             format!("{}:{err}", "async_job_script_write_failed"),
         ))
     })?;
-    let mut cmd = prepare_durable_run_cmd_process(cwd, sandbox_mode, workspace_root)?;
+    let mut cmd =
+        prepare_durable_run_cmd_process(cwd, sandbox_mode, sandbox_backend, workspace_root)?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     cmd.arg(&run_script_path)
         .current_dir(cwd)
@@ -782,27 +841,31 @@ pub(super) async fn start_async_command(
 fn prepare_run_cmd_process(
     cwd: &Path,
     sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
 ) -> Result<Command, RunSafeCommandError> {
-    prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, workspace_root, false)
+    prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, sandbox_backend, workspace_root, false)
 }
 
 fn prepare_durable_run_cmd_process(
     cwd: &Path,
     sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
 ) -> Result<Command, RunSafeCommandError> {
-    prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, workspace_root, true)
+    prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, sandbox_backend, workspace_root, true)
 }
 
 fn prepare_run_cmd_process_for_lifetime(
     cwd: &Path,
     sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     durable_async: bool,
 ) -> Result<Command, RunSafeCommandError> {
     let request = crate::process_sandbox::ProcessSandboxRequest {
         mode: sandbox_mode,
+        backend: sandbox_backend,
         workspace_root,
         execution_root: cwd,
         network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
@@ -816,15 +879,19 @@ fn prepare_run_cmd_process_for_lifetime(
     .map_err(|reason_code| {
         RunSafeCommandError::Policy(crate::skills::policy_block_error(
             reason_code,
-            vec![format!("sandbox_mode={}", sandbox_mode.as_token())],
+            vec![
+                format!("sandbox_mode={}", sandbox_mode.as_token()),
+                format!("sandbox_backend={}", sandbox_backend.as_token()),
+            ],
             vec![
                 "action=run_command".to_string(),
-                format!("sandbox_backend_required={}", sandbox_mode.as_token()),
+                format!("sandbox_backend_required={}", sandbox_backend.as_token()),
             ],
         ))
     })?;
     tracing::debug!(
         sandbox_backend = prepared.backend,
+        sandbox_backend_requested = sandbox_backend.as_token(),
         sandbox_mode = sandbox_mode.as_token(),
         "run_cmd_process_sandbox_prepared"
     );

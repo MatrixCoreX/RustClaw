@@ -316,6 +316,7 @@ pub(crate) async fn run_skill_with_runner_once(
         &state.skill_rt.skill_runner_path,
         crate::process_sandbox::ProcessSandboxRequest {
             mode: sandbox_mode,
+            backend: state.skill_rt.tools_policy.sandbox_backend,
             workspace_root: &state.skill_rt.workspace_root,
             execution_root: &state.skill_rt.workspace_root,
             network,
@@ -324,13 +325,15 @@ pub(crate) async fn run_skill_with_runner_once(
     )
     .map_err(|reason_code| {
         format!(
-            "skill-runner sandbox unavailable: reason_code={reason_code} sandbox_mode={}",
-            sandbox_mode.as_token()
+            "skill-runner sandbox unavailable: reason_code={reason_code} sandbox_mode={} sandbox_backend={}",
+            sandbox_mode.as_token(),
+            state.skill_rt.tools_policy.sandbox_backend_token()
         )
     })?;
     tracing::debug!(
         skill = canonical_skill_name,
         sandbox_backend = prepared.backend,
+        sandbox_backend_requested = state.skill_rt.tools_policy.sandbox_backend_token(),
         sandbox_mode = sandbox_mode.as_token(),
         network_policy = ?network,
         "skill_runner_process_sandbox_prepared"

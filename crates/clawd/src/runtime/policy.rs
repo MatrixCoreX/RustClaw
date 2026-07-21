@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use claw_core::config::{ToolApprovalPolicy, ToolSandboxMode, ToolsConfig};
+use claw_core::config::{ToolApprovalPolicy, ToolSandboxBackend, ToolSandboxMode, ToolsConfig};
 
 use super::state::LlmProviderRuntime;
 
@@ -14,6 +14,7 @@ pub(crate) struct RateLimiter {
 pub(crate) struct ToolsPolicy {
     pub(crate) access_profile: String,
     pub(crate) sandbox_mode: ToolSandboxMode,
+    pub(crate) sandbox_backend: ToolSandboxBackend,
     pub(crate) approval_policy: ToolApprovalPolicy,
     pub(crate) allow: Vec<String>,
     pub(crate) deny: Vec<String>,
@@ -159,6 +160,7 @@ impl ToolsPolicy {
         Ok(Self {
             access_profile,
             sandbox_mode: cfg.sandbox_mode,
+            sandbox_backend: cfg.sandbox_backend,
             approval_policy: cfg.approval_policy,
             allow,
             deny,
@@ -222,6 +224,10 @@ impl ToolsPolicy {
 
     pub(crate) fn sandbox_mode_token(&self) -> &'static str {
         self.sandbox_mode.as_token()
+    }
+
+    pub(crate) fn sandbox_backend_token(&self) -> &'static str {
+        self.sandbox_backend.as_token()
     }
 
     pub(crate) fn approval_policy_token(&self) -> &'static str {

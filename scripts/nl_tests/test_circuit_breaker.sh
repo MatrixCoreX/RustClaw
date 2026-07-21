@@ -31,6 +31,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/scripts/lib.sh"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/shell_compat.sh"
 
 CASE_COUNT="${CASE_COUNT:-12}"
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -88,7 +90,7 @@ echo "  case_count: $CASE_COUNT"
 echo
 
 # ---- Step 1: vendor inventory ------------------------------------------
-mapfile -t USABLE_VENDORS < <(python3 - <<'PY'
+array_from_command_lines USABLE_VENDORS python3 - <<'PY'
 import os, tomllib, pathlib, sys
 
 cfg_path = pathlib.Path("configs/config.toml")
@@ -131,7 +133,6 @@ for n in usable:
 for n in ordered:
     print(n)
 PY
-)
 
 if (( ${#USABLE_VENDORS[@]} == 0 )); then
   echo "[fatal] No vendor has an api_key set. Cannot run circuit breaker probe."
@@ -182,7 +183,7 @@ PROBE_PROMPTS=(
 PROBE_LEN="${#PROBE_PROMPTS[@]}"
 
 # Capture starting offset of model_io.log for the per-task diff.
-log_size() { stat -c '%s' "$MODEL_IO_LOG" 2>/dev/null || echo 0; }
+log_size() { file_size_bytes "$MODEL_IO_LOG"; }
 
 INITIAL_OFFSET="$(log_size)"
 echo "[model_io] initial offset: ${INITIAL_OFFSET} bytes"

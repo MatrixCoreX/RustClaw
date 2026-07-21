@@ -709,6 +709,7 @@ async fn restart_pi_app(
     }
 }
 
+#[cfg(target_os = "linux")]
 fn raspberry_pi_model() -> Option<String> {
     for path in [
         "/proc/device-tree/model",
@@ -736,6 +737,11 @@ fn raspberry_pi_model() -> Option<String> {
             return Some(model);
         }
     }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn raspberry_pi_model() -> Option<String> {
     None
 }
 

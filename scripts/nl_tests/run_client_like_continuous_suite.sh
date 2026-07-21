@@ -1390,7 +1390,8 @@ PY
       return 1
     fi
   fi
-  local case_tags_l=",${case_tags,,},"
+  local case_tags_l
+  case_tags_l=",$(printf '%s' "$case_tags" | tr '[:upper:]' '[:lower:]'),"
   if [[ -n "$expected_marker" && "$case_tags_l" == *",expect_exact_scalar,"* ]]; then
     local scalar_reason
     if ! scalar_reason="$(assert_reply_scalar_equals "$out_file" "$expected_marker" 2>&1)"; then

@@ -18,6 +18,8 @@ Current repository highlights:
 - built-in, external, and runner-based skills for system, files, web, image, audio, video, music, crypto, KB, and automation tasks
 - local browser UI in `UI/`, including a standalone NNI device-signing page
 - Raspberry Pi / small-screen desktop app in `pi_app/`
+- shared Linux/macOS runtime contracts, with fail-closed Bubblewrap and
+  Seatbelt process isolation selected through a machine-configured backend
 
 ## Agent Loop Architecture
 
@@ -50,7 +52,7 @@ flowchart TD
     RS --> RSG[No planner / resolver choice<br/>no verifier semantic selection]
     RSG --> MG
     MG -->|yes| MI[Persist intent + deterministic idempotency key<br/>persist attempt before invocation]
-    MG -->|no| EX{Execution adapter}
+    MG -->|no| EX{Execution adapter<br/>sandbox backend diagnostics when process-backed}
     MI --> EX
     EX -->|long-tail async_start| AS[Async media/job adapter<br/>pending_async_job + poll/cancel contract + checkpoint]
     AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
@@ -124,7 +126,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
-- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `subagent_graph`, `subagent_node`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. CLI and UI render these fields directly, including the budget profile/decision, continuation index, cumulative model/tool/token/cost/elapsed counters, soft-slice state, goal and checkpoint fields, hook fields, coding verification fields, and persisted child-graph progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
+- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `subagent_graph`, `subagent_node`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. Provider/context projections retain machine metrics such as `prompt_truncation_count` and `prompt_bytes_before_max`. CLI and UI render these fields directly, including the budget profile/decision, continuation index, cumulative model/tool/token/cost/elapsed counters, soft-slice state, goal and checkpoint fields, hook fields, coding verification fields, and persisted child-graph progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
 
 ### Planner, LLM, And Capability Flow
 
@@ -146,8 +148,8 @@ flowchart TD
     R --> QA
     QA -->|runtime async marker| AR[Allow async_start + strip internal marker]
     QA -->|subagent tool| SS[Bounded child team<br/>read-only explorer or isolated worktree writer/tester]
-    QA -->|call_tool| S[Tool executor]
-    QA -->|call_skill| T[Skill dispatcher]
+    QA -->|call_tool| S[Tool executor<br/>configured platform sandbox for subprocesses]
+    QA -->|call_skill| T[Skill dispatcher<br/>configured platform sandbox for runners]
     AR --> T
     T --> U{Skill kind}
     U -->|builtin| V[In-process builtin]
@@ -198,6 +200,55 @@ The permission plane is a structured execution boundary, not a second semantic r
 - Recovery paths such as non-interactive sudo retry are still adapter calls: they must reuse the same contract, hook, policy, and audit machinery as the original planner step.
 - Risky local coding or file-mutation capabilities should declare an isolation profile in registry metadata. `local_temp_workspace` is for disposable previews, dry runs, and generated artifacts that can be cleaned through artifact refs; `local_worktree` is for deliberate workspace edits that must be visible through task evidence, changed-file refs, and verification commands. UI and CLI surfaces read `permission_decision.steps[].sandbox`, `workspace_scope`, and `registry_policy` instead of interpreting localized text.
 - Confirmation decisions use the closed machine protocol `approve_once|always_for_scope|deny`. `always_for_scope` is exposed only for registry-declared local workspace mutations with an exact capability/effect/resource scope; it excludes `run_cmd`, network access, external publish, credential access, package installation, and privilege escalation. Grants are HMAC-signed, bound to the authenticated actor plus channel/chat session, expire after at most one hour, and are stored, matched, listed, and revoked by `clawd`. CLI/UI state never grants permission by itself.
+
+### Sandbox And Cross-Platform Execution
+
+`[tools].sandbox_backend` is independent from `sandbox_mode`. The default
+backend is `auto`: it resolves to Bubblewrap on Linux and macOS Seatbelt
+(`/usr/bin/sandbox-exec`) on macOS. Selecting a backend does not grant access;
+the verifier still applies capability effect, risk, confirmation, workspace,
+network, credential, and privilege policy before an adapter starts.
+
+```mermaid
+flowchart TD
+    A[Verified process-backed step<br/>run_cmd / runner skill / trusted command hook] --> B[ToolSandboxMode<br/>read_only / workspace_write / isolated_worktree / danger_full]
+    B -->|danger_full explicitly selected| C[Direct process<br/>no sandbox claim]
+    B -->|restricted mode| D{ToolSandboxBackend}
+    D -->|auto on Linux| E[Bubblewrap adapter]
+    D -->|auto on macOS| F[Seatbelt adapter<br/>/usr/bin/sandbox-exec]
+    D -->|bubblewrap explicit| E
+    D -->|macos_seatbelt explicit| F
+    D -->|remote_container explicit| G[Remote executor contract]
+    E --> H{Backend available?}
+    F --> H
+    G --> I[Not configured<br/>sandbox_remote_backend_not_configured]
+    H -->|no| J[Fail closed<br/>sandbox_backend_unavailable]
+    H -->|yes| K[Canonical workspace/execution roots]
+    K --> L[Filesystem + network policy<br/>additional writable paths]
+    L --> M[Clear/rebuild child environment<br/>launch process]
+    C --> N[Structured diagnostics]
+    I --> N
+    J --> N
+    M --> N
+    N --> O[Permission preview / structured policy error<br/>planner capability map + journal projection]
+```
+
+| Backend | Host | Selection | Current contract |
+| --- | --- | --- | --- |
+| Bubblewrap | Linux | `auto` or `bubblewrap` | Filesystem write scope, PID/IPC/UTS namespaces, optional network namespace, parent-bound or durable lifetime. Missing `bwrap` fails closed. |
+| Seatbelt | macOS | `auto` or `macos_seatbelt` | Read-all/write-scoped profile, optional network access, process policy, parent-bound or durable lifetime. Missing `sandbox-exec` fails closed. |
+| Remote container | Any | explicit `remote_container` | Reserved executor contract only. It returns `sandbox_remote_backend_not_configured` until a remote executor is configured and is never an automatic fallback. |
+| Direct | Any | explicit `sandbox_mode = "danger_full"` | No sandbox claim. This is an operator-selected bypass, not an availability fallback. |
+
+Diagnostics report the requested/resolved backend, platform, availability,
+fail-closed state, reason code, and filesystem/network/process/credential/
+resource/environment control levels. Service discovery is also platform-owned:
+Linux may use systemd/SysV, while macOS uses Homebrew services, launchd, or
+process observation. An incompatible explicit manager returns a structured
+`unsupported_platform` result without launching a Linux command. Development
+and release scripts use `scripts/shell_compat.sh` instead of GNU-only file/date
+commands or Bash 4-only collection syntax. See
+[`docs/cross_platform_contract.md`](docs/cross_platform_contract.md).
 
 ## Natural Language Contract Boundary
 

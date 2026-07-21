@@ -27,6 +27,11 @@ PRE_LLM_FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("direct_plan_result_builder", re.compile(r"\bbuild_plan_result\s*\(")),
     ("deterministic_plan_marker", re.compile(r'"deterministic:')),
 )
+PLANNER_LLM_GATEWAY_MARKERS: tuple[str, ...] = (
+    "llm_gateway::run_native_model_turn_with_fallback",
+    "llm_gateway::run_with_fallback_with_hints",
+    "llm_gateway::run_with_fallback_with_prompt_source",
+)
 
 
 def rel(path: Path) -> str:
@@ -37,16 +42,24 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def planning_prefix_before_llm() -> tuple[int, str]:
-    text = read(PLANNING_RS)
+def planning_prefix_before_llm_in_text(text: str) -> tuple[int, str] | None:
     start = text.find("pub(super) async fn plan_round_actions")
     if start < 0:
-        raise RuntimeError("plan_round_actions not found")
-    llm = text.find("llm_gateway::run_with_fallback_with_prompt_source", start)
-    if llm < 0:
-        raise RuntimeError("planner LLM gateway call not found")
+        return None
+    gateway_offsets = [
+        offset
+        for marker in PLANNER_LLM_GATEWAY_MARKERS
+        if (offset := text.find(marker, start)) >= 0
+    ]
+    if not gateway_offsets:
+        return None
+    llm = min(gateway_offsets)
     line_no = text[:start].count("\n") + 1
     return line_no, text[start:llm]
+
+
+def planning_prefix_before_llm() -> tuple[int, str] | None:
+    return planning_prefix_before_llm_in_text(read(PLANNING_RS))
 
 
 def test_only_module_paths() -> set[Path]:
@@ -91,7 +104,10 @@ def is_test_path(path: Path) -> bool:
 
 
 def scan_pre_llm_prefix() -> list[str]:
-    start_line, prefix = planning_prefix_before_llm()
+    prefix_result = planning_prefix_before_llm()
+    if prefix_result is None:
+        return [f"{rel(PLANNING_RS)}: planner_llm_gateway_call_not_found"]
+    start_line, prefix = prefix_result
     findings: list[str] = []
     for offset, line in enumerate(prefix.splitlines(), start=0):
         stripped = line.strip()
@@ -146,6 +162,20 @@ def run_self_test() -> int:
     assert DETERMINISTIC_PLAN_CALL.search("service_status_deterministic_plan_result(")
     assert PRE_LLM_FORBIDDEN_PATTERNS[1][1].search("build_plan_result(")
     assert PRE_LLM_FORBIDDEN_PATTERNS[2][1].search('"deterministic:service_status"')
+    native_fixture = """pub(super) async fn plan_round_actions() {
+let context = prepare();
+llm_gateway::run_native_model_turn_with_fallback();
+}"""
+    fallback_fixture = """pub(super) async fn plan_round_actions() {
+let context = prepare();
+llm_gateway::run_with_fallback_with_hints();
+}"""
+    assert planning_prefix_before_llm_in_text(native_fixture) == (
+        1,
+        "pub(super) async fn plan_round_actions() {\nlet context = prepare();\n",
+    )
+    assert planning_prefix_before_llm_in_text(fallback_fixture) is not None
+    assert planning_prefix_before_llm_in_text("fn unrelated() {}") is None
     print("SELF_TEST_OK")
     return 0
 

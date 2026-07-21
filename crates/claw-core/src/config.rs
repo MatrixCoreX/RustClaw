@@ -1374,6 +1374,27 @@ impl ToolSandboxMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum ToolSandboxBackend {
+    #[default]
+    Auto,
+    Bubblewrap,
+    MacosSeatbelt,
+    RemoteContainer,
+}
+
+impl ToolSandboxBackend {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Bubblewrap => "bubblewrap",
+            Self::MacosSeatbelt => "macos_seatbelt",
+            Self::RemoteContainer => "remote_container",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolApprovalPolicy {
     Never,
     #[default]
@@ -1399,6 +1420,8 @@ pub struct ToolsConfig {
     pub access_profile: String,
     #[serde(default)]
     pub sandbox_mode: ToolSandboxMode,
+    #[serde(default)]
+    pub sandbox_backend: ToolSandboxBackend,
     #[serde(default)]
     pub approval_policy: ToolApprovalPolicy,
     #[serde(default)]
@@ -1426,6 +1449,7 @@ impl Default for ToolsConfig {
         Self {
             access_profile: default_tools_profile(),
             sandbox_mode: ToolSandboxMode::default(),
+            sandbox_backend: ToolSandboxBackend::default(),
             approval_policy: ToolApprovalPolicy::default(),
             allow: Vec::new(),
             deny: Vec::new(),

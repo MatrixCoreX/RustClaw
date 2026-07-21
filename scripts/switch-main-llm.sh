@@ -17,7 +17,7 @@ if [[ $# -lt 1 ]]; then
     usage
 fi
 
-VENDOR="${1,,}"
+VENDOR="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
 case "$VENDOR" in
     qwen|minimax|mimo) ;;
     *) echo "Error: supported vendors: qwen, minimax, mimo"; usage ;;

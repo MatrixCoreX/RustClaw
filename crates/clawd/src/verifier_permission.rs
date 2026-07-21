@@ -92,6 +92,21 @@ fn step_permission_decision_json(
         crate::policy_decision::PolicyDecision::Allow
     };
     let sandbox_profile = verifier_sandbox_profile_token(registry_policy.as_ref(), effect);
+    let sandbox_network = if registry_policy
+        .as_ref()
+        .and_then(|policy| policy.get("network_access"))
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        crate::process_sandbox::ProcessNetworkPolicy::Inherit
+    } else {
+        crate::process_sandbox::ProcessNetworkPolicy::Deny
+    };
+    let sandbox_backend_diagnostics = crate::process_sandbox::sandbox_backend_diagnostics(
+        state.skill_rt.tools_policy.sandbox_backend,
+        state.skill_rt.tools_policy.sandbox_mode,
+        sandbox_network,
+    );
 
     json!({
         "step_id": step.step_id,
@@ -109,6 +124,8 @@ fn step_permission_decision_json(
         "requires_confirmation": requires_confirmation,
         "approval_policy": state.skill_rt.tools_policy.approval_policy_token(),
         "global_sandbox_mode": state.skill_rt.tools_policy.sandbox_mode_token(),
+        "global_sandbox_backend": state.skill_rt.tools_policy.sandbox_backend_token(),
+        "sandbox_backend_diagnostics": sandbox_backend_diagnostics,
         "sandbox_denial_reason": sandbox_denial_reason,
         "sandbox_profile": sandbox_profile.clone(),
         "sandbox": verifier_sandbox_summary(registry_policy.as_ref(), &sandbox_profile, effect),
@@ -194,6 +211,11 @@ pub(super) fn preview_command_permission_decision_json(
         "confirmation_required": decision.requires_confirmation(),
         "approval_policy": raw.get("approval_policy").cloned().unwrap_or(Value::Null),
         "sandbox_mode": raw.get("global_sandbox_mode").cloned().unwrap_or(Value::Null),
+        "sandbox_backend": raw.get("global_sandbox_backend").cloned().unwrap_or(Value::Null),
+        "sandbox_backend_diagnostics": raw
+            .get("sandbox_backend_diagnostics")
+            .cloned()
+            .unwrap_or(Value::Null),
         "sandbox_profile": raw.get("sandbox_profile").cloned().unwrap_or(Value::Null),
         "sandbox": raw.get("sandbox").cloned().unwrap_or(Value::Null),
         "workspace_scope": raw.get("workspace_scope").cloned().unwrap_or(Value::Null),
