@@ -47,7 +47,7 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | `info` | none | no | - | - | Return host/runtime introspection as JSON: hostname, current_user, kernel_release, timestamps, uptime, process RSS, pid, cwd, workspace root, executable path, OS and arch. |
-| `runtime_status` | `kind` | no | string | - | Runtime scalar to return. Supported: `current_user`, `host_name`, `kernel_release`, `current_time`, `current_working_directory`. Aliases such as `whoami`, `hostname`, `uname_r`, `system_time`, and `pwd` are normalized. |
+| `runtime_status` | `kind` | yes | string | - | Runtime scalar to return. Supported: `current_user`, `host_name`, `kernel_release`, `current_time`, `current_working_directory`. Aliases such as `whoami`, `hostname`, `uname_r`, `system_time`, and `pwd` are normalized. |
 | `inventory_dir` | `path` | no | string(path) | `.` | Target directory inside workspace. |
 | `inventory_dir` | `files_only` | no | bool | `false` | Keep only files. |
 | `inventory_dir` | `dirs_only` | no | bool | `false` | Keep only directories. |

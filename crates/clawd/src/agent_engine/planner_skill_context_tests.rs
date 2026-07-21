@@ -116,6 +116,19 @@ fn first_round_uses_only_budgeted_compact_index() {
         run_cmd_line.contains("system.preview_background_command"),
         "run_cmd_line={run_cmd_line}"
     );
+    let system_basic_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("skill=system_basic"))
+        .expect("system_basic compact-index line");
+    assert!(
+        system_basic_line.contains("system.runtime_status(action=runtime_status,required=kind"),
+        "system_basic_line={system_basic_line}"
+    );
+    assert!(
+        system_basic_line.contains("allowed_kind=current_time|current_user|current_working_directory|host_name|kernel_release"),
+        "system_basic_line={system_basic_line}"
+    );
     let fs_basic_line = context
         .text
         .lines()
