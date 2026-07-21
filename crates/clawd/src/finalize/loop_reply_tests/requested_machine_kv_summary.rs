@@ -287,6 +287,96 @@ fn requested_machine_kv_summary_repairs_conflicting_colon_value_without_dropping
 }
 
 #[test]
+fn requested_machine_kv_summary_repairs_markdown_path_without_dropping_localized_detail() {
+    let task = claimed_task("task-machine-kv-summary-markdown-path-localized-detail");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"/workspace/service_notes.md","line_count":7,"last_nonempty_line":"Operators should check the app log first."}}"#,
+    ));
+    let current = "読み取り結果：\n\n- **path**: `service_notes.md`\n- **任意の詳細**: `Operators should check the app log first.`";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", current));
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "path とその行だけを返してください。",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(
+        delivery_messages,
+        vec!["読み取り結果：\n\n- **path**: `/workspace/service_notes.md`\n- **任意の詳細**: `Operators should check the app log first.`".to_string()]
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_accepts_grounded_scalar_under_localized_label() {
+    let task = claimed_task("task-machine-kv-summary-localized-label-grounded-scalar");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"/workspace/docs/service_notes.md","line_count":7,"last_nonempty_line":"Operators should check the app log first."}}"#,
+    ));
+    let current = "読み取り結果：\n\n- **任意のラベル**: `docs/service_notes.md`\n- **別の詳細**: `Operators should check the app log first.`";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", current));
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "path とその行だけを返してください。",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(delivery_messages, vec![current.to_string()]);
+}
+
+#[test]
+fn requested_machine_kv_summary_rejects_ambiguous_basename_under_localized_label() {
+    let task = claimed_task("task-machine-kv-summary-localized-label-ambiguous-basename");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"/workspace/docs/service_notes.md"}}"#,
+    ));
+    let current = "- **任意のラベル**: `service_notes.md`\n- **別の詳細**: `unverified`";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", current));
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "path だけを返してください。",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(
+        delivery_messages,
+        vec!["path=/workspace/docs/service_notes.md"]
+    );
+}
+
+#[test]
 fn hook_runtime_surface_json_can_replace_short_token_delivery() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
