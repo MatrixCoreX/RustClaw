@@ -34,6 +34,16 @@ fn classify_prompt_source_uses_specific_classifier_labels() {
         ),
         "user_response_validator"
     );
+    assert_eq!(
+        classify_prompt_source(
+            "layered:prompts/native_action_protocol.md+prompts/native_turn_context.md"
+        ),
+        "plan"
+    );
+    assert_eq!(
+        classify_prompt_source("inline:native_plan_contract_repair"),
+        "plan"
+    );
 }
 
 #[test]

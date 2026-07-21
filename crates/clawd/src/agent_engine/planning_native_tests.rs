@@ -102,3 +102,27 @@ fn native_request_separates_system_protocol_from_user_turn() {
         }]
     );
 }
+
+#[test]
+fn native_contract_retry_preserves_tool_schema_and_adds_machine_observation() {
+    let request = native_planner_request("protocol", "current turn", Some(90));
+    let signal = native_contract_repair_signal("native_plan_capability_missing");
+    let repaired = native_contract_retry_request(&request, &signal);
+
+    assert_eq!(repaired.tools, request.tools);
+    assert_eq!(repaired.metadata, request.metadata);
+    assert_eq!(repaired.messages.len(), 3);
+    let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
+    assert_eq!(
+        observation["protocol_observation"]["error_code"],
+        "native_plan_capability_missing"
+    );
+    assert_eq!(
+        observation["protocol_observation"]["required_argument_fields"],
+        json!(["capability", "args"])
+    );
+    assert_eq!(
+        repaired.messages[2].content,
+        vec![ModelContentPart::Text { text: signal }]
+    );
+}
