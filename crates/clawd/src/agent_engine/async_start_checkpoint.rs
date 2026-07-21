@@ -25,6 +25,9 @@ pub(super) fn publish_pending_async_job_start_checkpoint(
         return Ok(None);
     };
     let poll_adapter = pending_async_job_poll_adapter_from_extra(structured_extra)?;
+    if let Some(slice) = loop_state.task_budget_slice.as_mut() {
+        slice.set_decision(crate::task_budget_contract::BudgetDecision::Waiting);
+    }
     let now_ts = crate::now_ts_u64() as i64;
     let payload = build_pending_async_job_checkpoint_progress_payload(
         task,
@@ -144,6 +147,10 @@ fn build_pending_async_job_checkpoint_progress_payload(
         "skill": normalized_skill,
         "global_step": global_step,
         "step_in_round": step_in_round,
+        "task_budget_slice": loop_state
+            .task_budget_slice
+            .as_ref()
+            .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
     });
     if let (Some(obj), Some(adapter)) = (
         boundary_context.as_object_mut(),
@@ -188,6 +195,10 @@ fn build_pending_async_job_checkpoint_progress_payload(
             "async_job_message_key": job.message_key,
             "async_timeout_policy": timeout_policy,
             "budget": budget_json,
+            "task_budget_slice": loop_state
+                .task_budget_slice
+                .as_ref()
+                .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
             "can_poll": true,
             "can_cancel": true,
             "last_heartbeat_ts": now_ts,

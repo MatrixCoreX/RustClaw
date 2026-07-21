@@ -237,6 +237,8 @@ fn build_turn_analysis_prompt_block(
 pub(crate) struct LoopState {
     pub(crate) round_no: usize,
     pub(crate) max_rounds: usize,
+    pub(crate) task_budget_slice: Option<crate::task_budget_contract::TaskBudgetSlice>,
+    pub(crate) task_budget_slice_base_elapsed_ms: u64,
     pub(crate) tool_calls_total: usize,
     pub(crate) total_steps_executed: usize,
     /// Progress hints only; published to task progress for "processing..." display. Must not contain full raw output.

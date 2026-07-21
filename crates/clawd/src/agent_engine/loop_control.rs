@@ -677,6 +677,134 @@ fn loop_state_has_recoverable_checkpoint_state(loop_state: &LoopState) -> bool {
         || loop_state.has_tool_or_skill_output
 }
 
+fn task_budget_profile(
+    profile: super::support::LoopBudgetProfile,
+) -> crate::task_budget_contract::TaskBudgetProfile {
+    use crate::task_budget_contract::TaskBudgetProfile;
+    match profile {
+        super::support::LoopBudgetProfile::General => TaskBudgetProfile::General,
+        super::support::LoopBudgetProfile::FastRead => TaskBudgetProfile::FastRead,
+        super::support::LoopBudgetProfile::GroundedSummary => TaskBudgetProfile::GroundedSummary,
+        super::support::LoopBudgetProfile::MultiStepWorkspace => {
+            TaskBudgetProfile::MultiStepWorkspace
+        }
+        super::support::LoopBudgetProfile::OpsClosedLoop => TaskBudgetProfile::OpsClosedLoop,
+    }
+}
+
+fn initialize_task_budget_slice(
+    loop_state: &mut LoopState,
+    profile: super::support::LoopBudgetProfile,
+    soft_checkpoint_after: Option<Duration>,
+    worker_timeout_seconds: u64,
+) {
+    if loop_state.task_budget_slice.is_some() {
+        return;
+    }
+    let soft_slice_ms = soft_checkpoint_after
+        .unwrap_or_else(|| Duration::from_secs(worker_timeout_seconds.max(1)))
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64;
+    loop_state.task_budget_slice = Some(crate::task_budget_contract::TaskBudgetSlice::new(
+        task_budget_profile(profile),
+        soft_slice_ms,
+        crate::task_budget_contract::BudgetHardCeilings::default(),
+    ));
+}
+
+fn task_budget_lifecycle_state(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .task_lifecycle
+        .as_ref()
+        .and_then(|value| value.get("state"))
+        .and_then(Value::as_str)
+}
+
+fn observe_task_budget(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    outcome: Option<&RoundOutcome>,
+    loop_started_at: Instant,
+    soft_slice_exhausted: bool,
+) -> crate::task_budget_contract::BudgetDecision {
+    use crate::task_budget_contract::{BudgetObservation, BudgetProgress};
+
+    let successful_steps = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok())
+        .count() as u64;
+    let artifact_count = loop_state.written_file_aliases.len() as u64
+        + u64::from(loop_state.last_written_file_path.is_some());
+    let lifecycle_state = task_budget_lifecycle_state(loop_state);
+    let progress = BudgetProgress {
+        evidence_count: loop_state.capability_results.len() as u64 + successful_steps,
+        artifact_count,
+        completed_plan_nodes: successful_steps,
+        verified_state_transitions: loop_state.successful_action_fingerprints.len() as u64,
+        async_continuations: u64::from(lifecycle_state == Some("background")),
+        stagnation_count: loop_state.consecutive_no_progress.min(u32::MAX as usize) as u32,
+    };
+    let model_finished = outcome.is_some_and(|round| {
+        round.stop_signal.is_some()
+            && round.stop_signal.as_deref() != Some("recoverable_failure_continue_round")
+    });
+    let policy_terminal = outcome.is_some_and(|round| round.had_error);
+    let resumable = loop_state_has_recoverable_checkpoint_state(loop_state);
+    let cumulative_elapsed_ms = loop_state.task_budget_slice_base_elapsed_ms.saturating_add(
+        loop_started_at
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64,
+    );
+    let observation = BudgetObservation {
+        cumulative_model_turns: state.task_llm_call_count(&task.task_id) as u64,
+        cumulative_tool_calls: loop_state.tool_calls_total as u64,
+        cumulative_elapsed_ms,
+        progress,
+        model_finished,
+        needs_user: loop_state.pending_user_input_required || lifecycle_state == Some("needs_user"),
+        waiting: matches!(lifecycle_state, Some("waiting" | "background")),
+        cancelled: false,
+        policy_terminal,
+        resumable,
+        soft_slice_exhausted,
+    };
+    let Some(slice) = loop_state.task_budget_slice.as_mut() else {
+        return crate::task_budget_contract::BudgetDecision::Terminal;
+    };
+    let decision = slice.observe(observation);
+    let event_payload = json!({
+        "schema_version": 1,
+        "decision": decision.as_str(),
+        "profile": slice.profile.as_str(),
+        "soft_slice_ms": slice.soft_slice_ms,
+        "continuation_index": slice.continuation_index,
+        "cumulative_model_turns": slice.cumulative_model_turns,
+        "cumulative_tool_calls": slice.cumulative_tool_calls,
+        "cumulative_elapsed_ms": slice.cumulative_elapsed_ms,
+        "progress": slice.progress,
+        "observed_progress": slice.progress.observed_progress(),
+        "soft_slice_exhausted": soft_slice_exhausted,
+        "resumable": resumable,
+    });
+    if let Err(err) = crate::task_event_transport::publish_claimed_event(
+        state,
+        task,
+        "budget_decision",
+        event_payload,
+    ) {
+        warn!(
+            task_id = task.task_id,
+            claim_attempt = task.claim_attempt,
+            error = %err,
+            "task_budget_decision_event_publish_failed"
+        );
+    }
+    decision
+}
+
 async fn run_agent_round(
     state: &AppState,
     task: &ClaimedTask,
@@ -1062,6 +1190,12 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         &task.payload_json,
     );
     let worker_soft_checkpoint_after = worker_soft_checkpoint_after(worker_task_timeout_seconds);
+    initialize_task_budget_slice(
+        &mut loop_state,
+        budget_profile,
+        worker_soft_checkpoint_after,
+        worker_task_timeout_seconds,
+    );
     loop {
         while round <= loop_state.max_rounds {
             ensure_task_running(state, task)?;
@@ -1069,6 +1203,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             if worker_budget_near_exhaustion(loop_started_at, worker_soft_checkpoint_after)
                 && loop_state_has_recoverable_checkpoint_state(&loop_state)
             {
+                observe_task_budget(state, task, &mut loop_state, None, loop_started_at, true);
                 loop_state.last_stop_signal = Some("budget_near_exhaustion".to_string());
                 publish_agent_loop_checkpoint_progress(
                     state,
@@ -1091,7 +1226,17 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             )
             .await?;
             loop_state.last_stop_signal = outcome.stop_signal.clone();
-            if worker_budget_near_exhaustion(loop_started_at, worker_soft_checkpoint_after)
+            let soft_slice_exhausted =
+                worker_budget_near_exhaustion(loop_started_at, worker_soft_checkpoint_after);
+            observe_task_budget(
+                state,
+                task,
+                &mut loop_state,
+                Some(&outcome),
+                loop_started_at,
+                soft_slice_exhausted,
+            );
+            if soft_slice_exhausted
                 && !outcome.had_error
                 && outcome.executed_actions > 0
                 && loop_state_has_recoverable_checkpoint_state(&loop_state)
