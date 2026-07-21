@@ -611,6 +611,77 @@ fn planner_protocol_failure_replans_next_round() {
 }
 
 #[test]
+fn workspace_patch_context_mismatch_replans_next_round() {
+    let state = test_state_with_registry();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "workspace_patch".to_string(),
+        args: serde_json::json!({
+            "action": "apply_patch",
+            "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new"
+        }),
+    }];
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "workspace_patch",
+            "error_kind": "patch_context_mismatch",
+            "error_text": "patch check failed",
+            "extra": {"error_code": "patch_context_mismatch"}
+        })
+    );
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            0,
+            4,
+            "workspace_patch",
+            actions.first().map(|action| match action {
+                AgentAction::CallSkill { args, .. } => args,
+                _ => unreachable!(),
+            }),
+            &err,
+        ),
+        Some("recoverable_failure_continue_round")
+    );
+}
+
+#[test]
+fn workspace_patch_apply_io_failure_does_not_gain_contract_repair() {
+    let state = test_state_with_registry();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "workspace_patch".to_string(),
+        args: serde_json::json!({"action": "apply_patch", "patch": "payload"}),
+    }];
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "workspace_patch",
+            "error_kind": "patch_apply_failed",
+            "error_text": "patch apply failed",
+            "extra": {"error_code": "patch_apply_failed"}
+        })
+    );
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            0,
+            4,
+            "workspace_patch",
+            actions.first().map(|action| match action {
+                AgentAction::CallSkill { args, .. } => args,
+                _ => unreachable!(),
+            }),
+            &err,
+        ),
+        None
+    );
+}
+
+#[test]
 fn planner_generated_terminal_command_failure_replans_but_literal_command_finalizes() {
     let state = test_state_with_registry();
     let actions = vec![AgentAction::CallSkill {
