@@ -66,6 +66,7 @@ fn step_permission_decision_json(
                 "privilege_escalation": mapping.privilege_escalation,
                 "once_per_task": mapping.once_per_task,
                 "dedup_scope": mapping.dedup_scope.map(|scope| scope.as_token()),
+                "dedup_fields": mapping.dedup_fields,
                 "idempotent": mapping.idempotent,
             });
             Some(policy)

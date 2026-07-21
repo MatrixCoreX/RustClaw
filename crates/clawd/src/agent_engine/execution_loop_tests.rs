@@ -1,6 +1,7 @@
 use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
     capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
+    prior_structured_observation_satisfies_read_only_action,
     successful_structured_observation_satisfies_selector,
     terminal_synthesis_can_skip_remaining_actions,
 };
@@ -82,6 +83,31 @@ enabled = true
 kind = "runner"
 planner_capabilities = [
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", once_per_task = true, dedup_scope = "args", idempotent = false },
+]
+"#
+}
+
+fn structured_observation_registry_fixture() -> &'static str {
+    r#"
+[[skills]]
+name = "preview_tool"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "preview.inspect", action = "inspect", effect = "observe", idempotent = true },
+  { name = "preview.apply", action = "apply", effect = "mutate", once_per_task = true, idempotent = false },
+]
+"#
+}
+
+fn resource_dedup_registry_fixture() -> &'static str {
+    r#"
+[[skills]]
+name = "preview_tool"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "preview.inspect", action = "inspect", effect = "observe", required = ["prompt"], optional = ["output_path"], risk_level = "low", idempotent = true, dedup_scope = "resource", dedup_fields = ["output_path"] },
 ]
 "#
 }
@@ -296,6 +322,76 @@ fn incomplete_structured_observation_keeps_terminal_discussion_actions() {
 }
 
 #[test]
+fn completed_structured_observation_skips_later_read_only_capability() {
+    let state = state_with_registry(structured_observation_registry_fixture(), &["preview_tool"]);
+    let mut loop_state = super::LoopState::new();
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("provider,model".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "preview_tool".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(r#"{"extra":{"provider":"example","model":"v1"}}"#.to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+    assert!(prior_structured_observation_satisfies_read_only_action(
+        &state,
+        None,
+        &loop_state,
+        &crate::AgentAction::CallCapability {
+            capability: "preview.inspect".to_string(),
+            args: serde_json::json!({}),
+        },
+    ));
+}
+
+#[test]
+fn completed_structured_observation_does_not_skip_mutating_capability() {
+    let state = state_with_registry(structured_observation_registry_fixture(), &["preview_tool"]);
+    let mut loop_state = super::LoopState::new();
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("provider,model".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "preview_tool".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(r#"{"extra":{"provider":"example","model":"v1"}}"#.to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+    assert!(!prior_structured_observation_satisfies_read_only_action(
+        &state,
+        None,
+        &loop_state,
+        &crate::AgentAction::CallCapability {
+            capability: "preview.apply".to_string(),
+            args: serde_json::json!({}),
+        },
+    ));
+}
+
+#[test]
 fn active_recipe_allows_repeating_successful_observe_effect() {
     let recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
@@ -457,6 +553,75 @@ fn repeat_guard_allows_successful_observe_repeat_until_limit() {
         )
         .as_deref(),
         Some("repeat_action_limit")
+    );
+}
+
+#[test]
+fn resource_dedup_blocks_same_resource_but_allows_distinct_resources() {
+    let state = state_with_registry(resource_dedup_registry_fixture(), &["preview_tool"]);
+    let task = task_fixture("task-resource-dedup");
+    let policy = test_policy(true);
+    let first = crate::AgentAction::CallCapability {
+        capability: "preview.inspect".to_string(),
+        args: serde_json::json!({
+            "prompt": "first description",
+            "output_path": "out/a.bin"
+        }),
+    };
+    let same_resource = crate::AgentAction::CallCapability {
+        capability: "preview.inspect".to_string(),
+        args: serde_json::json!({
+            "prompt": "rewritten description",
+            "output_path": "out/a.bin"
+        }),
+    };
+    let different_resource = crate::AgentAction::CallCapability {
+        capability: "preview.inspect".to_string(),
+        args: serde_json::json!({
+            "prompt": "first description",
+            "output_path": "out/b.bin"
+        }),
+    };
+    let first_fingerprint = action_fingerprint_for_policy(&state, &policy, &first);
+    let same_fingerprint = action_fingerprint_for_policy(&state, &policy, &same_resource);
+    let different_fingerprint = action_fingerprint_for_policy(&state, &policy, &different_resource);
+
+    assert_eq!(first_fingerprint, same_fingerprint);
+    assert_ne!(first_fingerprint, different_fingerprint);
+
+    let mut loop_state = super::LoopState::new();
+    loop_state
+        .successful_action_fingerprints
+        .insert(first_fingerprint, 1);
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &same_resource,
+            &same_fingerprint,
+            1,
+        )
+        .as_deref(),
+        Some("repeat_completed_action")
+    );
+    assert_eq!(
+        loop_state.rollout_attribution[0].dedup_scope.as_deref(),
+        Some("resource")
+    );
+
+    let missing_resource_a = crate::AgentAction::CallCapability {
+        capability: "preview.inspect".to_string(),
+        args: serde_json::json!({"prompt": "first description"}),
+    };
+    let missing_resource_b = crate::AgentAction::CallCapability {
+        capability: "preview.inspect".to_string(),
+        args: serde_json::json!({"prompt": "rewritten description"}),
+    };
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &missing_resource_a),
+        action_fingerprint_for_policy(&state, &policy, &missing_resource_b)
     );
 }
 

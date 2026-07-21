@@ -702,6 +702,7 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
                 | "post_write_validation_reserve"
                 | "repeat_action_limit"
                 | "repeat_completed_action"
+                | "structured_observation_already_ready"
         )
     })
 }

@@ -86,6 +86,7 @@ fn planner_capability_hint_includes_structured_contract() {
         preferred: true,
         once_per_task: Some(false),
         dedup_scope: Some(RegistryDedupScope::Args),
+        dedup_fields: Vec::new(),
         idempotent: Some(true),
         execution_mode: Some(CapabilityExecutionMode::AsyncRequired),
         async_adapter_kind: Some("media_job_poll".to_string()),

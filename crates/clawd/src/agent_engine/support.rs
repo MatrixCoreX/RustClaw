@@ -1457,21 +1457,59 @@ pub(super) fn action_fingerprint_for_policy(
         return action_fingerprint(state, action);
     };
     let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
-    if dedup_scope == claw_core::skill_registry::RegistryDedupScope::Action {
-        if run_command_action_uses_args_fingerprint(
-            &normalized_skill,
-            action_token.as_deref(),
-            args,
-        ) {
-            return action_fingerprint(state, policy_action);
+    match dedup_scope {
+        claw_core::skill_registry::RegistryDedupScope::Action => {
+            if run_command_action_uses_args_fingerprint(
+                &normalized_skill,
+                action_token.as_deref(),
+                args,
+            ) {
+                return action_fingerprint(state, policy_action);
+            }
+            return format!(
+                "skill:{}:action:{}",
+                normalized_skill,
+                action_token.unwrap_or_else(|| "_default".to_string())
+            );
         }
-        return format!(
-            "skill:{}:action:{}",
-            normalized_skill,
-            action_token.unwrap_or_else(|| "_default".to_string())
-        );
+        claw_core::skill_registry::RegistryDedupScope::Resource => {
+            let fields = registry.resolved_dedup_fields(&normalized_skill, action_token.as_deref());
+            let resource = fields
+                .iter()
+                .filter_map(|field| args.get(field).map(|value| (field.clone(), value.clone())))
+                .collect::<serde_json::Map<String, Value>>();
+            if resource.is_empty() {
+                return action_fingerprint(state, policy_action);
+            }
+            return format!(
+                "skill:{}:action:{}:resource:{}",
+                normalized_skill,
+                action_token.unwrap_or_else(|| "_default".to_string()),
+                canonical_json_string(&Value::Object(resource))
+            );
+        }
+        claw_core::skill_registry::RegistryDedupScope::Args => {}
     }
     action_fingerprint(state, policy_action)
+}
+
+pub(super) fn registry_dedup_scope_for_action(
+    state: &AppState,
+    action: &AgentAction,
+) -> claw_core::skill_registry::RegistryDedupScope {
+    let resolved_action = resolved_registry_action_for_policy(state, action);
+    let policy_action = resolved_action.as_ref().unwrap_or(action);
+    let Some((skill_name, args)) = action_skill_and_args(policy_action) else {
+        return claw_core::skill_registry::RegistryDedupScope::Args;
+    };
+    let normalized_skill = state
+        .resolve_canonical_skill_name(skill_name)
+        .to_ascii_lowercase();
+    let action_token = registry_action_token_from_args(args);
+    state
+        .get_skills_registry()
+        .map(|registry| registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref()))
+        .unwrap_or(claw_core::skill_registry::RegistryDedupScope::Args)
 }
 
 pub(super) fn registry_idempotency_guard_attribution(
@@ -1496,7 +1534,7 @@ pub(super) fn registry_idempotency_guard_attribution(
     let registry = state.get_skills_registry()?;
     let once_per_task = registry.resolved_once_per_task(&normalized_skill, action_token.as_deref());
     let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
-    if !once_per_task && dedup_scope != claw_core::skill_registry::RegistryDedupScope::Action {
+    if !once_per_task && dedup_scope == claw_core::skill_registry::RegistryDedupScope::Args {
         return None;
     }
     if run_command_action_uses_args_fingerprint(&normalized_skill, action_token.as_deref(), args) {

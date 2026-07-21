@@ -49,6 +49,9 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(dedup_scope) = mapping.dedup_scope {
         parts.push(format!("dedup_scope={}", dedup_scope.as_token()));
     }
+    if !mapping.dedup_fields.is_empty() {
+        parts.push(format!("dedup_fields={}", mapping.dedup_fields.join("|")));
+    }
     if let Some(idempotent) = mapping.idempotent {
         parts.push(format!("idempotent={idempotent}"));
     }

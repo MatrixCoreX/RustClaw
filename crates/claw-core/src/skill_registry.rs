@@ -75,6 +75,7 @@ pub enum RegistryDedupScope {
     #[default]
     Args,
     Action,
+    Resource,
 }
 
 impl RegistryDedupScope {
@@ -82,6 +83,7 @@ impl RegistryDedupScope {
         match self {
             Self::Args => "args",
             Self::Action => "action",
+            Self::Resource => "resource",
         }
     }
 }
@@ -145,6 +147,8 @@ pub struct PlannerCapabilityMapping {
     pub once_per_task: Option<bool>,
     #[serde(default)]
     pub dedup_scope: Option<RegistryDedupScope>,
+    #[serde(default)]
+    pub dedup_fields: Vec<String>,
     #[serde(default)]
     pub idempotent: Option<bool>,
     #[serde(default)]
@@ -668,6 +672,7 @@ fn normalize_planner_capabilities(
             preferred: mapping.preferred,
             once_per_task: mapping.once_per_task,
             dedup_scope: mapping.dedup_scope,
+            dedup_fields: normalize_schema_tokens(&mapping.dedup_fields),
             idempotent: mapping.idempotent,
             execution_mode: mapping.execution_mode,
             async_adapter_kind: trim_optional_string(mapping.async_adapter_kind.as_deref())
@@ -1355,6 +1360,13 @@ impl SkillsRegistry {
             return value;
         }
         legacy_dedup_scope_default(entry)
+    }
+
+    pub fn resolved_dedup_fields(&self, canonical_name: &str, action: Option<&str>) -> Vec<String> {
+        self.get(canonical_name)
+            .and_then(|entry| matching_planner_capability(entry, action))
+            .map(|mapping| mapping.dedup_fields.clone())
+            .unwrap_or_default()
     }
 
     pub fn resolved_idempotent(&self, canonical_name: &str, action: Option<&str>) -> bool {
