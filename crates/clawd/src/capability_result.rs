@@ -13,7 +13,7 @@ pub(crate) fn successful_execution_envelope(
 ) -> CapabilityResultEnvelope {
     let mut envelope =
         CapabilityResultEnvelope::ok(capability, machine_action(args), result_data(output, extra));
-    envelope.artifacts = artifact_refs(extra);
+    envelope.artifacts = artifact_refs_from_sources(output, extra);
     envelope.evidence.push(EvidenceRef {
         id: machine_evidence_id(step_id),
         source: capability.to_string(),
@@ -320,6 +320,21 @@ fn artifact_refs(extra: Option<&Value>) -> Vec<ArtifactRef> {
             }) {
                 refs.push(artifact);
             }
+        }
+    }
+    refs
+}
+
+fn artifact_refs_from_sources(output: &str, extra: Option<&Value>) -> Vec<ArtifactRef> {
+    let parsed_output = serde_json::from_str::<Value>(output.trim()).ok();
+    let mut refs = artifact_refs(parsed_output.as_ref());
+    for artifact in artifact_refs(extra) {
+        if !refs.iter().any(|existing| {
+            existing.id == artifact.id
+                && existing.path == artifact.path
+                && existing.uri == artifact.uri
+        }) {
+            refs.push(artifact);
         }
     }
     refs

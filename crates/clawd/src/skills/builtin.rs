@@ -657,6 +657,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 crate::skills::task_allows_sudo(state, task),
                 state.skill_rt.tools_policy.sandbox_mode,
                 &state.skill_rt.workspace_root,
+                builtin_task_id(task),
             )
             .await
             .map_err(|err| match err {

@@ -504,6 +504,44 @@ fn signed_artifact_url_is_redacted_before_model_synthesis() {
 }
 
 #[test]
+fn machine_output_artifact_refs_are_promoted_to_the_result_envelope() {
+    let output = serde_json::json!({
+        "schema_version": 1,
+        "kind": "tool_output_artifact",
+        "artifact_refs": [{
+            "id": "tool-output:task:stdout",
+            "path": ".rustclaw/artifacts/tool-output/task/stdout.log",
+            "media_type": "text/plain",
+            "sha256": "abc123",
+            "metadata": {
+                "size_bytes": 4096,
+                "stream": "stdout",
+                "provenance": "run_cmd"
+            }
+        }]
+    })
+    .to_string();
+
+    let envelope = super::successful_execution_envelope(
+        "run_cmd",
+        "step_1",
+        &serde_json::json!({}),
+        &output,
+        None,
+    );
+
+    assert_eq!(envelope.artifacts.len(), 1);
+    assert_eq!(
+        envelope.artifacts[0].id.as_deref(),
+        Some("tool-output:task:stdout")
+    );
+    assert_eq!(
+        envelope.artifacts[0].metadata["size_bytes"].as_u64(),
+        Some(4096)
+    );
+}
+
+#[test]
 fn exact_command_output_selector_preserves_generic_observation_text() {
     let envelope = super::successful_execution_envelope(
         "runtime.command",
