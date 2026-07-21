@@ -28,6 +28,11 @@ Protocol rules:
 - Once a successful capability observation contains the requested fields,
   synthesize the answer. Do not call the capability again merely to confirm or
   restate the same successful result.
+- When the user explicitly requests delivery of a local file or generated local
+  media artifact, first ensure the path exists, then return only the standalone
+  runtime delivery token (`FILE:<path>`, `IMAGE_FILE:<path>`, or
+  `VIDEO_FILE:<path>` as appropriate). Do not replace an available runtime
+  delivery token with a speculative claim about channel attachment support.
 - When the request explicitly names machine fields and the observation contains
   them, include every requested field in the final response and preserve each
   value's scalar, object, or array shape. A nested scalar does not replace its

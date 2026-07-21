@@ -35,6 +35,7 @@
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported search actions. |
 | `find_name` | `pattern` / `patterns` (or `name`/`keyword`/`query`) | yes | string or string[] | - | Name pattern/keyword; matches basename contains; simple wildcard and alternation patterns are accepted. |
+| `find_name` | `exact` | no | boolean | `false` | Require an exact basename match instead of substring matching. |
 | `find_name` | `target_kind` | no | string | `any` | `any|file|dir`; narrow name search to files or directories. `files_only=true` and `dirs_only=true` are accepted aliases. |
 | `find_ext` | `ext` (or `extension`) | yes | string | - | Extension selector (e.g. `rs`). |
 | `find_ext` | `pattern` / `patterns` (or `name`/`keyword`/`query`) | no | string or string[] | none | Optional basename fragment filter; simple wildcard and alternation patterns are accepted. |
@@ -52,7 +53,7 @@
 - Unsupported action names.
 - Search runtime errors return readable filesystem/tool errors.
 - `find_name` may return both files and directories unless `target_kind` is provided.
-- Successful responses are returned as JSON text with stable top-level fields like `action`, `root`, `count`, and `results`.
+- Successful responses are returned as JSON text with stable top-level fields like `action`, `root`, `workspace_root`, `count`, and `results`.
 - For `find_name` / `find_ext` / candidate discovery, `results` is the authoritative observed candidate list and `count` is the authoritative observed count.
 - If the caller asks to list or report candidates, the final answer should include every returned `results` item unless the user requested a top-N subset or the result is explicitly capped/truncated.
 - Do not replace a returned `results` array with only examples, a smaller sample, `etc.`, or inferred candidates.
@@ -63,13 +64,15 @@
 - Matrix admission status: built-in structured evidence only; strict search evidence must come from `extra.results`, `extra.matches`, and count fields.
 - `find_name`, `find_ext`, and `find_images` success `extra` fields:
   - `action`: string action name; evidence role `status`.
-  - `root`: string resolved/bounded search root; evidence role `path`.
+  - `root`: workspace-relative bounded search root; evidence role `path`.
+  - `workspace_root`: absolute canonical workspace root used to resolve relative result paths; evidence role `path`.
   - `count`: integer number of returned results; evidence role `count`.
   - `results`: string array candidate paths; evidence roles `results`, `entries`, and `path`.
   - `ext`, `patterns`, `target_kind`, and cap fields when present; evidence role `field_value`.
 - `grep_text` success `extra` fields:
   - `action`: string, always `grep_text`; evidence role `status`.
-  - `root`: string search root; evidence role `path`.
+  - `root`: workspace-relative search root; evidence role `path`.
+  - `workspace_root`: absolute canonical workspace root used to resolve relative match paths; evidence role `path`.
   - `patterns`: string array filename filters; evidence role `entries`.
   - `match_count`: integer match count; evidence role `count`.
   - `matches`: array of objects with `path`, `line`, and `text`; evidence roles `results`, `path`, `table_cell`, and `field_value`.
@@ -84,7 +87,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"{\"action\":\"find_ext\",\"root\":\"crates\",\"ext\":\"rs\",\"count\":20,\"results\":[\"crates/a.rs\"]}","extra":{"action":"find_ext","root":"crates","ext":"rs","count":20,"results":["crates/a.rs"]},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"action\":\"find_ext\",\"root\":\"crates\",\"workspace_root\":\"/workspace/rustclaw\",\"ext\":\"rs\",\"count\":20,\"results\":[\"crates/a.rs\"]}","extra":{"action":"find_ext","root":"crates","workspace_root":"/workspace/rustclaw","ext":"rs","count":20,"results":["crates/a.rs"]},"error_text":null}
 ```
 
 ## Output Contract

@@ -549,6 +549,7 @@ fn execute(args: Value) -> Result<Value, String> {
             Ok(json!({
                 "action": "find_name",
                 "root": to_rel(&root, &search_root),
+                "workspace_root": root.display().to_string(),
                 "patterns": pattern_norms,
                 "exact": exact_name,
                 "count": results.len(),
@@ -593,6 +594,7 @@ fn execute(args: Value) -> Result<Value, String> {
             Ok(json!({
                 "action": "find_ext",
                 "root": to_rel(&root, &search_root),
+                "workspace_root": root.display().to_string(),
                 "ext": ext,
                 "exts": exts,
                 "patterns": pattern_norms,
@@ -662,6 +664,7 @@ fn execute(args: Value) -> Result<Value, String> {
             Ok(json!({
                 "action": "grep_text",
                 "root": to_rel(&root, &search_root),
+                "workspace_root": root.display().to_string(),
                 "query": query,
                 "case_insensitive": case_insensitive,
                 "patterns": pattern_norms,
@@ -737,6 +740,7 @@ fn execute(args: Value) -> Result<Value, String> {
             return Ok(json!({
                 "action": "find_images",
                 "root": to_rel(&root, &search_root),
+                "workspace_root": root.display().to_string(),
                 "count": files.len(),
                 "results": files,
                 "directories_by_count": directories_by_count,

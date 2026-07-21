@@ -189,6 +189,32 @@ fn find_name_exact_basename_avoids_stem_contains_match() {
 }
 
 #[test]
+fn search_success_exposes_absolute_workspace_root() {
+    let root = workspace_root();
+    let out = execute(json!({
+        "action": "find_name",
+        "pattern": "Cargo.toml",
+        "exact": true,
+        "target_kind": "file",
+        "root": root.to_string_lossy().to_string(),
+        "max_depth": 1,
+        "max_results": 10
+    }))
+    .expect("find_name succeeds");
+
+    assert_eq!(
+        out.get("workspace_root").and_then(Value::as_str),
+        Some(root.to_string_lossy().as_ref())
+    );
+    assert!(root.is_absolute());
+    assert_eq!(out.get("root").and_then(Value::as_str), Some(""));
+    assert!(out
+        .get("results")
+        .and_then(Value::as_array)
+        .is_some_and(|results| results == &[json!("Cargo.toml")]));
+}
+
+#[test]
 fn find_name_checks_shallow_files_before_deep_scan_budget() {
     let root = unique_temp_dir("shallow-before-deep");
     let deep = root.join("aaa_deep");

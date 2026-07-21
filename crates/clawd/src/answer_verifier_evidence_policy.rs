@@ -170,6 +170,7 @@ pub(super) fn collect_joined_path_values_from_json_object(
 ) {
     let Some(root) = map
         .get("resolved_path")
+        .or_else(|| map.get("workspace_root"))
         .or_else(|| map.get("root"))
         .or_else(|| map.get("path"))
         .and_then(|value| value.as_str())
