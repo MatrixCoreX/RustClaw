@@ -451,12 +451,24 @@ fn autonomous_greenfield_shell_shape(command: &str) -> bool {
                     }
                     saw_write = true;
                 }
+                "set" if safe_fail_fast_shell_options(segment) => {}
                 "cd" | "pwd" | "ls" | "test" | "[" => {}
                 _ => return false,
             }
         }
     }
     saw_write
+}
+
+fn safe_fail_fast_shell_options(segment: &str) -> bool {
+    let options = segment.split_whitespace().skip(1).collect::<Vec<_>>();
+    !options.is_empty()
+        && options.iter().all(|option| {
+            matches!(
+                *option,
+                "-e" | "-u" | "-eu" | "-ue" | "-euo" | "-o" | "pipefail"
+            )
+        })
 }
 
 fn shell_command_lines_without_heredoc_bodies(command: &str) -> Vec<String> {
