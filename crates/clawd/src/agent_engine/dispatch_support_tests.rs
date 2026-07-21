@@ -528,7 +528,7 @@ fn fs_basic_virtual_permission_failure_finalizes_without_shell_fallback() {
 }
 
 #[test]
-fn explicit_missing_target_without_fallback_finalizes_not_found() {
+fn structured_missing_target_continues_next_round() {
     let state = test_state_with_registry();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -553,19 +553,16 @@ fn explicit_missing_target_without_fallback_finalizes_not_found() {
             Some(&serde_json::json!({"action":"read_range","path":"missing.md"})),
             &err,
         ),
-        Some("recoverable_failure_finalize")
+        Some("recoverable_failure_continue_round")
     );
 }
 
 #[test]
-fn repairable_missing_target_continues_next_round() {
+fn legacy_read_file_missing_target_continues_without_compatibility_arg() {
     let state = test_state_with_registry();
     let actions = vec![AgentAction::CallSkill {
         skill: "read_file".to_string(),
-        args: serde_json::json!({
-            "path":"missing.md",
-            "_clawd_missing_target_repairable": true
-        }),
+        args: serde_json::json!({"path":"missing.md"}),
     }];
     let err = "__RC_READ_FILE_NOT_FOUND__:/tmp/missing.md";
 
@@ -576,10 +573,7 @@ fn repairable_missing_target_continues_next_round() {
             0,
             4,
             "read_file",
-            Some(&serde_json::json!({
-                "path":"missing.md",
-                "_clawd_missing_target_repairable": true
-            })),
+            Some(&serde_json::json!({"path":"missing.md"})),
             err,
         ),
         Some("recoverable_failure_continue_round")

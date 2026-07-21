@@ -1353,7 +1353,7 @@ async fn non_recoverable_failure_preserves_resume_context_and_user_error() {
 }
 
 #[tokio::test]
-async fn missing_target_failure_without_fallback_publishes_failure_only() {
+async fn missing_target_failure_publishes_bounded_replan_progress() {
     let state = test_state();
     let task = test_task();
     let mut loop_state = LoopState::new();
@@ -1393,7 +1393,7 @@ async fn missing_target_failure_without_fallback_publishes_failure_only() {
     .await
     .expect("recoverable skill failure should not raise resume context");
 
-    assert_eq!(stop.as_deref(), Some("recoverable_failure_finalize"));
+    assert_eq!(stop.as_deref(), Some("recoverable_failure_continue_round"));
     assert!(loop_state.has_recoverable_failure_context);
     let failed_error = loop_state
         .output_vars
@@ -1420,13 +1420,10 @@ async fn missing_target_failure_without_fallback_publishes_failure_only() {
             .and_then(serde_json::Value::as_str),
         Some("not_found")
     );
-    assert_eq!(loop_state.progress_messages.len(), 1);
+    assert_eq!(loop_state.progress_messages.len(), 2);
     assert!(loop_state.progress_messages[0].contains("telegram.progress.step_failed"));
     assert!(loop_state.progress_messages[0].contains("system_basic"));
-    assert!(!loop_state
-        .progress_messages
-        .iter()
-        .any(|message| message.contains("telegram.progress.retry_")));
+    assert!(loop_state.progress_messages[1].contains("telegram.progress.retry_replan"));
 }
 
 #[tokio::test]

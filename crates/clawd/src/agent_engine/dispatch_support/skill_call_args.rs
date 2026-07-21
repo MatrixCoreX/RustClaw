@@ -4,8 +4,7 @@ use std::path::Path;
 use super::{AgentLoopGuardPolicy, AppState, LoopState, WriteFileEffectivePath};
 use crate::agent_engine::{
     CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG, CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG,
-    CLAWD_MISSING_TARGET_REPAIRABLE_ARG, CLAWD_RUNTIME_ASYNC_JOB_START_ARG,
-    CLAWD_USER_NAMED_OUTPUT_PATH_ARG,
+    CLAWD_RUNTIME_ASYNC_JOB_START_ARG, CLAWD_USER_NAMED_OUTPUT_PATH_ARG,
 };
 
 pub(super) fn strip_internal_execution_args(args: &mut Value) {
@@ -13,7 +12,6 @@ pub(super) fn strip_internal_execution_args(args: &mut Value) {
         obj.remove(CLAWD_CONTINUE_ON_ERROR_ARG);
         obj.remove(CLAWD_LITERAL_COMMAND_ARG);
         obj.remove(CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG);
-        obj.remove(CLAWD_MISSING_TARGET_REPAIRABLE_ARG);
         obj.remove(CLAWD_RUNTIME_ASYNC_JOB_START_ARG);
         obj.remove(CLAWD_USER_NAMED_OUTPUT_PATH_ARG);
         obj.remove(crate::execution_recipe::CLAWD_VALIDATION_ARG);

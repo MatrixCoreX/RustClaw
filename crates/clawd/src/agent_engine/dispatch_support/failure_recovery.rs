@@ -7,7 +7,7 @@ use super::{
 };
 use crate::agent_engine::{
     attempt_ledger, CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG,
-    CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG, CLAWD_MISSING_TARGET_REPAIRABLE_ARG,
+    CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG,
 };
 use crate::AgentAction;
 
@@ -185,12 +185,6 @@ fn run_cmd_literal_failure_is_repairable(args: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
-fn missing_target_failure_is_repairable(args: Option<&Value>) -> bool {
-    args.and_then(|value| value.get(CLAWD_MISSING_TARGET_REPAIRABLE_ARG))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
 fn structured_error_kind(err: &str) -> Option<String> {
     crate::skills::parse_structured_skill_error(err).map(|structured| structured.error_kind)
 }
@@ -288,10 +282,7 @@ pub(crate) fn classify_skill_failure_recovery(
             return Some("recoverable_failure_continue_in_round");
         }
         if crate::skills::is_missing_target_skill_error(normalized_skill, err) {
-            if missing_target_failure_is_repairable(call_args) {
-                return Some("recoverable_failure_continue_round");
-            }
-            return Some("recoverable_failure_finalize");
+            return Some("recoverable_failure_continue_round");
         }
         if remaining_actions_after_plan_capacity_are_discussion_only(
             actions,
