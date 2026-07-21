@@ -476,6 +476,7 @@ async fn execute_external_local_shell_recipe(
     args: &Value,
     source: &str,
 ) -> Result<Value, String> {
+    let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let reg = state
         .get_skills_registry()
         .ok_or_else(|| "external skill requires registry".to_string())?;
@@ -520,7 +521,7 @@ async fn execute_external_local_shell_recipe(
         state.skill_rt.cmd_idle_timeout_seconds,
         state.skill_rt.cmd_max_output_bytes,
         crate::skills::task_allows_sudo(state, Some(task)),
-        state.skill_rt.tools_policy.sandbox_mode,
+        execution_policy.sandbox_mode,
         state.skill_rt.tools_policy.sandbox_backend,
         &state.skill_rt.workspace_root,
     )

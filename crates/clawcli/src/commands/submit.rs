@@ -13,11 +13,12 @@ pub(crate) fn run_submit(
     detach: bool,
     json_output: bool,
     interval_ms: u64,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
     if wait && detach {
         anyhow::bail!("submit_wait_detach_conflict");
     }
-    let task_id = task::submit_ask(base_url, key, text)?;
+    let task_id = task::submit_ask(base_url, key, text, submission_options)?;
     if wait {
         let task = wait_for_terminal_task(base_url, key, &task_id, interval_ms)?;
         if json_output {
@@ -41,8 +42,9 @@ pub(crate) fn run_resume(
     key: &str,
     resume_task_id: &str,
     text: &str,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
-    let task_id = task::submit_resume_ask(base_url, key, resume_task_id, text)?;
+    let task_id = task::submit_resume_ask(base_url, key, resume_task_id, text, submission_options)?;
     println!("task_id: {}", task_id);
     println!("resume_task_id: {}", resume_task_id);
     Ok(())

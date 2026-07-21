@@ -94,6 +94,105 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
 }
 
 #[test]
+fn destructive_run_cmd_uses_authenticated_yolo_policy() {
+    let state = test_state();
+    let user_key = "rk-verifier-yolo-admin";
+    let db = state.core.db.get().expect("test db");
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS auth_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_key TEXT NOT NULL UNIQUE,
+            role TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT '',
+            last_used_at TEXT
+        );",
+    )
+    .expect("auth key table");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
+         VALUES (?1, 'admin', 1, 'now')",
+        rusqlite::params![user_key],
+    )
+    .expect("insert admin key");
+    drop(db);
+
+    let mut payload = json!({"text": "task"});
+    crate::task_execution_policy::stamp_authenticated_submission_policy(
+        &mut payload,
+        Some(&claw_core::types::AuthIdentity {
+            user_key: user_key.to_string(),
+            role: "admin".to_string(),
+            user_id: 1,
+            chat_id: 2,
+        }),
+        Some("clawcli"),
+        Some("yolo"),
+    )
+    .expect("stamp yolo policy");
+    let mut task = test_task();
+    task.user_key = Some(user_key.to_string());
+    task.payload_json = payload.to_string();
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: Some("remove temp files"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "rm -rf /tmp/rustclaw-verifier-test" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation);
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::ConfirmationRequired | VerifyIssueKind::SandboxPolicyDenied
+        )
+    }));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/task_execution_policy/mode")
+            .and_then(serde_json::Value::as_str),
+        Some("yolo")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/approval_policy")
+            .and_then(serde_json::Value::as_str),
+        Some("never")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/global_sandbox_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("danger_full")
+    );
+}
+
+#[test]
 fn readonly_cli_help_run_cmd_action_is_low_risk_without_confirmation() {
     let state = test_state();
     let task = test_task();

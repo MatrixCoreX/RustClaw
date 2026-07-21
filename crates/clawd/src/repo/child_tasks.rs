@@ -21,6 +21,7 @@ pub(crate) struct ChildTaskParentContext {
     pub(crate) channel: String,
     pub(crate) external_user_id: Option<String>,
     pub(crate) external_chat_id: Option<String>,
+    pub(crate) execution_policy_stamp: Option<Value>,
 }
 
 pub(crate) fn enqueue_child_task_specs(
@@ -63,7 +64,7 @@ pub(crate) fn enqueue_child_task_specs(
         if spec.parent_task_id != parent.parent_task_id {
             anyhow::bail!("child_parent_mismatch");
         }
-        let payload = child_task_payload(spec)?;
+        let payload = child_task_payload(spec, parent.execution_policy_stamp.as_ref())?;
         let result_json = queued_child_task_result(spec);
         tx.execute(
             "INSERT INTO tasks (
@@ -836,10 +837,13 @@ fn child_lifecycle_state(status: &str) -> &'static str {
     }
 }
 
-fn child_task_payload(spec: &ChildTaskSpec) -> anyhow::Result<Value> {
+fn child_task_payload(
+    spec: &ChildTaskSpec,
+    execution_policy_stamp: Option<&Value>,
+) -> anyhow::Result<Value> {
     let objective =
         child_task_objective(spec).ok_or_else(|| anyhow::anyhow!("child_objective_missing"))?;
-    Ok(json!({
+    let mut payload = json!({
         "text": objective,
         "task_role": "subagent_child",
         "parent_task_id": spec.parent_task_id,
@@ -852,7 +856,14 @@ fn child_task_payload(spec: &ChildTaskSpec) -> anyhow::Result<Value> {
             "required": spec.required,
             "merge_policy": spec.merge_policy.as_str(),
         },
-    }))
+    });
+    if let (Some(object), Some(stamp)) = (payload.as_object_mut(), execution_policy_stamp) {
+        object.insert(
+            crate::task_execution_policy::POLICY_PAYLOAD_FIELD.to_string(),
+            stamp.clone(),
+        );
+    }
+    Ok(payload)
 }
 
 fn child_task_objective(spec: &ChildTaskSpec) -> Option<&str> {

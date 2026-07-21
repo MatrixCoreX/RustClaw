@@ -1,7 +1,60 @@
 use super::{
     async_final_result_value, capability_task_payload, result_text_from_result_json,
-    resume_task_payload, threaded_ask_payload, TaskResumeRequest, TaskStatusView,
+    resume_task_payload, submit_ask, threaded_ask_payload, TaskResumeRequest, TaskStatusView,
+    TaskSubmissionOptions,
 };
+
+fn capture_submit_headers(options: TaskSubmissionOptions) -> String {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind capture server");
+    let address = listener.local_addr().expect("capture address");
+    let capture = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+        let mut bytes = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let count = stream.read(&mut buffer).expect("read request");
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..count]);
+            if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let body =
+            r#"{"ok":true,"data":{"task_id":"00000000-0000-4000-8000-000000000001"},"error":null}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("write response");
+        String::from_utf8(bytes).expect("utf8 request")
+    });
+
+    let base_url = format!("http://{address}");
+    submit_ask(&base_url, "rk-test", "inspect", options).expect("submit captured task");
+    capture.join().expect("join capture server")
+}
+
+#[test]
+fn task_submission_headers_keep_yolo_explicit() {
+    let safe = capture_submit_headers(TaskSubmissionOptions::default()).to_ascii_lowercase();
+    assert!(safe.contains("x-rustclaw-client: clawcli"));
+    assert!(!safe.contains("x-rustclaw-execution-mode:"));
+
+    let yolo = capture_submit_headers(TaskSubmissionOptions { yolo: true }).to_ascii_lowercase();
+    assert!(yolo.contains("x-rustclaw-client: clawcli"));
+    assert!(yolo.contains("x-rustclaw-execution-mode: yolo"));
+}
 
 #[test]
 fn lifecycle_summary_tokens_include_budget_snapshot() {

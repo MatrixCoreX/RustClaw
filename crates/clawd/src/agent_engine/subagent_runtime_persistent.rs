@@ -37,7 +37,7 @@ pub(super) fn record_persistent_child_task_from_args(
     let write_enabled = specs
         .iter()
         .any(|spec| spec.permission_profile == ChildTaskPermissionProfile::LocalWorktree);
-    let parent = child_parent_context(task);
+    let parent = child_parent_context(state, task);
     let max_parallel = persistent_max_parallel(args, config);
     let recursion_depth = child_recursion_depth_from_payload(&task.payload_json);
     let enqueue = enqueue_child_task_specs(state, &parent, &specs, max_parallel, recursion_depth)
@@ -381,7 +381,7 @@ fn child_recursion_depth_from_payload(payload_json: &str) -> usize {
         .unwrap_or(1)
 }
 
-fn child_parent_context(task: &ClaimedTask) -> ChildTaskParentContext {
+fn child_parent_context(state: &AppState, task: &ClaimedTask) -> ChildTaskParentContext {
     ChildTaskParentContext {
         parent_task_id: task.task_id.clone(),
         user_id: task.user_id,
@@ -390,6 +390,7 @@ fn child_parent_context(task: &ClaimedTask) -> ChildTaskParentContext {
         channel: task.channel.clone(),
         external_user_id: task.external_user_id.clone(),
         external_chat_id: task.external_chat_id.clone(),
+        execution_policy_stamp: crate::task_execution_policy::inheritable_policy_stamp(state, task),
     }
 }
 

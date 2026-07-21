@@ -727,6 +727,33 @@ pub(super) async fn execute_prepared_skill_action(
     action_trace_kind: &str,
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
+    if let Some(reason_code) =
+        crate::task_execution_policy::execution_policy_authorization_error(state, task)
+    {
+        let error = crate::skills::policy_block_error(
+            reason_code,
+            vec![format!("task_id: {}", task.task_id)],
+            vec![
+                "action=execute_agent_step".to_string(),
+                "required_authority=enabled_admin_key".to_string(),
+                format!(
+                    "decision={}",
+                    crate::policy_decision::PolicyDecision::Deny.as_token()
+                ),
+            ],
+        );
+        return Ok(handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &error,
+            action_trace_kind,
+        ));
+    }
     if let Some(err) =
         child_task_execution_policy_error(state, task, child_policy_skill, child_policy_args)
     {

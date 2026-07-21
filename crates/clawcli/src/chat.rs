@@ -28,6 +28,7 @@ pub(crate) fn run_chat(
     requested_thread_id: Option<&str>,
     force_new: bool,
     jsonl_output: bool,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
     crate::interrupt::install()?;
     let mut thread = commands::load_or_create_chat_thread(requested_thread_id, force_new)?;
@@ -109,6 +110,7 @@ pub(crate) fn run_chat(
             &thread.thread_id,
             &thread.session_id,
             thread.current_task_id.as_deref(),
+            submission_options,
         )?;
         commands::record_chat_task(&mut thread, &task_id)?;
         println!("task_id={task_id}");

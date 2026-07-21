@@ -438,6 +438,7 @@ fn enqueue_child_specs_creates_independent_child_tasks_and_parent_cancel_fanout(
         channel: "ui".to_string(),
         external_user_id: Some("ui-user".to_string()),
         external_chat_id: Some("ui-chat".to_string()),
+        execution_policy_stamp: None,
     };
     let specs = vec![
         sample_repo_child_spec("task-parent-enqueue", "task-child-enqueue-1", true),

@@ -66,6 +66,10 @@ fn read_only_preview_forces_read_only_process_sandbox() {
         action_scoped_runner_sandbox_mode(ToolSandboxMode::DangerFull, None),
         ToolSandboxMode::DangerFull
     );
+    assert_eq!(
+        action_scoped_runner_sandbox_mode(ToolSandboxMode::DangerFull, Some(&preview_mapping())),
+        ToolSandboxMode::DangerFull
+    );
 }
 
 #[test]

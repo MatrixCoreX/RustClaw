@@ -1004,6 +1004,7 @@ pub(crate) fn verify_plan(
     input: VerifyInput<'_>,
     mode: VerifyMode,
 ) -> VerifyResult {
+    let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let mut effective_plan_result = input.plan_result.clone();
     let capability_resolutions = resolve_capability_plan_steps(state, &mut effective_plan_result);
     let mut issues = Vec::new();
@@ -1112,7 +1113,8 @@ pub(crate) fn verify_plan(
                 &normalized_skill,
                 &step.args,
             );
-            let sandbox_denial = step_sandbox_denial_reason(state, &normalized_skill, &step.args);
+            let sandbox_denial =
+                step_sandbox_denial_reason(state, execution_policy, &normalized_skill, &step.args);
             if let Some(reason) = sandbox_denial {
                 issues.push(VerifyIssue {
                     step_id: step.step_id.clone(),
@@ -1134,7 +1136,7 @@ pub(crate) fn verify_plan(
                     Some(&step.args),
                 ) || is_confirmation_like_skill(&normalized_skill)
                     || high_risk_side_effect_requires_confirmation(effect, step_risk, &step.args));
-            let step_requires_confirmation = state.skill_rt.tools_policy.approval_required(
+            let step_requires_confirmation = execution_policy.approval_required(
                 risk_requires_confirmation,
                 effective_plan_result.needs_confirmation,
                 effect.mutates || matches!(step_risk, SkillRiskLevel::High),
@@ -1213,6 +1215,7 @@ pub(crate) fn verify_plan(
     let approved_steps = effective_plan_result.steps.clone();
     let mut permission_decision = verify_permission_decision_json(
         state,
+        execution_policy,
         &effective_plan_result,
         mode,
         approved,
@@ -1311,10 +1314,17 @@ fn resolve_capability_plan_steps(
 
 pub(crate) fn skill_sandbox_denial_reason(
     state: &AppState,
+    task: Option<&ClaimedTask>,
     normalized_skill: &str,
     args: &Value,
 ) -> Option<&'static str> {
-    permission::step_sandbox_denial_reason(state, normalized_skill, args)
+    permission::step_sandbox_denial_reason(
+        state,
+        task.map(|task| crate::task_execution_policy::effective_policy_for_task(state, task))
+            .unwrap_or_else(|| crate::task_execution_policy::configured_policy(state)),
+        normalized_skill,
+        args,
+    )
 }
 
 pub(crate) fn preview_command_permission_decision(

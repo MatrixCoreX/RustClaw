@@ -1573,6 +1573,7 @@ fn exec_offline_smoke_writes_machine_artifact_without_server() {
         true,
         Some(&artifact_dir),
         false,
+        crate::task::TaskSubmissionOptions::default(),
     )
     .expect("offline exec smoke");
 

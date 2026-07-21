@@ -234,11 +234,19 @@ impl ToolsPolicy {
         self.approval_policy.as_token()
     }
 
+    #[cfg(test)]
     pub(crate) fn sandbox_denial(
         &self,
         requirements: SandboxRequirements<'_>,
     ) -> Option<&'static str> {
-        match self.sandbox_mode {
+        Self::sandbox_denial_for_mode(self.sandbox_mode, requirements)
+    }
+
+    pub(crate) fn sandbox_denial_for_mode(
+        sandbox_mode: ToolSandboxMode,
+        requirements: SandboxRequirements<'_>,
+    ) -> Option<&'static str> {
+        match sandbox_mode {
             ToolSandboxMode::DangerFull => None,
             ToolSandboxMode::ReadOnly => {
                 if requirements.mutates || requirements.filesystem_write {
@@ -305,7 +313,21 @@ impl ToolsPolicy {
         planner_requested_approval: bool,
         mutates_or_external: bool,
     ) -> bool {
-        match self.approval_policy {
+        Self::approval_required_for_policy(
+            self.approval_policy,
+            risk_requires_approval,
+            planner_requested_approval,
+            mutates_or_external,
+        )
+    }
+
+    pub(crate) fn approval_required_for_policy(
+        approval_policy: ToolApprovalPolicy,
+        risk_requires_approval: bool,
+        planner_requested_approval: bool,
+        mutates_or_external: bool,
+    ) -> bool {
+        match approval_policy {
             ToolApprovalPolicy::Never => false,
             ToolApprovalPolicy::OnRisk => risk_requires_approval,
             ToolApprovalPolicy::OnRequest => risk_requires_approval || planner_requested_approval,

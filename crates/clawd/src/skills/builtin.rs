@@ -168,6 +168,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
     }
 
     let map = ensure_args_object(args)?;
+    let execution_policy = task
+        .map(|task| crate::task_execution_policy::effective_policy_for_task(state, task))
+        .unwrap_or_else(|| crate::task_execution_policy::configured_policy(state));
 
     match skill_name {
         "code_index" => {
@@ -657,7 +660,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     crate::skills::task_allows_sudo(state, task),
                     &job_id,
                     Path::new(&job_dir),
-                    state.skill_rt.tools_policy.sandbox_mode,
+                    execution_policy.sandbox_mode,
                     state.skill_rt.tools_policy.sandbox_backend,
                     &state.skill_rt.workspace_root,
                 )
@@ -684,7 +687,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 idle_timeout_seconds,
                 max_output_bytes,
                 crate::skills::task_allows_sudo(state, task),
-                state.skill_rt.tools_policy.sandbox_mode,
+                execution_policy.sandbox_mode,
                 state.skill_rt.tools_policy.sandbox_backend,
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),
