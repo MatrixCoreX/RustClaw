@@ -1,6 +1,7 @@
 use super::{
     load_task_mutation_reconciliation_directive, prepare_mutation_execution,
-    record_completed_without_replay, safe_mutation_outcome_projection, MutationExecutionGuard,
+    record_completed_without_replay, safe_mutation_outcome_projection,
+    settle_policy_blocked_mutation_as_not_applied, MutationExecutionGuard,
 };
 
 fn task_fixture() -> crate::ClaimedTask {
@@ -74,6 +75,81 @@ fn unclassified_mutation_fails_closed_into_ledger() {
     )
     .expect("prepare mutation");
     assert!(matches!(outcome, MutationExecutionGuard::Acquired(_)));
+}
+
+#[test]
+fn policy_blocked_mutation_is_recorded_as_not_applied() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture();
+    insert_active_task_claim(&state, &task);
+    let outcome = prepare_mutation_execution(
+        &state,
+        &task,
+        "schedule",
+        &serde_json::json!({"action": "create", "text": "fixture"}),
+        "skill:schedule:create:policy-blocked",
+        crate::execution_recipe::ActionEffect::mutate(),
+    )
+    .expect("prepare mutation");
+    let MutationExecutionGuard::Acquired(lease) = outcome else {
+        panic!("expected acquired mutation");
+    };
+    let error = crate::skills::policy_block_error(
+        "skill_policy_denied",
+        vec!["skill: schedule".to_string()],
+        vec!["policy=tools_policy".to_string()],
+    );
+
+    assert!(settle_policy_blocked_mutation_as_not_applied(
+        &state, &lease, &error
+    ));
+    let db = state.core.db.get().expect("test db");
+    let (phase, reconciliation): (String, String) = db
+        .query_row(
+            "SELECT phase, reconciliation_json FROM task_mutation_ledger WHERE task_id = ?1 AND fingerprint_hash = ?2",
+            rusqlite::params![task.task_id, lease.record.fingerprint_hash],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("load reconciled mutation");
+    assert_eq!(phase, "intent_recorded");
+    let reconciliation: serde_json::Value =
+        serde_json::from_str(&reconciliation).expect("reconciliation json");
+    assert_eq!(reconciliation["disposition"], "not_applied");
+    assert_eq!(reconciliation["reason_code"], "skill_policy_denied");
+}
+
+#[test]
+fn ordinary_mutation_error_does_not_claim_not_applied() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture();
+    insert_active_task_claim(&state, &task);
+    let outcome = prepare_mutation_execution(
+        &state,
+        &task,
+        "schedule",
+        &serde_json::json!({"action": "create", "text": "fixture"}),
+        "skill:schedule:create:ordinary-error",
+        crate::execution_recipe::ActionEffect::mutate(),
+    )
+    .expect("prepare mutation");
+    let MutationExecutionGuard::Acquired(lease) = outcome else {
+        panic!("expected acquired mutation");
+    };
+
+    assert!(!settle_policy_blocked_mutation_as_not_applied(
+        &state,
+        &lease,
+        "provider_transport_failed"
+    ));
+    let db = state.core.db.get().expect("test db");
+    let phase: String = db
+        .query_row(
+            "SELECT phase FROM task_mutation_ledger WHERE task_id = ?1 AND fingerprint_hash = ?2",
+            rusqlite::params![task.task_id, lease.record.fingerprint_hash],
+            |row| row.get(0),
+        )
+        .expect("load mutation phase");
+    assert_eq!(phase, "attempt_started");
 }
 
 #[test]

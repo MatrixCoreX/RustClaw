@@ -499,6 +499,53 @@ pub(super) fn mark_mutation_execution_uncertain(
     }
 }
 
+pub(super) fn settle_policy_blocked_mutation_as_not_applied(
+    state: &AppState,
+    lease: &crate::repo::TaskMutationLease,
+    error: &str,
+) -> bool {
+    let Some(policy_block) = crate::skills::parse_policy_block_error(error) else {
+        return false;
+    };
+    let projection = json!({
+        "schema_version": 1,
+        "disposition": "not_applied",
+        "status_code": "execution_policy_blocked",
+        "reason_code": policy_block.reason_code,
+        "decision": policy_block.decision,
+        "owner_layer": "task_mutation_ledger",
+    });
+    match crate::repo::reconcile_task_mutation(
+        &state.core.db,
+        &state.worker.worker_id,
+        lease.claim_attempt,
+        &lease.record.task_id,
+        &lease.record.fingerprint_hash,
+        crate::repo::TaskMutationReconciliation::NotApplied,
+        &projection,
+    ) {
+        Ok(crate::repo::ReconcileTaskMutationOutcome::RetryReady(_)) => true,
+        Ok(other) => {
+            warn!(
+                "policy-blocked mutation produced unexpected reconciliation outcome task_id={} action_ref={} outcome={:?}",
+                lease.record.task_id,
+                lease.record.action_ref,
+                other
+            );
+            false
+        }
+        Err(error) => {
+            warn!(
+                "policy-blocked mutation not-applied persistence failed task_id={} action_ref={} error={}",
+                lease.record.task_id,
+                lease.record.action_ref,
+                crate::truncate_for_log(&error.to_string())
+            );
+            false
+        }
+    }
+}
+
 fn registry_action_is_idempotent(state: &AppState, normalized_skill: &str, args: &Value) -> bool {
     let action = normalized_action_token(args);
     state
