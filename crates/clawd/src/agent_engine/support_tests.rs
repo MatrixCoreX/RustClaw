@@ -1,6 +1,6 @@
 use super::{
     action_fingerprint, action_fingerprint_for_policy, append_delivery_message,
-    build_agent_loop_checkpoint_progress_payload,
+    attach_task_llm_metrics_checkpoint, build_agent_loop_checkpoint_progress_payload,
     build_agent_loop_user_input_checkpoint_progress_payload, checkpoint_continuation_actions,
     collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
     load_agent_loop_guard_policy, AgentLoopGuardPolicy, AnswerVerifierRequiredEvidenceScope,
@@ -301,6 +301,34 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
         payload["task_checkpoint"]["boundary_context"]["task_budget_slice"]["profile"],
         "multi_step_workspace"
     );
+}
+
+#[test]
+fn soft_budget_checkpoint_payload_carries_accumulated_llm_metrics() {
+    let task = support_test_task();
+    let state = crate::AppState::test_default_with_fixture_provider();
+    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, "plan", 120);
+    state.note_task_llm_elapsed_with_label(&task.task_id, "plan", 75);
+    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, "verifier", 80);
+    state.note_task_llm_elapsed_with_label(&task.task_id, "verifier", 25);
+
+    let mut payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &LoopState::new(),
+        "task_budget_slice_exhausted",
+        1_781_800_000,
+        1_781_800_060,
+    );
+    attach_task_llm_metrics_checkpoint(&state, &task.task_id, &mut payload);
+
+    let metrics = &payload["task_checkpoint"]["boundary_context"]["task_llm_metrics"];
+    assert_eq!(metrics["schema_version"], 1);
+    assert_eq!(metrics["llm_calls"], 2);
+    assert_eq!(metrics["llm_elapsed_ms"], 100);
+    assert_eq!(metrics["by_prompt"]["plan"]["count"], 1);
+    assert_eq!(metrics["by_prompt"]["verifier"]["elapsed_ms"], 25);
+    assert_eq!(metrics["call_sequence"][0]["call_index"], 1);
+    assert_eq!(metrics["call_sequence"][1]["call_index"], 2);
 }
 
 #[test]

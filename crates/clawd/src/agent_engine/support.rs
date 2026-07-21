@@ -567,6 +567,19 @@ fn context_compaction_checkpoint_trigger_json(resume_reason: &str) -> Value {
     })
 }
 
+fn attach_task_llm_metrics_checkpoint(state: &AppState, task_id: &str, payload: &mut Value) {
+    let Some(boundary) = payload
+        .pointer_mut("/task_checkpoint/boundary_context")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    boundary.insert(
+        "task_llm_metrics".to_string(),
+        state.task_llm_metrics_checkpoint_json(task_id),
+    );
+}
+
 fn checkpoint_resume_state(
     loop_state: &super::LoopState,
     stage: super::checkpoint_resume_state::AgentCheckpointStage,
@@ -824,7 +837,7 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         state.task_llm_call_count(&task.task_id),
         state.task_llm_elapsed_ms(&task.task_id),
     );
-    let payload = build_agent_loop_checkpoint_progress_payload_with_budget(
+    let mut payload = build_agent_loop_checkpoint_progress_payload_with_budget(
         task,
         loop_state,
         resume_reason,
@@ -832,6 +845,7 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         now_ts + 60,
         budget,
     );
+    attach_task_llm_metrics_checkpoint(state, &task.task_id, &mut payload);
     if let Some(checkpoint_id) = payload
         .pointer("/task_lifecycle/checkpoint_id")
         .and_then(Value::as_str)
@@ -884,7 +898,7 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         state.task_llm_call_count(&task.task_id),
         state.task_llm_elapsed_ms(&task.task_id),
     );
-    let payload = build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
+    let mut payload = build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
         task,
         loop_state,
         resume_reason,
@@ -894,6 +908,7 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         args,
         budget,
     );
+    attach_task_llm_metrics_checkpoint(state, &task.task_id, &mut payload);
     let checkpoint_id = payload
         .pointer("/task_lifecycle/checkpoint_id")
         .and_then(Value::as_str)

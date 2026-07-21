@@ -13,6 +13,13 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     if !claimed_seeded_agent_loop_dispatch_ready(claimed) {
         return Ok(None);
     }
+    if let Some(metrics) = claimed
+        .task_checkpoint
+        .boundary_context
+        .get("task_llm_metrics")
+    {
+        state.restore_task_llm_metrics_from_checkpoint(&claimed.task_id, metrics);
+    }
 
     let mut payload: Value = serde_json::from_str(&claimed.task.payload_json)?;
     if let Some(resume_input) =
@@ -38,7 +45,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         claimed.task_checkpoint.completed_side_effect_refs.len(),
         stored_checkpoint_action.is_some()
     );
-    let result = if let Some(stored_action) = stored_checkpoint_action {
+    let mut result = if let Some(stored_action) = stored_checkpoint_action {
         let output_contract = stored_action
             .output_contract
             .map(serde_json::from_value::<crate::IntentOutputContract>)
@@ -89,6 +96,11 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         )
         .await
     };
+    if let Ok(answer) = &mut result {
+        if let Some(journal) = answer.task_journal.as_mut() {
+            journal.record_runtime_llm_metrics(state, &claimed.task_id);
+        }
+    }
 
     Ok(super::runtime_support::seeded_agent_loop_terminal_dispatch_result_payload(claimed, result))
 }

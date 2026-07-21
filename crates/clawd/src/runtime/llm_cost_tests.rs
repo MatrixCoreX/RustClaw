@@ -77,6 +77,40 @@ fn durable_ledger_restores_task_cost_and_logical_call_index_after_memory_clear()
 }
 
 #[test]
+fn checkpoint_restores_cross_slice_llm_metrics_before_new_calls() {
+    let state = governed_state();
+    let task = task("task-metrics-resume", 7);
+    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, "plan", 100);
+    state.note_task_llm_elapsed_with_label(&task.task_id, "plan", 40);
+    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, "verifier", 80);
+    state.note_task_llm_elapsed_with_label(&task.task_id, "verifier", 30);
+    let checkpoint = state.task_llm_metrics_checkpoint_json(&task.task_id);
+
+    state.clear_task_llm_call_count(&task.task_id);
+    state.restore_task_llm_metrics_from_checkpoint(&task.task_id, &checkpoint);
+    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, "plan", 120);
+    state.note_task_llm_elapsed_with_label(&task.task_id, "plan", 50);
+
+    let mut journal = crate::task_journal::TaskJournal::default();
+    journal.record_runtime_llm_metrics(&state, &task.task_id);
+    let metrics = journal
+        .to_summary_json()
+        .get("task_metrics")
+        .cloned()
+        .expect("task metrics");
+    assert_eq!(metrics["llm_calls_per_task"], 3);
+    assert_eq!(metrics["llm_elapsed_ms_per_task"], 120);
+    assert_eq!(metrics["by_prompt"]["plan"]["count"], 2);
+    assert_eq!(metrics["by_prompt"]["plan"]["elapsed_ms"], 90);
+    assert_eq!(metrics["by_prompt"]["verifier"]["count"], 1);
+    assert_eq!(metrics["frontdoor_llm"]["first_call_index"], 1);
+    assert_eq!(metrics["frontdoor_llm"]["first_planner_call_index"], 1);
+    let sequence = state.task_llm_call_sequence(&task.task_id);
+    assert_eq!(sequence[0].call_index, 1);
+    assert_eq!(sequence[2].call_index, 3);
+}
+
+#[test]
 fn soft_budgets_emit_task_user_and_provider_machine_signals() {
     let state = governed_state();
     let first = task("task-cost-soft-a", 7);

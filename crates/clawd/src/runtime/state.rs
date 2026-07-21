@@ -8,7 +8,7 @@ use claw_core::skill_registry::{
     OutputKind, SkillKind, SkillManifest, SkillRiskLevel, SkillsRegistry,
 };
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Semaphore;
 
@@ -31,7 +31,8 @@ pub(crate) struct SkillViews {
 /// 用于在 `task_journal_summary.task_metrics.by_prompt` 暴露细分维度，
 /// 让"哪个 prompt 把单任务预算烧光了"一眼可见，作为后续 prompt-level
 /// 优化与告警的诊断基础。
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub(crate) struct LlmPromptBucket {
     pub(crate) count: u64,
     pub(crate) elapsed_ms: u64,
@@ -55,11 +56,21 @@ pub(crate) struct LlmPromptBucket {
     pub(crate) prompt_truncated_bytes_total: u64,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct LlmCallSequenceEntry {
     pub(crate) call_index: u64,
     pub(crate) prompt_label: String,
     pub(crate) prompt_bytes: usize,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+struct TaskLlmMetricsCheckpoint {
+    schema_version: u32,
+    llm_calls: u64,
+    llm_elapsed_ms: u64,
+    by_prompt: HashMap<String, LlmPromptBucket>,
+    call_sequence: Vec<LlmCallSequenceEntry>,
 }
 
 pub(crate) struct SkillViewsSnapshot {
@@ -1067,6 +1078,57 @@ impl AppState {
             .get(task_id)
             .copied()
             .unwrap_or(0)
+    }
+
+    pub(crate) fn task_llm_metrics_checkpoint_json(&self, task_id: &str) -> Value {
+        serde_json::to_value(TaskLlmMetricsCheckpoint {
+            schema_version: 1,
+            llm_calls: self.task_llm_call_count(task_id),
+            llm_elapsed_ms: self.task_llm_elapsed_ms(task_id),
+            by_prompt: self.task_llm_by_prompt(task_id),
+            call_sequence: self.task_llm_call_sequence(task_id),
+        })
+        .unwrap_or_else(|_| serde_json::json!({"schema_version": 1}))
+    }
+
+    pub(crate) fn restore_task_llm_metrics_from_checkpoint(
+        &self,
+        task_id: &str,
+        checkpoint: &Value,
+    ) {
+        let Ok(snapshot) = serde_json::from_value::<TaskLlmMetricsCheckpoint>(checkpoint.clone())
+        else {
+            return;
+        };
+        if snapshot.schema_version != 1 {
+            return;
+        }
+
+        self.restore_task_llm_call_count_from_cost_ledger(task_id);
+        {
+            let mut guard = self.metrics.llm_calls_per_task.lock().unwrap();
+            let current = guard.entry(task_id.to_string()).or_insert(0);
+            *current = (*current).max(snapshot.llm_calls);
+        }
+        {
+            let mut guard = self.metrics.llm_elapsed_per_task.lock().unwrap();
+            let current = guard.entry(task_id.to_string()).or_insert(0);
+            *current = (*current).max(snapshot.llm_elapsed_ms);
+        }
+        {
+            let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
+            let current = guard.entry(task_id.to_string()).or_default();
+            if current.is_empty() {
+                *current = snapshot.by_prompt;
+            }
+        }
+        {
+            let mut guard = self.metrics.llm_call_sequence_per_task.lock().unwrap();
+            let current = guard.entry(task_id.to_string()).or_default();
+            if current.is_empty() {
+                *current = snapshot.call_sequence;
+            }
+        }
     }
 
     /// Phase 1.5: 按 prompt label 分桶记录耗时。会同时累加全局耗时表。

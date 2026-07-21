@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::providers::{ChatRequestHints, LlmRoutingPreference};
 use crate::LlmProviderRuntime;
@@ -37,7 +37,7 @@ impl LlmProviderLatencyTracker {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct LlmProviderRouteEvaluation {
     pub(crate) provider: String,
     pub(crate) model: String,
