@@ -587,9 +587,22 @@ Client-like continuous regression:
   This prints each case prompt, first-layer route, planner steps, verifier result, executed tool/skill evidence, LLM metrics, and final reply so regression review does not rely on a bare OK/fail line.
 - Summarize compact or large-run machine metrics:
   `python3 scripts/nl_tests/summarize_rollout_metrics.py scripts/nl_suite_logs/client_like_continuous/<run_id> --print-json`
-  This records pass/fail counts, LLM calls, prompt bytes/tokens when present, elapsed time, provider retries/errors, verifier-call count, lifecycle/background counts, checkpoint counts, provider blockers, tool-call counts, and prompt latency diagnostics from existing run JSON only.
+  This records pass/fail counts, LLM calls, prompt/input/cached/uncached tokens
+  when provider usage is present, elapsed and harness wall time, provider
+  retries/errors, verifier-call count, lifecycle/background counts, checkpoint
+  counts, provider blockers, tool-call counts, and prompt latency diagnostics
+  from existing run JSON only.
   Add absolute gates after compact runs when the touched surface is expected to stay bounded, for example:
   `python3 scripts/nl_tests/summarize_rollout_metrics.py scripts/nl_suite_logs/client_like_continuous/<run_id> --min-pass-rate 1.0 --max-avg-llm-calls 4 --max-prompt-truncations 0 --max-provider-final-errors 0`
+- Apply the versioned focused or continuous-coding regression budget to the
+  generated metrics:
+  `python3 scripts/nl_tests/check_runtime_regression_budget.py logs/agent_rollout_metrics/<metrics>.json --profile focused`
+  `python3 scripts/nl_tests/check_runtime_regression_budget.py logs/agent_rollout_metrics/<metrics>.json --profile continuous_coding`
+  The contract in
+  `scripts/inventories/runtime_regression_budgets.toml` gates correctness,
+  average prompt and uncached tokens, cache-read ratio when reported, LLM/tool
+  calls, prompt truncation, provider errors, and wall time. These are release
+  regression thresholds, not runtime round/tool hard stops.
 - Generate or check a lightweight offline regression baseline:
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --write-baseline /tmp/rustclaw-client-like-baseline.jsonl`
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/<name>.jsonl`

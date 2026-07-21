@@ -1195,6 +1195,13 @@ def summarize_run(
     total_provider_blockers = 0
     total_completed_side_effects = 0
     total_repair_attempts = 0
+    usage_recorded_turns = 0
+    total_usage_records = 0
+    total_usage_input_tokens = 0
+    total_usage_output_tokens = 0
+    total_cached_input_tokens = 0
+    total_cache_write_input_tokens = 0
+    cache_metric_record_count = 0
     wall_time_recorded_turns = 0
     total_wall_time_ms = 0
     max_wall_time_ms = 0
@@ -1280,6 +1287,28 @@ def summarize_run(
         by_prompt = metrics.get("by_prompt")
         if isinstance(by_prompt, dict):
             update_by_prompt_totals(by_prompt_totals, by_prompt)
+        llm_cost = metrics.get("llm_cost")
+        if isinstance(llm_cost, dict) and safe_int(llm_cost.get("usage_record_count")) > 0:
+            usage_recorded_turns += 1
+            total_usage_records += safe_int(llm_cost.get("usage_record_count"))
+            total_usage_input_tokens += safe_int(llm_cost.get("input_tokens"))
+            total_usage_output_tokens += safe_int(llm_cost.get("output_tokens"))
+            total_cached_input_tokens += safe_int(llm_cost.get("cached_input_tokens"))
+            total_cache_write_input_tokens += safe_int(
+                llm_cost.get("cache_write_input_tokens")
+            )
+        cost_records = metrics.get("llm_cost_records")
+        if isinstance(cost_records, list):
+            for record in cost_records:
+                if not isinstance(record, dict):
+                    continue
+                usage = record.get("usage")
+                if not isinstance(usage, dict):
+                    continue
+                if usage.get("cached_tokens") is not None or usage.get(
+                    "cache_read_input_tokens"
+                ) is not None:
+                    cache_metric_record_count += 1
 
         switches = summary.get("rollout_switches_enabled")
         if isinstance(switches, list):
@@ -1390,6 +1419,13 @@ def summarize_run(
     total_tokens = sum_by_prompt_field(by_prompt, "total_tokens")
     input_tokens = sum_by_prompt_field(by_prompt, "input_tokens")
     output_tokens = sum_by_prompt_field(by_prompt, "output_tokens")
+    if total_usage_records > 0:
+        input_tokens = total_usage_input_tokens
+        output_tokens = total_usage_output_tokens
+        prompt_tokens = input_tokens
+        completion_tokens = output_tokens
+        total_tokens = input_tokens + output_tokens
+    uncached_input_tokens = max(0, input_tokens - total_cached_input_tokens)
     prompt_bytes_before_values = [
         safe_int(bucket.get("prompt_bytes_before_max"))
         for bucket in by_prompt.values()
@@ -1498,6 +1534,33 @@ def summarize_run(
             "total_tokens": total_tokens,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cached_input_tokens": total_cached_input_tokens,
+            "cache_write_input_tokens": total_cache_write_input_tokens,
+            "uncached_input_tokens": uncached_input_tokens,
+            "usage_record_count": total_usage_records,
+            "usage_recorded_turns": usage_recorded_turns,
+            "usage_missing_turns": max(0, total_turns - usage_recorded_turns),
+            "usage_recording_status": (
+                "complete"
+                if usage_recorded_turns == total_turns and total_turns > 0
+                else "partial"
+                if usage_recorded_turns > 0
+                else "not_recorded"
+            ),
+            "cache_metric_record_count": cache_metric_record_count,
+            "cache_metric_status": (
+                "recorded" if cache_metric_record_count > 0 else "not_reported"
+            ),
+            "cache_read_ratio": ratio(total_cached_input_tokens, input_tokens),
+            "avg_input_tokens_per_turn": round(input_tokens / total_turns, 3)
+            if total_turns
+            else 0.0,
+            "avg_uncached_input_tokens_per_turn": round(
+                uncached_input_tokens / total_turns,
+                3,
+            )
+            if total_turns
+            else 0.0,
             "avg_calls_per_turn": round(total_llm_calls / total_turns, 3) if total_turns else 0.0,
             "avg_elapsed_ms_per_turn": round(total_llm_elapsed_ms / total_turns, 3)
             if total_turns
@@ -1616,6 +1679,30 @@ def summarize_run_dirs(
     )
     output_tokens = sum(
         safe_int(get_path(summary, "llm", "output_tokens")) for summary in summaries
+    )
+    cached_input_tokens = sum(
+        safe_int(get_path(summary, "llm", "cached_input_tokens"))
+        for summary in summaries
+    )
+    cache_write_input_tokens = sum(
+        safe_int(get_path(summary, "llm", "cache_write_input_tokens"))
+        for summary in summaries
+    )
+    uncached_input_tokens = sum(
+        safe_int(get_path(summary, "llm", "uncached_input_tokens"))
+        for summary in summaries
+    )
+    usage_record_count = sum(
+        safe_int(get_path(summary, "llm", "usage_record_count"))
+        for summary in summaries
+    )
+    usage_recorded_turns = sum(
+        safe_int(get_path(summary, "llm", "usage_recorded_turns"))
+        for summary in summaries
+    )
+    cache_metric_record_count = sum(
+        safe_int(get_path(summary, "llm", "cache_metric_record_count"))
+        for summary in summaries
     )
     prompt_bytes_before_max = max(
         (safe_int(get_path(summary, "llm", "prompt_bytes_before_max")) for summary in summaries),
@@ -1758,6 +1845,33 @@ def summarize_run_dirs(
             "total_tokens": total_tokens,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cached_input_tokens": cached_input_tokens,
+            "cache_write_input_tokens": cache_write_input_tokens,
+            "uncached_input_tokens": uncached_input_tokens,
+            "usage_record_count": usage_record_count,
+            "usage_recorded_turns": usage_recorded_turns,
+            "usage_missing_turns": max(0, turns_total - usage_recorded_turns),
+            "usage_recording_status": (
+                "complete"
+                if usage_recorded_turns == turns_total and turns_total > 0
+                else "partial"
+                if usage_recorded_turns > 0
+                else "not_recorded"
+            ),
+            "cache_metric_record_count": cache_metric_record_count,
+            "cache_metric_status": (
+                "recorded" if cache_metric_record_count > 0 else "not_reported"
+            ),
+            "cache_read_ratio": ratio(cached_input_tokens, input_tokens),
+            "avg_input_tokens_per_turn": round(input_tokens / turns_total, 3)
+            if turns_total
+            else 0.0,
+            "avg_uncached_input_tokens_per_turn": round(
+                uncached_input_tokens / turns_total,
+                3,
+            )
+            if turns_total
+            else 0.0,
             "avg_calls_per_turn": round(total_llm_calls / turns_total, 3)
             if turns_total
             else 0.0,
@@ -1823,6 +1937,59 @@ def run_self_test() -> int:
         )
         if tmp in line or "/tmp/" in line or "output=external_path" not in line:
             print(f"SELF_TEST_FAIL ok_line:{line}")
+            return 1
+        run_dir = Path(tmp) / "usage"
+        run_dir.mkdir()
+        (run_dir / "turn_1_case_1.json").write_text(
+            json.dumps(
+                {
+                    "data": {
+                        "status": "succeeded",
+                        "result_json": {
+                            "task_journal": {
+                                "summary": {
+                                    "final_status": "success",
+                                    "task_metrics": {
+                                        "llm_calls_per_task": 1,
+                                        "llm_elapsed_ms_per_task": 25,
+                                        "llm_cost": {
+                                            "usage_record_count": 1,
+                                            "input_tokens": 100,
+                                            "output_tokens": 20,
+                                            "cached_input_tokens": 40,
+                                            "cache_write_input_tokens": 5,
+                                        },
+                                        "llm_cost_records": [
+                                            {
+                                                "usage": {
+                                                    "prompt_tokens": 100,
+                                                    "cached_tokens": 40,
+                                                }
+                                            }
+                                        ],
+                                    },
+                                },
+                                "trace": {},
+                            }
+                        },
+                    },
+                    "harness_metrics": {"wall_time_ms": 75},
+                }
+            ),
+            encoding="utf-8",
+        )
+        usage_summary = summarize_run(run_dir)
+        if get_path(usage_summary, "llm", "cached_input_tokens") != 40:
+            print(f"SELF_TEST_FAIL cached_tokens:{usage_summary.get('llm')}")
+            return 1
+        if get_path(usage_summary, "llm", "uncached_input_tokens") != 60:
+            print(f"SELF_TEST_FAIL uncached_tokens:{usage_summary.get('llm')}")
+            return 1
+        if get_path(usage_summary, "llm", "cache_read_ratio") != 0.4:
+            print(f"SELF_TEST_FAIL cache_ratio:{usage_summary.get('llm')}")
+            return 1
+        if get_path(usage_summary, "wall_time", "recording_status") != "complete":
+            print(f"SELF_TEST_FAIL usage_wall_time:{usage_summary.get('wall_time')}")
             return 1
     if portable_path_ref("multiple") != "multiple":
         print("SELF_TEST_FAIL multiple_ref")
