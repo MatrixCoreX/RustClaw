@@ -77,9 +77,16 @@ fn native_tool_rejects_unknown_protocol_name_and_invalid_args() {
 
 #[test]
 fn native_request_separates_system_protocol_from_user_turn() {
-    let request = native_planner_request("protocol", "current turn");
+    let request = native_planner_request("protocol", "current turn", Some(90));
 
     assert_eq!(request.messages.len(), 2);
+    assert_eq!(
+        request
+            .metadata
+            .get("provider_timeout_seconds")
+            .and_then(serde_json::Value::as_u64),
+        Some(90)
+    );
     assert_eq!(request.messages[0].role, ModelRole::System);
     assert_eq!(request.messages[1].role, ModelRole::User);
     assert_eq!(

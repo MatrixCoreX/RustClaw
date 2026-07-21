@@ -330,6 +330,7 @@ pub(crate) enum LlmRoutingPreference {
 pub(crate) struct ChatRequestHints {
     pub(crate) temperature: Option<f64>,
     pub(crate) max_tokens: Option<u64>,
+    pub(crate) timeout_seconds: Option<u64>,
     pub(crate) required_input_modalities: Vec<String>,
     pub(crate) minimum_context_window_tokens: Option<usize>,
     pub(crate) requires_native_tools: bool,
@@ -341,6 +342,7 @@ impl Default for ChatRequestHints {
         Self {
             temperature: None,
             max_tokens: None,
+            timeout_seconds: None,
             required_input_modalities: vec!["text".to_string()],
             minimum_context_window_tokens: None,
             requires_native_tools: false,
@@ -628,7 +630,10 @@ async fn call_provider(
     let provider_type = provider.config.provider_type.as_str();
     for impl_ref in PROVIDER_IMPLS {
         if impl_ref.name() == provider_type {
-            let timeout_seconds = provider.config.timeout_seconds.max(1);
+            let timeout_seconds = effective_provider_timeout_seconds(
+                provider.config.timeout_seconds,
+                hints.timeout_seconds,
+            );
             return await_provider_call_with_timeout(
                 provider_type,
                 timeout_seconds,
@@ -652,7 +657,10 @@ async fn call_model_turn(
     let provider_type = provider.config.provider_type.as_str();
     for impl_ref in PROVIDER_IMPLS {
         if impl_ref.name() == provider_type {
-            let timeout_seconds = provider.config.timeout_seconds.max(1);
+            let timeout_seconds = effective_provider_timeout_seconds(
+                provider.config.timeout_seconds,
+                hints.timeout_seconds,
+            );
             return await_model_turn_call_with_timeout(
                 provider_type,
                 timeout_seconds,
@@ -665,6 +673,15 @@ async fn call_model_turn(
         format!("unsupported provider type: {provider_type}"),
         Value::Null,
     ))
+}
+
+fn effective_provider_timeout_seconds(
+    configured_timeout_seconds: u64,
+    request_timeout_seconds: Option<u64>,
+) -> u64 {
+    request_timeout_seconds
+        .map(|requested| configured_timeout_seconds.max(1).min(requested.max(1)))
+        .unwrap_or_else(|| configured_timeout_seconds.max(1))
 }
 
 async fn await_provider_call_with_timeout(

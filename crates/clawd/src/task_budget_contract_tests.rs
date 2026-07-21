@@ -1,7 +1,7 @@
 use super::{
     profile_for_verified_plan, task_budget_policy_from_toml, BudgetDecision, BudgetHardCeilings,
-    BudgetObservation, BudgetProgress, BudgetTimeoutClass, TaskBudgetProfile, TaskBudgetSlice,
-    VerifiedPlanBudgetFacts,
+    BudgetObservation, BudgetProfilePolicy, BudgetProgress, BudgetTimeoutClass, TaskBudgetProfile,
+    TaskBudgetSlice, VerifiedPlanBudgetFacts,
 };
 
 fn slice() -> TaskBudgetSlice {
@@ -239,4 +239,32 @@ fn verified_machine_plan_facts_select_profiles_without_user_text() {
         }),
         TaskBudgetProfile::OpsClosedLoop
     );
+}
+
+#[test]
+fn timeout_classes_are_bounded_by_soft_slice_and_administrator_ceiling() {
+    let mut slice = TaskBudgetSlice::new_with_policy(
+        TaskBudgetProfile::MultiStepWorkspace,
+        BudgetProfilePolicy {
+            soft_slice_ms: 900_000,
+            stagnation_tolerance: 4,
+            provider_timeout_class: BudgetTimeoutClass::Standard,
+            tool_timeout_class: BudgetTimeoutClass::LongTail,
+        },
+        BudgetHardCeilings {
+            non_resumable_tool_runtime_ms: 300_000,
+            ..BudgetHardCeilings::default()
+        },
+    );
+
+    assert_eq!(slice.provider_call_timeout_seconds(), 180);
+    assert_eq!(slice.tool_call_timeout_seconds(), 300);
+
+    slice.soft_slice_ms = 45_000;
+    assert_eq!(slice.provider_call_timeout_seconds(), 44);
+    assert_eq!(slice.tool_call_timeout_seconds(), 44);
+
+    slice.soft_slice_ms = 500;
+    assert_eq!(slice.provider_call_timeout_seconds(), 1);
+    assert_eq!(slice.tool_call_timeout_seconds(), 1);
 }

@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
+use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use super::{
@@ -53,6 +54,30 @@ use skill_execution_preflight::{
     validate_skill_output_contract,
 };
 use skill_execution_subagent::{record_subagent_hook_stage, record_subagent_step_execution};
+
+async fn run_with_tool_budget_timeout<F>(
+    tool_timeout: Option<(u64, &'static str)>,
+    execute: F,
+) -> Result<String, String>
+where
+    F: Future<Output = Result<String, String>>,
+{
+    let Some((timeout_seconds, timeout_class)) = tool_timeout else {
+        return execute.await;
+    };
+    match tokio::time::timeout(Duration::from_secs(timeout_seconds), execute).await {
+        Ok(result) => result,
+        Err(_) => Err(json!({
+            "schema_version": 1,
+            "status_code": "agent_tool_timeout",
+            "error_code": "agent_tool_timeout",
+            "timeout_class": timeout_class,
+            "timeout_seconds": timeout_seconds,
+            "resumable": false,
+        })
+        .to_string()),
+    }
+}
 
 async fn run_mcp_tool_observation(
     state: &AppState,
@@ -1039,12 +1064,18 @@ pub(super) async fn execute_prepared_skill_action(
     let mcp_descriptor = state.mcp_tool(normalized_skill);
     let is_mcp_tool = mcp_descriptor.is_some();
     let mcp_started_at = is_mcp_tool.then(Instant::now);
+    let tool_timeout = loop_state.task_budget_slice.as_ref().map(|slice| {
+        (
+            slice.tool_call_timeout_seconds(),
+            slice.tool_timeout_class.as_str(),
+        )
+    });
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || {
             let structured_validation_slot = Arc::clone(&structured_validation_slot);
             let structured_extra_slot = Arc::clone(&structured_extra_slot);
             let exec_args_for_run = exec_args_for_run.clone();
-            async move {
+            let execute = async move {
                 if is_mcp_tool {
                     let (raw, extra) =
                         run_mcp_tool_observation(state, task, normalized_skill, exec_args_for_run)
@@ -1064,7 +1095,8 @@ pub(super) async fn execute_prepared_skill_action(
                     *slot = outcome.extra.clone();
                 }
                 Ok(outcome.text)
-            }
+            };
+            async move { run_with_tool_budget_timeout(tool_timeout, execute).await }
         })
         .await;
     let structured_validation = structured_validation
@@ -1254,3 +1286,6 @@ mod preflight_dry_run_tests;
 #[cfg(test)]
 #[path = "skill_execution_tests.rs"]
 pub(super) mod tests;
+#[cfg(test)]
+#[path = "skill_execution_timeout_tests.rs"]
+mod timeout_tests;

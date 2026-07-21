@@ -67,6 +67,14 @@ impl BudgetTimeoutClass {
             Self::LongTail => "long_tail",
         }
     }
+
+    fn call_ceiling_seconds(self) -> u64 {
+        match self {
+            Self::Short => 60,
+            Self::Standard => 180,
+            Self::LongTail => 900,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,6 +271,18 @@ pub(crate) struct TaskBudgetSlice {
 }
 
 impl TaskBudgetSlice {
+    pub(crate) fn provider_call_timeout_seconds(&self) -> u64 {
+        call_timeout_seconds(self.provider_timeout_class, self.soft_slice_ms, u64::MAX)
+    }
+
+    pub(crate) fn tool_call_timeout_seconds(&self) -> u64 {
+        call_timeout_seconds(
+            self.tool_timeout_class,
+            self.soft_slice_ms,
+            self.hard_ceilings.non_resumable_tool_runtime_ms,
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn new(
         profile: TaskBudgetProfile,
@@ -353,6 +373,20 @@ impl TaskBudgetSlice {
         let slice = serde_json::from_value::<Self>(value.clone()).ok()?;
         (slice.schema_version == TASK_BUDGET_SCHEMA_VERSION).then_some(slice)
     }
+}
+
+fn call_timeout_seconds(
+    timeout_class: BudgetTimeoutClass,
+    soft_slice_ms: u64,
+    administrator_ceiling_ms: u64,
+) -> u64 {
+    let soft_reserve_ms = soft_slice_ms.saturating_sub(1_000).max(1_000);
+    let effective_ms = timeout_class
+        .call_ceiling_seconds()
+        .saturating_mul(1_000)
+        .min(soft_reserve_ms)
+        .min(administrator_ceiling_ms.max(1_000));
+    effective_ms.saturating_add(999) / 1_000
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

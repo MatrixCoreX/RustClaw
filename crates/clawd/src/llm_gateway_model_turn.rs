@@ -43,6 +43,10 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     let logical_call_index = state.task_llm_call_count(&task.task_id);
     let hints = crate::ChatRequestHints {
         requires_native_tools: true,
+        timeout_seconds: request
+            .metadata
+            .get("provider_timeout_seconds")
+            .and_then(serde_json::Value::as_u64),
         ..crate::ChatRequestHints::default()
     };
     let routing_plan = crate::providers::route_providers(task_providers, prompt.len(), &hints);

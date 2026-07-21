@@ -231,6 +231,8 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "struct BudgetObservation",
         "profile_for_verified_plan",
         "advanced_from",
+        "provider_call_timeout_seconds",
+        "tool_call_timeout_seconds",
         "load_task_budget_policy",
     ),
     "configs/agent_guard.toml": (
@@ -259,6 +261,22 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         '"cumulative_tool_calls"',
         '"soft_slice_exhausted"',
         '"resumable"',
+    ),
+    "crates/clawd/src/providers/client.rs": (
+        "timeout_seconds: Option<u64>",
+        "effective_provider_timeout_seconds",
+        "hints.timeout_seconds",
+    ),
+    "crates/clawd/src/agent_engine/planning.rs": (
+        "provider_call_timeout_seconds",
+        "provider_timeout_seconds",
+        "run_with_fallback_with_hints",
+    ),
+    "crates/clawd/src/agent_engine/skill_execution.rs": (
+        "tool_call_timeout_seconds",
+        "run_with_tool_budget_timeout",
+        '"agent_tool_timeout"',
+        '"resumable": false',
     ),
     "UI/src/lib/task-result.ts": (
         '"budget_decision"',
