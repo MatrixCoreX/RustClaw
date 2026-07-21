@@ -1,0 +1,27 @@
+schema_version = 1
+
+[profiles.focused]
+min_pass_rate = 1.0
+max_avg_prompt_tokens = 50000
+max_avg_uncached_input_tokens = 50000
+min_cache_read_ratio = 0.0
+require_cache_metrics = false
+max_avg_llm_calls = 4.0
+max_avg_tool_calls = 12.0
+max_avg_wall_time_ms = 600000
+require_complete_wall_time = false
+max_prompt_truncations = 0
+max_provider_final_errors = 0
+
+[profiles.continuous_coding]
+min_pass_rate = 1.0
+max_avg_prompt_tokens = 100000
+max_avg_uncached_input_tokens = 75000
+min_cache_read_ratio = 0.0
+require_cache_metrics = false
+max_avg_llm_calls = 8.0
+max_avg_tool_calls = 64.0
+max_avg_wall_time_ms = 3600000
+require_complete_wall_time = true
+max_prompt_truncations = 0
+max_provider_final_errors = 0
