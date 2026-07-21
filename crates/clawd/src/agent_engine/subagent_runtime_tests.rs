@@ -467,6 +467,87 @@ fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
 }
 
 #[test]
+fn persistent_subagent_batch_materializes_declared_dag_and_child_policy() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "task-persistent-dag-parent".to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: Some("ui-user".to_string()),
+        external_chat_id: Some("ui-chat".to_string()),
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text": "parent task"}).to_string(),
+    };
+    insert_running_parent_task(&state, &task);
+    let mut loop_state = LoopState::new();
+    let args = serde_json::json!({
+        "execution_mode": "persistent_child_task",
+        "max_parallel": 2,
+        "children": [
+            {
+                "node_id": "writer",
+                "role": "writer",
+                "objective": "machine_child_objective:write",
+                "allowed_capabilities": ["filesystem.write_text"],
+                "owned_paths": ["crates/runtime"]
+            },
+            {
+                "node_id": "reviewer",
+                "role": "reviewer",
+                "objective": "machine_child_objective:review",
+                "allowed_capabilities": ["filesystem.read_text_range"],
+                "depends_on": [{"node_id": "writer", "required": true}],
+                "model_policy": {"model_class": "reasoning"}
+            }
+        ]
+    });
+
+    record_persistent_child_task_from_args(
+        &state,
+        &task,
+        &mut loop_state,
+        1,
+        1,
+        &args,
+        &SubagentRuntimeConfig::default(),
+    )
+    .expect("schedule DAG");
+    let db = state.core.db.get().expect("get db");
+    let graph = crate::repo::child_task_graph::graph_snapshot(&db, &task.task_id)
+        .expect("read graph")
+        .expect("graph");
+    let nodes = graph["nodes"].as_array().expect("nodes");
+    let writer = nodes
+        .iter()
+        .find(|node| node["role"] == "writer")
+        .expect("writer");
+    let reviewer = nodes
+        .iter()
+        .find(|node| node["role"] == "reviewer")
+        .expect("reviewer");
+    assert_eq!(writer["readiness"], "ready");
+    assert_eq!(writer["owned_paths"], json!(["crates/runtime"]));
+    assert_eq!(
+        writer["tool_policy"]["allowed_capabilities"],
+        json!(["filesystem.write_text"])
+    );
+    assert_eq!(reviewer["readiness"], "blocked_dependency");
+    assert_eq!(reviewer["model_policy"]["model_class"], "reasoning");
+    assert_eq!(graph["edges"][0]["edge_kind"], "declared_dependency");
+    assert_eq!(
+        graph["edges"][0]["predecessor_task_id"],
+        writer["child_task_id"]
+    );
+    assert_eq!(
+        graph["edges"][0]["successor_task_id"],
+        reviewer["child_task_id"]
+    );
+}
+
+#[test]
 fn subagent_model_child_result_merges_into_runtime_observation() {
     let mut loop_state = LoopState::new();
     loop_state.round_no = 3;
@@ -568,10 +649,7 @@ fn subagent_new_role_tokens_preserve_readonly_policy() {
 fn subagent_runtime_config_supplies_default_timeout_and_parallel_budget() {
     let mut loop_state = LoopState::new();
     let config = SubagentRuntimeConfig {
-        allowed_roles: SubagentRole::all_tokens()
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+        role_definitions: crate::agent_runtime_contract::default_subagent_role_definitions(),
         max_parallel_readonly: 3,
         default_timeout_ms: Some(15_000),
         context_evidence_root: None,
@@ -606,10 +684,13 @@ fn subagent_runtime_config_supplies_default_timeout_and_parallel_budget() {
 }
 
 #[test]
-fn subagent_runtime_config_rejects_disabled_role_as_machine_state() {
+fn subagent_runtime_config_rejects_undefined_role_as_machine_state() {
     let mut loop_state = LoopState::new();
     let config = SubagentRuntimeConfig {
-        allowed_roles: vec!["observe".to_string()],
+        role_definitions: crate::agent_runtime_contract::default_subagent_role_definitions()
+            .into_iter()
+            .filter(|definition| definition.token == "observe")
+            .collect(),
         max_parallel_readonly: 1,
         default_timeout_ms: Some(5_000),
         context_evidence_root: None,
@@ -629,10 +710,7 @@ fn subagent_runtime_config_rejects_disabled_role_as_machine_state() {
     assert_eq!(stop_signal, Some(SUBAGENT_STOP_SIGNAL_INVALID_ROLE));
     let observation = &loop_state.task_observations[0];
     assert_eq!(observation["status"], "rejected");
-    assert_eq!(
-        observation["error_code"],
-        "subagent_role_disabled_by_config"
-    );
+    assert_eq!(observation["error_code"], "subagent_role_not_allowed");
     assert_eq!(observation["allowed_roles"][0], "observe");
     assert_eq!(observation["runtime_config"]["inline_write_enabled"], false);
     assert_eq!(
@@ -916,10 +994,7 @@ fn subagent_batch_records_conflicting_findings_for_parent_decision() {
 fn subagent_batch_isolates_optional_child_failures_and_parallel_limit() {
     let mut loop_state = LoopState::new();
     let config = SubagentRuntimeConfig {
-        allowed_roles: SubagentRole::all_tokens()
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+        role_definitions: crate::agent_runtime_contract::default_subagent_role_definitions(),
         max_parallel_readonly: 1,
         default_timeout_ms: Some(10_000),
         context_evidence_root: None,

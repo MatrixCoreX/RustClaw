@@ -33,6 +33,8 @@ fn state_with_tasks_table() -> crate::AppState {
         );",
     )
     .expect("create tasks table");
+    crate::repo::child_task_graph::ensure_child_task_graph_schema(&db)
+        .expect("child_task_graph_schema_test");
     drop(db);
     state
 }

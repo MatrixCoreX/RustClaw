@@ -70,6 +70,8 @@ fn state_with_tasks_table() -> crate::AppState {
         );",
     )
     .expect("create tasks table");
+    crate::repo::child_task_graph::ensure_child_task_graph_schema(&db)
+        .expect("create child task graph schema");
     drop(db);
     state
 }
@@ -251,16 +253,6 @@ fn update_task_failure_preserves_structured_terminal_reason() {
             expected_attribution
         );
     }
-}
-
-fn task_row_count(state: &crate::AppState, task_id: &str) -> i64 {
-    let db = state.core.db.get().expect("get db");
-    db.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE task_id = ?1",
-        rusqlite::params![task_id],
-        |row| row.get(0),
-    )
-    .expect("select task row count")
 }
 
 fn sample_repo_child_spec(
@@ -464,7 +456,7 @@ fn enqueue_child_specs_creates_independent_child_tasks_and_parent_cancel_fanout(
     assert_eq!(parent_result["child_task_ids"][1], "task-child-enqueue-2");
     assert_eq!(
         parent_result["child_task_enqueue"]["scheduler"]["decision"],
-        "scheduled"
+        "persisted_graph"
     );
 
     let claimed = claim_next_task(&state)
@@ -503,69 +495,6 @@ fn enqueue_child_specs_creates_independent_child_tasks_and_parent_cancel_fanout(
     assert_eq!(
         cancelled_child["task_lifecycle"]["terminal_reason"],
         "parent_cancelled"
-    );
-}
-
-#[test]
-fn enqueue_child_specs_bounds_by_role_and_permission_profile() {
-    let state = state_with_tasks_table();
-    insert_task(
-        &state,
-        "task-parent-role-profile",
-        "running",
-        Some(&json!({})),
-        1,
-    );
-    let parent = ChildTaskParentContext {
-        parent_task_id: "task-parent-role-profile".to_string(),
-        user_id: 42,
-        chat_id: 7,
-        user_key: Some("test-key".to_string()),
-        channel: "ui".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-    };
-    let mut first_write =
-        sample_repo_child_spec("task-parent-role-profile", "task-child-role-write-1", true);
-    first_write.role = "workspace_writer".to_string();
-    first_write.permission_profile = ChildTaskPermissionProfile::LocalCurrentWorkspace;
-    let mut second_write =
-        sample_repo_child_spec("task-parent-role-profile", "task-child-role-write-2", false);
-    second_write.role = "workspace_writer".to_string();
-    second_write.permission_profile = ChildTaskPermissionProfile::LocalCurrentWorkspace;
-    let read_only =
-        sample_repo_child_spec("task-parent-role-profile", "task-child-role-read-1", false);
-    let specs = vec![first_write, second_write, read_only];
-
-    let summary =
-        enqueue_child_task_specs(&state, &parent, &specs, 3, 1).expect("enqueue child specs");
-
-    assert_eq!(summary["status"], "scheduled");
-    assert_eq!(summary["queued_child_count"], 2);
-    assert_eq!(
-        summary["scheduler"]["decision"],
-        "role_profile_bounded_partial"
-    );
-    assert_eq!(
-        summary["scheduler"]["skipped_child_tasks"][0]["child_task_id"],
-        "task-child-role-write-2"
-    );
-    assert_eq!(
-        summary["scheduler"]["skipped_child_tasks"][0]["reason_code"],
-        "child_role_profile_capacity_exceeded"
-    );
-    assert_eq!(stored_status(&state, "task-child-role-write-1"), "queued");
-    assert_eq!(stored_status(&state, "task-child-role-read-1"), "queued");
-    assert_eq!(task_row_count(&state, "task-child-role-write-2"), 0);
-    let parent_result = stored_result_json(&state, "task-parent-role-profile");
-    assert_eq!(
-        parent_result["child_task_ids"][0],
-        "task-child-role-write-1"
-    );
-    assert_eq!(parent_result["child_task_ids"][1], "task-child-role-read-1");
-    assert_eq!(
-        parent_result["child_task_enqueue"]["scheduler"]["role_profile_boundaries_applied"],
-        true
     );
 }
 
@@ -1945,3 +1874,6 @@ mod tasks_resume_executor_tests;
 
 #[path = "task_resume_execution_tests.rs"]
 mod task_resume_execution_tests;
+
+#[path = "tasks_tests/child_graph.rs"]
+mod child_graph;

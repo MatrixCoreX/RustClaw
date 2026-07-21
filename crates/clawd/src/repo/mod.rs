@@ -3,6 +3,7 @@ pub(crate) mod audit;
 pub(crate) mod auth;
 pub(crate) mod child_patch;
 pub(crate) mod child_task_control;
+pub(crate) mod child_task_graph;
 pub(crate) mod child_tasks;
 pub(crate) mod submit;
 pub(crate) mod task_admin;

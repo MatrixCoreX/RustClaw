@@ -45,6 +45,8 @@ fn state_with_goal_task(task_id: &str, payload: Value) -> crate::AppState {
         );",
     )
     .expect("create route test tables");
+    crate::repo::child_task_graph::ensure_child_task_graph_schema(&db)
+        .expect("child_task_graph_schema_test");
     db.execute(
         "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
          VALUES (?1, 'admin', 1, '1', NULL)",

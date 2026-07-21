@@ -175,11 +175,18 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let mut stmt = db.prepare(
-        "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json,
+        "SELECT task.task_id, task.user_id, task.chat_id, task.user_key, task.channel,
+                task.external_user_id, task.external_chat_id, task.kind, task.payload_json,
                 COALESCE(claim_attempt, 0)
-         FROM tasks
-         WHERE status = 'queued'
-         ORDER BY created_at ASC
+         FROM tasks task
+         LEFT JOIN child_task_graph_nodes graph_node
+           ON graph_node.child_task_id = task.task_id
+         WHERE task.status = 'queued'
+           AND (
+               graph_node.child_task_id IS NULL
+               OR graph_node.readiness IN ('ready', 'running')
+           )
+         ORDER BY task.created_at ASC
          LIMIT 1",
     )?;
 
@@ -240,6 +247,7 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
         );
         return Ok(None);
     }
+    crate::repo::child_task_graph::mark_child_graph_node_running(&db, &task.task_id, &now_text)?;
 
     debug!(
         "claim_next_task: worker_id={} claimed task_id={} user_id={} chat_id={} kind={}",
@@ -644,6 +652,15 @@ pub(crate) fn update_task_failure(
             &["running"],
         ));
     }
+    let graph_snapshot = crate::repo::child_task_graph::terminate_parent_graph_children(
+        state,
+        &db,
+        task_id,
+        "failed",
+        &now_ts(),
+    )?;
+    drop(db);
+    publish_parent_graph_terminal_event(state, task_id, graph_snapshot);
     Ok(())
 }
 
@@ -685,6 +702,15 @@ pub(crate) fn update_task_failure_with_result(
             &["running"],
         ));
     }
+    let graph_snapshot = crate::repo::child_task_graph::terminate_parent_graph_children(
+        state,
+        &db,
+        task_id,
+        "failed",
+        &now_ts(),
+    )?;
+    drop(db);
+    publish_parent_graph_terminal_event(state, task_id, graph_snapshot);
     Ok(())
 }
 
@@ -772,7 +798,37 @@ pub(crate) fn update_task_timeout(
             &["running"],
         ));
     }
+    let graph_snapshot = crate::repo::child_task_graph::terminate_parent_graph_children(
+        state,
+        &db,
+        task_id,
+        "timeout",
+        &now_ts(),
+    )?;
+    drop(db);
+    publish_parent_graph_terminal_event(state, task_id, graph_snapshot);
     Ok(true)
+}
+
+fn publish_parent_graph_terminal_event(
+    state: &AppState,
+    parent_task_id: &str,
+    graph_snapshot: Option<Value>,
+) {
+    let Some(graph_snapshot) = graph_snapshot else {
+        return;
+    };
+    if let Err(error) = crate::task_event_transport::publish_event(
+        state,
+        parent_task_id,
+        "subagent_graph",
+        graph_snapshot,
+    ) {
+        warn!(
+            "subagent graph terminal event publish failed: task_id={} error={}",
+            parent_task_id, error
+        );
+    }
 }
 
 pub(crate) fn list_active_tasks_internal(

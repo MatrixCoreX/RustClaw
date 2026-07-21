@@ -59,6 +59,7 @@ fn review_child_patch(state: &AppState, record: &ChildPatchRecord) -> Result<Str
         "child_terminal_status": record.terminal_status,
         "permission_profile": record.permission_profile,
         "allowed_capabilities": record.allowed_capabilities,
+        "owned_paths": record.owned_paths,
         "patch_ref": artifact.metadata.get("patch_ref").cloned().unwrap_or(Value::Null),
         "base_commit": base_commit,
         "base_is_parent_ancestor": base_is_parent_ancestor,

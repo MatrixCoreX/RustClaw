@@ -12,11 +12,13 @@ pub(super) async fn record_subagent_hook_stage(
     step_in_round: usize,
     status: &str,
 ) {
+    let subagent_config =
+        crate::agent_engine::subagent_runtime::load_subagent_runtime_config(state);
     let role = args
         .get("role")
         .and_then(Value::as_str)
-        .and_then(crate::agent_runtime_contract::SubagentRole::parse_token)
-        .map(|role| role.as_token())
+        .and_then(|token| subagent_config.resolve_role(token))
+        .map(|role| role.token.as_str())
         .unwrap_or("unresolved");
     let evaluation = crate::agent_hooks::lifecycle_stage_outcome_for_state(
         state,

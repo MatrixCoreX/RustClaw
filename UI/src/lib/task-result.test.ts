@@ -65,6 +65,49 @@ test("renders safe model turn lifecycle fields", () => {
   assert.ok(view.meta.includes("tool_name=call_capability"));
 });
 
+test("summarizes persisted subagent graph events", () => {
+  const graphView = buildTaskTraceEventView(
+    {
+      event_type: "subagent_graph",
+      payload: {
+        schema_version: 1,
+        status: "active",
+        nodes: [
+          { child_task_id: "child-1", readiness: "running" },
+          { child_task_id: "child-2", readiness: "blocked_dependency" },
+        ],
+        edges: [
+          {
+            predecessor_task_id: "child-1",
+            successor_task_id: "child-2",
+          },
+        ],
+      },
+    },
+    "en",
+  );
+  assert.equal(graphView.title, "Subagent task graph");
+  assert.equal(graphView.detail, "2 node(s), 1 dependency edge(s); status active.");
+
+  const nodeView = buildTaskTraceEventView(
+    {
+      event_type: "subagent_node",
+      payload: {
+        child_task_id: "child-2",
+        graph: {
+          nodes: [
+            { child_task_id: "child-2", readiness: "failed" },
+          ],
+        },
+      },
+    },
+    "en",
+  );
+  assert.equal(nodeView.title, "Subagent task node");
+  assert.equal(nodeView.detail, "child-2 · failed");
+  assert.equal(nodeView.tone, "failed");
+});
+
 test("extracts visible task text before falling back to error text", () => {
   const result: TaskQueryResponse = {
     task_id: "task-1",

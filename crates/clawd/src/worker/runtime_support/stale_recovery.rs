@@ -25,6 +25,7 @@ struct StaleRunningTaskCandidate {
     task_id: String,
     reason: StaleRunningRecoveryReason,
     result_json: Option<String>,
+    is_child_subagent: bool,
 }
 
 fn recovery_should_preserve_recoverable_state(result_json: Option<&str>, now: i64) -> bool {
@@ -108,7 +109,7 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
     let mut candidates = Vec::new();
     {
         let mut stmt = db.prepare(
-            "SELECT task_id, result_json, lease_owner,
+            "SELECT task_id, result_json, lease_owner, payload_json,
                     CASE
                         WHEN lease_expires_at > 0 AND lease_expires_at <= ?2 THEN 'worker_lease_expired'
                         ELSE 'worker_heartbeat_stale'
@@ -126,11 +127,12 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
-                parse_recovery_reason(row.get::<_, String>(3)?.as_str()),
+                row.get::<_, String>(3)?,
+                parse_recovery_reason(row.get::<_, String>(4)?.as_str()),
             ))
         })?;
         for row in rows {
-            let (task_id, result_json, _lease_owner, reason) = row?;
+            let (task_id, result_json, _lease_owner, payload_json, reason) = row?;
             if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
                 continue;
             }
@@ -138,6 +140,7 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
                 task_id,
                 reason,
                 result_json,
+                is_child_subagent: child_subagent_payload(&payload_json),
             });
         }
     }
@@ -147,8 +150,38 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
 
     let mut changed = 0;
     for candidate in &candidates {
-        changed += db.execute(
-            "UPDATE tasks
+        changed += if candidate.is_child_subagent {
+            db.execute(
+                "UPDATE tasks
+                 SET status = 'queued',
+                     error_text = NULL,
+                     result_json = ?3,
+                     updated_at = ?4,
+                     lease_owner = NULL,
+                     lease_expires_at = 0,
+                     claimed_at = 0
+                 WHERE task_id = ?1
+                   AND status = 'running'
+                   AND (
+                        CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?2
+                        OR (lease_expires_at > 0 AND lease_expires_at <= ?5)
+                   )",
+                rusqlite::params![
+                    candidate.task_id,
+                    stale_before.to_string(),
+                    stale_child_requeue_result_json(
+                        &candidate.task_id,
+                        candidate.result_json.as_deref(),
+                        &candidate.reason,
+                        now,
+                    ),
+                    now_ts(),
+                    now,
+                ],
+            )?
+        } else {
+            db.execute(
+                "UPDATE tasks
              SET status = 'timeout',
                  error_text = CASE
                      WHEN error_text IS NULL OR TRIM(error_text) = '' THEN ?3
@@ -162,20 +195,21 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
                     CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?2
                     OR (lease_expires_at > 0 AND lease_expires_at <= ?5)
                )",
-            rusqlite::params![
-                candidate.task_id,
-                stale_before.to_string(),
-                candidate.reason.error_token(),
-                now_ts(),
-                now,
-                stale_running_timeout_result_json(
-                    &candidate.task_id,
-                    candidate.result_json.as_deref(),
-                    &candidate.reason,
+                rusqlite::params![
+                    candidate.task_id,
+                    stale_before.to_string(),
+                    candidate.reason.error_token(),
+                    now_ts(),
                     now,
-                )
-            ],
-        )?;
+                    stale_running_timeout_result_json(
+                        &candidate.task_id,
+                        candidate.result_json.as_deref(),
+                        &candidate.reason,
+                        now,
+                    )
+                ],
+            )?
+        };
     }
     if changed != candidates.len() {
         warn!(
@@ -206,7 +240,7 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
     let mut active_current_worker_task_ids = Vec::new();
     {
         let mut stmt = db.prepare(
-            "SELECT task_id, result_json, lease_owner,
+            "SELECT task_id, result_json, lease_owner, payload_json,
                     CASE
                         WHEN lease_expires_at > 0 AND lease_expires_at <= ?2 THEN 'worker_lease_expired'
                         ELSE 'worker_heartbeat_stale'
@@ -224,11 +258,12 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
-                parse_recovery_reason(row.get::<_, String>(3)?.as_str()),
+                row.get::<_, String>(3)?,
+                parse_recovery_reason(row.get::<_, String>(4)?.as_str()),
             ))
         })?;
         for row in rows {
-            let (task_id, result_json, lease_owner, reason) = row?;
+            let (task_id, result_json, lease_owner, payload_json, reason) = row?;
             if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
                 continue;
             }
@@ -242,6 +277,7 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
                 task_id,
                 reason,
                 result_json,
+                is_child_subagent: child_subagent_payload(&payload_json),
             });
         }
     }
@@ -261,8 +297,38 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
 
     let mut changed = 0;
     for candidate in &candidates {
-        changed += db.execute(
-            "UPDATE tasks
+        changed += if candidate.is_child_subagent {
+            db.execute(
+                "UPDATE tasks
+                 SET status = 'queued',
+                     error_text = NULL,
+                     result_json = ?3,
+                     updated_at = ?4,
+                     lease_owner = NULL,
+                     lease_expires_at = 0,
+                     claimed_at = 0
+                 WHERE task_id = ?1
+                   AND status = 'running'
+                   AND (
+                        CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?2
+                        OR (lease_expires_at > 0 AND lease_expires_at <= ?5)
+                   )",
+                rusqlite::params![
+                    candidate.task_id,
+                    stale_before.to_string(),
+                    stale_child_requeue_result_json(
+                        &candidate.task_id,
+                        candidate.result_json.as_deref(),
+                        &candidate.reason,
+                        now,
+                    ),
+                    now_ts(),
+                    now,
+                ],
+            )?
+        } else {
+            db.execute(
+                "UPDATE tasks
              SET status = 'timeout',
                  error_text = CASE
                      WHEN error_text IS NULL OR TRIM(error_text) = '' THEN ?3
@@ -276,20 +342,21 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
                     CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?2
                     OR (lease_expires_at > 0 AND lease_expires_at <= ?5)
                )",
-            rusqlite::params![
-                candidate.task_id,
-                stale_before.to_string(),
-                candidate.reason.error_token(),
-                now_ts(),
-                now,
-                stale_running_timeout_result_json(
-                    &candidate.task_id,
-                    candidate.result_json.as_deref(),
-                    &candidate.reason,
+                rusqlite::params![
+                    candidate.task_id,
+                    stale_before.to_string(),
+                    candidate.reason.error_token(),
+                    now_ts(),
                     now,
-                )
-            ],
-        )?;
+                    stale_running_timeout_result_json(
+                        &candidate.task_id,
+                        candidate.result_json.as_deref(),
+                        &candidate.reason,
+                        now,
+                    )
+                ],
+            )?
+        };
     }
     if changed != candidates.len() {
         warn!(
@@ -333,6 +400,49 @@ fn parse_recovery_reason(raw: &str) -> StaleRunningRecoveryReason {
     } else {
         StaleRunningRecoveryReason::WorkerHeartbeatStale
     }
+}
+
+fn child_subagent_payload(raw_payload_json: &str) -> bool {
+    serde_json::from_str::<Value>(raw_payload_json)
+        .ok()
+        .is_some_and(|payload| crate::repo::child_tasks::is_child_subagent_payload(&payload))
+}
+
+fn stale_child_requeue_result_json(
+    task_id: &str,
+    raw_result_json: Option<&str>,
+    reason: &StaleRunningRecoveryReason,
+    recovered_at: i64,
+) -> String {
+    let mut result_json = raw_result_json
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let reason_code = reason.error_token();
+    if let Some(object) = result_json.as_object_mut() {
+        object.insert("status_code".to_string(), json!("child_claim_requeued"));
+        object.insert("reason_code".to_string(), json!(reason_code));
+        object.insert(
+            "task_lifecycle".to_string(),
+            json!({
+                "schema_version": 1,
+                "state": "queued",
+                "source": "worker_stale_recovery",
+                "reason_code": reason_code,
+                "recovered_at": recovered_at,
+                "worker_events": [{
+                    "event_type": "child_claim_requeued",
+                    "owner_layer": "worker_runtime",
+                    "task_id": task_id,
+                    "state_from": "running",
+                    "state_to": "queued",
+                    "reason_code": reason_code,
+                    "recovered_at": recovered_at,
+                }],
+            }),
+        );
+    }
+    result_json.to_string()
 }
 
 fn stale_running_timeout_result_json(

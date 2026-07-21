@@ -352,6 +352,7 @@ async fn main() -> anyhow::Result<()> {
         ensure_channel_schema(&db)?;
         ensure_task_lease_schema(&db)?;
         ensure_key_auth_schema(&db)?;
+        repo::child_task_graph::ensure_child_task_graph_schema(&db)?;
         memory::indexing::ensure_retrieval_schema(&db)?;
         if config.memory.hybrid_recall_enabled
             && (config.memory.reindex_on_startup
@@ -388,7 +389,11 @@ async fn main() -> anyhow::Result<()> {
         recover_stale_running_tasks_on_startup(
             &db,
             config.worker.running_no_progress_timeout_seconds.max(1),
-        )?
+        )
+        .and_then(|recovered| {
+            repo::child_task_graph::reconcile_child_task_graphs_after_restart(&db, &now_ts())?;
+            Ok(recovered)
+        })?
     };
     if !recovered_task_ids.is_empty() {
         let recovery_detail = json!({

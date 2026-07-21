@@ -29,6 +29,50 @@ CREATE TABLE IF NOT EXISTS tasks (
     claimed_at    INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS child_task_graphs (
+    parent_task_id TEXT PRIMARY KEY,
+    schema_version INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    max_parallel INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS child_task_graph_nodes (
+    parent_task_id TEXT NOT NULL,
+    child_task_id TEXT PRIMARY KEY,
+    role TEXT NOT NULL,
+    required INTEGER NOT NULL,
+    readiness TEXT NOT NULL,
+    permission_profile TEXT NOT NULL,
+    merge_policy TEXT NOT NULL,
+    owned_paths_json TEXT NOT NULL,
+    budget_json TEXT NOT NULL,
+    model_policy_json TEXT NOT NULL,
+    tool_policy_json TEXT NOT NULL,
+    result_contract_json TEXT NOT NULL,
+    steering_version INTEGER NOT NULL DEFAULT 0,
+    steering_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_child_task_graph_nodes_parent_readiness
+ON child_task_graph_nodes(parent_task_id, readiness, created_at);
+
+CREATE TABLE IF NOT EXISTS child_task_graph_edges (
+    parent_task_id TEXT NOT NULL,
+    predecessor_task_id TEXT NOT NULL,
+    successor_task_id TEXT NOT NULL,
+    required INTEGER NOT NULL,
+    edge_kind TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(parent_task_id, predecessor_task_id, successor_task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_child_task_graph_edges_successor
+ON child_task_graph_edges(parent_task_id, successor_task_id);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           TEXT NOT NULL,

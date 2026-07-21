@@ -34,6 +34,8 @@ fn worker_runtime_error_immediately_transitions_running_task_to_failed() {
             );",
         )
         .expect("create tasks table");
+        crate::repo::child_task_graph::ensure_child_task_graph_schema(&db)
+            .expect("child_task_graph_schema_test");
         db.execute(
             "INSERT INTO tasks (task_id, status, updated_at, lease_owner, claim_attempt)
              VALUES (?1, 'running', '0', ?2, ?3)",

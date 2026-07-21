@@ -124,7 +124,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
-- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. CLI and UI render these fields directly, including the budget profile/decision, continuation index, cumulative model/tool/token/cost/elapsed counters, soft-slice state, goal and checkpoint fields, hook fields, coding verification fields, and team progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
+- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `subagent_graph`, `subagent_node`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. CLI and UI render these fields directly, including the budget profile/decision, continuation index, cumulative model/tool/token/cost/elapsed counters, soft-slice state, goal and checkpoint fields, hook fields, coding verification fields, and persisted child-graph progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
 
 ### Planner, LLM, And Capability Flow
 
@@ -180,7 +180,7 @@ flowchart TD
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
 - `Task journal event`: executor observations are projected into stable `task_goal`, `context_budget`, `context_compaction`, `tool_started`, `tool_step`, `tool_finished`, optional `coding_checkpoint`, optional `coding_task_contract`, optional `coding_evidence`, and optional team lifecycle events with refs, counts, status tokens, verification tokens, timing, and failure attribution for CLI/UI progress views.
-- `subagent tool`: planner-authorized child work is explicit. Explorers remain bounded and read-only; an isolated writer/tester may work only in its task-scoped Git worktree and return patch/evidence refs. The parent reviews conflicts, dirty-parent state, and precondition hashes before admitting or rejecting the patch. Children never write directly into the parent worktree or publish externally.
+- `subagent tool`: planner-authorized child work is explicit and persisted as an acyclic child-task graph. Trusted role definitions come from `agent_guard.toml`; the model selects a role token but cannot define permissions. The queue claims only ready nodes, serializes overlapping writer ownership, and permits disjoint isolated worktree writers to run concurrently. The parent reviews persisted ownership, conflicts, dirty-parent state, and precondition hashes before admitting or rejecting a patch. Children never publish externally, and only an explicitly admitted local-current-workspace role may write outside an isolated task worktree.
 - `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
@@ -609,30 +609,41 @@ Subagent team orchestration flow:
 
 ```mermaid
 flowchart TD
-    A[Planner action<br/>subagent children batch] --> B[Subagent runtime]
-    B --> C[Load agent_guard subagent config]
-    C --> D[Validate role, scope, timeout, required flag]
-    D --> E{Child isolation}
-    E -->|explorer| F[Bounded read-only child<br/>finding/evidence refs]
-    E -->|writer/tester| G[Create task-scoped Git worktree<br/>base commit + write boundary]
-    G --> H[Child edits and verifies in isolation]
-    H --> I[Persist child patch record<br/>patch_ref + precondition hashes + evidence]
-    F --> J[Aggregate child results]
-    I --> J
-    J --> K{Parent review}
-    K -->|overlap / stale / dirty parent| L[Machine reject<br/>agent_team_conflict_detected]
-    K -->|required child failed| M[Parent stop signal<br/>subagent_required_child_failed]
-    K -->|read-only findings ready| N[Synthesize from child findings]
-    K -->|patch admissible| O[workspace.review_child_patch]
-    O --> P[Exact parent approval]
-    P --> Q[workspace.apply_child_patch<br/>parent-owned mutation]
-    Q --> R[Parent diff + verification evidence]
-    L --> S[agent_team_aggregated]
-    M --> S
-    N --> S
-    R --> S
-    S --> T[clawcli subagents/review + UI task trace]
+    A[Planner action<br/>subagent children + dependencies] --> B[Load trusted role definitions]
+    B --> C[Validate role, scope, ownership,<br/>permission, budget, model/tool policy]
+    C --> D[Persist parent graph + child tasks<br/>in one SQLite transaction]
+    D --> E{Readiness reconciliation}
+    E -->|dependencies satisfied + capacity| F[Ready]
+    E -->|waiting for predecessor| G[blocked_dependency]
+    E -->|parallel limit reached| H[blocked_capacity]
+    F --> I{Child isolation}
+    I -->|read-only role| J[Bounded child<br/>findings/evidence refs]
+    I -->|isolated writer/tester| K[Task-scoped Git worktree<br/>persisted owned_paths]
+    K --> L[Child edits and verifies]
+    L --> M[Persist patch/evidence/result]
+    J --> N[Terminal node transition]
+    M --> N
+    N --> E
+    N -->|required predecessor failed| O[Cancel dependent nodes]
+    N -->|success| P[Promote successors]
+    P --> Q{Parent review}
+    Q -->|ownership mismatch / stale / dirty / overlap| R[Machine reject]
+    Q -->|patch admissible| S[Review + exact parent approval]
+    S --> T[Parent-owned patch admission + verification]
+    U[Pause/resume/steer/retry] --> V[Versioned steering or edge rewire]
+    V --> E
+    W[Process restart / expired child lease] --> X[Reconcile task rows + requeue generation]
+    X --> E
+    Y[Parent fail/timeout/cancel] --> Z[Cancel unfinished graph]
+    O --> AA[subagent_graph + subagent_node events]
+    R --> AA
+    T --> AA
+    Z --> AA
+    AA --> AB[clawcli events/replay + UI task trace]
 ```
+
+The persisted schema and lifecycle rules are documented in
+[`docs/child_task_graph_contract.md`](docs/child_task_graph_contract.md).
 
 Goal, checkpoint, and resume flow:
 

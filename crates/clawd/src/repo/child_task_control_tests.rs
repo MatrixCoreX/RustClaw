@@ -215,6 +215,130 @@ fn failed_child_retry_preserves_contract_and_supersedes_previous_attempt() {
 }
 
 #[test]
+fn failed_graph_child_retry_rewires_dependencies_to_replacement() {
+    let temp = TempDir::new();
+    let state = state_with_schema(&temp.path.join("tasks.sqlite"));
+    let parent_task_id = "parent-graph-retry";
+    let predecessor_task_id = "child-graph-predecessor";
+    let child_task_id = "child-graph-failed";
+    let successor_task_id = "child-graph-successor";
+    insert_task(
+        &state,
+        parent_task_id,
+        "running",
+        &json!({"text": "parent"}),
+        &json!({
+            "child_task_ids": [
+                predecessor_task_id,
+                child_task_id,
+                successor_task_id
+            ]
+        }),
+    );
+    insert_task(
+        &state,
+        predecessor_task_id,
+        "succeeded",
+        &child_payload(parent_task_id, predecessor_task_id),
+        &json!({"status_code": "completed"}),
+    );
+    insert_task(
+        &state,
+        child_task_id,
+        "failed",
+        &child_payload(parent_task_id, child_task_id),
+        &json!({"status_code": "verification_failed"}),
+    );
+    insert_task(
+        &state,
+        successor_task_id,
+        "queued",
+        &child_payload(parent_task_id, successor_task_id),
+        &json!({}),
+    );
+    {
+        let db = state.core.db.get().expect("get database");
+        db.execute(
+            "INSERT INTO child_task_graphs (
+                parent_task_id, schema_version, status, max_parallel,
+                created_at, updated_at
+             ) VALUES (?1, 1, 'active', 2, '1', '1')",
+            rusqlite::params![parent_task_id],
+        )
+        .expect("insert graph");
+        for (task_id, readiness) in [
+            (predecessor_task_id, "succeeded"),
+            (child_task_id, "failed"),
+            (successor_task_id, "blocked_dependency"),
+        ] {
+            db.execute(
+                "INSERT INTO child_task_graph_nodes (
+                    parent_task_id, child_task_id, role, required, readiness,
+                    permission_profile, merge_policy, owned_paths_json,
+                    budget_json, model_policy_json, tool_policy_json,
+                    result_contract_json, created_at, updated_at
+                 ) VALUES (
+                    ?1, ?2, 'writer', 1, ?3, 'local_worktree',
+                    'structured_findings', '[\"src\"]', '{}', '{}', '{}',
+                    '{}', '1', '1'
+                 )",
+                rusqlite::params![parent_task_id, task_id, readiness],
+            )
+            .expect("insert graph node");
+        }
+        for (predecessor, successor) in [
+            (predecessor_task_id, child_task_id),
+            (child_task_id, successor_task_id),
+        ] {
+            db.execute(
+                "INSERT INTO child_task_graph_edges (
+                    parent_task_id, predecessor_task_id, successor_task_id,
+                    required, edge_kind, created_at
+                 ) VALUES (?1, ?2, ?3, 1, 'declared', '1')",
+                rusqlite::params![parent_task_id, predecessor, successor],
+            )
+            .expect("insert graph edge");
+        }
+    }
+
+    let update = retry_child_task_with_revised_goal(
+        &state,
+        parent_task_id,
+        child_task_id,
+        "retry the failed graph node",
+    )
+    .expect("retry graph child")
+    .expect("retry update");
+
+    let db = state.core.db.get().expect("get database");
+    let snapshot = crate::repo::child_task_graph::graph_snapshot(&db, parent_task_id)
+        .expect("load graph snapshot")
+        .expect("graph snapshot");
+    let nodes = snapshot["nodes"].as_array().expect("graph nodes");
+    assert!(!nodes
+        .iter()
+        .any(|node| node["child_task_id"] == child_task_id));
+    let replacement = nodes
+        .iter()
+        .find(|node| node["child_task_id"] == update.child_task_id)
+        .expect("replacement graph node");
+    assert_eq!(replacement["readiness"], "ready");
+    assert_eq!(replacement["owned_paths"], json!(["src"]));
+    let edges = snapshot["edges"].as_array().expect("graph edges");
+    assert!(edges.iter().any(|edge| {
+        edge["predecessor_task_id"] == predecessor_task_id
+            && edge["successor_task_id"] == update.child_task_id
+    }));
+    assert!(edges.iter().any(|edge| {
+        edge["predecessor_task_id"] == update.child_task_id
+            && edge["successor_task_id"] == successor_task_id
+    }));
+    assert!(!edges.iter().any(|edge| {
+        edge["predecessor_task_id"] == child_task_id || edge["successor_task_id"] == child_task_id
+    }));
+}
+
+#[test]
 fn successful_retry_unblocks_parent_without_recounting_required_failure() {
     let temp = TempDir::new();
     let state = state_with_schema(&temp.path.join("tasks.sqlite"));

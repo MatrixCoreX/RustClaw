@@ -177,6 +177,13 @@ pub(crate) fn retry_child_task_with_revised_goal(
             now,
         ],
     )?;
+    let graph_node_replaced = super::child_task_graph::replace_child_graph_node_for_retry(
+        &tx,
+        parent_task_id,
+        child_task_id,
+        &new_child_task_id,
+        &now,
+    )?;
 
     let mut parent_result = raw_parent_result
         .as_deref()
@@ -201,6 +208,24 @@ pub(crate) fn retry_child_task_with_revised_goal(
     }
     tx.commit()?;
     drop(db);
+    if graph_node_replaced {
+        let db = state
+            .core
+            .db
+            .get()
+            .map_err(|error| anyhow::anyhow!("db_pool:{error}"))?;
+        let graph_snapshot =
+            super::child_task_graph::reconcile_child_task_graph(&db, parent_task_id, &now)?;
+        drop(db);
+        if let Some(snapshot) = graph_snapshot {
+            let _ = crate::task_event_transport::publish_event(
+                state,
+                parent_task_id,
+                "subagent_graph",
+                snapshot,
+            );
+        }
+    }
     let _ = super::child_tasks::refresh_parent_child_task_merge(state, parent_task_id)?;
 
     Ok(Some(ChildTaskRetryUpdate {

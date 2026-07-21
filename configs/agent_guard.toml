@@ -59,13 +59,67 @@
 # 用途/Purpose: subagent 角色与并发预算；只消费机器 token，不解析用户自然语言。
 # Machine-only subagent role and parallel budget configuration. Inline children remain read-only;
 # persistent writers run only in parent-reviewed local worktrees.
-# allowed_roles 缺失或为空时使用代码默认全集。
-allowed_roles = ["observe", "explorer", "worker", "writer", "review", "reviewer", "test", "verifier"]
 # Inline read-only children use this limit. Persistent local-worktree writers have a separate
-# always-on scheduler boundary of one active writer worktree per parent batch.
+# persisted DAG boundary and may run concurrently only with disjoint path ownership.
 max_parallel_readonly = 4
 # 子 agent 未显式给 budget.timeout_ms 时使用的默认 timeout；0 或缺失表示使用 parent loop 默认。
 default_timeout_ms = 30000
+
+[agent.subagents.role_definitions.observe]
+family = "explorer"
+default_scope = "read_only_discovery"
+default_permission_profile = "read_only"
+allowed_permission_profiles = ["read_only"]
+result_contract_required = false
+
+[agent.subagents.role_definitions.explorer]
+family = "explorer"
+default_scope = "read_only_discovery"
+default_permission_profile = "read_only"
+allowed_permission_profiles = ["read_only"]
+result_contract_required = false
+
+[agent.subagents.role_definitions.worker]
+family = "worker"
+default_scope = "read_only_worker"
+default_permission_profile = "read_only"
+allowed_permission_profiles = ["read_only", "local_worktree"]
+result_contract_required = false
+
+[agent.subagents.role_definitions.writer]
+family = "worker"
+default_scope = "isolated_worktree_write"
+default_permission_profile = "local_worktree"
+allowed_permission_profiles = ["local_worktree"]
+result_contract_required = true
+
+[agent.subagents.role_definitions.review]
+family = "reviewer"
+default_scope = "read_only_review"
+default_permission_profile = "read_only"
+allowed_permission_profiles = ["read_only"]
+result_contract_required = true
+
+[agent.subagents.role_definitions.reviewer]
+family = "reviewer"
+default_scope = "read_only_review"
+default_permission_profile = "read_only"
+allowed_permission_profiles = ["read_only"]
+result_contract_required = true
+
+[agent.subagents.role_definitions.test]
+family = "verifier"
+default_scope = "read_only_verification"
+default_permission_profile = "read_only"
+allowed_permission_profiles = ["read_only", "local_worktree"]
+result_contract_required = true
+
+[agent.subagents.role_definitions.verifier]
+family = "verifier"
+default_scope = "read_only_verification"
+default_permission_profile = "read_only"
+allowed_permission_profiles = ["read_only"]
+result_contract_required = true
 
 [agent.task_budget]
 # Interactive work uses resumable soft slices. These high administrator ceilings are
