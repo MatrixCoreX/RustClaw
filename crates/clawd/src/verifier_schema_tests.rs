@@ -141,3 +141,69 @@ fn virtual_count_entries_runtime_arguments_are_declared() {
         "runtime rewrite arguments must remain valid: {invalid_fields:?}"
     );
 }
+
+#[test]
+fn runtime_status_requires_declared_machine_kind() {
+    let state = tests::test_state();
+    let task = tests::test_task();
+    let plan = tests::plan_result(vec![PlanStep {
+        step_id: "s1".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "system_basic".to_string(),
+        args: json!({ "action": "runtime_status" }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }]);
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    assert!(result.issues.iter().any(|issue| {
+        issue.kind == VerifyIssueKind::MissingRequiredArg
+            && issue.missing_fields == ["kind".to_string()]
+    }));
+}
+
+#[test]
+fn runtime_status_rejects_kind_outside_registry_enum() {
+    let state = tests::test_state();
+    let task = tests::test_task();
+    let plan = tests::plan_result(vec![PlanStep {
+        step_id: "s1".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "system_basic".to_string(),
+        args: json!({ "action": "runtime_status", "kind": "runtime_status" }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }]);
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    assert!(result.issues.iter().any(|issue| {
+        issue.kind == VerifyIssueKind::InvalidArgumentValue
+            && issue.detail == "error_code=invalid_argument_value field=kind constraint=enum"
+    }));
+}

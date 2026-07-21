@@ -79,6 +79,14 @@ fn runtime_status_returns_current_time_scalar() {
 }
 
 #[test]
+fn runtime_status_requires_an_explicit_machine_kind() {
+    let obj = serde_json::Map::new();
+    let err = runtime_status(&obj).expect_err("missing kind must fail");
+
+    assert_eq!(err.kind, "invalid_input");
+}
+
+#[test]
 fn resolve_path_blocks_absolute_outside_workspace_without_permission() {
     let root = temp_root("deny_abs");
     let denied = resolve_path(&root, "/etc/passwd", false).expect_err("should deny");

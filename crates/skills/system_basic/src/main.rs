@@ -282,7 +282,11 @@ fn runtime_status(obj: &Map<String, Value>) -> SkillResult<String> {
         .or_else(|| obj.get("query"))
         .or_else(|| obj.get("field"))
         .and_then(Value::as_str)
-        .unwrap_or("info");
+        .ok_or_else(|| {
+            SkillError::invalid_input(
+                "runtime_status requires kind: current_user|host_name|kernel_release|current_time|current_working_directory",
+            )
+        })?;
     let kind = normalize_runtime_status_kind(raw_kind);
     let value = match kind.as_str() {
         "current_user" => detect_current_user().unwrap_or_else(|| "-".to_string()),

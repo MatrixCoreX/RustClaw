@@ -101,9 +101,9 @@ planner_kind = "tool"
 output_kind = "text"
 side_effect = false
 auto_invocable = true
-input_schema = { type = "object", properties = { action = { type = "string" }, kind = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string" }, kind = { type = "string", enum = ["current_user", "host_name", "kernel_release", "current_time", "current_working_directory"] } } }
 planner_capabilities = [
-  { name = "system.runtime_status", action = "runtime_status", effect = "observe", optional = ["kind"], risk_level = "low", preferred = true },
+  { name = "system.runtime_status", action = "runtime_status", effect = "observe", required = ["kind"], risk_level = "low", preferred = true },
 ]
 
 [[skills]]
