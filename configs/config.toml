@@ -501,7 +501,8 @@ note = "placeholder"
 # - `cmd_idle_timeout_seconds` 新增 60        （stdout/stderr 无输出卡住上限）
 # - `cmd_max_output_bytes`     新增 8000      （持续输出截断上限）
 # `coding` profile 仅允许本地编码、检查、任务控制和知识读取能力；网络发布、媒体生成、
-# 账户访问、安装和服务控制需要管理员在部署配置中按 skill 显式放行.
+# 账户访问、安装和服务变更操作需要管理员在部署配置中按 skill/capability 显式放行；
+# 只读服务状态检查由 coding profile 的 action-scoped capability 允许.
 [tools]
 allow = []
 access_profile = "coding"
