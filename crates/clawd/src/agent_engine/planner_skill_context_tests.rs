@@ -90,11 +90,11 @@ fn first_round_uses_only_budgeted_compact_index() {
     let task_control_line = context
         .text
         .lines()
-        .find(|line| line.contains("skill=task_control"));
+        .find(|line| line.contains("task_control.list(action=list"));
     assert!(
         context
             .text
-            .contains("side-effect-free coding-repair previews"),
+            .contains("summary=List, inspect, cancel, resume, and pause RustClaw tasks"),
         "task_control_line={task_control_line:?}"
     );
     assert!(context.text.contains("coding_workflow.preview_repair"));
@@ -110,7 +110,7 @@ fn first_round_uses_only_budgeted_compact_index() {
     let run_cmd_line = context
         .text
         .lines()
-        .find(|line| line.contains("skill=run_cmd"))
+        .find(|line| line.contains("system.run_command"))
         .expect("run_cmd compact-index line");
     assert!(
         run_cmd_line.contains("system.preview_background_command"),
@@ -119,7 +119,7 @@ fn first_round_uses_only_budgeted_compact_index() {
     let system_basic_line = context
         .text
         .lines()
-        .find(|line| line.contains("skill=system_basic"))
+        .find(|line| line.contains("system.runtime_status(action=runtime_status"))
         .expect("system_basic compact-index line");
     assert!(
         system_basic_line.contains("system.runtime_status(action=runtime_status,required=kind"),
@@ -137,7 +137,7 @@ fn first_round_uses_only_budgeted_compact_index() {
     let fs_basic_line = context
         .text
         .lines()
-        .find(|line| line.contains("skill=fs_basic"))
+        .find(|line| line.contains("filesystem.list_entries"))
         .expect("fs_basic compact-index line");
     for capability in [
         "filesystem.stat_paths",
@@ -157,7 +157,7 @@ fn first_round_uses_only_budgeted_compact_index() {
     let video_line = context
         .text
         .lines()
-        .find(|line| line.contains("skill=video_generate"))
+        .find(|line| line.contains("video.generate"))
         .expect("video_generate compact-index line");
     assert!(
         video_line.contains(
@@ -168,7 +168,7 @@ fn first_round_uses_only_budgeted_compact_index() {
     let schedule_line = context
         .text
         .lines()
-        .find(|line| line.contains("skill=schedule"))
+        .find(|line| line.contains("schedule.preview(action=preview"))
         .expect("schedule compact-index line");
     assert!(
         !schedule_line.contains("summary=Shared skill prompt contract:"),
@@ -178,6 +178,13 @@ fn first_round_uses_only_budgeted_compact_index() {
         schedule_line.contains("schedule.preview(action=preview"),
         "schedule_line={schedule_line}"
     );
+    let process_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("process.ps(action=ps"))
+        .expect("process capability compact-index line");
+    assert!(process_line.contains("process.port_list(action=port_list"));
+    assert!(!context.text.contains("process_basic"));
 }
 
 #[test]
@@ -260,4 +267,6 @@ fn native_action_protocol_scopes_output_constraints_semantically() {
     assert!(PROMPT.contains("payload-only"));
     assert!(PROMPT.contains("not by itself a user-visible sibling deliverable"));
     assert!(PROMPT.contains("apply the constraint to the entire visible answer"));
+    assert!(PROMPT.contains("return only the selected compact subset"));
+    assert!(PROMPT.contains("Do not echo the complete observation inventory"));
 }

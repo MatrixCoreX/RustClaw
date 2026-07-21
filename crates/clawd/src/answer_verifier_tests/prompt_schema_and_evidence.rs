@@ -165,6 +165,10 @@ fn answer_verifier_prompts_scope_constraints_to_compound_deliverables() {
     assert!(RETRY_PROMPT.contains("as internal"));
     assert!(RETRY_PROMPT.contains("rather than a visible sibling deliverable"));
     assert!(RETRY_PROMPT.contains("whole-answer shape constraint"));
+    assert!(VERIFIER_PROMPT.contains("A request for selected highlights is not a request"));
+    assert!(VERIFIER_PROMPT.contains("does not prove Internet/public reachability"));
+    assert!(RETRY_PROMPT.contains("compact selected findings"));
+    assert!(RETRY_PROMPT.contains("claims not established by separate observed evidence"));
 }
 
 #[test]

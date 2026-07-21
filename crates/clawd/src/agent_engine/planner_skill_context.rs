@@ -185,13 +185,15 @@ fn first_summary_line<'a>(lines: impl Iterator<Item = &'a str>) -> Option<String
                 && !line.starts_with("<!--")
                 && !line.starts_with("Registry metadata:")
         })
-        .map(|line| {
-            let mut out = line.to_string();
-            if out.chars().count() > 90 {
-                out = out.chars().take(90).collect::<String>() + "...";
-            }
-            out
-        })
+        .map(compact_summary)
+}
+
+fn compact_summary(value: &str) -> String {
+    if value.chars().count() > 90 {
+        value.chars().take(90).collect::<String>() + "..."
+    } else {
+        value.to_string()
+    }
 }
 
 /// First-round route hint: give the LLM a compact skill index so ordinary
@@ -209,38 +211,61 @@ pub(super) fn build_skill_quick_index_text_scoped(
     }
     let mut candidate_lines = Vec::new();
     for skill in &enabled {
-        let summary =
-            if let Some(registry_prompt_rel_path) = state.skill_registry_prompt_rel_path(skill) {
-                let prompt_body =
-                    crate::load_prompt_template_for_state(state, &registry_prompt_rel_path, "").0;
-                first_non_heading_line(&prompt_body)
-                    .unwrap_or_else(|| SKILL_SUMMARY_FALLBACK_TOKEN.to_string())
-            } else {
-                SKILL_PROMPT_FILE_MISSING_TOKEN.to_string()
-            };
-        if let Some(manifest) = state.skill_manifest(skill) {
-            let detailed = format!(
-                "- skill={skill}; summary={summary}; planner_kind={}{}{}",
-                manifest.planner_kind.as_token(),
-                quick_index_planner_capabilities(&manifest),
-                quick_index_output_contract(&manifest)
+        let Some(manifest) = state.skill_manifest(skill) else {
+            warn!(
+                "planner skill quick index omitted skill without registry manifest: skill={}",
+                skill
             );
-            let compact = format!(
-                "- skill={skill}; summary={summary}; planner_kind={}{}{}",
-                manifest.planner_kind.as_token(),
-                quick_index_planner_capability_candidates(&manifest),
-                quick_index_output_contract(&manifest)
-            );
-            candidate_lines.push(
-                if detailed.chars().count() <= SKILL_QUICK_INDEX_LINE_CHAR_BUDGET {
-                    detailed
+            continue;
+        };
+        let summary = manifest
+            .description
+            .as_deref()
+            .map(compact_summary)
+            .unwrap_or_else(|| {
+                if let Some(registry_prompt_rel_path) = state.skill_registry_prompt_rel_path(skill)
+                {
+                    let prompt_body =
+                        crate::load_prompt_template_for_state(state, &registry_prompt_rel_path, "")
+                            .0;
+                    first_non_heading_line(&prompt_body)
+                        .unwrap_or_else(|| SKILL_SUMMARY_FALLBACK_TOKEN.to_string())
                 } else {
-                    compact
-                },
+                    SKILL_PROMPT_FILE_MISSING_TOKEN.to_string()
+                }
+            });
+        let detailed_capabilities = quick_index_planner_capabilities(&manifest)
+            .strip_prefix("; planner_capabilities: ")
+            .unwrap_or_default()
+            .to_string();
+        let compact_capabilities = quick_index_planner_capability_candidates(&manifest)
+            .strip_prefix("; capability_candidates=")
+            .unwrap_or_default()
+            .to_string();
+        if detailed_capabilities.is_empty() {
+            warn!(
+                "planner skill quick index omitted skill without callable capability: skill={}",
+                skill
             );
-        } else {
-            candidate_lines.push(format!("- skill={skill}; summary={summary}"));
+            continue;
         }
+        let detailed = format!(
+            "- callable_capabilities={detailed_capabilities}; summary={summary}; planner_layer={}{}",
+            manifest.planner_kind.as_token(),
+            quick_index_output_contract(&manifest)
+        );
+        let compact = format!(
+            "- callable_capabilities={compact_capabilities}; summary={summary}; planner_layer={}{}",
+            manifest.planner_kind.as_token(),
+            quick_index_output_contract(&manifest)
+        );
+        candidate_lines.push(
+            if detailed.chars().count() <= SKILL_QUICK_INDEX_LINE_CHAR_BUDGET {
+                detailed
+            } else {
+                compact
+            },
+        );
     }
     let mut lines = Vec::new();
     let mut used_chars = 0usize;

@@ -117,7 +117,7 @@ async fn finalize_loop_reply_preserves_publishable_evidence_summary_over_scalar_
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "process_basic",
-        r#"{"extra":{"action":"port_list","ports":[8787],"public_ports":[8787],"listeners":[{"port":8787,"process_name":"clawd"}]},"text":"port=8787"}"#,
+        r#"{"extra":{"action":"port_list","ports":[8787],"all_interface_ports":[8787],"internet_reachability":"not_observed","listeners":[{"port":8787,"process_name":"clawd"}]},"text":"port=8787"}"#,
     ));
     loop_state
         .executed_step_results

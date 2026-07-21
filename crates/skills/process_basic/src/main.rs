@@ -301,7 +301,7 @@ struct PortListener {
 fn port_list_extra(command_tool: &'static str, text: &str, filter: Option<String>) -> Value {
     let listeners = parse_port_listeners(command_tool, text);
     let listener_count = listeners.len();
-    let public_listener_count = listeners
+    let all_interface_listener_count = listeners
         .iter()
         .filter(|listener| listener.is_wildcard)
         .count();
@@ -310,7 +310,7 @@ fn port_list_extra(command_tool: &'static str, text: &str, filter: Option<String
         .filter(|listener| listener.is_loopback)
         .count();
     let listener_sample = prioritized_listener_sample(&listeners, 64);
-    let public_listener_sample = prioritized_listener_sample(
+    let all_interface_listener_sample = prioritized_listener_sample(
         &listeners
             .iter()
             .filter(|listener| listener.is_wildcard)
@@ -327,10 +327,11 @@ fn port_list_extra(command_tool: &'static str, text: &str, filter: Option<String
         "command_tool": command_tool,
         "output": text,
         "listener_count": listener_count,
-        "public_listener_count": public_listener_count,
+        "all_interface_listener_count": all_interface_listener_count,
         "localhost_listener_count": localhost_listener_count,
+        "internet_reachability": "not_observed",
         "ports": unique_ports(&listeners),
-        "public_ports": unique_ports(
+        "all_interface_ports": unique_ports(
             &listeners
                 .iter()
                 .filter(|listener| listener.is_wildcard)
@@ -339,8 +340,8 @@ fn port_list_extra(command_tool: &'static str, text: &str, filter: Option<String
         ),
         "listeners": listener_sample,
         "listeners_truncated": listener_count > 64,
-        "public_listeners": public_listener_sample,
-        "public_listeners_truncated": public_listener_count > 32,
+        "all_interface_listeners": all_interface_listener_sample,
+        "all_interface_listeners_truncated": all_interface_listener_count > 32,
     })
 }
 

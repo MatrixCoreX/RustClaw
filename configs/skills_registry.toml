@@ -543,7 +543,6 @@ required_bins = ["ps", "kill"]
 optional_bins = ["ss", "lsof", "netstat"]
 platform_notes = ["port_list chooses Linux ss before lsof/netstat; macOS uses lsof before netstat."]
 planner_capabilities = [
-  { name = "process_basic", action = "ps", effect = "observe", optional = ["action", "limit", "filter", "query", "name"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "process.ps", action = "ps", effect = "observe", optional = ["limit", "filter", "query", "name"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "process.port_list", action = "port_list", effect = "observe", optional = ["filter", "query", "port"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "process.kill", action = "kill", effect = "mutate", required = ["pid"], optional = ["signal"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },

@@ -23,6 +23,20 @@ use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResul
 const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_protocol.md";
 const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
 
+fn planner_last_observation(loop_state: &LoopState) -> String {
+    super::observed_output::latest_structured_capability_observation(loop_state)
+        .or_else(|| {
+            loop_state
+                .last_output
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(crate::truncate_for_log)
+        })
+        .or_else(|| loop_state.delivery_messages.last().cloned())
+        .unwrap_or_default()
+}
+
 /// Planner-visible tool and skill inventory for one loop round.
 ///
 /// This helper only prepares prompt/tool-library material. It must not build a
@@ -48,6 +62,10 @@ impl<'a> PlannerToolLibrary<'a> {
         let capability_map =
             crate::capability_map::build_compact_capability_map_for_task(self.state, self.task);
         Ok(format!("runtime_capability_map_v2\n{capability_map}"))
+    }
+
+    fn callable_capability_names(&self) -> Vec<String> {
+        crate::capability_map::planner_callable_capability_names_for_task(self.state, self.task)
     }
 }
 
@@ -123,14 +141,14 @@ pub(super) async fn plan_round_actions(
         // 真正记录每步输出的字段是 LoopState.last_output（agent_engine.rs 中
         // register_step_output / register_failed_step_output 都会维护）。优先使用它，
         // 仅在确无 step output 时回退到 delivery_messages，最后退化到占位符。
-        let last_output = loop_state
-            .last_output
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| crate::truncate_for_log(s))
-            .or_else(|| loop_state.delivery_messages.last().cloned())
-            .unwrap_or_else(|| "(none)".to_string());
+        let last_output = {
+            let observation = planner_last_observation(loop_state);
+            if observation.is_empty() {
+                "(none)".to_string()
+            } else {
+                observation
+            }
+        };
         let (prompt_name, prompt_logical_path) = incremental_prompt_spec();
         let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
             state,
@@ -221,14 +239,7 @@ pub(super) async fn plan_round_actions(
     } else {
         String::new()
     };
-    let native_last_output = loop_state
-        .last_output
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(crate::truncate_for_log)
-        .or_else(|| loop_state.delivery_messages.last().cloned())
-        .unwrap_or_default();
+    let native_last_output = planner_last_observation(loop_state);
     let native_user_prompt = crate::render_prompt_template(
         &native_turn_context.template,
         &[
@@ -310,10 +321,12 @@ pub(super) async fn plan_round_actions(
         .task_budget_slice
         .as_ref()
         .map(crate::task_budget_contract::TaskBudgetSlice::provider_call_timeout_seconds);
+    let callable_capability_names = planner_tool_library.callable_capability_names();
     let native_request = native_planner_request(
         &native_system_prompt,
         &native_user_prompt,
         provider_timeout_seconds,
+        &callable_capability_names,
     );
     if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback(
         state,
@@ -324,36 +337,40 @@ pub(super) async fn plan_round_actions(
     )
     .await?
     {
-        let (native_turn, planner_notes) = match actions_from_native_turn(&native_turn) {
-            Ok(_) => (native_turn, String::new()),
-            Err(error_code) => {
-                warn!(
-                    "native_plan_contract_retry task_id={} round={} error_code={}",
-                    task.task_id, loop_state.round_no, error_code
-                );
-                let repair_signal = native_contract_repair_signal(&error_code);
-                let repair_request = native_contract_retry_request(&native_request, &repair_signal);
-                let repair_prompt = format!("{native_prompt}\n\n{repair_signal}");
-                let repair_source =
-                    format!("{native_prompt_source}+inline:native_plan_contract_repair");
-                let repaired_turn = llm_gateway::run_native_model_turn_with_fallback(
-                    state,
-                    task,
-                    &repair_prompt,
-                    &repair_source,
-                    &repair_request,
-                )
-                .await?
-                .ok_or_else(|| "native_plan_contract_repair_unavailable".to_string())?;
-                actions_from_native_turn(&repaired_turn)?;
-                (
-                    repaired_turn,
-                    format!("native_contract_repair_reason_code={error_code}"),
-                )
-            }
-        };
-        let plan_actions =
-            normalize_planned_actions(state, actions_from_native_turn(&native_turn)?);
+        let (native_turn, planner_notes) =
+            match actions_from_native_turn(&native_turn, &callable_capability_names) {
+                Ok(_) => (native_turn, String::new()),
+                Err(error_code) => {
+                    warn!(
+                        "native_plan_contract_retry task_id={} round={} error_code={}",
+                        task.task_id, loop_state.round_no, error_code
+                    );
+                    let repair_signal = native_contract_repair_signal(&error_code);
+                    let repair_request =
+                        native_contract_retry_request(&native_request, &repair_signal);
+                    let repair_prompt = format!("{native_prompt}\n\n{repair_signal}");
+                    let repair_source =
+                        format!("{native_prompt_source}+inline:native_plan_contract_repair");
+                    let repaired_turn = llm_gateway::run_native_model_turn_with_fallback(
+                        state,
+                        task,
+                        &repair_prompt,
+                        &repair_source,
+                        &repair_request,
+                    )
+                    .await?
+                    .ok_or_else(|| "native_plan_contract_repair_unavailable".to_string())?;
+                    actions_from_native_turn(&repaired_turn, &callable_capability_names)?;
+                    (
+                        repaired_turn,
+                        format!("native_contract_repair_reason_code={error_code}"),
+                    )
+                }
+            };
+        let plan_actions = normalize_planned_actions(
+            state,
+            actions_from_native_turn(&native_turn, &callable_capability_names)?,
+        );
         let raw_plan_text =
             serde_json::to_string(&native_turn).map_err(|error| error.to_string())?;
         let plan_result = build_plan_result_with_notes(
@@ -447,6 +464,7 @@ fn native_planner_request(
     system_prompt: &str,
     user_prompt: &str,
     provider_timeout_seconds: Option<u64>,
+    callable_capability_names: &[String],
 ) -> ModelTurnRequest {
     let mut metadata = std::collections::BTreeMap::new();
     if let Some(timeout_seconds) = provider_timeout_seconds {
@@ -454,6 +472,13 @@ fn native_planner_request(
             "provider_timeout_seconds".to_string(),
             Value::Number(timeout_seconds.into()),
         );
+    }
+    let mut capability_schema = json!({
+        "type": "string",
+        "description": "runtime_callable_capability_catalog_v1.token"
+    });
+    if !callable_capability_names.is_empty() {
+        capability_schema["enum"] = json!(callable_capability_names);
     }
     ModelTurnRequest {
         messages: vec![
@@ -467,10 +492,7 @@ fn native_planner_request(
                 "type": "object",
                 "required": ["capability", "args"],
                 "properties": {
-                    "capability": {
-                        "type": "string",
-                        "description": "Registry capability name from the supplied runtime capability map."
-                    },
+                    "capability": capability_schema,
                     "args": {
                         "type": "object",
                         "description": "Structured capability arguments."
@@ -511,13 +533,26 @@ fn native_contract_retry_request(
     request
 }
 
-fn actions_from_native_turn(turn: &ModelTurnResponse) -> Result<Vec<AgentAction>, String> {
+fn actions_from_native_turn(
+    turn: &ModelTurnResponse,
+    callable_capability_names: &[String],
+) -> Result<Vec<AgentAction>, String> {
     if !turn.tool_calls.is_empty() {
-        return turn
+        let actions = turn
             .tool_calls
             .iter()
             .map(action_from_native_tool_call)
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
+        if actions.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::CallCapability { capability, .. }
+                    if !callable_capability_names.iter().any(|name| name == capability)
+            )
+        }) {
+            return Err("native_plan_capability_not_in_runtime_catalog".to_string());
+        }
+        return Ok(actions);
     }
     let content = turn.text.trim();
     if content.is_empty() {

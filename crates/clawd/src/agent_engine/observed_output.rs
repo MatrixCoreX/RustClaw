@@ -68,6 +68,7 @@ use output_path_facts::*;
 #[path = "observed_output_entries.rs"]
 mod output_entries;
 pub(crate) use output_entries::has_observed_answer_candidates;
+pub(super) use output_entries::latest_structured_capability_observation;
 #[cfg(test)]
 use output_entries::recent_generated_output_from_user_request;
 use output_entries::{

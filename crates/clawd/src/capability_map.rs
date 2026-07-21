@@ -148,6 +148,30 @@ pub(crate) fn build_compact_capability_map_for_task(
     build_capability_map_for_task_with_detail(state, task, false)
 }
 
+pub(crate) fn planner_callable_capability_names_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    if let Some(registry) = state.get_skills_registry() {
+        for skill in state.planner_available_skills_for_task(task) {
+            names.extend(
+                registry
+                    .planner_capabilities(&skill)
+                    .iter()
+                    .map(|mapping| mapping.name.clone()),
+            );
+        }
+    }
+    names.extend(
+        state
+            .mcp_planner_tools()
+            .into_iter()
+            .map(|tool| tool.capability),
+    );
+    names.into_iter().collect()
+}
+
 fn build_capability_map_for_task_with_detail(
     state: &AppState,
     task: &ClaimedTask,
@@ -174,7 +198,8 @@ fn build_capability_map_for_task_with_detail(
     let available_set = visible.iter().cloned().collect::<BTreeSet<_>>();
     let unavailable_hints = unavailable_skill_hints(state, &all_visible, &available_set);
     let mcp_tools = state.mcp_planner_tools();
-    if visible.is_empty() && mcp_tools.is_empty() {
+    let callable_capabilities = planner_callable_capability_names_for_task(state, task);
+    if callable_capabilities.is_empty() {
         let mut lines = vec![
             "Current runtime-available tool capabilities are unavailable; use chat only when no external retrieval or execution is needed.".to_string(),
             sandbox_hint,
@@ -189,24 +214,27 @@ fn build_capability_map_for_task_with_detail(
 
     let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut layered: BTreeMap<PlannerCapabilityKind, BTreeSet<String>> = BTreeMap::new();
-    for skill in &visible {
-        grouped
-            .entry(classify_skill(state, skill))
-            .or_default()
-            .insert(skill.clone());
-        let planner_kind = state
-            .get_skills_registry()
-            .and_then(|registry| registry.planner_kind(skill))
-            .unwrap_or(PlannerCapabilityKind::Skill);
-        layered
-            .entry(planner_kind)
-            .or_default()
-            .insert(skill.clone());
+    if let Some(registry) = state.get_skills_registry() {
+        for skill in &visible {
+            let planner_kind = registry
+                .planner_kind(skill)
+                .unwrap_or(PlannerCapabilityKind::Skill);
+            for mapping in registry.planner_capabilities(skill) {
+                grouped
+                    .entry(classify_skill(state, skill))
+                    .or_default()
+                    .insert(mapping.name.clone());
+                layered
+                    .entry(planner_kind)
+                    .or_default()
+                    .insert(mapping.name.clone());
+            }
+        }
     }
 
     let mut lines = vec![
-        "Current capability map (derived from the currently enabled skills):".to_string(),
-        "Use this as routing guidance, not as a full tool schema.".to_string(),
+        "runtime_callable_capability_catalog_v1".to_string(),
+        "capability_value_contract=exact_catalog_token".to_string(),
         "Do not plan or call capabilities marked `runtime_availability: unavailable`; choose another available capability or explain the dependency gap.".to_string(),
         crate::agent_runtime_contract::runtime_protocol_hint_line(
             &crate::agent_runtime_contract::load_subagent_role_definitions(
@@ -222,26 +250,25 @@ fn build_capability_map_for_task_with_detail(
     ];
 
     if !layered.is_empty() {
-        lines.push(
-            "Capability layers: tools are low-level reusable actions, skills are domain capabilities, workflows are multi-step playbooks."
-                .to_string(),
-        );
-        for (kind, skills) in layered {
+        lines.push("capability_layers_v1".to_string());
+        for (kind, capabilities) in layered {
             let label = match kind {
-                PlannerCapabilityKind::Tool => "tools",
-                PlannerCapabilityKind::Skill => "skills",
-                PlannerCapabilityKind::Workflow => "workflows",
+                PlannerCapabilityKind::Tool => "tool_capabilities",
+                PlannerCapabilityKind::Skill => "skill_capabilities",
+                PlannerCapabilityKind::Workflow => "workflow_capabilities",
             };
             lines.push(format!(
                 "- {label}: {}.",
-                skills.into_iter().collect::<Vec<_>>().join(", ")
+                capabilities.into_iter().collect::<Vec<_>>().join(", ")
             ));
         }
     }
 
-    for (group, skills) in grouped {
-        let skills_text = skills.into_iter().collect::<Vec<_>>().join(", ");
-        lines.push(format!("- group={group}; visible_skills={skills_text}."));
+    for (group, capabilities) in grouped {
+        let capability_text = capabilities.into_iter().collect::<Vec<_>>().join(", ");
+        lines.push(format!(
+            "- group={group}; callable_capabilities={capability_text}."
+        ));
     }
 
     if include_registry_skill_hints {
@@ -451,15 +478,6 @@ fn build_capability_map_for_task_with_detail(
         lines.push("Enabled but unavailable capabilities omitted from planning:".to_string());
         lines.extend(unavailable_hints);
     }
-
-    lines.push(
-        "If the user is asking for current data, real system state, latest external information, or observable results, prefer `act` over `chat`."
-            .to_string(),
-    );
-    lines.push(
-        "Use `chat` only for explanation, advice, rewriting, or discussion that does not require external retrieval or execution."
-            .to_string(),
-    );
 
     lines.join("\n")
 }

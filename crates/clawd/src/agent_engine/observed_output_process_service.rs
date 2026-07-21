@@ -168,14 +168,20 @@ fn process_basic_port_list_observed_candidate(value: &serde_json::Value) -> Opti
     );
     for key in [
         "listener_count",
-        "public_listener_count",
+        "all_interface_listener_count",
         "localhost_listener_count",
     ] {
         if let Some(count) = process_basic_json_u64(value, key) {
             lines.push(format!("port_list.{key}={count}"));
         }
     }
-    for key in ["public_ports", "ports"] {
+    push_process_basic_optional_field(
+        &mut lines,
+        "port_list",
+        "internet_reachability",
+        process_basic_json_string(value, "internet_reachability"),
+    );
+    for key in ["all_interface_ports", "ports"] {
         if let Some(values) = process_basic_string_array(value, key) {
             lines.push(format!("port_list.{key}={}", values.join(",")));
         }
@@ -216,8 +222,8 @@ fn process_basic_port_list_observed_candidate(value: &serde_json::Value) -> Opti
 }
 
 fn process_basic_notable_listener_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
-    let public_listeners = value
-        .get("public_listeners")
+    let all_interface_listeners = value
+        .get("all_interface_listeners")
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
@@ -226,10 +232,10 @@ fn process_basic_notable_listener_values(value: &serde_json::Value) -> Vec<serde
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let source = if public_listeners.is_empty() {
+    let source = if all_interface_listeners.is_empty() {
         listeners
     } else {
-        public_listeners
+        all_interface_listeners
     };
     source.into_iter().take(8).collect()
 }

@@ -242,10 +242,23 @@ fn extra_reports_waiting(extra: Option<&Value>) -> bool {
 
 fn continuation_object(extra: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
     let extra = extra?.as_object()?;
-    extra
-        .get("pending_async_job")
-        .and_then(Value::as_object)
-        .or(Some(extra))
+    if let Some(job) = extra.get("pending_async_job").and_then(Value::as_object) {
+        return Some(job);
+    }
+    [
+        "job_id",
+        "poll_ref",
+        "checkpoint_ref",
+        "poll_after_ms",
+        "poll_after_seconds",
+        "expires_at",
+        "cancel_ref",
+        "cancel_token",
+        "result_ref",
+    ]
+    .into_iter()
+    .any(|key| extra.contains_key(key))
+    .then_some(extra)
 }
 
 fn continuation_reference(extra: Option<&Value>) -> Option<String> {
