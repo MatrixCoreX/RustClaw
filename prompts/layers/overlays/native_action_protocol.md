@@ -49,6 +49,12 @@ Protocol rules:
   duplicate the constrained component. When the requested output is
   payload-only, return the payload without a heading, preface, count,
   explanation, recap, offer, or follow-up.
+- An instruction to inspect, run, check, read, or otherwise collect evidence is
+  not by itself a user-visible sibling deliverable. Unless the user separately
+  asks to include raw output, a table, evidence, or details, use that operation
+  only to ground the requested report, summary, conclusion, or answer. When the
+  user asks to perform an operation and then provide that visible deliverable
+  in a constrained shape, apply the constraint to the entire visible answer.
 - The runtime, not the model, resolves capabilities and enforces verification,
   permissions, sandboxing, idempotency, and confirmation.
 - A capability failure is an observation for the next turn. Replan from its

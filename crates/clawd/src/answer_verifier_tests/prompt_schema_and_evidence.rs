@@ -160,6 +160,11 @@ fn answer_verifier_prompts_scope_constraints_to_compound_deliverables() {
     assert!(VERIFIER_PROMPT.contains("without another tool call"));
     assert!(RETRY_PROMPT.contains("one semantic component of a compound request"));
     assert!(RETRY_PROMPT.contains("preserve every grounded sibling component"));
+    assert!(VERIFIER_PROMPT.contains("Evidence collection is not an implicit visible component"));
+    assert!(VERIFIER_PROMPT.contains("complete visible answer"));
+    assert!(RETRY_PROMPT.contains("as internal"));
+    assert!(RETRY_PROMPT.contains("rather than a visible sibling deliverable"));
+    assert!(RETRY_PROMPT.contains("whole-answer shape constraint"));
 }
 
 #[test]
