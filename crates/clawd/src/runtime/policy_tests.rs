@@ -48,7 +48,7 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
         assert!(policy.is_any_allowed(&[&skill_token, &capability_token], None));
         assert!(!policy.is_allowed(&skill_token, None));
     }
-    for capability in ["schedule.compile", "schedule.preview", "schedule.list"] {
+    for capability in ["schedule.preview", "schedule.list"] {
         let capability_token = format!("capability:{capability}");
         assert!(policy.is_allowed(&capability_token, None));
         assert!(policy.is_any_allowed(&["skill:schedule", &capability_token], None));
@@ -82,7 +82,7 @@ fn explicit_schedule_skill_deny_overrides_observe_capability_allow() {
     config.deny = vec!["skill:schedule".to_string()];
     let policy = ToolsPolicy::from_config(&config).expect("tools policy");
 
-    assert!(!policy.is_any_allowed(&["skill:schedule", "capability:schedule.compile"], None));
+    assert!(!policy.is_any_allowed(&["skill:schedule", "capability:schedule.preview"], None));
 }
 
 #[test]

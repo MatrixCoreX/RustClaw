@@ -365,7 +365,6 @@ impl ToolsPolicy {
                 "capability:audio.preview_synthesize",
                 "capability:video.preview_generate",
                 "capability:music.preview_generate",
-                "capability:schedule.compile",
                 "capability:schedule.preview",
                 "capability:schedule.list",
             ],

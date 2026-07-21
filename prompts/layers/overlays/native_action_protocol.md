@@ -18,6 +18,11 @@ Protocol rules:
 - Use only capability names present in `RUNTIME_CAPABILITY_MAP`.
 - Prefer the smallest capability that produces the evidence or effect needed
   for the current step.
+- When the user requests a structured parse, validation, preview, inspection,
+  transformation, or computed result and a matching runtime capability is
+  available, call that capability instead of substituting your own inference.
+  A direct response is appropriate only when no runtime evidence or effect is
+  needed, or after the required capability observations are available.
 - The runtime, not the model, resolves capabilities and enforces verification,
   permissions, sandboxing, idempotency, and confirmation.
 - A capability failure is an observation for the next turn. Replan from its

@@ -35,7 +35,7 @@ act|golden_observed_hidden|golden,act,observed|看一下当前目录有没有隐
 # --- clarify：信息不足，应该触发 clarify_question 而不是瞎猜 ---
 ask|golden_clarify_send_file|golden,clarify|把那个文件发给我
 
-# --- schedule：定时任务；走 schedule_intent + schedule.compile ---
+# --- schedule：定时任务；解析预览走 schedule.preview，变更操作走对应叶能力 ---
 schedule|golden_schedule_morning|golden,schedule|每天早上 8 点提醒我开会
 
 # --- failure graceful：明确不存在的文件，应优雅返回"找不到"而不是崩 ---

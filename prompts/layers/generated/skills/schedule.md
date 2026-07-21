@@ -23,7 +23,10 @@ Compile natural-language scheduling requests into structured schedule plans.
 - `schedule.delete`: delete scheduled jobs; use `target_job_id` when the user names one.
 - `schedule.pause`: pause scheduled jobs; use `target_job_id` when the user names one.
 - `schedule.resume`: resume scheduled jobs; use `target_job_id` when the user names one.
-- `schedule.compile`: only compile natural language into `ScheduleIntentOutput`.
+
+The builtin `compile` action is an internal workflow protocol operation, not a
+planner capability. Use `schedule.preview` for every user-requested parse-only
+or dry-run schedule operation.
 
 ## Output
 - JSON string with fields matching `ScheduleIntentOutput`:
