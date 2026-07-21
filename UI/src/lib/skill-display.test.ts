@@ -28,6 +28,9 @@ test("uses fallback base skill names when backend data is empty", () => {
   const fallback = baseSkillNamesWithFallback([]);
   assert.ok(fallback.includes("run_cmd"));
   assert.ok(fallback.includes("fs_basic"));
+  assert.ok(fallback.includes("schedule"));
+  assert.ok(fallback.includes("extension_manager"));
+  assert.ok(fallback.includes("kb"));
   assert.deepEqual(baseSkillNamesWithFallback(["custom_base", "chat"]), ["custom_base"]);
 });
 
@@ -41,6 +44,16 @@ test("groups managed skills by runtime metadata", () => {
   assert.deepEqual(groups.image, ["image_generate"]);
   assert.deepEqual(groups.audio, ["audio_synthesize"]);
   assert.deepEqual(groups.base, ["fs_basic"]);
+  assert.deepEqual(groups.other, ["crypto"]);
+});
+
+test("groups default workflow and knowledge skills as always-on base skills", () => {
+  const groups = groupSkillNames(
+    ["schedule", "extension_manager", "kb", "crypto"],
+    new Set(baseSkillNamesWithFallback([])),
+    new Set(),
+  );
+  assert.deepEqual(groups.base, ["extension_manager", "kb", "schedule"]);
   assert.deepEqual(groups.other, ["crypto"]);
 });
 

@@ -2,191 +2,25 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{skill_availability, AppState, ClaimedTask};
 use claw_core::skill_registry::{
-    Capability, OutputKind, PlannerCapabilityKind, PlannerCapabilityMapping, SkillRegistryEntry,
+    PlannerCapabilityKind, PlannerCapabilityMapping, SkillRegistryEntry,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum CapabilityDomain {
-    Filesystem,
-    System,
-    Config,
-    Git,
-    Process,
-    Service,
-    TaskControl,
-    OpsStatus,
-    MarketData,
-    NewsContent,
-    ImageMedia,
-    AudioMedia,
-    VideoMedia,
-    MusicMedia,
-    Publishing,
-    GeneralChat,
-}
+const UNGROUPED_CAPABILITY_TOKEN: &str = "ungrouped";
 
-impl CapabilityDomain {
-    fn title(self) -> &'static str {
-        match self {
-            CapabilityDomain::Filesystem => "filesystem",
-            CapabilityDomain::System => "system",
-            CapabilityDomain::Config => "config",
-            CapabilityDomain::Git => "git",
-            CapabilityDomain::Process => "process",
-            CapabilityDomain::Service => "service",
-            CapabilityDomain::TaskControl => "task_control",
-            CapabilityDomain::OpsStatus => "ops/status",
-            CapabilityDomain::MarketData => "market/data",
-            CapabilityDomain::NewsContent => "news/web",
-            CapabilityDomain::ImageMedia => "image",
-            CapabilityDomain::AudioMedia => "audio",
-            CapabilityDomain::VideoMedia => "video",
-            CapabilityDomain::MusicMedia => "music",
-            CapabilityDomain::Publishing => "publishing",
-            CapabilityDomain::GeneralChat => "chat",
-        }
-    }
-
-    fn summary(self) -> &'static str {
-        match self {
-            CapabilityDomain::Filesystem => {
-                "inspect directories, read files, create/write files, remove files, and search the filesystem"
-            }
-            CapabilityDomain::System => {
-                "run shell commands and inspect local system, developer, package, archive, git, HTTP, and database information"
-            }
-            CapabilityDomain::Config
-            | CapabilityDomain::Git
-            | CapabilityDomain::Process
-            | CapabilityDomain::Service
-            | CapabilityDomain::TaskControl => self.title(),
-            CapabilityDomain::OpsStatus => {
-                "check service/process/runtime task status, list or cancel the current chat's queued/running tasks, read logs, run health checks, and inspect safe config state"
-            }
-            CapabilityDomain::MarketData => {
-                "retrieve stock and crypto quotes, market indicators, portfolio/position data, order status, and trading-related facts"
-            }
-            CapabilityDomain::NewsContent => {
-                "fetch RSS feeds, news, and web content from external sources"
-            }
-            CapabilityDomain::ImageMedia => {
-                "analyze images and perform image generation or editing"
-            }
-            CapabilityDomain::AudioMedia => "transcribe audio and synthesize spoken output",
-            CapabilityDomain::VideoMedia | CapabilityDomain::MusicMedia => self.title(),
-            CapabilityDomain::Publishing => "draft or send outbound social content",
-            CapabilityDomain::GeneralChat => {
-                "provide conversational explanation, rewriting, and smalltalk when external retrieval is not needed"
-            }
-        }
-    }
-
-    fn from_registry_group(group: &str) -> Option<Self> {
-        match group.trim().to_ascii_lowercase().as_str() {
-            "filesystem" | "file" | "files" | "fs" => Some(Self::Filesystem),
-            "config" | "configuration" => Some(Self::Config),
-            "git" | "vcs" | "repository" => Some(Self::Git),
-            "process" | "processes" => Some(Self::Process),
-            "service" | "services" => Some(Self::Service),
-            "task" | "tasks" | "task_control" => Some(Self::TaskControl),
-            "system" | "developer" | "dev" | "shell" | "http" | "database" | "db" | "package"
-            | "archive" | "transform" | "workflow" | "flows" | "orchestration" => {
-                Some(Self::System)
-            }
-            "ops" | "status" | "ops/status" | "runtime" => Some(Self::OpsStatus),
-            "market" | "market/data" | "finance" => Some(Self::MarketData),
-            "news" | "web" | "news/web" => Some(Self::NewsContent),
-            "image" | "vision" => Some(Self::ImageMedia),
-            "audio" | "voice" => Some(Self::AudioMedia),
-            "video" => Some(Self::VideoMedia),
-            "music" => Some(Self::MusicMedia),
-            "publishing" | "social" => Some(Self::Publishing),
-            "chat" | "general_chat" => Some(Self::GeneralChat),
-            _ => None,
-        }
-    }
-}
-
-fn classify_skill(state: &AppState, skill: &str) -> CapabilityDomain {
-    infer_domain_from_skill_metadata(state, skill)
-        .or_else(|| legacy_domain_from_skill_name(skill))
-        .unwrap_or(CapabilityDomain::System)
-}
-
-fn infer_domain_from_skill_metadata(state: &AppState, skill: &str) -> Option<CapabilityDomain> {
-    let registry = state.get_skills_registry()?;
-    let entry = registry.get(skill)?;
-    infer_domain_from_registry_entry(entry)
-}
-
-fn infer_domain_from_registry_entry(entry: &SkillRegistryEntry) -> Option<CapabilityDomain> {
-    if let Some(domain) = legacy_domain_from_skill_name(entry.name.trim()) {
-        return Some(domain);
-    }
-    if let Some(domain) = entry
+fn registry_group_token(entry: &SkillRegistryEntry) -> Option<String> {
+    entry
         .group
         .as_deref()
-        .and_then(CapabilityDomain::from_registry_group)
-    {
-        return Some(domain);
-    }
-    if entry.output_kind == OutputKind::Image {
-        return Some(CapabilityDomain::ImageMedia);
-    }
-    if entry
-        .resolved_capabilities
-        .iter()
-        .any(|cap| matches!(cap, Capability::FsRead | Capability::FsWrite))
-        && !entry
-            .resolved_capabilities
-            .iter()
-            .any(|cap| matches!(cap, Capability::Net | Capability::Llm))
-    {
-        return Some(CapabilityDomain::Filesystem);
-    }
-    if entry
-        .resolved_capabilities
-        .iter()
-        .any(|cap| matches!(cap, Capability::Net))
-    {
-        return Some(CapabilityDomain::NewsContent);
-    }
-    if entry
-        .resolved_capabilities
-        .iter()
-        .any(|cap| matches!(cap, Capability::Llm))
-    {
-        return Some(CapabilityDomain::GeneralChat);
-    }
-    let canonical = entry.name.trim();
-    if canonical.is_empty() {
-        return None;
-    }
-    None
+        .map(str::trim)
+        .filter(|group| !group.is_empty())
+        .map(str::to_ascii_lowercase)
 }
 
-fn legacy_domain_from_skill_name(skill: &str) -> Option<CapabilityDomain> {
-    match skill.trim().to_ascii_lowercase().as_str() {
-        "stock" | "crypto" => Some(CapabilityDomain::MarketData),
-        "rss_fetch" | "web_search_extract" | "browser_web" => Some(CapabilityDomain::NewsContent),
-        "image_vision" | "image_generate" | "image_edit" => Some(CapabilityDomain::ImageMedia),
-        "audio_transcribe" | "audio_synthesize" => Some(CapabilityDomain::AudioMedia),
-        "video_generate" => Some(CapabilityDomain::VideoMedia),
-        "music_generate" => Some(CapabilityDomain::MusicMedia),
-        "x" => Some(CapabilityDomain::Publishing),
-        "chat" => Some(CapabilityDomain::GeneralChat),
-        "fs_basic" | "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file"
-        | "fs_search" => Some(CapabilityDomain::Filesystem),
-        "config_basic" | "config_edit" | "config_guard" => Some(CapabilityDomain::Config),
-        "git_basic" => Some(CapabilityDomain::Git),
-        "process_basic" => Some(CapabilityDomain::Process),
-        "service_control" | "health_check" | "log_analyze" => Some(CapabilityDomain::Service),
-        "task_control" => Some(CapabilityDomain::TaskControl),
-        "docker_basic" => Some(CapabilityDomain::OpsStatus),
-        "run_cmd" | "system_basic" | "http_basic" | "install_module" | "package_manager"
-        | "archive_basic" | "db_basic" => Some(CapabilityDomain::System),
-        _ => None,
-    }
+fn classify_skill(state: &AppState, skill: &str) -> String {
+    state
+        .get_skills_registry()
+        .and_then(|registry| registry.get(skill).and_then(registry_group_token))
+        .unwrap_or_else(|| UNGROUPED_CAPABILITY_TOKEN.to_string())
 }
 
 fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
@@ -350,7 +184,7 @@ fn build_capability_map_for_task_with_detail(
         return lines.join("\n");
     }
 
-    let mut grouped: BTreeMap<CapabilityDomain, BTreeSet<String>> = BTreeMap::new();
+    let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut layered: BTreeMap<PlannerCapabilityKind, BTreeSet<String>> = BTreeMap::new();
     for skill in &visible {
         grouped
@@ -402,14 +236,9 @@ fn build_capability_map_for_task_with_detail(
         }
     }
 
-    for (domain, skills) in grouped {
+    for (group, skills) in grouped {
         let skills_text = skills.into_iter().collect::<Vec<_>>().join(", ");
-        lines.push(format!(
-            "- {}: {}. Visible skills: {}.",
-            domain.title(),
-            domain.summary(),
-            skills_text
-        ));
+        lines.push(format!("- group={group}; visible_skills={skills_text}."));
     }
 
     if include_registry_skill_hints {
