@@ -144,7 +144,7 @@ def final_text_machine_field_value(text: str, field: str) -> str | None:
     if isinstance(parsed, dict) and field in parsed:
         return value_to_compare_text(parsed[field])
     match = re.search(
-        rf"(?m)^\s*{re.escape(field)}\s*[:=]\s*(.*?)\s*$",
+        rf"(?m)^\s*(?:[-*+]\s+)?(?:\*\*|__|`)?{re.escape(field)}(?:\*\*|__|`)?\s*[:=]\s*(.*?)\s*$",
         text,
     )
     if match is not None:
