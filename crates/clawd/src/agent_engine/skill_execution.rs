@@ -1248,6 +1248,11 @@ pub(super) async fn execute_prepared_skill_action(
                 return Err(TASK_CANCELED_ERR.to_string());
             }
             let err = step_execution.error.clone().unwrap_or_default();
+            let mutation_not_dispatched = mutation_guard.as_ref().is_some_and(|lease| {
+                super::mutation_ledger::settle_policy_blocked_mutation_as_not_applied(
+                    state, lease, &err,
+                )
+            });
             let failure_outcome = handle_skill_step_failure(
                 state,
                 task,
@@ -1268,6 +1273,29 @@ pub(super) async fn execute_prepared_skill_action(
             )
             .await?;
             if let Some(lease) = mutation_guard.as_ref() {
+                if mutation_not_dispatched {
+                    return match failure_outcome {
+                        Some(stop_reason)
+                            if stop_reason == "recoverable_failure_continue_in_round" =>
+                        {
+                            Ok(SkillActionOutcome {
+                                ended_with_user_visible_output: false,
+                                stop_signal: None,
+                                continue_in_round: true,
+                            })
+                        }
+                        Some(stop_reason) => Ok(SkillActionOutcome {
+                            ended_with_user_visible_output: false,
+                            stop_signal: Some(stop_reason),
+                            continue_in_round: false,
+                        }),
+                        None => Ok(SkillActionOutcome {
+                            ended_with_user_visible_output: false,
+                            stop_signal: None,
+                            continue_in_round: false,
+                        }),
+                    };
+                }
                 super::support::publish_agent_loop_mutation_reconciliation_checkpoint(
                     state,
                     task,
