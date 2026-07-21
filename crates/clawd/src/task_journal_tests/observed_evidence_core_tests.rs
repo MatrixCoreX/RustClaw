@@ -147,6 +147,26 @@ fn large_async_contract_does_not_starve_common_machine_fields() {
     ] {
         assert!(fields.contains(field), "missing {field}: {fields:?}");
     }
+
+    let compact_prefix = observed["items"]
+        .as_array()
+        .expect("evidence items")
+        .iter()
+        .take(super::super::MAX_RESULT_TRACE_COMPACT_ARRAY_ITEMS)
+        .filter_map(|item| item["field"].as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    for field in [
+        "extra.provider",
+        "extra.model",
+        "extra.duration",
+        "extra.planned_outputs",
+        "extra.async_contract",
+    ] {
+        assert!(
+            compact_prefix.contains(field),
+            "compaction prefix missing {field}: {compact_prefix:?}"
+        );
+    }
 }
 
 #[test]

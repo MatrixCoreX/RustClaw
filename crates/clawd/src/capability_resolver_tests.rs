@@ -649,11 +649,11 @@ fn capability_resolution_record_covers_resolved_mapping() {
 }
 
 #[test]
-fn capability_alias_resolution_records_canonical_registry_identity() {
+fn canonical_capability_resolution_records_registry_identity() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
-        "task_control.preview_repair",
+        "coding_workflow.preview_repair",
         json!({}),
     );
 
@@ -667,7 +667,7 @@ fn capability_alias_resolution_records_canonical_registry_identity() {
         args.get("action").and_then(Value::as_str),
         Some("preview_coding_repair")
     );
-    assert_eq!(record.capability_ref, "task_control.preview_repair");
+    assert_eq!(record.capability_ref, "coding_workflow.preview_repair");
     assert_eq!(
         record.canonical_capability_ref.as_deref(),
         Some("coding_workflow.preview_repair")
@@ -881,7 +881,7 @@ fn config_read_fields_capability_normalizes_machine_field_aliases() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
-        "config_basic.read_fields",
+        "config.read_fields",
         json!({
             "config_path": "configs/agent_guard.toml",
             "fields": [
@@ -892,7 +892,7 @@ fn config_read_fields_capability_normalizes_machine_field_aliases() {
             ]
         }),
     );
-    let action = action.expect("config_basic.read_fields capability should resolve");
+    let action = action.expect("config.read_fields capability should resolve");
     let AgentAction::CallTool { tool, args } = action else {
         panic!("expected config_basic tool action, got {action:?}");
     };
@@ -920,18 +920,18 @@ fn config_read_fields_capability_normalizes_machine_field_aliases() {
         "capability_resolver_registry_mapping_resolved"
     );
     assert_eq!(record.source, "registry");
-    assert_eq!(record.capability_ref, "config_basic.read_fields");
+    assert_eq!(record.capability_ref, "config.read_fields");
 }
 
 #[test]
-fn registry_resolves_fully_qualified_skill_action_capability() {
+fn registry_resolves_declared_browser_capability() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
-        "browser_web.open_extract",
+        "browser.open_extract",
         json!({"url": "https://example.com"}),
     );
-    let action = action.expect("registry skill.action capability should resolve");
+    let action = action.expect("declared browser capability should resolve");
     match action {
         AgentAction::CallTool { tool, args } => {
             assert_eq!(tool, "browser_web");
@@ -951,8 +951,26 @@ fn registry_resolves_fully_qualified_skill_action_capability() {
         "capability_resolver_registry_mapping_resolved"
     );
     assert_eq!(record.source, "registry");
-    assert_eq!(record.capability_ref, "browser_web.open_extract");
+    assert_eq!(record.capability_ref, "browser.open_extract");
     assert_eq!(record.resolved_ref.as_deref(), Some("tool:browser_web"));
+}
+
+#[test]
+fn registry_rejects_undeclared_skill_action_capability() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "image_generate.preview_generate",
+        json!({"prompt": "abstract geometric study"}),
+    );
+
+    assert!(action.is_none());
+    assert_eq!(record.reason_code, "capability_unavailable");
+    assert_eq!(record.outcome, "unresolved");
+    assert_eq!(record.source, "none");
+    assert_eq!(record.capability_ref, "image_generate.preview_generate");
+    assert!(record.canonical_capability_ref.is_none());
+    assert!(record.resolved_ref.is_none());
 }
 
 #[test]

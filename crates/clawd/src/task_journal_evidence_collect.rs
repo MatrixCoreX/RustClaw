@@ -15,6 +15,27 @@ impl ObservedEvidenceCollector {
     }
 }
 
+pub(super) fn prioritize_observed_evidence_for_storage(items: &mut Vec<Value>) {
+    let mut prioritized = Vec::new();
+    for leaf in OBSERVED_EVIDENCE_STORAGE_PRIORITY_LEAVES {
+        let selected = items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let field = item.get("field")?.as_str()?;
+                (field.rsplit('.').next() == Some(*leaf))
+                    .then_some((index, field.matches('.').count()))
+            })
+            .min_by_key(|(_, depth)| *depth)
+            .map(|(index, _)| index);
+        if let Some(index) = selected {
+            prioritized.push(items.remove(index));
+        }
+    }
+    prioritized.append(items);
+    *items = prioritized;
+}
+
 pub(super) fn collect_json_observed_evidence(
     collector: &mut ObservedEvidenceCollector,
     source: &str,

@@ -1009,13 +1009,14 @@ pub(super) fn collect_observed_evidence_from_output(
 }
 
 pub(super) fn observed_evidence_from_collector(
-    collector: ObservedEvidenceCollector,
+    mut collector: ObservedEvidenceCollector,
     extractor: EvidenceExtractorSpec,
 ) -> Option<Value> {
     if collector.items.is_empty() {
         return None;
     }
     let item_count = collector.total_count;
+    prioritize_observed_evidence_for_storage(&mut collector.items);
     Some(json!({
         "schema_version": 1,
         "source": "step_output",

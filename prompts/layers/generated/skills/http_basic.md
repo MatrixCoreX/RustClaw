@@ -11,7 +11,7 @@
 - `http_basic` performs simple HTTP requests for fetch and JSON post use cases.
 - It is intended for lightweight API calls with explicit URL and optional headers/body.
 - Use it for raw HTTP/API observations, status validation, response preview checks, and downloads.
-- Do not use it as the primary page-reading capability when the task needs browser-rendered page titles, readable article/page text, page summaries, screenshots, or extraction artifacts; those belong to `browser_web.open_extract`.
+- Do not use it as the primary page-reading capability when the task needs browser-rendered page titles, readable article/page text, page summaries, screenshots, or extraction artifacts; those belong to `browser.open_extract`.
 - When called inside RustClaw with a valid `user_key`, requests to local RustClaw API endpoints on `http://127.0.0.1:8787/` automatically include `X-RustClaw-Key`.
 - Any received HTTP response is returned as an observation, including non-2xx statuses; network/timeout/protocol failures remain skill errors.
 
