@@ -158,6 +158,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const filteredSkillsTool = useMemo(() => filterSkillNamesBySearch(skillGroups.tool, normalizedSkillsSearchQuery), [skillGroups.tool, normalizedSkillsSearchQuery]);
   const filteredSkillsImage = useMemo(() => filterSkillNamesBySearch(skillGroups.image, normalizedSkillsSearchQuery), [skillGroups.image, normalizedSkillsSearchQuery]);
   const filteredSkillsAudio = useMemo(() => filterSkillNamesBySearch(skillGroups.audio, normalizedSkillsSearchQuery), [skillGroups.audio, normalizedSkillsSearchQuery]);
+  const filteredSkillsMultimedia = useMemo(() => filterSkillNamesBySearch(skillGroups.multimedia, normalizedSkillsSearchQuery), [skillGroups.multimedia, normalizedSkillsSearchQuery]);
   const filteredSkillsBase = useMemo(() => filterSkillNamesBySearch(skillGroups.base, normalizedSkillsSearchQuery), [skillGroups.base, normalizedSkillsSearchQuery]);
   const filteredSkillsOther = useMemo(() => filterSkillNamesBySearch(skillGroups.other, normalizedSkillsSearchQuery), [skillGroups.other, normalizedSkillsSearchQuery]);
 
@@ -426,6 +427,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     filteredSkillsBase,
     filteredSkillsImage,
     filteredSkillsAudio,
+    filteredSkillsMultimedia,
     filteredSkillsOther,
     normalizedSkillsSearchQuery,
     skillsSearchQuery,

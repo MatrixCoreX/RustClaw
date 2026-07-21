@@ -36,15 +36,26 @@ test("uses fallback base skill names when backend data is empty", () => {
 
 test("groups managed skills by runtime metadata", () => {
   const groups = groupSkillNames(
-    ["image_generate", "audio_synthesize", "run_cmd", "crypto", "fs_basic"],
+    ["image_generate", "audio_synthesize", "video_generate", "music_generate", "run_cmd", "crypto", "fs_basic"],
     new Set(["fs_basic"]),
     new Set(["run_cmd"]),
   );
   assert.deepEqual(groups.tool, ["run_cmd"]);
   assert.deepEqual(groups.image, ["image_generate"]);
   assert.deepEqual(groups.audio, ["audio_synthesize"]);
+  assert.deepEqual(groups.multimedia, ["music_generate", "video_generate"]);
   assert.deepEqual(groups.base, ["fs_basic"]);
   assert.deepEqual(groups.other, ["crypto"]);
+});
+
+test("keeps future video and music machine names in multimedia", () => {
+  const groups = groupSkillNames(
+    ["video_edit", "music_remix", "image_edit", "audio_transcribe", "plain_skill"],
+    new Set(),
+    new Set(),
+  );
+  assert.deepEqual(groups.multimedia, ["music_remix", "video_edit"]);
+  assert.deepEqual(groups.other, ["plain_skill"]);
 });
 
 test("groups default workflow and knowledge skills as always-on base skills", () => {
