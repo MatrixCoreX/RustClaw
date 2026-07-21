@@ -388,7 +388,7 @@ pub(super) fn workspace_filesystem_mutation_can_run_autonomously(
     args: &Value,
 ) -> bool {
     if normalized_skill == "run_cmd" {
-        return workspace_greenfield_run_cmd_can_run_autonomously(state, args);
+        return workspace_coding_run_cmd_can_run_autonomously(state, args);
     }
     if normalized_skill != "fs_basic"
         || !matches!(
@@ -403,7 +403,7 @@ pub(super) fn workspace_filesystem_mutation_can_run_autonomously(
         .any(|path| path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root))
 }
 
-fn workspace_greenfield_run_cmd_can_run_autonomously(state: &AppState, args: &Value) -> bool {
+fn workspace_coding_run_cmd_can_run_autonomously(state: &AppState, args: &Value) -> bool {
     if !matches!(
         state.skill_rt.tools_policy.sandbox_mode,
         claw_core::config::ToolSandboxMode::WorkspaceWrite
@@ -420,12 +420,13 @@ fn workspace_greenfield_run_cmd_can_run_autonomously(state: &AppState, args: &Va
     else {
         return false;
     };
+    let effect = crate::execution_recipe::classify_skill_action_effect(state, "run_cmd", args);
     !crate::skills::command_requests_sudo(command)
-        && crate::execution_recipe::action_satisfies_greenfield_creation(state, "run_cmd", args)
-        && autonomous_greenfield_shell_shape(command)
+        && effect.mutates
+        && autonomous_workspace_coding_shell_shape(command)
 }
 
-fn autonomous_greenfield_shell_shape(command: &str) -> bool {
+fn autonomous_workspace_coding_shell_shape(command: &str) -> bool {
     let command_lines = shell_command_lines_without_heredoc_bodies(command);
     if command_lines.is_empty() {
         return false;

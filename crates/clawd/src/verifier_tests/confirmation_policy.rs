@@ -206,39 +206,43 @@ fn workspace_validation_run_cmd_is_low_risk_without_confirmation() {
 }
 
 #[test]
-fn sandboxed_workspace_greenfield_run_cmd_does_not_require_confirmation() {
+fn sandboxed_workspace_coding_run_cmd_does_not_require_confirmation() {
     let state = test_state();
     let task = test_task();
-    let command = "set -e\nmkdir -p run/new_calc && cd run/new_calc && cat > calc.py <<'EOF'\ndef add(a, b):\n    return a + b\nEOF\nls -la\necho '---RUN TEST---'\npython3 test_calc.py\necho \"EXIT_CODE=$?\"";
-    let result = verify_plan(
-        &state,
-        &task,
-        VerifyInput {
-            output_contract: Some(&route_result()),
-            request_text: Some("create a new project"),
-            context_bundle_summary: None,
-            plan_result: &plan_result(vec![PlanStep {
-                step_id: "s1".to_string(),
-                action_type: "call_skill".to_string(),
-                skill: "run_cmd".to_string(),
-                args: json!({"command": command}),
-                depends_on: Vec::new(),
-                why: String::new(),
-            }]),
-            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
-        },
-        VerifyMode::Enforce,
-    );
+    for command in [
+        "set -e\nmkdir -p run/new_calc && cd run/new_calc && cat > calc.py <<'EOF'\ndef add(a, b):\n    return a + b\nEOF\nls -la\necho '---RUN TEST---'\npython3 test_calc.py\necho \"EXIT_CODE=$?\"",
+        "cat > run/existing_calc.py <<'EOF'\ndef mul(a, b):\n    return a * b\nEOF\necho 'updated' >> run/CHANGELOG",
+    ] {
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                output_contract: Some(&route_result()),
+                request_text: Some("update workspace code"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({"command": command}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
 
-    assert!(result.approved, "issues: {:?}", result.issues);
-    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/0/decision")
-            .and_then(serde_json::Value::as_str),
-        Some("allow")
-    );
+        assert!(result.approved, "issues: {:?}", result.issues);
+        assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+        assert_eq!(
+            result
+                .permission_decision
+                .pointer("/steps/0/decision")
+                .and_then(serde_json::Value::as_str),
+            Some("allow")
+        );
+    }
 }
 
 #[test]
