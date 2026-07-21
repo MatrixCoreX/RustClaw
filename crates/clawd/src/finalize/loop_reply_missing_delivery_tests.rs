@@ -53,7 +53,7 @@ fn plan_confirmation_checkpoint_preserves_allowed_prefix_before_risky_step() {
 
 #[test]
 fn pending_user_input_clarify_reason_prefers_structured_machine_fields() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.pending_user_input_required = true;
     loop_state.output_vars.insert(
         "agent_loop.terminal_intent".to_string(),
@@ -84,7 +84,7 @@ fn pending_user_input_clarify_reason_prefers_structured_machine_fields() {
 async fn observed_execution_without_delivery_reply_omits_raw_summary() {
     let state = test_state();
     let task = claimed_task("task-missing-delivery-observed");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -136,7 +136,7 @@ async fn observed_execution_without_delivery_reply_omits_raw_summary() {
 async fn observed_execution_without_delivery_uses_exact_scalar_path_projection() {
     let state = test_state();
     let task = claimed_task("task-missing-delivery-dry-run-projection");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -176,7 +176,7 @@ async fn observed_execution_without_delivery_uses_exact_scalar_path_projection()
 async fn observed_execution_without_delivery_does_not_reuse_route_fixed_question() {
     let state = test_state();
     let task = claimed_task("task-missing-delivery-clarify");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -220,7 +220,7 @@ async fn observed_execution_without_delivery_does_not_reuse_route_fixed_question
 
 #[test]
 fn structured_failure_message_is_grounded_in_failed_step() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -278,7 +278,7 @@ fn structured_failure_message_is_grounded_in_failed_step() {
 #[test]
 fn generic_content_observed_language_is_not_runtime_publishable() {
     let task = claimed_task("task-observed-language-evidence-complete");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "log_analyze",
@@ -317,7 +317,7 @@ fn generic_content_observed_language_is_not_runtime_publishable() {
 #[test]
 fn free_none_observed_delivery_does_not_promote_empty_contract_coverage() {
     let task = claimed_task("task-observed-language-free-none");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", "alpha\nbeta\n"));
@@ -340,7 +340,7 @@ fn free_none_observed_delivery_does_not_promote_empty_contract_coverage() {
 async fn observed_execution_without_delivery_skips_summary_for_extract_field_result() {
     let state = test_state();
     let task = claimed_task("task-missing-field-observed");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -394,7 +394,7 @@ async fn observed_execution_without_delivery_skips_summary_for_extract_field_res
 async fn observed_execution_without_delivery_uses_language_synthesis_for_config_read() {
     let state = test_state();
     let task = claimed_task("task-structured-container-summary");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -446,7 +446,7 @@ fn exact_file_names_contract_prefers_observed_list_over_synthesized_sentence() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "list_dir",
@@ -563,7 +563,7 @@ fn missing_publishable_delivery_can_finish_as_clarify() {
 
 #[test]
 fn successful_delivery_can_preserve_structured_user_input_clarify() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     assert_eq!(
         successful_delivery_final_status(&loop_state, None, &[]),
         crate::task_journal::TaskJournalFinalStatus::Success

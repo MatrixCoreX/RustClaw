@@ -116,7 +116,7 @@ fn structured_observed_body_includes_count_inventory_breakdown_for_synthesis() {
 
 #[test]
 fn direct_scalar_defers_compare_paths_result_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -148,7 +148,7 @@ fn direct_scalar_defers_compare_paths_result_to_synthesis() {
 
 #[test]
 fn direct_answer_defers_git_status_dirty_worktree_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "git_basic",
@@ -176,7 +176,7 @@ fn direct_answer_defers_git_status_dirty_worktree_to_llm() {
 
 #[test]
 fn direct_answer_defers_git_log_release_note_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "read_file",
@@ -215,7 +215,7 @@ fn direct_answer_defers_git_log_release_note_to_synthesis() {
 
 #[test]
 fn direct_answer_defers_git_status_clean_when_exit_only_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "git_basic", "exit=0\n"));
@@ -241,7 +241,7 @@ fn direct_answer_defers_git_status_clean_when_exit_only_to_llm() {
 
 #[test]
 fn direct_answer_defers_git_status_dirty_without_branch_header_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "git_basic",

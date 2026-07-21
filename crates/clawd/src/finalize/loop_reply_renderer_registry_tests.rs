@@ -69,7 +69,7 @@ fn renderer_trace_records_machine_fields_and_journal_observation() {
         .iter()
         .find(|renderer| renderer.key == "control_machine_envelope")
         .expect("control renderer descriptor");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
 
     super::renderer_registry::record_renderer_trace(
         &mut loop_state,

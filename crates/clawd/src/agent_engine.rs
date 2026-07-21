@@ -236,9 +236,9 @@ fn build_turn_analysis_prompt_block(
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LoopState {
     pub(crate) round_no: usize,
-    pub(crate) max_rounds: usize,
     pub(crate) task_budget_slice: Option<crate::task_budget_contract::TaskBudgetSlice>,
     pub(crate) task_budget_slice_base_elapsed_ms: u64,
+    pub(crate) task_budget_worker_soft_limit_ms: u64,
     pub(crate) tool_calls_total: usize,
     pub(crate) total_steps_executed: usize,
     /// Progress hints only; published to task progress for "processing..." display. Must not contain full raw output.
@@ -252,7 +252,6 @@ pub(crate) struct LoopState {
     pub(crate) repeat_action_counts: HashMap<String, usize>,
     pub(crate) successful_action_fingerprints: HashMap<String, usize>,
     pub(crate) consecutive_no_progress: usize,
-    pub(crate) recoverable_failure_extra_rounds_used: usize,
     pub(crate) last_output: Option<String>,
     pub(crate) output_vars: HashMap<String, String>,
     pub(crate) has_tool_or_skill_output: bool,
@@ -309,11 +308,8 @@ pub(crate) struct LoopState {
 }
 
 impl LoopState {
-    pub(crate) fn new(max_rounds: usize) -> Self {
-        Self {
-            max_rounds,
-            ..Self::default()
-        }
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
 }
 

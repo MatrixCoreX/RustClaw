@@ -171,13 +171,11 @@ pub(super) async fn plan_round_actions(
         Some(loop_state.round_no),
     );
     info!(
-        "{} loop_round_plan task_id={} round={} max_rounds={} max_steps={} multi_round_enabled={}",
+        "{} loop_round_plan task_id={} round={} max_steps={}",
         crate::highlight_tag("loop"),
         task.task_id,
         loop_state.round_no,
-        policy.max_rounds,
-        policy.max_steps,
-        policy.multi_round_enabled
+        policy.max_steps
     );
     info!(
         "plan_llm_request task_id={} round={} planner_mode=agent_loop prompt_chars={} tool_spec_chars={} skill_context_chars={} skill_context_mode={} selected_skills={} quick_index_chars={} playbook_chars={} recent_replies_chars={} user_request={}",

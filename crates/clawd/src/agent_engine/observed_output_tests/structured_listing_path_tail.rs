@@ -1,6 +1,6 @@
 #[test]
 fn direct_answer_can_passthrough_listing_when_planner_does_not_request_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "list_dir",
@@ -28,7 +28,7 @@ fn direct_answer_can_passthrough_listing_when_planner_does_not_request_synthesis
 
 #[test]
 fn direct_answer_can_passthrough_inventory_when_planner_does_not_request_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -63,7 +63,7 @@ fn direct_answer_does_not_passthrough_run_cmd_listing_when_content_evidence_is_r
     ));
     std::fs::create_dir_all(&temp_dir).unwrap();
 
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "a.md\nb.md\n"));
@@ -90,7 +90,7 @@ fn direct_answer_does_not_passthrough_run_cmd_listing_when_content_evidence_is_r
 
 #[test]
 fn direct_answer_blocks_contract_forbidden_observation_action() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "hello from shell"));

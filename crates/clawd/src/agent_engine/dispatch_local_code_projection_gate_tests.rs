@@ -68,7 +68,7 @@ fn context_with_required_machine_fields(response_shape: OutputResponseShape) -> 
 }
 
 fn loop_state_with_writes_and_validation() -> LoopState {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -107,7 +107,7 @@ fn local_code_projection_defer_gate_triggers_for_missing_post_write_readback() {
 
 #[test]
 fn local_code_projection_defer_gate_triggers_for_legacy_write_file_missing_readback() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -187,7 +187,7 @@ fn local_code_projection_defer_gate_ignores_file_token_contracts() {
 }
 
 fn loop_state_with_code_readbacks_without_validation() -> LoopState {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -217,7 +217,7 @@ fn local_code_projection_defer_until_validation_blocks_readback_snippet_candidat
 
 #[test]
 fn local_code_projection_defer_until_validation_blocks_post_write_candidate() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",

@@ -79,7 +79,7 @@ async fn mcp_execution_records_auditable_teaching_observation() {
         started_at: 1,
         finished_at: 2,
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     record_mcp_tool_execution_observation(
         &state,
@@ -144,7 +144,7 @@ async fn mcp_transport_failure_records_machine_error_without_raw_detail() {
         started_at: 1,
         finished_at: 2,
     };
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     record_mcp_tool_execution_observation(
         &state,

@@ -7,7 +7,7 @@ fn ledger_value(ledger: &str) -> Value {
 
 #[test]
 fn attempt_ledger_renders_failed_step_with_retry_hint() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(crate::executor::StepExecutionResult {
@@ -69,7 +69,7 @@ fn attempt_ledger_renders_failed_step_with_retry_hint() {
 
 #[test]
 fn attempt_ledger_prefers_recorded_args_summary() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     super::record_attempt(
         &mut loop_state,
         "run_cmd",
@@ -87,7 +87,7 @@ fn attempt_ledger_prefers_recorded_args_summary() {
 
 #[test]
 fn attempt_ledger_records_verifier_retry_instruction() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     super::record_attempt_with_retry_instruction(
         &mut loop_state,
         "answer_verifier",
@@ -189,7 +189,7 @@ fn attempt_ledger_records_verifier_retry_instruction() {
 
 #[test]
 fn attempt_ledger_marks_policy_block_non_retryable() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     super::record_attempt(
         &mut loop_state,
         "db_basic",
@@ -216,7 +216,7 @@ fn attempt_ledger_marks_contract_rejections_non_retryable() {
             "do_not_repeat_missing_target_binding; bind_target_or_ask_for_clarification",
         ),
     ] {
-        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let mut loop_state = crate::agent_engine::LoopState::new();
         super::record_attempt(
             &mut loop_state,
             "fs_basic",
@@ -235,7 +235,7 @@ fn attempt_ledger_marks_contract_rejections_non_retryable() {
 
 #[test]
 fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let err = crate::skills::structured_skill_error_from_parts(
         "run_cmd",
         "contract_action_rejected",
@@ -350,7 +350,7 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
 
 #[test]
 fn attempt_ledger_exposes_structured_error_code_and_exit_code() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let err = crate::skills::structured_skill_error_from_parts(
         "run_cmd",
         "command_failed",
@@ -403,7 +403,7 @@ fn attempt_ledger_exposes_structured_error_code_and_exit_code() {
 
 #[test]
 fn attempt_ledger_exposes_provider_status_in_repair_envelope() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let err = crate::skills::structured_skill_error_from_parts(
         "image_generate",
         "provider_retryable_response",
@@ -469,7 +469,7 @@ fn attempt_ledger_exposes_provider_status_in_repair_envelope() {
 
 #[test]
 fn attempt_ledger_exposes_provider_unsupported_machine_fields() {
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let err = crate::skills::structured_skill_error_from_parts(
         "video_generate",
         "provider_unsupported",
@@ -516,7 +516,7 @@ fn attempt_ledger_marks_terminal_failures_non_retryable() {
         "auth_failed",
         "missing_input",
     ] {
-        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let mut loop_state = crate::agent_engine::LoopState::new();
         super::record_attempt(
             &mut loop_state,
             "tool",

@@ -67,23 +67,52 @@ max_parallel_readonly = 4
 # 子 agent 未显式给 budget.timeout_ms 时使用的默认 timeout；0 或缺失表示使用 parent loop 默认。
 default_timeout_ms = 30000
 
+[agent.task_budget]
+# Interactive work uses resumable soft slices. These high administrator ceilings are
+# fail-closed emergency boundaries and cannot be raised by planner/model output.
+admin_max_model_turns = 256
+admin_max_tool_calls = 512
+admin_max_total_tokens = 100000000
+admin_max_cost_usd_nanos = 100000000000
+admin_max_elapsed_seconds = 86400
+admin_max_continuations = 64
+admin_max_non_resumable_tool_seconds = 3600
+
+[agent.task_budget.profiles.general]
+soft_slice_seconds = 300
+stagnation_tolerance = 3
+provider_timeout_class = "standard"
+tool_timeout_class = "standard"
+
+[agent.task_budget.profiles.fast_read]
+soft_slice_seconds = 120
+stagnation_tolerance = 2
+provider_timeout_class = "short"
+tool_timeout_class = "short"
+
+[agent.task_budget.profiles.grounded_summary]
+soft_slice_seconds = 300
+stagnation_tolerance = 3
+provider_timeout_class = "standard"
+tool_timeout_class = "standard"
+
+[agent.task_budget.profiles.multi_step_workspace]
+soft_slice_seconds = 900
+stagnation_tolerance = 4
+provider_timeout_class = "standard"
+tool_timeout_class = "long_tail"
+
+[agent.task_budget.profiles.ops_closed_loop]
+soft_slice_seconds = 1200
+stagnation_tolerance = 4
+provider_timeout_class = "standard"
+tool_timeout_class = "long_tail"
+
 [agent.loop_guard]
 # 用途/Purpose: 单任务最大 agent 步数上限.
 # 建议修改/Recommended change: 可改 / Editable.
 # 风险/Risk: 过低会截断任务；过高可能增加循环成本.
 max_steps = 32
-# 用途/Purpose: 单任务最多规划执行轮次（受控多轮）.
-# 建议修改/Recommended change: 建议 3~5；具体任务由 budget_profiles 分级覆盖.
-# 风险/Risk: 过高会增加循环与成本，过低可能影响复杂任务完成度.
-max_rounds = 4
-# 用途/Purpose: 当结构化可恢复失败刚好发生在轮次上限时，额外给 LLM 的自修复轮次.
-# 建议修改/Recommended change: 建议 1~2；0 表示不额外补轮.
-# 风险/Risk: 过高会增加 provider 成本；仍受重复动作/no-progress/安全策略限制.
-recoverable_failure_extra_rounds = 1
-# 用途/Purpose: 是否启用受控多轮协调器.
-# 建议修改/Recommended change: true 开启，false 降级单轮.
-# 风险/Risk: 关闭会回到单轮模式，复杂任务可能需要用户再次触发.
-multi_round_enabled = true
 # 用途/Purpose: Answer Verifier required-evidence 强制阻断范围；替代全局 bool.
 # 终态值/Final token: all.
 # 建议修改/Recommended change: 保持 all；非 all 的历史值会被 runtime 归一化为 all。
@@ -100,14 +129,6 @@ registry_idempotency_guard_scope = "all"
 # 建议修改/Recommended change: 建议 3~6.
 # 风险/Risk: 过低易误杀，过高会放大重复调用.
 repeat_action_limit = 4
-# 用途/Purpose: 连续“无新增进展”轮次阈值.
-# 建议修改/Recommended change: 建议 1~2；复杂取证任务由 budget_profiles 放宽.
-# 风险/Risk: 过低可能提前结束，过高会导致空转.
-no_progress_limit = 1
-# 用途/Purpose: 单任务最大工具/技能调用次数.
-# 建议修改/Recommended change: 可改 / Editable.
-# 风险/Risk: 过低会提前失败；过高会增加资源消耗.
-max_tool_calls = 12
 # 用途/Purpose: 同一动作签名重复多少次后中止.
 # 建议修改/Recommended change: 可改 / Editable.
 # 风险/Risk: 过低易误杀；过高会放大循环.
@@ -116,36 +137,24 @@ repeat_same_action_limit = 4
 [agent.loop_guard.budget_profiles.fast_read]
 # 用途/Purpose: 单次只读/状态/标量类任务，保持低延迟.
 max_steps = 16
-max_rounds = 2
-max_tool_calls = 6
 repeat_action_limit = 3
-no_progress_limit = 1
 
 [agent.loop_guard.budget_profiles.grounded_summary]
 # 用途/Purpose: 需要证据覆盖、摘要、比较、验证或命令输出总结的任务.
 max_steps = 40
-max_rounds = 4
-max_tool_calls = 16
 repeat_action_limit = 5
-no_progress_limit = 2
 
 [agent.loop_guard.budget_profiles.multi_step_workspace]
 # 用途/Purpose: 多文件/目录/交付/写入类 workspace 任务，允许更多观察与修复.
 max_steps = 56
-max_rounds = 6
-max_tool_calls = 24
 repeat_action_limit = 6
-no_progress_limit = 2
 
 [agent.loop_guard.ops_closed_loop]
 # 用途/Purpose: 针对“检查 -> 修改 -> 验证 -> 修复”这类长尾闭环任务的专属放宽配置。
 # 建议修改/Recommended change: 只对复杂运维/配置任务放宽，避免影响普通短任务收敛速度。
 # 风险/Risk: 过高会拉长单任务占用时间；过低仍可能截断长尾修复闭环。
 max_steps = 48
-max_rounds = 6
-max_tool_calls = 24
 repeat_action_limit = 6
-no_progress_limit = 2
 max_repairs = 3
 run_cmd_timeout_seconds = 180
 run_cmd_validation_timeout_seconds = 90

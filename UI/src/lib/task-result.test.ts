@@ -683,6 +683,21 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
                 compaction_id: "context_compaction:1",
               },
             },
+            {
+              seq: 14,
+              event_type: "budget_decision",
+              payload: {
+                decision: "checkpoint_requeue",
+                profile: "multi_step_workspace",
+                soft_slice_ms: 900000,
+                continuation_index: 2,
+                cumulative_model_turns: 7,
+                cumulative_tool_calls: 15,
+                observed_progress: true,
+                soft_slice_exhausted: true,
+                resumable: true,
+              },
+            },
           ],
         },
       },
@@ -728,6 +743,12 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.ok(traceEventMeta(events[11]).includes("included_ref_count=2"));
   assert.ok(traceEventMeta(events[12]).includes("record_count=1"));
   assert.ok(traceEventMeta(events[12]).includes("summary_kind=deterministic_context_budget"));
+  assert.ok(traceEventMeta(events[13]).includes("decision=checkpoint_requeue"));
+  assert.ok(traceEventMeta(events[13]).includes("profile=multi_step_workspace"));
+  assert.ok(traceEventMeta(events[13]).includes("cumulative_model_turns=7"));
+  assert.ok(traceEventMeta(events[13]).includes("cumulative_tool_calls=15"));
+  assert.ok(traceEventMeta(events[13]).includes("continuation_index=2"));
+  assert.ok(traceEventMeta(events[13]).includes("soft_slice_exhausted=true"));
   assert.equal(buildTaskTraceEventView(events[1], "en").title, "Checkpoint saved");
   assert.equal(buildTaskTraceEventView(events[1], "en").tone, "attention");
   assert.equal(buildTaskTraceEventView(events[2], "en").detail, "run_cmd is running.");
@@ -755,6 +776,12 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.equal(buildTaskTraceEventView(events[10], "en").tone, "ok");
   assert.equal(buildTaskTraceEventView(events[11], "en").title, "Context budget");
   assert.equal(buildTaskTraceEventView(events[12], "en").title, "Context compaction");
+  assert.equal(buildTaskTraceEventView(events[13], "en").title, "Task budget decision");
+  assert.equal(
+    buildTaskTraceEventView(events[13], "en").detail,
+    "multi_step_workspace · checkpoint_requeue · continuation 2",
+  );
+  assert.equal(buildTaskTraceEventView(events[13], "en").tone, "attention");
 });
 
 test("collects artifact refs recursively without duplicate mirrored arrays", () => {

@@ -15,7 +15,7 @@ fn generic_content_tail_read_does_not_replace_failed_synthesis() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("**执行过程**\n1. 调用技能 `system_basic`（action=read_range）".to_string());
@@ -66,7 +66,7 @@ fn tail_read_directory_inventory_projection_uses_planned_tail_count() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push(
         "files.count=4\nfiles:\n- alpha.log\n- beta.log\n- gamma.log\n- omega.log".to_string(),
     );
@@ -147,7 +147,7 @@ fn bounded_head_read_range_observed_answer_replaces_failed_synthesis_for_content
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let stale_failure =
         "read_range completed, but final user-facing answer was not produced".to_string();
     loop_state.delivery_messages.push(stale_failure.clone());
@@ -206,7 +206,7 @@ fn bounded_head_read_range_recovery_allows_unclassified_failed_free_route() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("finalizer did not produce a publishable answer".to_string());
@@ -268,7 +268,7 @@ fn generic_one_sentence_content_keeps_model_synthesis_authority() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("unsupported synthesis".to_string());
@@ -320,7 +320,7 @@ fn tail_read_range_rejects_unclassified_content_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("已有执行结果，但我没能整理成可靠结论。".to_string());
@@ -362,7 +362,7 @@ fn tail_read_range_backfill_reads_extra_wrapped_fs_basic_output() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -395,7 +395,7 @@ fn tail_read_range_observed_answer_ignores_json_hidden_in_visible_text() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push("current synthesized summary".to_string());
@@ -442,7 +442,7 @@ fn strict_exact_tail_read_replaces_synthesized_failure_from_log_contents() {
         ..Default::default()
     };
     let synthesis = "The log shows HTTP 401 and says the task cannot continue.".to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push(synthesis.clone());
     loop_state.last_user_visible_respond = Some(synthesis.clone());
@@ -494,7 +494,7 @@ async fn finalize_loop_reply_strict_exact_tail_read_overrides_synthesized_failur
         ..Default::default()
     };
     let synthesis = "Reading failed because the observed log line contains HTTP 401.".to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push(synthesis.clone());
     loop_state.last_user_visible_respond = Some(synthesis.clone());
@@ -562,7 +562,7 @@ async fn enforce_contract_keeps_strict_exact_tail_read_with_error_like_log_text(
         ..Default::default()
     };
     let observed = "WARN provider failed: http 401: Please carry the API secret key\nWARN memory preference fallback failed: http 401";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push(observed.to_string());
     loop_state.last_user_visible_respond = Some(observed.to_string());
@@ -602,7 +602,7 @@ fn generic_content_tail_read_keeps_machine_projection_for_model_synthesis() {
         ..Default::default()
     };
     let machine_projection = "path=/home/guagua/rustclaw/logs/clawd.log\ncontent_excerpt:\n1|old";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
         .push(machine_projection.to_string());
@@ -649,7 +649,7 @@ async fn content_evidence_failure_defers_when_latest_tail_read_range_available()
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "synthesize_answer",
@@ -683,7 +683,7 @@ fn generic_one_sentence_tail_read_does_not_select_a_line_in_runtime() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
@@ -716,7 +716,7 @@ fn tail_read_range_observed_answer_preserves_existing_content_summary() {
         ..Default::default()
     };
     let summary = "最后几行都是同一任务的工具调度记录。".to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .delivery_messages
@@ -765,7 +765,7 @@ fn generic_tail_read_does_not_replace_model_summary() {
     let older_summary = "model_io.log 里 error、failed、timeout 各出现 1 次。".to_string();
     let raw_tail_answer =
         "2026-05-20T09:00:00Z INFO prompt queued\n2026-05-20T09:00:01Z ERROR model timeout";
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .delivery_messages
@@ -827,7 +827,7 @@ fn tail_read_range_observed_answer_preserves_latest_registered_respond() {
         ..Default::default()
     };
     let summary = "最后几行都是同一任务的工具调度记录。".to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .delivery_messages
@@ -872,7 +872,7 @@ fn generic_tail_read_does_not_reconstruct_model_summary_from_step_history() {
     };
     let summary =
         "clawd.run.log 的尾部都是 INFO 级 task_call 流转，整体更像服务正常启动而非刚遇到报错。";
-    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .delivery_messages
@@ -932,7 +932,7 @@ fn tail_read_range_observed_answer_replaces_synthesis_after_tail_for_strict_raw_
     let raw_tail_json = r#"{"action":"read_range","mode":"tail","requested_n":5,"excerpt":"7|{\"status\":\"ok\",\"model\":\"gpt-4o-mini\",\"prompt_source\":\"clarify\"}\n8|{\"status\":\"ok\",\"model\":\"gpt-4o-mini\",\"prompt_source\":\"context\"}\n9|{\"status\":\"ok\",\"model\":\"gpt-4o-mini\",\"prompt_source\":\"context\"}"}"#;
     let synthesis = "{\"status\":\"ok\",\"model\":\"gpt-4o-mini\",\"prompt_source\":\"clarify\"}\n{\"status\":\"ok\",\"model\":\"gpt-4o-mini\",\"prompt_source\":\"context\"}\n{\"status\":\"ok\",\"model\":\"gpt-4o-mini\",\"prompt_source\":\"context\"}\n\nAll records are ok and show one continuous model-handled task flow."
         .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push(synthesis.clone());
     loop_state.last_user_visible_respond = Some(synthesis.clone());

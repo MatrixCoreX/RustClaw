@@ -58,7 +58,12 @@ flowchart TD
     V --> W[证据覆盖 + 答案形状检查]
     W -->|修复 / 缺证据| WR[RepairEnvelope<br/>issue codes + attempt ledger]
     WR --> J
-    W -->|完成| X[观测输出收尾]
+    W -->|本轮已观测| BD{BudgetDecision<br/>progress + deadline + policy + hard ceilings}
+    BD -->|continue| J
+    BD -->|finish| X[观测输出收尾]
+    BD -->|checkpoint_requeue / waiting / needs_user| BC[持久化 TaskBudgetSlice + task_checkpoint<br/>释放精确 claim]
+    BC --> ASP
+    BD -->|terminal| X
     R --> Y[用户可见消息组装]
     X --> Y
     Y --> Z[输出契约护栏 + 任务结果]
@@ -103,11 +108,12 @@ flowchart TD
 - `permission_decision`：verifier 和 preflight blocker 输出 `allowed`、`needs_confirmation`、`denied_by_policy`、`dry_run_required`、`external_provider_blocked`、`risk_level`、`action_effect`、registry dedup/idempotency 等机器字段。UI、API、finalizer 和 i18n 应消费这些字段渲染说明，而不是解析 runtime prose。
 - `Async job start`：长尾工具可以先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after`、`can_poll`、`can_cancel` 的机器回复，同时任务仍可通过 checkpoint 轮询恢复。媒体技能通过 registry capability 暴露这类形状，例如 `image.generate` / `image.poll` / `image.cancel`、`audio.synthesize` / `audio.poll` / `audio.cancel`、`video.generate` / `video.poll` / `video.cancel` 和 `music.generate` / `music.poll` / `music.cancel`。
 - `Evidence coverage`：工具、技能和合成输出都会成为循环内观测；缺证据或可恢复失败会带着压缩的已尝试方法历史回到循环。
+- `TaskBudgetSlice / BudgetDecision`：交互任务使用可恢复的软墙钟切片和结构化进度，不再把普通 `max_rounds` 或 `max_tool_calls` 当完成阈值。每次模型/工具结果被观测后，runtime 根据 verifier 通过的计划事实、evidence/artifact 进度、continuation、policy、取消、deadline 和管理员硬上限，选择 `continue`、`finish`、`checkpoint_requeue`、`waiting`、`needs_user` 或 `terminal`。模型可以请求续跑，但不能提高成本、权限、时间或资源上限。
 - `RepairEnvelope`：repair 是有边界的循环内恢复。运行时提供 `repair_source`、`issue_codes`、`missing_evidence`、`permission_decision`、`provider_status`、`attempt_fingerprint`、`side_effect_fingerprint`、`checkpoint_id`、`next_recovery_kind` 等机器字段；planner/finalizer 可以据此重新规划、澄清、转后台等待或结构化失败，而不是解析本地化 prose。
 - `Observed-output finalizer`：只有答案形状与证据契约满足后，才发布有观测依据的结果。
 - `Output-contract guard`：保存结果前规范最终文本、`messages` 数组、文件 token、标量/严格输出形状和通道交付一致性。
 - `Journal + session update`：任务状态、观测事实和活跃会话锚点在收尾后持久化；后台记忆任务是可选、非阻塞的。
-- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`task_transition`、`checkpoint_created`、`tool_started`、`tool_step`、`tool_finished`、`coding_checkpoint`、`coding_task_contract`、`coding_evidence`、`provider_call`、`agent_hook`、`subagent`、`agent_team_started`、`subagent_finished`、`agent_team_aggregated` 和 `task_final`。CLI 与 UI 直接渲染这些字段，包括 `evidence_ref`、`checkpoint_ref`、`checkpoint_kind`、`pending_async_job_id`、coding 计数、验证命令计数/token、验证状态/失败类别 token、`projection_revision`、`latest_verification_step_ref`、历史失败字段、未验证风险 token、`prompt_truncation_count`、`prompt_bytes_before_max` 和 step 时间字段，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
+- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`budget_decision`、`task_transition`、`checkpoint_created`、工具/coding/provider/hook/subagent 事件和 `task_final`。CLI 与 UI 直接渲染预算 profile/decision、continuation index、累计模型/工具/token/成本/耗时、soft-slice 状态、checkpoint、验证和 team 进度等机器字段，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
 
 ### Planner、LLM 与 Capability 流程
 
@@ -389,13 +395,13 @@ flowchart TD
     ZAP --> ZB
     ZA -->|terminal success/failure| ZB[Persist result_json/status]
     J --> ZC[Heartbeat + process ask/run_skill]
-    ZC --> ZD{agent loop outcome}
-    ZD -->|soft budget/provider wait/async job| ZE[task_lifecycle<br/>waiting/background + task_checkpoint + repair_signal]
+    ZC --> ZD{BudgetDecision + agent loop outcome}
+    ZD -->|checkpoint_requeue/provider wait/async job| ZE[task_lifecycle<br/>waiting/background + task_checkpoint + TaskBudgetSlice]
     ZE --> D
     ZE --> ZEE[checkpoint_created event<br/>checkpoint_ref + pending_async_job_id]
     ZD -->|needs user| S
     ZD -->|complete| ZB
-    ZC --> ZCE[tool_started / tool_finished / coding_checkpoint / coding_evidence events]
+    ZC --> ZCE[budget_decision / tool_started / tool_finished<br/>coding_checkpoint / coding_evidence events]
     ZB --> ZF[通道交付 + 会话更新]
     ZB --> ZG[Task journal trace + event_stream]
     ZG --> ZW[CLI / UI watch + report]
@@ -444,7 +450,7 @@ clawcli goal edit task-123 --objective "updated goal" --done tests_pass --goal-s
 clawcli goal clear task-123
 ```
 
-- task event stream 包含状态迁移、checkpoint、工具生命周期、coding checkpoint/evidence、provider、hook、subagent 和 final 事件。`clawcli events/watch`、`clawcli report`、`clawcli review`、`clawcli subagents`、`clawcli permission inspect` 与浏览器任务详情会渲染 `evidence_ref`、`checkpoint_ref`、`checkpoint_kind`、`pending_async_job_id`、`step_ref`、`changed_file_count`、`test_count`、`verification_command_count`、`verification_command`、`verification_commands`、`verification_status`、`verification_failure_kinds`、`unverified_risk`、`llm_budget_status`、`child_run_id`、`tool_permission_profile`、`read_only_enforced`、`write_isolation_status`、`isolation_profile`、`sandbox_source`、`started_at`、`finished_at` 等机器字段；原始 event JSON 放在二级详情。
+- task event stream 包含 goal、context budget/compaction、task-budget decision、状态迁移、checkpoint、工具/coding/provider/hook/subagent 和 final 事件。CLI、report 和浏览器任务详情直接渲染 `decision`、`profile`、`continuation_index`、累计模型/工具/token/成本/耗时、`soft_slice_exhausted`、`resumable`、checkpoint、验证证据和 team 进度等稳定机器字段；原始 event JSON 放在二级详情。
 - `clawcli run-skill <skill_name> --args-json '{...}'` 提交显式 `kind=run_skill` 任务，不走自然语言路由；加 `--wait` 可轮询同一个 `task_id`。
 - `clawcli skills` 读取 registry-backed 技能元数据；`clawcli capabilities` 读取扁平化 `/v1/capabilities` 机器端点。脚本消费时请加 `--json`。
 - `clawcli llm-trace <task_id> [--raw] [--limit N]` 读取 task debug endpoint，并用 `llm_call_ref=LLM#1..N` 输出每轮 LLM 调用编号、flow/code attribution、provider/model/status、usage token，以及可选 raw request/response 字段。
@@ -452,7 +458,7 @@ clawcli goal clear task-123
 - 普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。
 - async 长尾工具应启动外部 job、写入 `pending_async_job`、建立 checkpoint，并先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after` 的 accepted 机器回复；当 provider 或 dry-run adapter 支持时，poll 和 cancel 也应作为结构化 capability 暴露。后续由 worker recovery 通过 `poll_async_job` 继续轮询。
 - terminal async poll projection 会保留已有 ask 可见回复；如果 ask 任务只有机器 executor 输出，则补一个包含 `checkpoint_id`、`poll_ref`、`task_id` 和 `final_result_json` 的机器 JSON 回复。
-- seeded resume 会恢复 checkpoint 中的预算计数、observations、artifact refs、repair budget 字段和已完成 side-effect fingerprints，再重新进入 agent loop。
+- seeded resume 会恢复持久化的 `TaskBudgetSlice`、累计模型/工具/token/成本/耗时、continuation index、observations、artifact refs、repair 状态和已完成 side-effect fingerprints，再重新进入 agent loop。健康任务只要持续产生结构化进度，就可以跨越旧 4-round/12-tool 数值；真正停止由重复/停滞、取消、policy 或管理员硬上限决定。
 - runtime recovery 和 projection 只移动 `status_code`、`message_key`、`executor_state`、`resume_directive`、`job_id`、artifact refs 等机器字段。用户可见 prose 由 finalizer、i18n、UI 或模型渲染。
 - Lease/heartbeat 模型见 `docs/task_lifecycle_lease_model.md`；foreground 与 resume-executor 的每次写入都由 task row 的精确 `(lease_owner, claim_attempt)` 隔离。heartbeat 只能续租当前 claim，checkpoint recovery 会推进 generation，旧 worker 不能再发布 claimed process event 或覆盖终态结果。
 

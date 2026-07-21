@@ -1,6 +1,7 @@
 use super::{
-    BudgetDecision, BudgetHardCeilings, BudgetObservation, BudgetProgress, TaskBudgetProfile,
-    TaskBudgetSlice,
+    profile_for_verified_plan, task_budget_policy_from_toml, BudgetDecision, BudgetHardCeilings,
+    BudgetObservation, BudgetProgress, BudgetTimeoutClass, TaskBudgetProfile, TaskBudgetSlice,
+    VerifiedPlanBudgetFacts,
 };
 
 fn slice() -> TaskBudgetSlice {
@@ -10,18 +11,21 @@ fn slice() -> TaskBudgetSlice {
         BudgetHardCeilings {
             model_turns: 20,
             tool_calls: 40,
+            total_tokens: 100_000,
+            cost_usd_nanos: 1_000_000_000,
             elapsed_ms: 600_000,
             continuations: 8,
+            non_resumable_tool_runtime_ms: 60_000,
         },
     )
 }
 
 #[test]
-fn progress_with_capacity_continues() {
+fn progress_crosses_former_round_and_tool_thresholds() {
     let mut slice = slice();
     let decision = slice.observe(BudgetObservation {
-        cumulative_model_turns: 5,
-        cumulative_tool_calls: 13,
+        cumulative_model_turns: 6,
+        cumulative_tool_calls: 14,
         cumulative_elapsed_ms: 40_000,
         progress: BudgetProgress {
             evidence_count: 2,
@@ -34,7 +38,7 @@ fn progress_with_capacity_continues() {
 
     assert_eq!(decision, BudgetDecision::Continue);
     assert!(slice.progress.observed_progress());
-    assert_eq!(slice.cumulative_tool_calls, 13);
+    assert_eq!(slice.cumulative_tool_calls, 14);
 }
 
 #[test]
@@ -116,6 +120,28 @@ fn administrator_ceiling_is_terminal_even_with_progress() {
 }
 
 #[test]
+fn historical_progress_does_not_hide_repeated_stagnation() {
+    let mut slice = slice();
+    slice.progress.evidence_count = 4;
+    slice.progress.completed_plan_nodes = 2;
+    let decision = slice.observe(BudgetObservation {
+        cumulative_model_turns: 6,
+        cumulative_tool_calls: 9,
+        progress: BudgetProgress {
+            evidence_count: 4,
+            completed_plan_nodes: 2,
+            stagnation_count: 3,
+            ..BudgetProgress::default()
+        },
+        stagnation_exhausted: true,
+        resumable: true,
+        ..BudgetObservation::default()
+    });
+
+    assert_eq!(decision, BudgetDecision::Terminal);
+}
+
+#[test]
 fn checkpoint_round_trip_resumes_once() {
     let mut original = slice();
     original.observe(BudgetObservation {
@@ -138,4 +164,79 @@ fn checkpoint_round_trip_resumes_once() {
     assert_eq!(restored.cumulative_tool_calls, 17);
     assert_eq!(restored.progress.verified_state_transitions, 3);
     assert_eq!(restored.last_decision, BudgetDecision::Continue);
+}
+
+#[test]
+fn machine_config_selects_profile_slice_and_admin_ceilings() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[agent.task_budget]
+admin_max_model_turns = 80
+admin_max_tool_calls = 160
+admin_max_total_tokens = 500000
+admin_max_cost_usd_nanos = 9000000000
+admin_max_elapsed_seconds = 7200
+admin_max_continuations = 12
+admin_max_non_resumable_tool_seconds = 900
+
+[agent.task_budget.profiles.multi_step_workspace]
+soft_slice_seconds = 420
+stagnation_tolerance = 5
+provider_timeout_class = "standard"
+tool_timeout_class = "long_tail"
+"#,
+    )
+    .expect("task budget config");
+
+    let policy = task_budget_policy_from_toml(&parsed);
+    let profile = policy.profile(TaskBudgetProfile::MultiStepWorkspace);
+
+    assert_eq!(profile.soft_slice_ms, 420_000);
+    assert_eq!(profile.stagnation_tolerance, 5);
+    assert_eq!(profile.provider_timeout_class, BudgetTimeoutClass::Standard);
+    assert_eq!(profile.tool_timeout_class, BudgetTimeoutClass::LongTail);
+    assert_eq!(policy.hard_ceilings.model_turns, 80);
+    assert_eq!(policy.hard_ceilings.tool_calls, 160);
+    assert_eq!(policy.hard_ceilings.total_tokens, 500_000);
+    assert_eq!(policy.hard_ceilings.cost_usd_nanos, 9_000_000_000);
+    assert_eq!(policy.hard_ceilings.elapsed_ms, 7_200_000);
+    assert_eq!(policy.hard_ceilings.continuations, 12);
+    assert_eq!(policy.hard_ceilings.non_resumable_tool_runtime_ms, 900_000);
+}
+
+#[test]
+fn verified_machine_plan_facts_select_profiles_without_user_text() {
+    assert_eq!(
+        profile_for_verified_plan(VerifiedPlanBudgetFacts {
+            action_count: 1,
+            observe_count: 1,
+            ..VerifiedPlanBudgetFacts::default()
+        }),
+        TaskBudgetProfile::FastRead
+    );
+    assert_eq!(
+        profile_for_verified_plan(VerifiedPlanBudgetFacts {
+            action_count: 2,
+            observe_count: 2,
+            evidence_required: true,
+            ..VerifiedPlanBudgetFacts::default()
+        }),
+        TaskBudgetProfile::GroundedSummary
+    );
+    assert_eq!(
+        profile_for_verified_plan(VerifiedPlanBudgetFacts {
+            action_count: 3,
+            mutate_count: 1,
+            needs_confirmation: true,
+            ..VerifiedPlanBudgetFacts::default()
+        }),
+        TaskBudgetProfile::MultiStepWorkspace
+    );
+    assert_eq!(
+        profile_for_verified_plan(VerifiedPlanBudgetFacts {
+            ops_closed_loop: true,
+            ..VerifiedPlanBudgetFacts::default()
+        }),
+        TaskBudgetProfile::OpsClosedLoop
+    );
 }

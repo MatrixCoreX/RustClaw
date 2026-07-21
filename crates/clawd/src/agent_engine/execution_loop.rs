@@ -332,17 +332,19 @@ pub(super) async fn execute_actions_once(
         let global_step = loop_state.total_steps_executed + 1;
         let fingerprint = super::action_fingerprint_for_policy(state, policy, action);
         if action_counts_as_tool_call(action)
-            && loop_state.tool_calls_total >= policy.max_tool_calls.max(1)
+            && loop_state.task_budget_slice.as_ref().is_some_and(|slice| {
+                loop_state.tool_calls_total as u64 >= slice.hard_ceilings.tool_calls
+            })
         {
             info!(
-                "executor_result_error task_id={} round={} step={} type=guard error=max_tool_calls reached={} action={}",
+                "executor_result_error task_id={} round={} step={} type=guard error=task_budget_admin_tool_ceiling reached={} action={}",
                 task.task_id,
                 loop_state.round_no,
                 step_in_round,
-                policy.max_tool_calls,
+                loop_state.tool_calls_total,
                 plan_step_label(action)
             );
-            stop_signal = Some("max_tool_calls".to_string());
+            stop_signal = Some("task_budget_admin_tool_ceiling".to_string());
             break;
         }
         if let Some(reason) = check_repeat_action_guard(

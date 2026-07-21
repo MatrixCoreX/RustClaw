@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn content_evidence_contractual_terminal_answer_is_kept_before_meta_classifier() {
     let answer = "最先该做的是：验证配置能否正确加载。";
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(answer.to_string());
     loop_state.delivery_messages.push(answer.to_string());
@@ -44,7 +44,7 @@ fn content_evidence_contractual_terminal_answer_is_kept_before_meta_classifier()
 #[test]
 fn content_evidence_one_sentence_terminal_answer_is_kept_without_domain_routing() {
     let answer = "最先该做的是**验证配置能正确加载**。";
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(answer.to_string());
     loop_state.delivery_messages.push(answer.to_string());
@@ -75,7 +75,7 @@ fn content_evidence_one_sentence_terminal_answer_is_kept_without_domain_routing(
 #[test]
 fn content_evidence_keeps_strict_json_projection_before_meta_classifier() {
     let answer = r#"{"created_files":["/workspace/calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(answer.to_string());
     loop_state.delivery_messages.push(answer.to_string());
@@ -129,7 +129,7 @@ fn content_evidence_keeps_strict_json_projection_before_meta_classifier() {
 #[test]
 fn content_evidence_scalar_heading_terminal_answer_is_kept_before_meta_classifier() {
     let answer = "Service Notes";
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(answer.to_string());
     loop_state.delivery_messages.push(answer.to_string());
@@ -170,7 +170,7 @@ fn content_evidence_scalar_heading_terminal_answer_is_kept_before_meta_classifie
 #[test]
 fn content_evidence_contractual_terminal_answer_requires_observation() {
     let answer = "配置加载检查应先做。";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -193,7 +193,7 @@ fn content_evidence_contractual_terminal_answer_requires_observation() {
 #[test]
 fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
     let listing = "base_skill_response_contract.md\nskill_integration_guide.md";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(listing.to_string());
     loop_state.delivery_messages.push(listing.to_string());
@@ -234,7 +234,7 @@ fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
 #[test]
 fn single_listing_entry_passthrough_is_dropped_for_content_evidence() {
     let listing = "base_skill_response_contract.md\nskill_integration_guide.md";
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some("base_skill_response_contract.md".to_string());
     loop_state

@@ -183,7 +183,7 @@ fn observed_answer_language_compatibility_does_not_treat_prose_as_machine_fields
 
 #[test]
 fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_machine_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -311,7 +311,7 @@ count=2"#,
 
 #[test]
 fn generic_content_is_not_hard_summarized_by_observed_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -341,7 +341,7 @@ fn generic_content_is_not_hard_summarized_by_observed_output() {
 async fn observed_fallback_keeps_strict_exact_tail_read_before_composer() {
     let state = AppState::test_default_with_fixture_provider();
     let task = claimed_task("task-observed-strict-raw-tail");
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -385,7 +385,7 @@ async fn observed_fallback_keeps_strict_exact_tail_read_before_composer() {
 
 #[test]
 fn direct_answer_keeps_fallback_for_unstructured_content() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "read_file",
@@ -414,7 +414,7 @@ fn direct_answer_keeps_fallback_for_unstructured_content() {
 
 #[test]
 fn direct_answer_defers_doc_parse_content_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "doc_parse",
@@ -441,7 +441,7 @@ fn direct_answer_defers_doc_parse_content_to_model_synthesis() {
 
 #[test]
 fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "doc_parse",
@@ -470,7 +470,7 @@ fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
 
 #[test]
 fn direct_answer_defers_filename_content_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -498,7 +498,7 @@ fn direct_answer_defers_filename_content_to_model_synthesis() {
 
 #[test]
 fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -530,7 +530,7 @@ fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
 
 #[test]
 fn exact_observation_output_read_range_direct_answer_preserves_visible_blank_line() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -563,7 +563,7 @@ fn exact_observation_output_read_range_direct_answer_preserves_visible_blank_lin
 
 #[test]
 fn raw_read_range_direct_answer_sanitizes_log_excerpt() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let skill_output = serde_json::json!({
             "action": "read_range",
             "path": "/tmp/feishud.log",
@@ -605,7 +605,7 @@ fn raw_read_range_direct_answer_sanitizes_log_excerpt() {
 
 #[test]
 fn scalar_route_fs_basic_tail_read_range_prefers_structured_excerpt() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "run_cmd",
@@ -653,7 +653,7 @@ fn scalar_route_fs_basic_tail_read_range_prefers_structured_excerpt() {
 
 #[test]
 fn direct_answer_defers_path_content_to_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -681,7 +681,7 @@ fn direct_answer_defers_path_content_to_model_synthesis() {
 
 #[test]
 fn direct_answer_does_not_passthrough_read_range_when_summary_is_requested() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -711,7 +711,7 @@ fn direct_answer_does_not_passthrough_read_range_when_summary_is_requested() {
 
 #[test]
 fn direct_answer_defers_read_range_passthrough_when_language_conflicts() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
@@ -742,7 +742,7 @@ fn direct_answer_defers_read_range_passthrough_when_language_conflicts() {
 
 #[test]
 fn path_inspection_contract_does_not_passthrough_read_range() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -776,7 +776,7 @@ fn path_inspection_contract_does_not_passthrough_read_range() {
 
 #[test]
 fn direct_answer_prefers_current_turn_excerpt_summary_request_over_resolved_intent_drift() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",

@@ -23,7 +23,7 @@ fn structured_respond_clarify_step_marks_loop_pending_user_input() {
         }],
     );
     let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
 
     assert!(loop_state.pending_user_input_required);
@@ -68,7 +68,7 @@ fn boundary_observation_tool_action_forces_machine_clarify_without_delivery() {
             "name": "test_calc_core.py"
         }),
     }];
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.boundary_observation_needs_clarify = true;
 
@@ -118,7 +118,7 @@ fn boundary_observation_with_concrete_tool_target_defers_to_agent_loop() {
             "n": 20
         }),
     }];
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.boundary_observation_needs_clarify = true;
 
@@ -153,7 +153,7 @@ fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_
     route.locator_kind = OutputLocatorKind::None;
     route.delivery_required = false;
     route.delivery_intent = OutputDeliveryIntent::None;
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     let first = try_recover_inconsistent_boundary_clarify(&mut loop_state, Some(&route), &intent)
         .expect("inconsistent boundary clarify should be recoverable");
@@ -233,7 +233,7 @@ fn planner_locator_contract_does_not_recover_clarify_into_plan_file_read() {
     route.locator_kind = OutputLocatorKind::Path;
     route.delivery_required = false;
     route.delivery_intent = OutputDeliveryIntent::None;
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     assert!(
         try_recover_inconsistent_boundary_clarify(&mut loop_state, Some(&route), &intent,)
@@ -264,7 +264,7 @@ fn decision_envelope_output_vars_do_not_expose_initial_gate_ref_as_field() {
             why: String::new(),
         }],
     );
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     record_agent_loop_decision_envelope_output_vars(&mut loop_state, &plan);
 
@@ -312,7 +312,7 @@ fn decision_envelope_output_vars_include_clarify_machine_fields_from_raw_plan() 
             why: String::new(),
         }],
     );
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     record_agent_loop_decision_envelope_output_vars(&mut loop_state, &plan);
 
@@ -360,7 +360,7 @@ fn decision_envelope_answer_clears_stale_clarify_machine_fields() {
             why: String::new(),
         }],
     );
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
 
     record_agent_loop_decision_envelope_output_vars(&mut loop_state, &clarify_plan);
     loop_state.pending_user_input_required = true;

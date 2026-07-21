@@ -98,7 +98,7 @@ fn execution_output_json_strips_text_and_error_text_fields() {
 
 #[test]
 fn execution_summary_suppressed_for_grounded_content_answer() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -132,7 +132,7 @@ fn execution_summary_suppressed_for_grounded_content_answer() {
 
 #[test]
 fn execution_summary_is_not_attached_before_final_delivery() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -182,7 +182,7 @@ fn execution_summary_is_not_attached_before_final_delivery() {
 
 #[test]
 fn evidence_contract_delivery_suppresses_execution_summary_for_name_list_answer() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -207,7 +207,7 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_name_list_answer(
 
 #[test]
 fn evidence_contract_delivery_suppresses_execution_summary_for_status_answer() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "http_basic",
@@ -235,7 +235,7 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_status_answer() {
 
 #[test]
 fn execution_summary_is_not_attached_for_japanese_request() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -279,7 +279,7 @@ fn execution_summary_is_not_attached_for_japanese_request() {
 
 #[test]
 fn execution_summary_suppressed_for_scalar_value_contract() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -327,7 +327,7 @@ fn execution_summary_drops_existing_summary_for_scalar_delivery_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -358,7 +358,7 @@ fn execution_summary_drops_existing_summary_for_config_guard_delivery() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_edit",
@@ -387,7 +387,7 @@ fn execution_summary_drops_existing_summary_for_transform_result_delivery() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "transform",
@@ -416,7 +416,7 @@ fn execution_summary_drops_existing_summary_for_strict_synthesized_delivery() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -450,7 +450,7 @@ fn execution_summary_drops_existing_summary_for_synthesized_content_delivery() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -474,7 +474,7 @@ fn execution_summary_drops_existing_summary_for_synthesized_content_delivery() {
 
 #[test]
 fn execution_summary_suppressed_for_multi_structured_scalar_synthesis() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -498,7 +498,7 @@ fn execution_summary_suppressed_for_multi_structured_scalar_synthesis() {
 
 #[test]
 fn execution_summary_suppressed_for_scalar_content_synthesis() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -518,7 +518,7 @@ fn execution_summary_suppressed_for_scalar_content_synthesis() {
 
 #[test]
 fn execution_summary_is_not_attached_for_multiple_execution_steps() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -573,7 +573,7 @@ fn execution_summary_is_not_attached_for_multiple_execution_steps() {
 
 #[test]
 fn execution_summary_message_builder_returns_none_for_english_requests() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -610,7 +610,7 @@ fn execution_summary_message_builder_returns_none_for_english_requests() {
 
 #[test]
 fn execution_summary_builder_stays_disabled_for_shifted_rounds() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -686,7 +686,7 @@ fn execution_summary_builder_stays_disabled_for_shifted_rounds() {
 
 #[test]
 fn execution_summary_builder_stays_disabled_when_global_step_ids_shift() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -759,7 +759,7 @@ fn execution_summary_builder_stays_disabled_when_global_step_ids_shift() {
 
 #[test]
 fn virtual_tool_execution_summary_builder_stays_disabled_without_plan_step() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -780,7 +780,7 @@ fn virtual_tool_execution_summary_builder_stays_disabled_without_plan_step() {
 
 #[test]
 fn virtual_tool_execution_summary_builder_stays_disabled_when_plan_used_call_skill() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -817,7 +817,7 @@ fn virtual_tool_execution_summary_builder_stays_disabled_when_plan_used_call_ski
 fn observed_synthesis_unavailable_fails_loud_without_execution_summary() {
     let state = test_state();
     let task = claimed_task("task-observed-llm-unavailable");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -856,7 +856,7 @@ fn observed_synthesis_unavailable_fails_loud_without_execution_summary() {
 
 #[test]
 fn execution_summary_is_not_attached_for_exact_observed_passthrough_delivery() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -904,7 +904,7 @@ fn execution_summary_skips_for_exact_observation_output_route() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -923,7 +923,7 @@ fn execution_summary_suppressed_for_strict_content_excerpt_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -964,7 +964,7 @@ fn execution_summary_suppressed_for_generic_path_content_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -990,7 +990,7 @@ fn execution_summary_sanitizes_log_excerpt_secrets_and_ansi() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
@@ -1008,7 +1008,7 @@ fn execution_summary_suppressed_for_exact_file_names_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "list_dir",
@@ -1032,7 +1032,7 @@ fn execution_summary_skips_for_exact_sentence_count_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "doc_parse",
@@ -1060,7 +1060,7 @@ fn execution_summary_skips_for_scalar_count_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -1083,7 +1083,7 @@ fn execution_summary_skips_for_scalar_count_inventory_observation() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -1106,7 +1106,7 @@ fn execution_summary_skips_for_strict_json_container_delivery() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "db_basic",
@@ -1131,7 +1131,7 @@ fn execution_summary_suppressed_for_file_names_contract_even_with_original_user_
         user_request: Some("List the first five filenames under logs.".to_string()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "list_dir",
@@ -1155,7 +1155,7 @@ fn execution_summary_is_not_attached_for_failed_file_token_delivery() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -1201,7 +1201,7 @@ fn execution_summary_suppressed_for_successful_file_token_delivery() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -1248,7 +1248,7 @@ fn execution_summary_suppressed_for_path_inspection_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_search",
@@ -1269,7 +1269,7 @@ fn execution_summary_includes_direct_fs_search_structured_observation() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_search",
@@ -1298,7 +1298,7 @@ fn execution_summary_suppressed_for_scalar_contract_without_reading_user_text() 
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "list_dir",
@@ -1328,7 +1328,7 @@ fn execution_summary_builder_stays_disabled_for_long_outputs() {
         output_contract: Some(free_route_result()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let long_output = format!("{}END", "x".repeat(1000));
     loop_state
         .executed_step_results
@@ -1339,7 +1339,7 @@ fn execution_summary_builder_stays_disabled_for_long_outputs() {
 
 #[test]
 fn execution_summary_builder_stays_disabled_for_recoverable_crypto_account_error() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_recoverable_failure_context = true;
     let err = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
     loop_state
@@ -1358,7 +1358,7 @@ fn execution_summary_builder_stays_disabled_for_recoverable_crypto_account_error
 
 #[test]
 fn content_evidence_failure_suppresses_execution_summary_for_missing_target() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "system_basic",

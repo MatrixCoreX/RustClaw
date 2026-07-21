@@ -32,7 +32,7 @@ fn assert_unresolved_runtime_template_respond_replans(content: &str) {
     let state = super::test_state_with_registry();
     let task = test_task();
     let policy = crate::agent_engine::support::load_agent_loop_guard_policy(&state);
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let actions = vec![AgentAction::Respond {
         content: content.to_string(),
@@ -58,7 +58,7 @@ fn assert_unresolved_runtime_template_respond_replans(content: &str) {
 fn assert_direct_template_guard_replans(content: &str, resolved_text: &str) {
     let state = super::test_state_with_registry();
     let task = test_task();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let outcome =
         super::super::respond_template_guard::unresolved_runtime_template_respond_outcome(

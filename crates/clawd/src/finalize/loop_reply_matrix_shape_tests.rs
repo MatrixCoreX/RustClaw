@@ -14,7 +14,7 @@ fn matrix_shape_replaces_stale_file_token_delivery_with_observed_directory_listi
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -103,7 +103,7 @@ fn matrix_shape_replaces_stale_file_token_delivery_with_bounded_read_excerpt() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -186,7 +186,7 @@ fn matrix_shape_keeps_direct_file_delivery_respond_over_bounded_read_excerpt() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -251,7 +251,7 @@ fn matrix_shape_keeps_file_token_when_plan_uses_runtime_file_selection_template(
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.round_traces.push(crate::task_journal::TaskJournalRoundTrace {
         round_no: 1,
         goal: "deliver selected file".to_string(),
@@ -315,7 +315,7 @@ fn active_bound_inventory_path_overrides_bare_path_directory_listing_contract() 
         cross_turn_recent_execution_context: Some("### ACTIVE_EXECUTION_ANCHOR\nfollowup_source_request: find report\nfollowup_op_kind: Read\nfollowup_bound_target: case_only/report.md\nobserved_bound_target: case_only/report.md".to_string()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -364,7 +364,7 @@ fn matrix_shape_guard_replaces_unstructured_strict_list_with_observed_list() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -408,7 +408,7 @@ fn matrix_shape_guard_replaces_scalar_count_field_placeholder_with_observed_valu
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -444,7 +444,7 @@ fn matrix_strict_list_shape_builds_list_from_observed_json() {
     route.locator_hint = "document".to_string();
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -476,7 +476,7 @@ fn matrix_strict_list_ignores_inventory_json_hidden_in_visible_text() {
         "root": "document"
     })
     .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -501,7 +501,7 @@ fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.limit = Some(3);
     route.selection.list_selector.include_metadata = Some(false);
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -534,7 +534,7 @@ fn matrix_path_list_inventory_uses_planner_output_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -576,7 +576,7 @@ fn matrix_filesystem_find_entries_contract_builds_path_list() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -608,7 +608,7 @@ fn matrix_path_list_collects_grep_text_name_results_from_wrapped_extra() {
     route.requires_content_evidence = true;
     route.response_shape = crate::OutputResponseShape::Strict;
     route.selection.structured_field_selector = Some("path".to_string());
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -642,7 +642,7 @@ fn matrix_file_name_list_prefers_wrapped_names_over_size_summary_synthesis() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -692,7 +692,7 @@ fn matrix_file_name_list_prefers_wrapped_names_over_size_summary_synthesis() {
 
 #[test]
 fn generic_observed_machine_projection_uses_inventory_names_by_kind() {
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -712,7 +712,7 @@ fn generic_observed_machine_projection_uses_inventory_names_by_kind() {
 
 #[test]
 fn generic_observed_machine_projection_uses_grep_matches() {
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -736,7 +736,7 @@ fn matrix_strict_list_shape_builds_directory_names_from_inventory_dirs() {
     route.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::Dir;
     route.selection.list_selector.target_kind_specified = true;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -758,7 +758,7 @@ fn name_list_renderer_uses_file_names_contract() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
     route.selection.list_selector.target_kind_specified = true;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -780,7 +780,7 @@ fn name_list_renderer_uses_directory_names_contract() {
     route.response_shape = crate::OutputResponseShape::Strict;
     route.selection.list_selector.target_kind = crate::OutputScalarCountTargetKind::Dir;
     route.selection.list_selector.target_kind_specified = true;
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",

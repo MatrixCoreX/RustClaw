@@ -301,8 +301,7 @@ pub(super) async fn try_run_post_write_validation_reserve_recovery(
     if actions.is_empty() {
         return Ok(false);
     }
-    let recovery_policy =
-        post_write_content_evidence_readback_recovery_policy(policy, loop_state, actions.len());
+    let recovery_policy = post_write_content_evidence_recovery_policy(policy, actions.len());
 
     loop_state.has_recoverable_failure_context = true;
     loop_state.delivery_messages.clear();
@@ -362,7 +361,6 @@ pub(super) fn post_write_validation_reserve_actions(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Vec<AgentAction> {
     if max_actions == 0
-        || loop_state.last_stop_signal.as_deref() != Some("max_tool_calls")
         || loop_state
             .output_vars
             .contains_key("agent_loop.post_write_validation_reserve_recovery_used")
@@ -524,18 +522,11 @@ fn validation_action_already_executed(
         .is_some_and(|command| executed_commands.contains(command))
 }
 
-pub(super) fn post_write_content_evidence_readback_recovery_policy(
+pub(super) fn post_write_content_evidence_recovery_policy(
     policy: &AgentLoopGuardPolicy,
-    loop_state: &LoopState,
     action_count: usize,
 ) -> AgentLoopGuardPolicy {
     let mut recovery_policy = policy.clone();
-    let bounded_extra_tool_calls = action_count.min(8);
-    recovery_policy.max_tool_calls = recovery_policy.max_tool_calls.max(
-        loop_state
-            .tool_calls_total
-            .saturating_add(bounded_extra_tool_calls),
-    );
     recovery_policy.max_steps = recovery_policy.max_steps.max(action_count.max(1));
     recovery_policy
 }

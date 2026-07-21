@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn requested_machine_kv_summary_does_not_replace_model_text_with_path_fact_template() {
     let task = claimed_task("task-machine-kv-path-fact-marker");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",

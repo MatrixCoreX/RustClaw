@@ -80,6 +80,34 @@ Checkpointed `waiting`, `background`, and `needs_user` work remains in `tasks.st
 
 An active resume-executor lease blocks duplicate resume work until it expires. Expired claims become eligible for recovery from the checkpoint and completed side-effect ledger. Claiming due checkpoint recovery increments the task-row `claim_attempt`. Every subsequent resume work-item, executor-plan, handoff, dispatch, execution result, result projection, and lease renewal carries that generation and requires the same task-row owner/generation.
 
+## Task Budget Slices
+
+Interactive agent work uses a persisted `TaskBudgetSlice` rather than a normal
+completion limit based on planner rounds or tool calls. After each model/tool
+result, the runtime evaluates a closed `BudgetDecision`: `continue`, `finish`,
+`checkpoint_requeue`, `waiting`, `needs_user`, or `terminal`.
+
+- Profiles are selected from verifier-approved plan length, capability effect,
+  evidence/delivery requirements, confirmation state, execution recipe, and
+  continuation state. User wording is not a budget-policy input.
+- Soft slice expiration with resumable state produces `checkpoint_requeue`,
+  publishes a claim-fenced `budget_decision` event, and stores cumulative
+  counters in the checkpoint.
+- Resume restores model/tool/token/cost/elapsed counters and increments the
+  continuation index exactly once.
+- Repetition, structured stagnation, cancellation, permission/sandbox policy,
+  and administrator hard ceilings remain deterministic boundaries.
+- Explicit round/tool caps remain valid only in non-interactive or child-task
+  request contracts. They are not global interactive-loop defaults.
+- The worker outer timeout remains a last-resort terminal boundary for a
+  non-resumable stuck operation, missing heartbeat, administrator hard ceiling,
+  or unrecoverable checkpoint failure. Healthy resumable work should reach a
+  soft checkpoint before it.
+
+Configured administrator hard ceilings cover cumulative model turns, tool
+calls, tokens, estimated cost, elapsed time, continuations, and non-resumable
+tool runtime. Model output cannot raise them.
+
 ## Recovery Rules
 
 - Ordinary stale `running` tasks can be marked `timeout` from machine timestamps and worker lease state.

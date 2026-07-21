@@ -11,7 +11,7 @@ FILE: prompts/schemas/intent_normalizer.schema.json (15570 bytes)
   "title": "IntentNormalizerOut",
   "description": "Schema for the JSON object returned by the unified intent normalizer prompt"
 }"#;
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", output));
@@ -68,7 +68,7 @@ File: intent_normalizer.schema.json (15570 bytes)
     "confidence"
   ]
 }"#;
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", output));

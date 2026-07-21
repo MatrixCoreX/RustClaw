@@ -444,6 +444,21 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "prompt_bytes_budget_min",
     "prompt_bytes_after_max",
     "prompt_truncated_bytes_total",
+    "profile",
+    "soft_slice_ms",
+    "continuation_index",
+    "cumulative_model_turns",
+    "cumulative_tool_calls",
+    "cumulative_input_tokens",
+    "cumulative_output_tokens",
+    "cumulative_cost_usd_nanos",
+    "cumulative_elapsed_ms",
+    "stagnation_tolerance",
+    "provider_timeout_class",
+    "tool_timeout_class",
+    "observed_progress",
+    "soft_slice_exhausted",
+    "resumable",
     "at_ms",
     "started_at",
     "finished_at",
@@ -645,6 +660,30 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       title: tLocal("上下文压缩", "Context compaction"),
       detail: tLocal(`压缩记录 ${count} 条。`, `${count} compaction record(s).`),
       tone: "attention",
+      meta,
+    };
+  }
+
+  if (eventType === "budget_decision") {
+    const decision = field("decision");
+    const profile = field("profile");
+    const continuation = field("continuation_index") || "0";
+    const budgetTone: TaskTraceEventView["tone"] =
+      decision === "terminal"
+        ? "failed"
+        : decision === "checkpoint_requeue" || decision === "waiting" || decision === "needs_user"
+          ? "attention"
+          : decision === "finish"
+            ? "ok"
+            : "running";
+    return {
+      eventType,
+      title: tLocal("任务预算决策", "Task budget decision"),
+      detail: tLocal(
+        `${profile || "general"} · ${decision || "continue"} · 续跑 ${continuation}`,
+        `${profile || "general"} · ${decision || "continue"} · continuation ${continuation}`,
+      ),
+      tone: budgetTone,
       meta,
     };
   }

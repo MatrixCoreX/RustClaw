@@ -112,7 +112,7 @@ async fn checkpointed_ask_finalization_overrides_failure_metric() {
         "schema_version": 1,
         "state": "waiting",
         "source": "agent_loop_soft_budget",
-        "resume_reason": "agent_loop_max_rounds",
+        "resume_reason": "task_budget_slice_exhausted",
         "next_check_after": 1781800060,
         "checkpoint_id": "ckpt-accepted"
     }));

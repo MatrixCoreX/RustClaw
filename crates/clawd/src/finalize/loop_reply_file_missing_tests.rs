@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn missing_file_search_evidence_detects_zero_match_fs_search() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_search".to_string(),
@@ -26,7 +26,7 @@ fn missing_file_search_evidence_detects_zero_match_fs_search() {
 
 #[test]
 fn missing_file_search_evidence_detects_missing_path_facts() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -54,7 +54,7 @@ fn missing_file_search_evidence_detects_missing_path_facts() {
 
 #[test]
 fn missing_file_search_evidence_detects_missing_path_facts_from_machine_extra() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -93,7 +93,7 @@ fn missing_file_search_evidence_ignores_json_hidden_in_visible_text() {
         "include_missing": true
     })
     .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -115,7 +115,7 @@ fn missing_file_search_evidence_ignores_json_hidden_in_visible_text() {
 
 #[test]
 fn latest_file_delivery_observation_treats_missing_path_facts_as_terminal_missing() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -162,7 +162,7 @@ fn latest_file_delivery_observation_treats_missing_path_facts_as_terminal_missin
 
 #[test]
 fn missing_file_search_evidence_detects_not_found_probe_output() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
@@ -178,7 +178,7 @@ fn missing_file_search_evidence_detects_not_found_probe_output() {
 
 #[test]
 fn missing_file_search_evidence_detects_system_basic_find_path_zero_matches() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -215,7 +215,7 @@ fn missing_file_search_evidence_detects_wrapped_fs_basic_find_name_zero_matches(
         "text": "{\"action\":\"find_name\",\"count\":0,\"exact\":false,\"patterns\":[\"definitely_missing_text_match_case_001.txt\"],\"results\":[],\"root\":\"document\"}"
     })
     .to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -268,7 +268,7 @@ async fn finalize_loop_reply_returns_not_found_for_missing_file_delivery() {
         ..Default::default()
     };
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -331,7 +331,7 @@ async fn finalize_loop_reply_inherits_language_for_missing_file_delivery_path_re
         ..Default::default()
     };
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -381,7 +381,7 @@ async fn finalize_loop_reply_returns_not_found_for_wrapped_fs_basic_missing_file
         ..Default::default()
     };
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -456,7 +456,7 @@ async fn finalize_loop_reply_returns_not_found_for_run_cmd_not_found_delivery() 
         ..Default::default()
     };
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -504,7 +504,7 @@ async fn finalize_loop_reply_returns_not_found_for_missing_path_facts_delivery()
         ..Default::default()
     };
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -570,7 +570,7 @@ async fn finalize_loop_reply_keeps_missing_file_delivery_when_synthesis_is_non_t
         ..Default::default()
     };
 
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),

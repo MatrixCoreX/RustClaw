@@ -1743,7 +1743,7 @@ fn watch_progress_json_exposes_compact_lifecycle_machine_fields() {
                 "resume_due": false,
                 "resume_wait_seconds": 17,
                 "next_action_kind": "resume_checkpoint",
-                "reason_code": "agent_loop_max_rounds",
+                "reason_code": "task_budget_slice_exhausted",
                 "next_poll_after": "2030-01-01T00:00:00Z",
                 "poll_ref": "poll:watch",
                 "last_heartbeat_ts": 1781800000,
@@ -1772,7 +1772,7 @@ fn watch_progress_json_exposes_compact_lifecycle_machine_fields() {
     assert_eq!(progress["resume_reason"], "agent_loop_soft_budget");
     assert_eq!(progress["resume_wait_seconds"], 17);
     assert_eq!(progress["next_action_kind"], "resume_checkpoint");
-    assert_eq!(progress["reason_code"], "agent_loop_max_rounds");
+    assert_eq!(progress["reason_code"], "task_budget_slice_exhausted");
     assert_eq!(progress["poll_ref"], "poll:watch");
     assert_eq!(progress["last_heartbeat_ts"], 1781800000);
     assert_eq!(progress["lease_owner"], "worker-a");

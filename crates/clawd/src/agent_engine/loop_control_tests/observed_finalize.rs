@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn observed_scalar_output_can_stop_loop_without_second_round() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -25,7 +25,7 @@ fn observed_scalar_output_can_stop_loop_without_second_round() {
 
 #[test]
 fn observed_config_basic_strict_output_continues_for_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -51,7 +51,7 @@ fn observed_config_basic_strict_output_continues_for_synthesis() {
 
 #[test]
 fn observed_call_capability_inventory_names_continue_for_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -78,7 +78,7 @@ fn observed_call_capability_inventory_names_continue_for_synthesis() {
 
 #[test]
 fn complete_structured_selector_stops_after_single_capability_only_plan() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     let mut route = route_result(OutputResponseShape::Strict);
     route.selection.structured_field_selector = Some(
@@ -108,7 +108,7 @@ fn complete_structured_selector_stops_after_single_capability_only_plan() {
 
 #[test]
 fn incomplete_structured_selector_does_not_trigger_shared_round_stop() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let mut route = route_result(OutputResponseShape::Strict);
     route.selection.structured_field_selector = Some("checkpoint,diff".to_string());
     loop_state.executed_step_results.push(ok_step(
@@ -125,7 +125,7 @@ fn incomplete_structured_selector_does_not_trigger_shared_round_stop() {
 
 #[test]
 fn capability_inventory_names_continue_to_incremental_planner() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -153,7 +153,7 @@ fn capability_inventory_names_continue_to_incremental_planner() {
 
 #[test]
 fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_second_round() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -213,7 +213,7 @@ fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_secon
 
 #[test]
 fn bounded_read_range_observe_only_round_uses_incremental_planner() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -244,7 +244,7 @@ fn bounded_read_range_observe_only_round_uses_incremental_planner() {
 
 #[test]
 fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -267,7 +267,7 @@ fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
 
 #[test]
 fn service_control_status_protocol_output_continues_for_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     let service_payload = json!({
         "status": "ok",
@@ -321,7 +321,7 @@ fn service_control_status_protocol_output_continues_for_model_synthesis() {
 
 #[test]
 fn raw_strict_model_language_output_does_not_stop_on_bare_observation() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
@@ -346,7 +346,7 @@ fn raw_strict_model_language_output_does_not_stop_on_bare_observation() {
 
 #[test]
 fn observation_only_freeform_round_can_stop_for_observed_fallback() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -369,7 +369,7 @@ fn observation_only_freeform_round_can_stop_for_observed_fallback() {
 
 #[test]
 fn unscoped_workspace_evidence_drafting_does_not_stop_on_search_only() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -396,7 +396,7 @@ fn unscoped_workspace_evidence_drafting_does_not_stop_on_search_only() {
 
 #[test]
 fn unscoped_workspace_evidence_drafting_continues_after_doc_read() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -423,7 +423,7 @@ fn unscoped_workspace_evidence_drafting_continues_after_doc_read() {
 
 #[test]
 fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -454,7 +454,7 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
 
 #[test]
 fn path_inspection_waits_for_model_synthesis_after_observation() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -482,7 +482,7 @@ fn path_inspection_waits_for_model_synthesis_after_observation() {
 
 #[test]
 fn missing_path_inspection_waits_for_model_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -510,7 +510,7 @@ fn missing_path_inspection_waits_for_model_synthesis() {
 
 #[test]
 fn missing_path_batch_facts_content_contract_continues_for_possible_fallback() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -537,7 +537,7 @@ fn missing_path_batch_facts_content_contract_continues_for_possible_fallback() {
 
 #[test]
 fn structured_keys_free_output_can_stop_before_second_round() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -563,7 +563,7 @@ fn structured_keys_free_output_can_stop_before_second_round() {
 
 #[test]
 fn extract_fields_free_output_can_stop_before_second_round() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -589,7 +589,7 @@ fn extract_fields_free_output_can_stop_before_second_round() {
 
 #[test]
 fn health_check_scalar_summary_continues_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -613,7 +613,7 @@ fn health_check_scalar_summary_continues_to_synthesis() {
 
 #[test]
 fn recipe_waiting_for_validation_does_not_stop_on_observed_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.execution_recipe = ExecutionRecipeRuntimeState {
         kind: ExecutionRecipeKind::OpsClosedLoop,
         validation_required: true,
@@ -640,7 +640,7 @@ fn recipe_waiting_for_validation_does_not_stop_on_observed_output() {
 
 #[test]
 fn recipe_inspect_stage_does_not_stop_on_observed_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.execution_recipe = ExecutionRecipeRuntimeState {
         kind: ExecutionRecipeKind::OpsClosedLoop,
         phase: crate::execution_recipe::ExecutionRecipePhase::Inspect,
@@ -668,7 +668,7 @@ fn recipe_inspect_stage_does_not_stop_on_observed_output() {
 
 #[test]
 fn read_only_round_continues_planner_without_runtime_recipe() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -700,7 +700,7 @@ fn read_only_round_continues_planner_without_runtime_recipe() {
 
 #[test]
 fn strict_json_read_only_round_continues_planner_for_live_code_workspace() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -747,8 +747,8 @@ fn strict_json_read_only_round_continues_planner_for_live_code_workspace() {
 }
 
 #[test]
-fn bounded_capability_observation_still_requires_synthesis_at_round_cap() {
-    let mut loop_state = LoopState::new(2);
+fn bounded_capability_observation_continues_without_round_cap() {
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 2;
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -764,7 +764,7 @@ fn bounded_capability_observation_still_requires_synthesis_at_round_cap() {
         args: json!({"path":"/workspace/project/calc_core.py","start_line":1,"end_line":16}),
     }];
 
-    assert!(!observe_only_round_should_continue(
+    assert!(observe_only_round_should_continue(
         &route,
         &loop_state,
         &actions,
@@ -781,7 +781,7 @@ fn bounded_capability_observation_still_requires_synthesis_at_round_cap() {
 
 #[test]
 fn fs_basic_capability_read_only_round_continues_planner() {
-    let mut loop_state = LoopState::new(4);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step(
@@ -812,7 +812,7 @@ fn fs_basic_capability_read_only_round_continues_planner() {
 
 #[test]
 fn recipe_done_does_not_scan_user_text_for_success_marker() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.execution_recipe = ExecutionRecipeRuntimeState {
         kind: ExecutionRecipeKind::OpsClosedLoop,
         phase: crate::execution_recipe::ExecutionRecipePhase::Done,
@@ -842,136 +842,6 @@ fn recipe_done_does_not_scan_user_text_for_success_marker() {
         &loop_state,
         &actions,
     ));
-}
-
-#[test]
-fn recoverable_recipe_failure_continues_next_round_and_keeps_repair_count() {
-    let task = test_task();
-    let policy = test_policy();
-    let mut loop_state = LoopState::new(4);
-    loop_state.round_no = 1;
-    loop_state.execution_recipe = ExecutionRecipeRuntimeState {
-        kind: ExecutionRecipeKind::OpsClosedLoop,
-        phase: crate::execution_recipe::ExecutionRecipePhase::Repair,
-        inspect_first: true,
-        validation_required: true,
-        max_repairs: 3,
-        repair_count: 1,
-        saw_inspect: true,
-        saw_mutation: true,
-        saw_validation: false,
-        ..Default::default()
-    };
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("recoverable_failure_continue_round".to_string()),
-        next_goal_hint: Some("repair sing-box".to_string()),
-        no_progress: false,
-    };
-    assert!(!evaluate_round_outcome(
-        &task,
-        &mut loop_state,
-        &policy,
-        &outcome
-    ));
-    assert_eq!(loop_state.execution_recipe.repair_count, 1);
-    assert_eq!(
-        loop_state.execution_recipe.phase,
-        crate::execution_recipe::ExecutionRecipePhase::Repair
-    );
-    assert_eq!(loop_state.consecutive_no_progress, 0);
-}
-
-#[test]
-fn recoverable_failure_at_round_cap_extends_loop_once() {
-    let task = test_task();
-    let mut policy = test_policy();
-    policy.max_rounds = 2;
-    policy.recoverable_failure_extra_rounds = 1;
-    let mut loop_state = LoopState::new(2);
-    loop_state.round_no = 2;
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("recoverable_failure_continue_round".to_string()),
-        next_goal_hint: Some("try alternate locator".to_string()),
-        no_progress: false,
-    };
-
-    assert!(!evaluate_round_outcome(
-        &task,
-        &mut loop_state,
-        &policy,
-        &outcome
-    ));
-    assert_eq!(loop_state.max_rounds, 3);
-    assert_eq!(loop_state.recoverable_failure_extra_rounds_used, 1);
-}
-
-#[test]
-fn recoverable_failure_extra_round_exhaustion_stops() {
-    let task = test_task();
-    let mut policy = test_policy();
-    policy.max_rounds = 2;
-    policy.recoverable_failure_extra_rounds = 1;
-    let mut loop_state = LoopState::new(2);
-    loop_state.round_no = 2;
-    loop_state.recoverable_failure_extra_rounds_used = 1;
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("recoverable_failure_continue_round".to_string()),
-        next_goal_hint: Some("try alternate locator".to_string()),
-        no_progress: false,
-    };
-
-    assert!(evaluate_round_outcome(
-        &task,
-        &mut loop_state,
-        &policy,
-        &outcome
-    ));
-    assert_eq!(loop_state.max_rounds, 2);
-    assert_eq!(loop_state.recoverable_failure_extra_rounds_used, 1);
-}
-
-#[test]
-fn exhausted_recipe_budget_stops_next_round() {
-    let task = test_task();
-    let policy = test_policy();
-    let mut loop_state = LoopState::new(4);
-    loop_state.round_no = 2;
-    loop_state.execution_recipe = ExecutionRecipeRuntimeState {
-        kind: ExecutionRecipeKind::OpsClosedLoop,
-        phase: crate::execution_recipe::ExecutionRecipePhase::Repair,
-        inspect_first: true,
-        validation_required: true,
-        max_repairs: 2,
-        repair_count: 3,
-        saw_inspect: true,
-        saw_mutation: true,
-        saw_validation: false,
-        ..Default::default()
-    };
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("recipe_repair_budget_exhausted".to_string()),
-        next_goal_hint: None,
-        no_progress: false,
-    };
-    assert!(evaluate_round_outcome(
-        &task,
-        &mut loop_state,
-        &policy,
-        &outcome
-    ));
-    assert_eq!(loop_state.execution_recipe.repair_count, 3);
-    assert_eq!(
-        loop_state.execution_recipe.phase,
-        crate::execution_recipe::ExecutionRecipePhase::Repair
-    );
 }
 
 #[test]

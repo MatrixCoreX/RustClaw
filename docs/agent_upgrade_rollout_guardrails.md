@@ -25,15 +25,19 @@ These controls are read by current code and can be used for rollback after confi
 
 | Control | Location | Default / Current | Effect | Rollback |
 | --- | --- | --- | --- | --- |
-| `max_steps` | `configs/agent_guard.toml` `[agent.loop_guard]` | `32` | Maximum agent loop steps. | Restore previous value and restart `clawd`. |
-| `max_rounds` | `[agent.loop_guard]` | `4` | Maximum planner-execution rounds. | Lower to previous stable value and restart. |
-| `recoverable_failure_extra_rounds` | `[agent.loop_guard]` | `1` | Extra repair rounds for structured recoverable failures near round limit. | Set to `0` or previous stable value and restart. |
-| `multi_round_enabled` | `[agent.loop_guard]` | `true` | Enables controlled multi-round execution. | Set `false` to fall back toward single-round behavior. |
+| `max_steps` | `configs/agent_guard.toml` `[agent.loop_guard]` | `32` | Per-plan action capacity; not a whole-task round/tool completion limit. | Restore the previous action capacity and restart `clawd`. |
 | `repeat_action_limit` | `[agent.loop_guard]` | `4` | Cross-round repeat-action guard. | Restore previous value and restart. |
-| `no_progress_limit` | `[agent.loop_guard]` | `1` | Stops consecutive no-progress rounds. | Restore previous value and restart. |
-| `max_tool_calls` | `[agent.loop_guard]` | `12` | Maximum tool/skill calls per task. | Restore previous value and restart. |
-| `budget_profiles.*` | `[agent.loop_guard.budget_profiles.*]` | profile-specific | Per-task-class loop budgets. | Revert profile values and restart. |
-| `ops_closed_loop.*` | `[agent.loop_guard.ops_closed_loop]` | profile-specific | Larger budget for check-modify-validate-repair flows. | Revert profile values and restart. |
+| `admin_max_*` | `[agent.task_budget]` | high emergency ceilings | Fail-closed cumulative model/tool/token/cost/elapsed/continuation/non-resumable runtime boundary. | Lower only as an administrator policy; model output cannot raise it. |
+| `profiles.*.soft_slice_seconds` | `[agent.task_budget.profiles.*]` | profile-specific | Wall-time checkpoint cadence for resumable interactive work. | Restore previous duration and restart. |
+| `profiles.*.stagnation_tolerance` | `[agent.task_budget.profiles.*]` | `2` to `4` | Structured consecutive non-progress tolerance. | Restore previous tolerance and restart. |
+| `profiles.*.provider_timeout_class` | `[agent.task_budget.profiles.*]` | `short` / `standard` | Provider timeout policy class and event attribution. | Restore the previous machine class and restart. |
+| `profiles.*.tool_timeout_class` | `[agent.task_budget.profiles.*]` | `short` / `standard` / `long_tail` | Tool timeout policy class and event attribution. | Restore the previous machine class and restart. |
+
+The old interactive `max_rounds`, `max_tool_calls`, `no_progress_limit`,
+`recoverable_failure_extra_rounds`, and `multi_round_enabled` controls were
+physically removed. Rollback is by reverting the coherent task-budget code
+change, not by retaining a dual runtime branch. Explicit caps remain available
+only in non-interactive and child-task machine request contracts.
 
 ### Rollout Controls And Retired Route-Authority Keys
 

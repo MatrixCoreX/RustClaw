@@ -15,7 +15,7 @@ async fn planner_run_cmd_async_start_publishes_waiting_checkpoint() {
     state.skill_rt.workspace_root = workspace_root.clone();
     enable_test_skills(&state, &["run_cmd"]);
     let task = test_task();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let raw_args = serde_json::json!({
         "command": "sleep 0.05 && echo RUSTCLAW_ASYNC_SMOKE",

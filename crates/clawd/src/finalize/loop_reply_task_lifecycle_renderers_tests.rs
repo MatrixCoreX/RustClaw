@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn task_lifecycle_renderer_dispatch_records_structured_traces_when_skipped() {
     let task = claimed_task("task-lifecycle-renderer-trace");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let mut delivery_messages = Vec::new();
     let mut finalizer_summary = None;
 

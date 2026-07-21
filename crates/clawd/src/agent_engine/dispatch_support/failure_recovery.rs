@@ -147,7 +147,7 @@ fn remaining_actions_are_discussion_only(
         })
 }
 
-fn remaining_actions_after_round_cap_are_discussion_only(
+fn remaining_actions_after_plan_capacity_are_discussion_only(
     actions: &[AgentAction],
     current_idx: usize,
     max_steps: usize,
@@ -293,7 +293,11 @@ pub(crate) fn classify_skill_failure_recovery(
             }
             return Some("recoverable_failure_finalize");
         }
-        if remaining_actions_after_round_cap_are_discussion_only(actions, current_idx, max_steps) {
+        if remaining_actions_after_plan_capacity_are_discussion_only(
+            actions,
+            current_idx,
+            max_steps,
+        ) {
             return Some("recoverable_failure_finalize");
         }
         if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
@@ -314,7 +318,11 @@ pub(crate) fn classify_skill_failure_recovery(
         if current_idx > 0 && !has_remaining_action_after_full(actions, current_idx) {
             return Some("recoverable_failure_finalize");
         }
-        if remaining_actions_after_round_cap_are_discussion_only(actions, current_idx, max_steps) {
+        if remaining_actions_after_plan_capacity_are_discussion_only(
+            actions,
+            current_idx,
+            max_steps,
+        ) {
             return Some("recoverable_failure_finalize");
         }
         if run_cmd_is_literal_user_command(call_args)
@@ -374,7 +382,7 @@ pub(crate) fn classify_skill_failure_recovery(
     if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
         return Some("recoverable_failure_continue_in_round");
     }
-    if remaining_actions_after_round_cap_are_discussion_only(actions, current_idx, max_steps) {
+    if remaining_actions_after_plan_capacity_are_discussion_only(actions, current_idx, max_steps) {
         return Some("recoverable_failure_finalize");
     }
     if normalized_skill.eq_ignore_ascii_case("run_cmd")

@@ -89,6 +89,12 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         'matches!(lifecycle_state, "waiting" | "background" | "needs_user")',
         "if loop_state_has_checkpoint_handoff(&pre_finalize_loop_state)",
         "return Ok(reply);",
+        "initialize_task_budget_slice",
+        "profile_for_verified_plan",
+        "observe_task_budget",
+        '"task_budget_slice_exhausted"',
+        '"budget_decision"',
+        "publish_claimed_event",
     ),
     "crates/clawd/src/finalize/task.rs": (
         "journal_has_checkpointed_nonterminal_lifecycle",
@@ -212,6 +218,55 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "maybe_recover_stale_running_tasks_runtime",
         "sync_recovery_can_claim_dispatch_executor",
     ),
+    "crates/clawd/src/task_budget_contract.rs": (
+        "enum BudgetDecision",
+        "Continue",
+        "Finish",
+        "CheckpointRequeue",
+        "Waiting",
+        "NeedsUser",
+        "Terminal",
+        "struct BudgetHardCeilings",
+        "struct TaskBudgetSlice",
+        "struct BudgetObservation",
+        "profile_for_verified_plan",
+        "advanced_from",
+        "load_task_budget_policy",
+    ),
+    "configs/agent_guard.toml": (
+        "[agent.task_budget]",
+        "admin_max_model_turns",
+        "admin_max_tool_calls",
+        "admin_max_total_tokens",
+        "admin_max_cost_usd_nanos",
+        "admin_max_elapsed_seconds",
+        "admin_max_continuations",
+        "admin_max_non_resumable_tool_seconds",
+        "[agent.task_budget.profiles.general]",
+        "[agent.task_budget.profiles.fast_read]",
+        "[agent.task_budget.profiles.grounded_summary]",
+        "[agent.task_budget.profiles.multi_step_workspace]",
+        "[agent.task_budget.profiles.ops_closed_loop]",
+        "soft_slice_seconds",
+        "stagnation_tolerance",
+        "provider_timeout_class",
+        "tool_timeout_class",
+    ),
+    "crates/clawcli/src/events.rs": (
+        '"profile"',
+        '"continuation_index"',
+        '"cumulative_model_turns"',
+        '"cumulative_tool_calls"',
+        '"soft_slice_exhausted"',
+        '"resumable"',
+    ),
+    "UI/src/lib/task-result.ts": (
+        '"budget_decision"',
+        '"Task budget decision"',
+        '"continuation_index"',
+        '"cumulative_model_turns"',
+        '"soft_slice_exhausted"',
+    ),
     "docs/task_lifecycle_lease_model.md": (
         "task-row worker leases",
         "checkpoint resume-executor leases",
@@ -225,6 +280,10 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "`claim_attempt`",
         "`resume_entrypoint = \"poll_async_job\"`",
         "`clawcli resume-task <task_id>`",
+        "`TaskBudgetSlice`",
+        "`BudgetDecision`",
+        "`checkpoint_requeue`",
+        "administrator hard ceilings",
         "`cargo test -p clawd task_lifecycle -- --quiet`",
         "`cargo test -p clawd task_resume_execution -- --quiet`",
         "`cargo test -p clawd async_poll_executor -- --quiet`",
@@ -247,6 +306,35 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
 }
 
+FORBIDDEN_INTERACTIVE_BUDGET_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
+    "configs/agent_guard.toml": (
+        "\nmax_rounds =",
+        "\nmax_tool_calls =",
+        "\nno_progress_limit =",
+        "\nrecoverable_failure_extra_rounds =",
+        "\nmulti_round_enabled =",
+    ),
+    "crates/clawd/src/agent_engine/support.rs": (
+        "max_rounds:",
+        "max_tool_calls:",
+        "no_progress_limit:",
+        "recoverable_failure_extra_rounds:",
+        "multi_round_enabled:",
+    ),
+    "crates/clawd/src/agent_engine/loop_control.rs": (
+        "agent_loop_max_rounds",
+        "agent_loop_no_progress_limit",
+        "budget_near_exhaustion",
+        "recoverable_failure_extra_rounds",
+        "multi_round_enabled",
+    ),
+    "crates/clawd/src/agent_engine/execution_loop.rs": (
+        "agent_loop_max_tool_calls",
+        "max_tool_calls_reached",
+        "budget_near_exhaustion",
+    ),
+}
+
 RESUME_PROTOCOL_FILES = (
     "crates/clawd/src/repo/task_resume_execution.rs",
     "crates/clawd/src/repo/task_resume_execution/dispatch_claim.rs",
@@ -265,6 +353,13 @@ def read_repo_texts() -> dict[str, str | None]:
         except UnicodeDecodeError:
             out[rel_path] = None
     for rel_path in RESUME_PROTOCOL_FILES:
+        if rel_path in out:
+            continue
+        try:
+            out[rel_path] = (ROOT / rel_path).read_text(encoding="utf-8")
+        except (FileNotFoundError, UnicodeDecodeError):
+            out[rel_path] = None
+    for rel_path in FORBIDDEN_INTERACTIVE_BUDGET_TOKENS_BY_PATH:
         if rel_path in out:
             continue
         try:
@@ -305,6 +400,15 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
     if "task_checkpoint_from_result_json" not in combined_resume:
         findings.append("task_checkpoint_restore_boundary_missing")
 
+    for rel_path, tokens in FORBIDDEN_INTERACTIVE_BUDGET_TOKENS_BY_PATH.items():
+        text = texts.get(rel_path)
+        if text is None:
+            findings.append(f"missing_or_unreadable:{rel_path}")
+            continue
+        for token in tokens:
+            if token in text:
+                findings.append(f"forbidden_interactive_budget_token:{rel_path}:{token}")
+
     return findings
 
 
@@ -337,6 +441,8 @@ def minimal_good_texts() -> dict[str, str | None]:
     )
     for rel_path in RESUME_PROTOCOL_FILES:
         texts[rel_path] = (texts.get(rel_path) or "") + "\n" + resume_protocol
+    for rel_path in FORBIDDEN_INTERACTIVE_BUDGET_TOKENS_BY_PATH:
+        texts.setdefault(rel_path, "")
     return texts
 
 
@@ -362,6 +468,11 @@ def run_self_test() -> None:
     missing_doc["docs/task_lifecycle_lease_model.md"] = "`task_lifecycle.state`"
     findings = scan_texts(missing_doc)
     assert any("docs/task_lifecycle_lease_model.md" in item for item in findings)
+
+    legacy_budget = dict(good)
+    legacy_budget["configs/agent_guard.toml"] += "\nmax_rounds = 4"
+    findings = scan_texts(legacy_budget)
+    assert any("forbidden_interactive_budget_token" in item for item in findings)
 
     print("TASK_LIFECYCLE_CONTRACT_SELF_TEST ok")
 

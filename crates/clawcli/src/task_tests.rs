@@ -16,7 +16,7 @@ fn lifecycle_summary_tokens_include_budget_snapshot() {
                 "resume_directive": "run_next_planner_round",
                 "heartbeat_at": 1781800000,
                 "attempt_id": 2,
-                "reason_code": "agent_loop_max_rounds",
+                "reason_code": "task_budget_slice_exhausted",
                 "last_successful_evidence_ref": "step_3:evidence:1",
                 "evidence_ref_count": 2,
                 "budget": {
@@ -47,7 +47,7 @@ fn lifecycle_summary_tokens_include_budget_snapshot() {
     assert!(tokens.iter().any(|token| token == "attempt_id=2"));
     assert!(tokens
         .iter()
-        .any(|token| token == "reason_code=agent_loop_max_rounds"));
+        .any(|token| token == "reason_code=task_budget_slice_exhausted"));
     assert!(tokens
         .iter()
         .any(|token| token == "resume_directive=run_next_planner_round"));

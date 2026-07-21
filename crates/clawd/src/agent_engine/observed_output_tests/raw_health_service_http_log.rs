@@ -5,7 +5,7 @@ fn direct_answer_preserves_run_cmd_directory_entry_names() {
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&temp_dir);
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "run_cmd",
@@ -40,7 +40,7 @@ fn direct_answer_preserves_run_cmd_directory_entry_names_without_request_text_li
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&temp_dir);
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "a\nb\nc\nd\n"));
@@ -80,7 +80,7 @@ fn run_cmd_exists_token_is_not_interpreted_as_a_path_verdict() {
         .unwrap_or_else(|_| file_path.clone())
         .to_string_lossy()
         .to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "EXISTS\n"));
@@ -110,7 +110,7 @@ fn run_cmd_exists_token_is_not_interpreted_as_a_path_verdict() {
 
 #[test]
 fn run_cmd_not_found_token_is_not_interpreted_as_a_path_verdict() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "NOT_FOUND\n"));
@@ -138,7 +138,7 @@ fn run_cmd_not_found_token_is_not_interpreted_as_a_path_verdict() {
 
 #[test]
 fn direct_answer_defers_health_check_json_for_act_free_shape() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let body = r#"{"clawd_health_port_open":true,"telegramd_process_count":0}"#;
     loop_state
         .executed_step_results
@@ -165,7 +165,7 @@ fn direct_answer_defers_health_check_json_for_act_free_shape() {
 
 #[test]
 fn direct_answer_defers_health_check_contract_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let body = r#"{"clawd_process_count":1,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0}}"#;
     loop_state
         .executed_step_results
@@ -193,7 +193,7 @@ fn direct_answer_defers_health_check_contract_to_synthesis() {
 
 #[test]
 fn direct_answer_defers_wrapped_health_check_free_shape() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let body = serde_json::json!({
         "extra": {
             "clawd_health_port_open": true,
@@ -242,7 +242,7 @@ fn direct_answer_defers_wrapped_health_check_free_shape() {
 
 #[test]
 fn direct_answer_defers_health_check_diagnostic_summary_for_system_health_fields() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let body = r#"{"clawd_process_count":1,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":43},"system_health":{"os_family":"linux","load_avg_1m":3.81,"memory_available_bytes":11270471680,"disk_root_available_bytes":18108059648,"warnings":[]}}"#;
     loop_state
         .executed_step_results
@@ -270,7 +270,7 @@ fn direct_answer_defers_health_check_diagnostic_summary_for_system_health_fields
 
 #[test]
 fn direct_answer_defers_health_check_summary_for_act_free_shape() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     let body = r#"{"clawd_process_count":7,"telegramd_process_count":0,"clawd_health_port_open":false,"clawd_log":{"exists":false},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#;
     loop_state
         .executed_step_results
@@ -297,7 +297,7 @@ fn direct_answer_defers_health_check_summary_for_act_free_shape() {
 
 #[test]
 fn direct_answer_defers_health_check_summary_over_later_steps_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "health_check",
@@ -330,7 +330,7 @@ fn direct_answer_defers_health_check_summary_over_later_steps_to_llm() {
 
 #[test]
 fn direct_answer_defers_health_check_one_sentence_summary_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "health_check",
@@ -358,7 +358,7 @@ fn direct_answer_defers_health_check_one_sentence_summary_to_llm() {
 
 #[test]
 fn direct_answer_defers_health_check_unhealthy_summary_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "health_check",
@@ -386,7 +386,7 @@ fn direct_answer_defers_health_check_unhealthy_summary_to_llm() {
 
 #[test]
 fn direct_answer_defers_health_check_telegramd_stopped_summary_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "health_check",
@@ -414,7 +414,7 @@ fn direct_answer_defers_health_check_telegramd_stopped_summary_to_llm() {
 
 #[test]
 fn direct_answer_defers_health_check_language_sensitive_summary_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "health_check",
@@ -446,7 +446,7 @@ fn direct_answer_defers_health_check_language_sensitive_summary_to_llm() {
 
 #[test]
 fn direct_answer_defers_health_check_os_summary_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "health_check",
@@ -478,7 +478,7 @@ fn direct_answer_defers_health_check_os_summary_to_llm() {
 
 #[test]
 fn direct_answer_defers_health_check_os_warning_summary_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "health_check",
@@ -510,7 +510,7 @@ fn direct_answer_defers_health_check_os_warning_summary_to_llm() {
 
 #[test]
 fn direct_answer_defers_process_basic_port_summary_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "process_basic",
@@ -538,7 +538,7 @@ fn direct_answer_defers_process_basic_port_summary_to_llm() {
 
 #[test]
 fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
@@ -608,7 +608,7 @@ fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
 
 #[test]
 fn observed_entries_compact_wrapped_process_basic_port_list() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "process_basic",
@@ -659,7 +659,7 @@ fn observed_entries_compact_wrapped_process_basic_port_list() {
 
 #[test]
 fn observed_entries_compact_wrapped_process_basic_ps() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "process_basic",
@@ -694,7 +694,7 @@ fn observed_entries_compact_wrapped_process_basic_ps() {
 
 #[test]
 fn direct_answer_uses_generic_selector_for_process_listener_count() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "process_basic",
@@ -737,7 +737,7 @@ fn direct_answer_uses_generic_selector_for_process_listener_count() {
 
 #[test]
 fn direct_answer_defers_process_basic_observation_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "process_basic",
@@ -766,7 +766,7 @@ fn direct_answer_defers_process_basic_observation_to_synthesis() {
 
 #[test]
 fn direct_answer_prefers_process_basic_status_over_later_system_info() {
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",

@@ -13,7 +13,7 @@ async fn finalize_loop_reply_keeps_clarify_machine_envelope_internal_by_default(
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.pending_user_input_required = true;
     loop_state.output_vars.insert(
         "agent_loop.terminal_intent".to_string(),
@@ -89,7 +89,7 @@ async fn finalize_loop_reply_marks_agent_loop_terminal_clarify_without_route_cla
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.pending_user_input_required = true;
     loop_state.output_vars.insert(
         "agent_loop.terminal_intent".to_string(),
@@ -187,7 +187,7 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
         }),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.pending_user_input_required = true;
     loop_state.output_vars.insert(
         "agent_loop.terminal_intent".to_string(),
@@ -274,7 +274,7 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
 }
 
 fn terminal_clarify_loop_state(model_content: &str) -> crate::agent_engine::LoopState {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.pending_user_input_required = true;
     loop_state.output_vars.insert(
         "agent_loop.terminal_intent".to_string(),
@@ -427,7 +427,7 @@ async fn finalize_loop_reply_keeps_agent_loop_clarify_machine_fields_structured_
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.terminal_intent".to_string(),
         "answer".to_string(),
@@ -539,7 +539,7 @@ async fn finalize_loop_reply_does_not_attach_clarify_envelope_after_completed_ac
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let act_envelope = serde_json::json!({
         "control_intent": "act",
         "decision": "call_capability",
@@ -608,7 +608,7 @@ async fn finalize_loop_reply_does_not_mark_answer_delivery_as_clarify_from_route
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let answer = "1. login module scope\n2. auth session\n3. user recovery";
     loop_state.delivery_messages.push(answer.to_string());
     loop_state.last_user_visible_respond = Some(answer.to_string());

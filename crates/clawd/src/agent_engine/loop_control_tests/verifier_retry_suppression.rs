@@ -3,7 +3,7 @@ use super::super::loop_control_post_write_evidence_guard::{
 };
 use super::{
     answer_contract, answer_verifier_retry_summary, commit_answer_verifier_retry_answer, ok_step,
-    post_write_content_evidence_readback_recovery_policy,
+    post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
@@ -156,23 +156,15 @@ fn code_mutation_unresolved_test_status_creates_retry_gap() {
 }
 
 #[test]
-fn post_write_readback_recovery_reserves_bounded_tool_budget_after_cap() {
+fn post_write_readback_recovery_reserves_bounded_plan_capacity() {
     let policy = test_policy();
-    let mut capped_state = LoopState::new(policy.max_rounds);
-    capped_state.tool_calls_total = policy.max_tool_calls;
-
-    let recovery = post_write_content_evidence_readback_recovery_policy(&policy, &capped_state, 2);
-
-    assert_eq!(recovery.max_tool_calls, policy.max_tool_calls + 2);
-    assert_eq!(recovery.max_rounds, policy.max_rounds);
+    let recovery = post_write_content_evidence_recovery_policy(&policy, 2);
     assert_eq!(recovery.max_steps, policy.max_steps);
 
-    let mut below_cap_state = LoopState::new(policy.max_rounds);
-    below_cap_state.tool_calls_total = policy.max_tool_calls - 2;
-    let below_cap_recovery =
-        post_write_content_evidence_readback_recovery_policy(&policy, &below_cap_state, 2);
-
-    assert_eq!(below_cap_recovery.max_tool_calls, policy.max_tool_calls);
+    let mut narrow_policy = policy.clone();
+    narrow_policy.max_steps = 1;
+    let expanded = post_write_content_evidence_recovery_policy(&narrow_policy, 3);
+    assert_eq!(expanded.max_steps, 3);
 }
 
 #[test]
@@ -273,7 +265,7 @@ fn publishable_strict_json_projection_replaces_stale_verifier_candidate() {
     let mut reply = AskReply::non_llm("def safe_div(a,b): ...".to_string())
         .with_messages(vec!["def safe_div(a,b): ...".to_string()])
         .with_task_journal(journal);
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.strict_json_projection_publishable".to_string(),
         "true".to_string(),
@@ -303,7 +295,7 @@ fn publishable_strict_json_projection_replaces_stale_verifier_candidate() {
 fn local_code_machine_projection_replaces_stale_verifier_candidate_before_verifier() {
     let user_text =
         "最后只输出 JSON，包含 changed_files、test_command、test_status、functions、error_codes。";
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.run_cmd_commands".to_string(),
         serde_json::json!([

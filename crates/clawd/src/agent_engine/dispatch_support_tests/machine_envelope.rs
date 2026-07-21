@@ -85,7 +85,7 @@ fn terminal_last_output_placeholder_respond_publishes_structured_output() {
         payload_json: String::new(),
     };
     let policy = load_agent_loop_guard_policy(&state);
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     let content = r#"{"changed_files":["calc_core.py","test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"OK","functions":["add","sub","mul"]}"#;
@@ -140,7 +140,7 @@ fn bare_last_output_respond_prefers_publishable_synthesis_output() {
     let raw_observation = r#"{"owner_layer":"subagent_runtime","output_format":"machine_json","context_evidence":{"items":[{"content_excerpt":"large"}]},"child_model_result":{"status":"completed"}}"#;
     let compact_answer =
         r#"{"boundary_consistent":true,"write_allowed":false,"external_publish_allowed":false}"#;
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_output = Some(raw_observation.to_string());
@@ -223,7 +223,7 @@ fn bare_last_output_respond_projects_subagent_child_model_result() {
     })
     .to_string();
     let expected = child_result.to_string();
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_output = Some(raw_observation.clone());
@@ -273,7 +273,7 @@ fn terminal_last_output_placeholder_respond_publishes_empty_string_scalar() {
         payload_json: String::new(),
     };
     let policy = load_agent_loop_guard_policy(&state);
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
     let content = "\"\"";

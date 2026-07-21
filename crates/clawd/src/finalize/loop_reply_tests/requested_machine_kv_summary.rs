@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn requested_machine_kv_summary_replaces_raw_observed_delivery() {
     let task = claimed_task("task-machine-kv-summary-finalizer");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
@@ -51,7 +51,7 @@ fn requested_machine_kv_summary_replaces_raw_observed_delivery() {
 #[test]
 fn requested_machine_kv_summary_uses_normalized_config_preview_selector() {
     let task = claimed_task("task-machine-kv-config-preview-selector");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "synthesize_answer",
@@ -86,7 +86,7 @@ fn requested_machine_kv_summary_uses_normalized_config_preview_selector() {
 #[test]
 fn requested_machine_kv_summary_preserves_policy_decision_selector() {
     let task = claimed_task("task-machine-kv-policy-decision-selector");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -126,7 +126,7 @@ fn requested_machine_kv_summary_preserves_policy_decision_selector() {
 #[test]
 fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
     let task = claimed_task("task-machine-kv-summary-required-evidence-richer");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -172,7 +172,7 @@ fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
 #[test]
 fn requested_machine_kv_summary_preserves_richer_colon_labeled_delivery() {
     let task = claimed_task("task-machine-kv-summary-colon-labeled-richer");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -200,7 +200,7 @@ fn requested_machine_kv_summary_preserves_richer_colon_labeled_delivery() {
 #[test]
 fn requested_machine_kv_summary_repairs_conflicting_colon_value_without_dropping_fields() {
     let task = claimed_task("task-machine-kv-summary-colon-conflict");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -232,7 +232,7 @@ fn requested_machine_kv_summary_repairs_conflicting_colon_value_without_dropping
 fn hook_runtime_surface_json_can_replace_short_token_delivery() {
     let mut route = free_route_result();
     route.requires_content_evidence = true;
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -271,7 +271,7 @@ fn grounded_compound_delivery_preserves_latest_terminal_language_over_observed_p
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "log_analyze",
@@ -326,7 +326,7 @@ fn grounded_compound_delivery_preserves_latest_terminal_language_over_observed_p
 #[test]
 fn requested_machine_kv_summary_preserves_publishable_summary_over_marker_only_summary() {
     let task = claimed_task("task-machine-kv-marker-only-summary");
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -363,7 +363,7 @@ fn requested_machine_kv_summary_preserves_publishable_summary_over_marker_only_s
 #[test]
 fn requested_machine_kv_summary_preserves_structured_media_dry_run_projection() {
     let task = claimed_task("task-machine-kv-media-dry-run-projection");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let output_path = "/home/guagua/rustclaw/document/media_dry_run/image_status_card.png";
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -423,7 +423,7 @@ fn requested_machine_kv_summary_preserves_structured_media_dry_run_projection() 
 #[test]
 fn requested_machine_kv_summary_preserves_async_cancel_adapter_projection() {
     let task = claimed_task("task-machine-kv-async-cancel-projection");
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "image_generate",
@@ -466,7 +466,7 @@ fn requested_machine_kv_summary_preserves_async_cancel_adapter_projection() {
 #[test]
 fn requested_machine_kv_summary_preserves_publishable_command_summary() {
     let task = claimed_task("task-machine-kv-summary-command-summary");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -515,7 +515,7 @@ fn requested_machine_kv_summary_preserves_publishable_command_summary() {
 #[test]
 fn requested_machine_kv_summary_preserves_agent_hook_runtime_surface_delivery() {
     let task = claimed_task("task-machine-kv-agent-hook-surface");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -545,7 +545,7 @@ fn requested_machine_kv_summary_preserves_agent_hook_runtime_surface_delivery() 
 #[test]
 fn requested_machine_kv_summary_preserves_colon_field_value_delivery() {
     let task = claimed_task("task-machine-kv-summary-colon-fields");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -587,7 +587,7 @@ fn requested_machine_kv_summary_preserves_colon_field_value_delivery() {
 #[test]
 fn requested_machine_kv_summary_requires_observed_non_flag_value() {
     let task = claimed_task("task-machine-kv-summary-finalizer-missing");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
@@ -612,7 +612,7 @@ fn requested_machine_kv_summary_requires_observed_non_flag_value() {
 #[test]
 fn requested_machine_kv_summary_uses_state_patch_required_field() {
     let task = claimed_task("task-machine-kv-summary-state-patch");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.last_user_visible_respond = Some(
         "After boundary changes, run `python3 scripts/check_planner_runtime_boundary.py`."
             .to_string(),
@@ -655,7 +655,7 @@ fn requested_machine_kv_summary_uses_state_patch_required_field() {
 #[test]
 fn requested_machine_kv_summary_replaces_prose_when_state_patch_requires_machine_fields() {
     let task = claimed_task("task-machine-kv-strict-state-patch-prose");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "git_basic",
@@ -697,7 +697,7 @@ fn requested_machine_kv_summary_replaces_prose_when_state_patch_requires_machine
 #[test]
 fn requested_machine_kv_summary_replaces_partial_machine_delivery_for_required_fields() {
     let task = claimed_task("task-machine-kv-strict-state-patch-partial");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -738,7 +738,7 @@ fn requested_machine_kv_summary_replaces_partial_machine_delivery_for_required_f
 #[test]
 fn requested_machine_kv_summary_repairs_array_field_without_truncating_json() {
     let task = claimed_task("task-machine-kv-array-conflict");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "kb",
@@ -769,7 +769,7 @@ names: ["alpha","beta"]"#
 #[test]
 fn requested_machine_kv_summary_projects_git_status_fields_from_user_request() {
     let task = claimed_task("task-git-status-machine-kv-user-request");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "git_basic",
@@ -798,7 +798,7 @@ fn requested_machine_kv_summary_projects_git_status_fields_from_user_request() {
 #[test]
 fn requested_machine_kv_summary_overrides_scalar_path_when_explicit_pair_is_observed() {
     let task = claimed_task("task-machine-kv-explicit-pair-over-scalar-path");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -831,7 +831,7 @@ fn requested_machine_kv_summary_overrides_scalar_path_when_explicit_pair_is_obse
 #[test]
 fn requested_machine_kv_summary_projects_empty_git_paths() {
     let task = claimed_task("task-git-status-empty-paths");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "git_basic",
@@ -856,7 +856,7 @@ fn requested_machine_kv_summary_projects_empty_git_paths() {
 #[test]
 fn requested_machine_kv_summary_replaces_conflicting_machine_values_for_required_field() {
     let task = claimed_task("task-machine-kv-strict-conflicting-values");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -894,7 +894,7 @@ fn requested_machine_kv_summary_replaces_conflicting_machine_values_for_required
 #[test]
 fn requested_machine_kv_summary_patches_empty_machine_field_in_rich_answer() {
     let task = claimed_task("task-machine-kv-patch-empty-field");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -925,7 +925,7 @@ fn requested_machine_kv_summary_patches_empty_machine_field_in_rich_answer() {
 #[test]
 fn requested_machine_kv_summary_patches_none_machine_field_in_rich_answer() {
     let task = claimed_task("task-machine-kv-patch-none-field");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -954,7 +954,7 @@ fn requested_machine_kv_summary_patches_none_machine_field_in_rich_answer() {
 #[test]
 fn requested_machine_kv_summary_preserves_rich_answer_with_requested_machine_line() {
     let task = claimed_task("task-machine-kv-preserve-rich-field");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -980,7 +980,7 @@ fn requested_machine_kv_summary_preserves_rich_answer_with_requested_machine_lin
 #[test]
 fn requested_machine_kv_summary_projects_observed_field_value_over_marker_only_delivery() {
     let task = claimed_task("task-machine-kv-project-field-over-marker");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -1021,7 +1021,7 @@ fn requested_machine_kv_summary_projects_observed_field_value_over_marker_only_d
 #[test]
 fn requested_machine_kv_summary_projects_exact_config_field_pair_across_languages() {
     let task = claimed_task("task-machine-kv-config-field-pair-ko");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -1050,7 +1050,7 @@ fn requested_machine_kv_summary_projects_exact_config_field_pair_across_language
 #[test]
 fn requested_machine_kv_summary_prefers_observed_field_value_over_marker_only_payload() {
     let task = claimed_task("task-machine-kv-project-field-over-payload-marker");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -1094,7 +1094,7 @@ fn requested_machine_kv_summary_prefers_observed_field_value_over_marker_only_pa
 #[test]
 fn requested_machine_kv_summary_preserves_latest_rich_answer_over_stale_machine_value() {
     let task = claimed_task("task-machine-kv-preserve-latest-rich-field");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
@@ -1130,7 +1130,7 @@ fn requested_machine_kv_summary_preserves_latest_rich_answer_over_stale_machine_
 #[test]
 fn requested_machine_kv_summary_ignores_context_summary_machine_tokens() {
     let task = claimed_task("task-machine-kv-context-token");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "respond", "false"));
@@ -1157,7 +1157,7 @@ fn requested_machine_kv_summary_ignores_context_summary_machine_tokens() {
 #[test]
 fn requested_machine_kv_summary_ignores_internal_user_request_machine_tokens() {
     let task = claimed_task("task-machine-kv-internal-user-request-token");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -1188,7 +1188,7 @@ fn requested_machine_kv_summary_ignores_internal_user_request_machine_tokens() {
 #[test]
 fn requested_machine_kv_summary_restores_count_after_listing_render() {
     let task = claimed_task("task-machine-kv-structured-listing");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -1222,7 +1222,7 @@ fn requested_machine_kv_summary_restores_count_after_listing_render() {
 #[test]
 fn requested_machine_kv_summary_preserves_full_structured_contract_json() {
     let task = claimed_task("task-machine-kv-structured-contract");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     let contract = serde_json::json!({
         "schema_version": 1,
         "contract_marker": "async_job_poll_contract_dry_run",

@@ -281,21 +281,6 @@ impl RepairSignal {
         self
     }
 
-    pub(crate) fn with_loop_budget(
-        mut self,
-        round_no: usize,
-        max_attempts: usize,
-        no_progress_count: usize,
-        budget_exhausted: bool,
-    ) -> Self {
-        self.repair_attempt = Some(round_no);
-        self.round_no = Some(round_no);
-        self.max_attempts = Some(max_attempts);
-        self.no_progress_count = Some(no_progress_count);
-        self.budget_exhausted = Some(budget_exhausted);
-        self
-    }
-
     pub(crate) fn with_rejected_action(mut self, rejected_action: Option<String>) -> Self {
         self.rejected_action = rejected_action
             .as_deref()
@@ -670,7 +655,7 @@ mod tests {
         let signal = RepairSignal::from_checkpoint_resume_parts(
             "ckpt-123",
             crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
-            "max_rounds",
+            "task_budget_slice_exhausted",
         );
         let value = signal.to_json();
 
@@ -681,7 +666,7 @@ mod tests {
         );
         assert_eq!(
             value.get("signal").and_then(Value::as_str),
-            Some("max_rounds")
+            Some("task_budget_slice_exhausted")
         );
         assert_eq!(
             value
@@ -699,7 +684,7 @@ mod tests {
             value
                 .pointer("/repair_envelope/stop_reason_code")
                 .and_then(Value::as_str),
-            Some("max_rounds")
+            Some("task_budget_slice_exhausted")
         );
     }
 

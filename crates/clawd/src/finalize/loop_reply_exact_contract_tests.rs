@@ -41,7 +41,7 @@ fn exact_contract_does_not_keep_rich_delivery_when_exact_delivery_is_required() 
 #[test]
 fn exact_contract_keeps_latest_terminal_table_over_short_observed_projection() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(6);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -100,7 +100,7 @@ fn exact_contract_keeps_latest_terminal_table_over_short_observed_projection() {
 #[test]
 fn unclassified_inventory_keeps_model_synthesis_with_read_evidence() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -148,7 +148,7 @@ fn unclassified_inventory_keeps_model_synthesis_with_read_evidence() {
 #[test]
 fn exact_contract_keeps_publishable_synthesis_over_raw_observed_inventory() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -203,7 +203,7 @@ fn exact_contract_keeps_publishable_synthesis_over_raw_observed_inventory() {
 #[test]
 fn path_inspection_keeps_model_language_verdict_over_observation() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -245,7 +245,7 @@ fn path_inspection_keeps_model_language_verdict_over_observation() {
 #[test]
 fn exact_contract_keeps_planned_subset_over_raw_observed_file_paths() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -285,7 +285,7 @@ fn exact_contract_keeps_planned_subset_over_raw_observed_file_paths() {
 #[test]
 fn exact_contract_keeps_explicit_json_delivery_over_observed_phrase() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),

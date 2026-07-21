@@ -1,9 +1,8 @@
 use super::{
     answer_contract_for_reply, answer_verifier_retry_summary,
     apply_structured_respond_clarify_to_loop_state, commit_answer_verifier_retry_answer,
-    evaluate_round_outcome, forced_boundary_observation_clarify_intent,
-    initial_execution_recipe_spec, observe_only_round_should_continue,
-    post_write_content_evidence_readback_recovery_policy,
+    forced_boundary_observation_clarify_intent, initial_execution_recipe_spec,
+    observe_only_round_should_continue, post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
@@ -12,7 +11,6 @@ use super::{
     structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_structurally_satisfied, terminal_user_answer_stop_signal,
     text_has_exact_marker_line, try_recover_inconsistent_boundary_clarify, AgentLoopGuardPolicy,
-    RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -24,8 +22,8 @@ use crate::{
         ExecutionRecipeSpec, ExecutionRecipeTargetScope,
     },
     executor::{StepExecutionResult, StepExecutionStatus},
-    AgentAction, AskReply, ClaimedTask, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape,
+    AgentAction, AskReply, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape,
 };
 use serde_json::json;
 
@@ -103,21 +101,6 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
     }
 }
 
-fn test_task() -> ClaimedTask {
-    ClaimedTask {
-        claim_attempt: 0,
-        task_id: "task-loop-control".to_string(),
-        user_id: 1,
-        chat_id: 2,
-        user_key: None,
-        channel: "telegram".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    }
-}
-
 fn plan_result_with_raw_and_steps(
     raw_plan_text: &str,
     steps: Vec<crate::PlanStep>,
@@ -137,12 +120,7 @@ fn plan_result_with_raw_and_steps(
 fn test_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
         max_steps: 8,
-        max_rounds: 4,
-        max_tool_calls: 12,
-        recoverable_failure_extra_rounds: 1,
         repeat_action_limit: 3,
-        no_progress_limit: 1,
-        multi_round_enabled: true,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         fast_read: Default::default(),

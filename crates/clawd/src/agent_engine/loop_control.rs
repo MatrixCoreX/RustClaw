@@ -414,7 +414,6 @@ fn should_stop_for_observed_finalize(
         return false;
     }
     if route_result.response_shape != crate::OutputResponseShape::Scalar
-        && loop_state.round_no < loop_state.max_rounds
         && latest_path_batch_facts_all_missing(loop_state)
         && !has_discussion_followup_action(actions)
     {
@@ -468,137 +467,6 @@ fn should_stop_for_observed_finalize(
         && required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         })
-}
-
-fn evaluate_round_outcome(
-    task: &ClaimedTask,
-    loop_state: &mut LoopState,
-    policy: &AgentLoopGuardPolicy,
-    outcome: &RoundOutcome,
-) -> bool {
-    if outcome.had_error {
-        info!(
-            "loop_round_stop task_id={} round={} reason=had_error",
-            task.task_id, loop_state.round_no
-        );
-        return true;
-    }
-    if let Some(reason) = &outcome.stop_signal {
-        if reason == "recoverable_failure_continue_round" {
-            if !policy.multi_round_enabled {
-                info!(
-                    "loop_round_stop task_id={} round={} reason=recoverable_failure_multi_round_disabled",
-                    task.task_id, loop_state.round_no
-                );
-                return true;
-            }
-            if loop_state.round_no >= loop_state.max_rounds {
-                if loop_state.recoverable_failure_extra_rounds_used
-                    >= policy.recoverable_failure_extra_rounds
-                {
-                    info!(
-                        "loop_round_stop task_id={} round={} reason=recoverable_failure_extra_rounds_exhausted used={} limit={}",
-                        task.task_id,
-                        loop_state.round_no,
-                        loop_state.recoverable_failure_extra_rounds_used,
-                        policy.recoverable_failure_extra_rounds
-                    );
-                    return true;
-                }
-                loop_state.recoverable_failure_extra_rounds_used += 1;
-                loop_state.max_rounds += 1;
-                info!(
-                    "loop_round_extend task_id={} round={} reason={} new_max_rounds={} used_extra={}",
-                    task.task_id,
-                    loop_state.round_no,
-                    reason,
-                    loop_state.max_rounds,
-                    loop_state.recoverable_failure_extra_rounds_used
-                );
-            }
-            loop_state.consecutive_no_progress = 0;
-            info!(
-                "loop_round_continue task_id={} round={} reason={}",
-                task.task_id, loop_state.round_no, reason
-            );
-            return false;
-        }
-        info!(
-            "loop_round_stop task_id={} round={} reason={} next_goal_hint={}",
-            task.task_id,
-            loop_state.round_no,
-            reason,
-            crate::truncate_for_log(outcome.next_goal_hint.as_deref().unwrap_or(""))
-        );
-        return true;
-    }
-    if outcome.executed_actions == 0 {
-        info!(
-            "loop_round_stop task_id={} round={} reason=no_actions",
-            task.task_id, loop_state.round_no
-        );
-        return true;
-    }
-    if outcome.no_progress {
-        loop_state.consecutive_no_progress += 1;
-    } else {
-        loop_state.consecutive_no_progress = 0;
-    }
-    if loop_state.consecutive_no_progress > policy.no_progress_limit {
-        info!(
-            "loop_round_stop task_id={} round={} reason=no_progress limit={} count={}",
-            task.task_id,
-            loop_state.round_no,
-            policy.no_progress_limit,
-            loop_state.consecutive_no_progress
-        );
-        return true;
-    }
-    if !policy.multi_round_enabled {
-        info!(
-            "loop_round_stop task_id={} round={} reason=multi_round_disabled",
-            task.task_id, loop_state.round_no
-        );
-        return true;
-    }
-    if loop_state.round_no >= loop_state.max_rounds {
-        info!(
-            "loop_round_stop task_id={} round={} reason=max_rounds reached={}",
-            task.task_id, loop_state.round_no, loop_state.max_rounds
-        );
-        return true;
-    }
-    false
-}
-
-fn soft_budget_checkpoint_resume_reason(
-    loop_state: &LoopState,
-    policy: &AgentLoopGuardPolicy,
-    outcome: &RoundOutcome,
-) -> Option<&'static str> {
-    if outcome.had_error {
-        return None;
-    }
-    if outcome
-        .stop_signal
-        .as_deref()
-        .is_some_and(|signal| signal == "recoverable_failure_continue_round")
-    {
-        if let Some(reason) = recoverable_provider_blocker_resume_reason(loop_state) {
-            return Some(reason);
-        }
-        return None;
-    }
-    if outcome.stop_signal.is_some() || outcome.executed_actions == 0 {
-        return None;
-    }
-    if outcome.no_progress && loop_state.consecutive_no_progress > policy.no_progress_limit {
-        return Some("agent_loop_no_progress_limit");
-    }
-    if policy.multi_round_enabled && loop_state.round_no >= loop_state.max_rounds {
-        return Some("agent_loop_max_rounds");
-    }
-    None
 }
 
 fn loop_state_has_checkpoint_handoff(loop_state: &LoopState) -> bool {
@@ -663,11 +531,11 @@ fn worker_soft_checkpoint_after(worker_timeout_secs: u64) -> Option<Duration> {
     worker_soft_checkpoint_after_seconds(worker_timeout_secs).map(Duration::from_secs)
 }
 
-fn worker_budget_near_exhaustion(
-    started_at: Instant,
-    soft_checkpoint_after: Option<Duration>,
-) -> bool {
-    soft_checkpoint_after.is_some_and(|duration| started_at.elapsed() >= duration)
+fn task_budget_soft_slice_exhausted(started_at: Instant, loop_state: &LoopState) -> bool {
+    loop_state
+        .task_budget_slice
+        .as_ref()
+        .is_some_and(|slice| started_at.elapsed().as_millis() >= u128::from(slice.soft_slice_ms))
 }
 
 fn loop_state_has_recoverable_checkpoint_state(loop_state: &LoopState) -> bool {
@@ -695,21 +563,104 @@ fn task_budget_profile(
 fn initialize_task_budget_slice(
     loop_state: &mut LoopState,
     profile: super::support::LoopBudgetProfile,
+    task_budget_policy: &crate::task_budget_contract::TaskBudgetPolicy,
     soft_checkpoint_after: Option<Duration>,
     worker_timeout_seconds: u64,
 ) {
-    if loop_state.task_budget_slice.is_some() {
-        return;
-    }
     let soft_slice_ms = soft_checkpoint_after
         .unwrap_or_else(|| Duration::from_secs(worker_timeout_seconds.max(1)))
         .as_millis()
         .min(u128::from(u64::MAX)) as u64;
-    loop_state.task_budget_slice = Some(crate::task_budget_contract::TaskBudgetSlice::new(
-        task_budget_profile(profile),
-        soft_slice_ms,
-        crate::task_budget_contract::BudgetHardCeilings::default(),
-    ));
+    loop_state.task_budget_worker_soft_limit_ms = soft_slice_ms;
+    if let Some(slice) = loop_state.task_budget_slice.as_mut() {
+        slice.soft_slice_ms = slice.soft_slice_ms.min(soft_slice_ms).max(1);
+        return;
+    }
+    let profile = task_budget_profile(profile);
+    let mut profile_policy = task_budget_policy.profile(profile);
+    profile_policy.soft_slice_ms = profile_policy.soft_slice_ms.min(soft_slice_ms);
+    loop_state.task_budget_slice = Some(
+        crate::task_budget_contract::TaskBudgetSlice::new_with_policy(
+            profile,
+            profile_policy,
+            task_budget_policy.hard_ceilings.clone(),
+        ),
+    );
+}
+
+fn apply_task_budget_profile(
+    loop_state: &mut LoopState,
+    task_budget_policy: &crate::task_budget_contract::TaskBudgetPolicy,
+    profile: crate::task_budget_contract::TaskBudgetProfile,
+) {
+    if let Some(slice) = loop_state.task_budget_slice.as_mut() {
+        slice.apply_profile(
+            profile,
+            task_budget_policy.profile(profile),
+            loop_state.task_budget_worker_soft_limit_ms,
+        );
+    }
+}
+
+fn verified_action_effect(
+    state: &AppState,
+    action: &AgentAction,
+) -> crate::execution_recipe::ActionEffect {
+    let resolved =
+        crate::capability_resolver::resolve_agent_action_for_state(state, action.clone());
+    match resolved {
+        AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+            crate::execution_recipe::classify_skill_action_effect(state, &tool, &args)
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::Think { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. } => crate::execution_recipe::ActionEffect::default(),
+    }
+}
+
+fn budget_profile_for_prepared_round(
+    state: &AppState,
+    loop_state: &LoopState,
+    prepared_round: &super::prepare_round::PreparedRoundActions,
+) -> crate::task_budget_contract::TaskBudgetProfile {
+    let mut facts = crate::task_budget_contract::VerifiedPlanBudgetFacts {
+        needs_confirmation: prepared_round.verify_result.needs_confirmation,
+        has_continuation: matches!(
+            task_budget_lifecycle_state(loop_state),
+            Some("waiting" | "background")
+        ) || loop_state
+            .task_checkpoint
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.get("pending_async_job"))
+            .is_some_and(|value| !value.is_null()),
+        ops_closed_loop: matches!(
+            loop_state.execution_recipe.kind,
+            crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
+        ),
+        ..crate::task_budget_contract::VerifiedPlanBudgetFacts::default()
+    };
+    if let Some(contract) = prepared_round.effective_output_contract.as_ref() {
+        facts.evidence_required = contract.requires_content_evidence
+            || !crate::evidence_policy::required_evidence_fields_for_output_contract(contract)
+                .is_empty();
+        facts.delivery_required = contract.delivery_required;
+    }
+    for action in &prepared_round.actions {
+        if matches!(
+            action,
+            AgentAction::CallTool { .. }
+                | AgentAction::CallSkill { .. }
+                | AgentAction::CallCapability { .. }
+        ) {
+            facts.action_count = facts.action_count.saturating_add(1);
+        }
+        let effect = verified_action_effect(state, action);
+        facts.observe_count += usize::from(effect.observes);
+        facts.mutate_count += usize::from(effect.mutates);
+        facts.validate_count += usize::from(effect.validates);
+    }
+    crate::task_budget_contract::profile_for_verified_plan(facts)
 }
 
 fn task_budget_lifecycle_state(loop_state: &LoopState) -> Option<&str> {
@@ -738,6 +689,9 @@ fn observe_task_budget(
     let artifact_count = loop_state.written_file_aliases.len() as u64
         + u64::from(loop_state.last_written_file_path.is_some());
     let lifecycle_state = task_budget_lifecycle_state(loop_state);
+    let provider_waiting = outcome.is_some_and(|round| {
+        round.stop_signal.as_deref() == Some("recoverable_failure_continue_round")
+    }) && recoverable_provider_blocker_resume_reason(loop_state).is_some();
     let progress = BudgetProgress {
         evidence_count: loop_state.capability_results.len() as u64 + successful_steps,
         artifact_count,
@@ -746,11 +700,26 @@ fn observe_task_budget(
         async_continuations: u64::from(lifecycle_state == Some("background")),
         stagnation_count: loop_state.consecutive_no_progress.min(u32::MAX as usize) as u32,
     };
-    let model_finished = outcome.is_some_and(|round| {
-        round.stop_signal.is_some()
-            && round.stop_signal.as_deref() != Some("recoverable_failure_continue_round")
+    let policy_terminal = outcome.is_some_and(|round| {
+        round.had_error
+            || matches!(
+                round.stop_signal.as_deref(),
+                Some("repeat_action_limit" | "repeat_completed_action")
+            )
     });
-    let policy_terminal = outcome.is_some_and(|round| round.had_error);
+    let model_finished = outcome.is_some_and(|round| {
+        round.executed_actions == 0
+            || round.stop_signal.as_deref().is_some_and(|signal| {
+                !matches!(
+                    signal,
+                    "recoverable_failure_continue_round"
+                        | "replan_from_verifier_signal"
+                        | "post_write_validation_reserve"
+                        | "repeat_action_limit"
+                        | "repeat_completed_action"
+                )
+            })
+    });
     let resumable = loop_state_has_recoverable_checkpoint_state(loop_state);
     let cumulative_elapsed_ms = loop_state.task_budget_slice_base_elapsed_ms.saturating_add(
         loop_started_at
@@ -758,16 +727,26 @@ fn observe_task_budget(
             .as_millis()
             .min(u128::from(u64::MAX)) as u64,
     );
+    let cost = state.task_llm_cost_summary(&task.task_id);
+    let stagnation_tolerance = loop_state
+        .task_budget_slice
+        .as_ref()
+        .map(|slice| slice.stagnation_tolerance)
+        .unwrap_or(1);
     let observation = BudgetObservation {
         cumulative_model_turns: state.task_llm_call_count(&task.task_id) as u64,
         cumulative_tool_calls: loop_state.tool_calls_total as u64,
+        cumulative_input_tokens: cost.input_tokens,
+        cumulative_output_tokens: cost.output_tokens,
+        cumulative_cost_usd_nanos: cost.estimated_cost_usd_nanos,
         cumulative_elapsed_ms,
         progress,
         model_finished,
         needs_user: loop_state.pending_user_input_required || lifecycle_state == Some("needs_user"),
-        waiting: matches!(lifecycle_state, Some("waiting" | "background")),
+        waiting: provider_waiting || matches!(lifecycle_state, Some("waiting" | "background")),
         cancelled: false,
         policy_terminal,
+        stagnation_exhausted: loop_state.consecutive_no_progress >= stagnation_tolerance as usize,
         resumable,
         soft_slice_exhausted,
     };
@@ -783,7 +762,13 @@ fn observe_task_budget(
         "continuation_index": slice.continuation_index,
         "cumulative_model_turns": slice.cumulative_model_turns,
         "cumulative_tool_calls": slice.cumulative_tool_calls,
+        "cumulative_input_tokens": slice.cumulative_input_tokens,
+        "cumulative_output_tokens": slice.cumulative_output_tokens,
+        "cumulative_cost_usd_nanos": slice.cumulative_cost_usd_nanos,
         "cumulative_elapsed_ms": slice.cumulative_elapsed_ms,
+        "stagnation_tolerance": slice.stagnation_tolerance,
+        "provider_timeout_class": slice.provider_timeout_class.as_str(),
+        "tool_timeout_class": slice.tool_timeout_class.as_str(),
         "progress": slice.progress,
         "observed_progress": slice.progress.observed_progress(),
         "soft_slice_exhausted": soft_slice_exhausted,
@@ -811,15 +796,15 @@ async fn run_agent_round(
     goal: &str,
     user_text: &str,
     policy: &mut AgentLoopGuardPolicy,
+    task_budget_policy: &crate::task_budget_contract::TaskBudgetPolicy,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
     initial_plan: Option<&crate::PlanResult>,
 ) -> Result<RoundOutcome, String> {
     info!(
-        "loop_round_start task_id={} round={} max_rounds={} total_steps={} tool_calls_total={}",
+        "loop_round_start task_id={} round={} total_steps={} tool_calls_total={}",
         task.task_id,
         loop_state.round_no,
-        loop_state.max_rounds,
         loop_state.total_steps_executed,
         loop_state.tool_calls_total
     );
@@ -860,7 +845,7 @@ async fn run_agent_round(
         .output_vars
         .contains_key("agent_loop.planner_budget_profile")
     {
-        let profile = AgentLoopGuardPolicy::budget_profile_for_context(
+        let guard_profile = AgentLoopGuardPolicy::budget_profile_for_context(
             loop_state.execution_recipe,
             prepared_round.effective_output_contract.as_ref(),
         );
@@ -868,19 +853,33 @@ async fn run_agent_round(
             loop_state.execution_recipe,
             prepared_round.effective_output_contract.as_ref(),
         );
-        loop_state.max_rounds = policy.max_rounds.max(1);
+        let profile = budget_profile_for_prepared_round(state, loop_state, &prepared_round);
+        apply_task_budget_profile(loop_state, task_budget_policy, profile);
         loop_state.output_vars.insert(
             "agent_loop.planner_budget_profile".to_string(),
             profile.as_str().to_string(),
         );
         info!(
-            "loop_planner_budget_profile task_id={} profile={} max_rounds={} max_steps={} max_tool_calls={} no_progress_limit={}",
+            "loop_planner_budget_profile task_id={} profile={} max_steps={} soft_slice_ms={} stagnation_tolerance={}",
             task.task_id,
             profile.as_str(),
-            policy.max_rounds,
             policy.max_steps,
-            policy.max_tool_calls,
-            policy.no_progress_limit
+            loop_state
+                .task_budget_slice
+                .as_ref()
+                .map(|slice| slice.soft_slice_ms)
+                .unwrap_or_default(),
+            loop_state
+                .task_budget_slice
+                .as_ref()
+                .map(|slice| slice.stagnation_tolerance)
+                .unwrap_or_default()
+        );
+        info!(
+            task_id = task.task_id,
+            guard_profile = guard_profile.as_str(),
+            task_budget_profile = profile.as_str(),
+            "loop_structured_budget_profile_selected"
         );
     }
     if let Some(output_contract) = prepared_round.effective_output_contract.as_ref() {
@@ -1151,7 +1150,9 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     initial_task_observations: &[Value],
 ) -> Result<AskReply, String> {
     let base_policy = load_agent_loop_guard_policy(state);
-    let mut loop_state = LoopState::new(base_policy.max_rounds.max(1));
+    let task_budget_policy =
+        crate::task_budget_contract::load_task_budget_policy(&state.skill_rt.workspace_root);
+    let mut loop_state = LoopState::new();
     super::seed_loop_state_for_agent_run(&mut loop_state, agent_run_context, resume_checkpoint);
     loop_state
         .task_observations
@@ -1163,7 +1164,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     let budget_profile =
         AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, None);
     let mut policy = base_policy.adjusted_for_context(loop_state.execution_recipe, None);
-    loop_state.max_rounds = policy.max_rounds.max(1);
     base_policy.apply_recipe_runtime_overrides(&mut loop_state.execution_recipe);
     let enabled_rollout_switches = policy.enabled_rollout_switches();
     if !enabled_rollout_switches.is_empty() {
@@ -1173,13 +1173,10 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         );
     }
     info!(
-        "loop_budget_profile task_id={} profile={} max_rounds={} max_steps={} max_tool_calls={} no_progress_limit={} repeat_action_limit={}",
+        "loop_budget_profile task_id={} profile={} max_steps={} repeat_action_limit={}",
         task.task_id,
         budget_profile.as_str(),
-        policy.max_rounds,
         policy.max_steps,
-        policy.max_tool_calls,
-        policy.no_progress_limit,
         policy.repeat_action_limit
     );
     let mut round = 1usize;
@@ -1193,77 +1190,102 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     initialize_task_budget_slice(
         &mut loop_state,
         budget_profile,
+        &task_budget_policy,
         worker_soft_checkpoint_after,
         worker_task_timeout_seconds,
     );
+    let mut skip_planner_rounds = false;
     loop {
-        while round <= loop_state.max_rounds {
-            ensure_task_running(state, task)?;
-            loop_state.round_no = round;
-            if worker_budget_near_exhaustion(loop_started_at, worker_soft_checkpoint_after)
-                && loop_state_has_recoverable_checkpoint_state(&loop_state)
-            {
-                observe_task_budget(state, task, &mut loop_state, None, loop_started_at, true);
-                loop_state.last_stop_signal = Some("budget_near_exhaustion".to_string());
-                publish_agent_loop_checkpoint_progress(
-                    state,
-                    task,
-                    &mut loop_state,
-                    "budget_near_exhaustion",
-                );
-                break;
-            }
-            super::maybe_publish_execution_recipe_phase_hint(state, task, &mut loop_state);
-            let outcome = run_agent_round(
-                state,
-                task,
-                goal,
-                user_text,
-                &mut policy,
-                &mut loop_state,
-                agent_run_context,
-                (round == 1).then_some(initial_plan).flatten(),
-            )
-            .await?;
-            loop_state.last_stop_signal = outcome.stop_signal.clone();
-            let soft_slice_exhausted =
-                worker_budget_near_exhaustion(loop_started_at, worker_soft_checkpoint_after);
-            observe_task_budget(
-                state,
-                task,
-                &mut loop_state,
-                Some(&outcome),
-                loop_started_at,
-                soft_slice_exhausted,
-            );
-            if soft_slice_exhausted
-                && !outcome.had_error
-                && outcome.executed_actions > 0
-                && loop_state_has_recoverable_checkpoint_state(&loop_state)
-            {
-                loop_state.last_stop_signal = Some("budget_near_exhaustion".to_string());
-                publish_agent_loop_checkpoint_progress(
-                    state,
-                    task,
-                    &mut loop_state,
-                    "budget_near_exhaustion",
-                );
-                break;
-            }
-            if evaluate_round_outcome(task, &mut loop_state, &policy, &outcome) {
-                if let Some(resume_reason) =
-                    soft_budget_checkpoint_resume_reason(&loop_state, &policy, &outcome)
-                {
-                    publish_agent_loop_checkpoint_progress(
+        if !skip_planner_rounds {
+            loop {
+                ensure_task_running(state, task)?;
+                loop_state.round_no = round;
+                if task_budget_soft_slice_exhausted(loop_started_at, &loop_state) {
+                    let decision = observe_task_budget(
                         state,
                         task,
                         &mut loop_state,
-                        resume_reason,
+                        None,
+                        loop_started_at,
+                        true,
                     );
+                    loop_state.last_stop_signal = Some("task_budget_slice_exhausted".to_string());
+                    if matches!(
+                        decision,
+                        crate::task_budget_contract::BudgetDecision::CheckpointRequeue
+                    ) {
+                        publish_agent_loop_checkpoint_progress(
+                            state,
+                            task,
+                            &mut loop_state,
+                            "task_budget_slice_exhausted",
+                        );
+                    }
+                    break;
                 }
-                break;
+                super::maybe_publish_execution_recipe_phase_hint(state, task, &mut loop_state);
+                let outcome = run_agent_round(
+                    state,
+                    task,
+                    goal,
+                    user_text,
+                    &mut policy,
+                    &task_budget_policy,
+                    &mut loop_state,
+                    agent_run_context,
+                    (round == 1).then_some(initial_plan).flatten(),
+                )
+                .await?;
+                loop_state.last_stop_signal = outcome.stop_signal.clone();
+                if outcome.no_progress {
+                    loop_state.consecutive_no_progress =
+                        loop_state.consecutive_no_progress.saturating_add(1);
+                } else {
+                    loop_state.consecutive_no_progress = 0;
+                }
+                let soft_slice_exhausted =
+                    task_budget_soft_slice_exhausted(loop_started_at, &loop_state);
+                let decision = observe_task_budget(
+                    state,
+                    task,
+                    &mut loop_state,
+                    Some(&outcome),
+                    loop_started_at,
+                    soft_slice_exhausted,
+                );
+                match decision {
+                    crate::task_budget_contract::BudgetDecision::Continue => {
+                        round = round.saturating_add(1);
+                    }
+                    crate::task_budget_contract::BudgetDecision::CheckpointRequeue => {
+                        loop_state.last_stop_signal =
+                            Some("task_budget_slice_exhausted".to_string());
+                        publish_agent_loop_checkpoint_progress(
+                            state,
+                            task,
+                            &mut loop_state,
+                            "task_budget_slice_exhausted",
+                        );
+                        break;
+                    }
+                    crate::task_budget_contract::BudgetDecision::Waiting => {
+                        if let Some(resume_reason) =
+                            recoverable_provider_blocker_resume_reason(&loop_state)
+                        {
+                            publish_agent_loop_checkpoint_progress(
+                                state,
+                                task,
+                                &mut loop_state,
+                                resume_reason,
+                            );
+                        }
+                        break;
+                    }
+                    crate::task_budget_contract::BudgetDecision::NeedsUser
+                    | crate::task_budget_contract::BudgetDecision::Finish
+                    | crate::task_budget_contract::BudgetDecision::Terminal => break,
+                }
             }
-            round += 1;
         }
         let pre_finalize_loop_state = loop_state.clone();
         let mut reply = crate::finalize::finalize_loop_reply(
@@ -1306,7 +1328,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         .await?
         {
             loop_state = pre_verifier_recovery_loop_state;
-            round = loop_state.max_rounds + 1;
+            skip_planner_rounds = true;
             continue;
         }
         attach_answer_verifier_if_missing(

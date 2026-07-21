@@ -1,6 +1,6 @@
 #[test]
 fn direct_scalar_defers_count_inventory_total_with_component_breakdown_to_llm() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
@@ -11,7 +11,7 @@ fn direct_scalar_defers_count_inventory_total_with_component_breakdown_to_llm() 
 
 #[test]
 fn direct_scalar_reads_count_inventory_single_dimension_from_structured_output() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
@@ -210,7 +210,7 @@ fn dir_compare_direct_answer_reports_no_differences() {
 
 #[test]
 fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentence() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",

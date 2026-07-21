@@ -72,7 +72,7 @@ fn agent_context_with_required_machine_fields(fields: serde_json::Value) -> Agen
 #[test]
 fn reusable_terminal_json_after_later_observation_preserves_prior_success_answer() {
     let terminal_answer = r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
-    let mut loop_state = LoopState::new(3);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "run_cmd",
@@ -98,7 +98,7 @@ fn reusable_terminal_json_after_later_observation_preserves_prior_success_answer
 
 #[test]
 fn reusable_terminal_json_requires_later_nonterminal_observation() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "synthesize_answer",
@@ -117,7 +117,7 @@ fn reusable_terminal_json_rejects_unresolved_machine_values() {
         r#"{"answer":"{{last_output}}"}"#,
         r#"{"steps":[]}"#,
     ] {
-        let mut loop_state = LoopState::new(2);
+        let mut loop_state = LoopState::new();
         loop_state
             .executed_step_results
             .push(ok_step("step_1", "respond", answer));
@@ -136,7 +136,7 @@ fn reusable_terminal_json_rejects_unresolved_machine_values() {
 
 #[test]
 fn strict_json_projection_answer_rejects_unresolved_machine_values() {
-    let loop_state = LoopState::new(1);
+    let loop_state = LoopState::new();
     let context = agent_context_with_required_machine_fields(json!([
         "changed_files",
         "test_command",
@@ -154,7 +154,7 @@ fn strict_json_projection_answer_rejects_unresolved_machine_values() {
 
 #[test]
 fn strict_json_projection_answer_rejects_structural_error_code_tokens() {
-    let loop_state = LoopState::new(1);
+    let loop_state = LoopState::new();
     let context = agent_context_with_required_machine_fields(json!([
         "changed_files",
         "test_command",
@@ -174,7 +174,7 @@ fn strict_json_projection_answer_rejects_structural_error_code_tokens() {
 
 #[test]
 fn local_code_task_projection_prefers_structured_required_machine_fields_over_user_surface() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -230,7 +230,7 @@ fn local_code_task_projection_prefers_structured_required_machine_fields_over_us
 
 #[test]
 fn local_code_task_projection_supports_verification_command_and_diff_summary() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
@@ -309,7 +309,7 @@ fn local_code_task_projection_supports_verification_command_and_diff_summary() {
 
 #[test]
 fn local_code_task_projection_builds_created_files_test_command_and_status() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -357,7 +357,7 @@ fn local_code_task_projection_builds_created_files_test_command_and_status() {
 
 #[test]
 fn local_code_task_projection_uses_legacy_write_file_as_changed_file_evidence() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -394,7 +394,7 @@ fn local_code_task_projection_uses_legacy_write_file_as_changed_file_evidence() 
 
 #[test]
 fn local_code_task_projection_preserves_multiple_validation_commands() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.run_cmd_commands".to_string(),
         serde_json::json!([
@@ -458,7 +458,7 @@ fn local_code_task_projection_preserves_multiple_validation_commands() {
 
 #[test]
 fn local_code_task_projection_includes_failing_command_repair_fields() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "cd /workspace/project && python3 test_calc_core.py; echo \"EXIT_CODE=$?\"".to_string(),
@@ -568,7 +568,7 @@ fn local_code_task_projection_includes_failing_command_repair_fields() {
 
 #[test]
 fn local_code_task_projection_uses_plan_trace_run_cmd_commands() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
@@ -662,7 +662,7 @@ fn local_code_task_projection_uses_plan_trace_run_cmd_commands() {
 
 #[test]
 fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -734,7 +734,7 @@ fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
 
 #[test]
 fn local_code_task_projection_uses_planner_selector_instead_of_context_prose() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "cd /workspace/project && python3 test_calc_core.py".to_string(),
@@ -803,7 +803,7 @@ fn local_code_task_projection_uses_planner_selector_instead_of_context_prose() {
 
 #[test]
 fn local_code_task_projection_uses_successful_write_plan_content_for_code_fields() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -883,7 +883,7 @@ fn local_code_task_projection_uses_successful_write_plan_content_for_code_fields
 
 #[test]
 fn local_code_task_projection_uses_structured_fields_not_ordinary_prose_tokens() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -937,7 +937,7 @@ fn local_code_task_projection_uses_structured_fields_not_ordinary_prose_tokens()
 
 #[test]
 fn local_code_task_projection_ignores_multilingual_raw_user_field_words() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -971,7 +971,7 @@ fn local_code_task_projection_ignores_multilingual_raw_user_field_words() {
 
 #[test]
 fn local_code_task_projection_refuses_unobserved_content_fields() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -1001,7 +1001,7 @@ fn local_code_task_projection_refuses_unobserved_content_fields() {
 
 #[test]
 fn local_code_task_projection_uses_readbacks_for_functions_errors_and_evidence_files() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -1053,7 +1053,7 @@ fn local_code_task_projection_uses_readbacks_for_functions_errors_and_evidence_f
 
 #[test]
 fn local_code_task_projection_uses_post_write_readbacks_for_functions() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),
@@ -1113,7 +1113,7 @@ fn local_code_task_projection_uses_post_write_readbacks_for_functions() {
 
 #[test]
 fn local_code_task_projection_supplements_partial_source_readback_from_test_imports() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.run_cmd_commands".to_string(),
         serde_json::json!([
@@ -1185,7 +1185,7 @@ fn local_code_task_projection_supplements_partial_source_readback_from_test_impo
 
 #[test]
 fn local_code_task_projection_prefers_unwritten_source_readback_over_test_functions() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.run_cmd_commands".to_string(),
         serde_json::json!([
@@ -1254,7 +1254,7 @@ fn local_code_task_projection_prefers_unwritten_source_readback_over_test_functi
 
 #[test]
 fn local_code_task_projection_excludes_noop_writes_from_changed_files() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.run_cmd_commands".to_string(),
         serde_json::json!(["python3 test_calc_core.py"]).to_string(),
@@ -1311,7 +1311,7 @@ fn local_code_task_projection_excludes_noop_writes_from_changed_files() {
 
 #[test]
 fn local_code_task_projection_uses_code_readbacks_when_no_current_write_exists() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.run_cmd_commands".to_string(),
         serde_json::json!([
@@ -1371,7 +1371,7 @@ fn local_code_task_projection_uses_code_readbacks_when_no_current_write_exists()
 
 #[test]
 fn local_code_task_projection_refuses_created_files_without_current_write() {
-    let mut loop_state = LoopState::new(2);
+    let mut loop_state = LoopState::new();
     loop_state.output_vars.insert(
         "agent_loop.latest_run_cmd_command".to_string(),
         "python3 test_calc_core.py".to_string(),

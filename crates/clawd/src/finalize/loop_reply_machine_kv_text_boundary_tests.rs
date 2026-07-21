@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn requested_machine_kv_summary_does_not_preserve_web_listing_from_visible_text_json() {
     let task = claimed_task("task-machine-kv-web-text-boundary");
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "web_search_extract",

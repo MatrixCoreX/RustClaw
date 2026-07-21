@@ -4,7 +4,7 @@ use crate::finalize::loop_reply::deterministic_structured_container_summary_answ
 #[test]
 fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -26,7 +26,7 @@ fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
 #[test]
 fn structured_container_summary_returns_machine_fields_for_empty_object() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -58,7 +58,7 @@ fn structured_container_summary_returns_machine_fields_for_empty_object() {
 #[test]
 fn structured_container_summary_returns_machine_fields_for_empty_array() {
     let state = test_state();
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
@@ -89,7 +89,7 @@ fn structured_container_summary_returns_machine_fields_for_empty_array() {
 
 #[test]
 fn direct_structured_observed_answer_defers_when_plan_requested_synthesis() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -120,7 +120,7 @@ fn direct_structured_observed_answer_defers_when_plan_requested_synthesis() {
 
 #[test]
 fn direct_structured_observed_answer_uses_names_only_inventory_despite_synthesis_plan() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -155,7 +155,7 @@ fn direct_structured_observed_answer_uses_names_only_inventory_despite_synthesis
 
 #[test]
 fn direct_structured_observed_answer_uses_dirs_only_inventory_despite_synthesis_plan() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -191,7 +191,7 @@ fn direct_structured_observed_answer_uses_dirs_only_inventory_despite_synthesis_
 
 #[test]
 fn direct_structured_observed_answer_defers_generic_content_to_synthesis() {
-    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
@@ -218,7 +218,7 @@ fn broad_structured_read_drops_separator() {
     std::fs::write(&path, "[memory]\nconfig_path = \"configs/memory.toml\"\n")
         .expect("write temp toml");
     let path_text = path.to_string_lossy().to_string();
-    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages = vec![
         "=============================================================================".to_string(),

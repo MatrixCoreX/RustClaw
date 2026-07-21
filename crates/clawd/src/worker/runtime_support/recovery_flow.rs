@@ -92,7 +92,7 @@ fn prepare_due_paused_checkpoint_resume_work(
                 lease_seconds,
             ) {
                 Ok(Some(claimed)) => {
-                    let mut seeded_loop_state = crate::agent_engine::LoopState::new(1);
+                    let mut seeded_loop_state = crate::agent_engine::LoopState::new();
                     let Some(seed_report) = crate::agent_engine::seed_loop_state_for_agent_run(
                         &mut seeded_loop_state,
                         None,
