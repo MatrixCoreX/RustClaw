@@ -527,6 +527,13 @@ pub(crate) struct SkillRunOutcome {
     pub(crate) extra: Option<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SkillExecutionContext {
+    pub(crate) action_ref: String,
+    pub(crate) idempotency_key: String,
+    pub(crate) attempt_no: i64,
+}
+
 struct SkillExecutionIsolation {
     state: AppState,
     artifact_refs: Vec<Value>,
@@ -1475,7 +1482,17 @@ pub(crate) async fn run_skill_with_runner_outcome(
     state: &AppState,
     task: &ClaimedTask,
     skill_name: &str,
+    args: serde_json::Value,
+) -> Result<SkillRunOutcome, String> {
+    run_skill_with_runner_outcome_with_context(state, task, skill_name, args, None).await
+}
+
+pub(crate) async fn run_skill_with_runner_outcome_with_context(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
     mut args: serde_json::Value,
+    execution_context: Option<&SkillExecutionContext>,
 ) -> Result<SkillRunOutcome, String> {
     let mut skill_name = state.resolve_canonical_skill_name(skill_name);
     if skill_name.is_empty() {
@@ -1680,7 +1697,15 @@ pub(crate) async fn run_skill_with_runner_outcome(
 
     let value = match kind {
         SkillKind::External => {
-            execute_external_skill(execution_state, task, &skill_name, &args, &source).await?
+            execute_external_skill(
+                execution_state,
+                task,
+                &skill_name,
+                &args,
+                &source,
+                execution_context,
+            )
+            .await?
         }
         SkillKind::Runner => {
             let runner_name = execution_state.runner_name_for_skill(&skill_name);
@@ -1697,6 +1722,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
                 &args,
                 &source,
                 skill_timeout_secs,
+                execution_context,
             )
             .await?
         }

@@ -18,6 +18,9 @@ mod loop_state_contract_evidence;
 mod loop_state_seed;
 mod media_artifact_plan;
 mod mutation_ledger;
+pub(crate) use mutation_ledger::{
+    load_task_mutation_reconciliation_directive, safe_mutation_outcome_projection,
+};
 pub(crate) mod observed_output;
 mod planner_skill_context;
 mod planning;

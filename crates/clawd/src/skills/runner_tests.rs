@@ -88,3 +88,45 @@ fn read_only_local_api_action_retains_network_only() {
         ToolSandboxMode::ReadOnly
     );
 }
+
+#[test]
+fn runner_context_carries_internal_idempotency_contract_outside_skill_args() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        claim_attempt: 3,
+        task_id: "task-runner-idempotency".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let execution = crate::skills::SkillExecutionContext {
+        action_ref: "skill:demo:action:publish".to_string(),
+        idempotency_key: "stable-key".to_string(),
+        attempt_no: 2,
+    };
+
+    let context =
+        build_runner_skill_context(&state, &task, "ui", serde_json::json!({}), Some(&execution));
+
+    assert_eq!(
+        context.pointer("/execution/schema_version"),
+        Some(&serde_json::json!(1))
+    );
+    assert_eq!(
+        context
+            .pointer("/execution/idempotency_key")
+            .and_then(serde_json::Value::as_str),
+        Some("stable-key")
+    );
+    assert_eq!(
+        context
+            .pointer("/execution/attempt_no")
+            .and_then(serde_json::Value::as_i64),
+        Some(2)
+    );
+}

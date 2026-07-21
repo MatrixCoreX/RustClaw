@@ -97,6 +97,36 @@ CASES = (
     ),
     FaultCase(
         "L",
+        "mutation_all_phases_survive_restart",
+        "repo::task_mutation_ledger::tests::deterministic_key_and_every_durable_phase_survive_database_reopen",
+    ),
+    FaultCase(
+        "L",
+        "mutation_intent_transfers_before_attempt",
+        "repo::task_mutation_ledger::tests::intent_only_restart_can_transfer_to_new_claim_without_replaying_an_attempt",
+    ),
+    FaultCase(
+        "L",
+        "mutation_reconciled_phase_suppresses_replay",
+        "repo::task_mutation_ledger::tests::applied_reconciliation_is_committable_without_original_action_replay",
+    ),
+    FaultCase(
+        "L",
+        "mutation_reconciliation_suppresses_replay",
+        "agent_engine::mutation_ledger::tests::structured_reconciliation_commits_applied_effect_without_replaying_action",
+    ),
+    FaultCase(
+        "L",
+        "mutation_prose_cannot_reconcile",
+        "agent_engine::mutation_ledger::tests::prose_resume_input_cannot_resolve_mutation_without_machine_directive",
+    ),
+    FaultCase(
+        "L",
+        "direct_skill_mutation_checkpoints_ambiguity",
+        "worker::run_skill_mutation::tests::direct_run_skill_ambiguous_failure_checkpoints_instead_of_terminal_retry",
+    ),
+    FaultCase(
+        "L",
         "resume_lease_renews_claim_chain",
         "repo::tasks::tests::task_resume_execution_tests::resume_lease::active_resume_dispatch_lease_renews_the_complete_claim_chain",
     ),

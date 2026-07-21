@@ -1,3 +1,4 @@
+use rusqlite::OptionalExtension;
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
@@ -52,16 +53,173 @@ pub(super) fn prepare_mutation_execution(
         })
         .to_string()
     })? {
-        crate::repo::BeginTaskMutationOutcome::Acquired(lease) => {
+        crate::repo::BeginTaskMutationOutcome::Acquired(mut lease) => {
+            crate::repo::start_task_mutation_attempt(&state.core.db, &mut lease).map_err(
+                |error| {
+                    json!({
+                        "error_kind": "mutation_attempt_start_failed",
+                        "reason_code": "mutation_attempt_start_failed",
+                        "message_key": "clawd.task.mutation_attempt_start_failed",
+                        "owner_layer": "task_mutation_ledger",
+                        "action_ref": action_ref,
+                        "detail_code": crate::truncate_for_agent_trace(&error.to_string()),
+                    })
+                    .to_string()
+                },
+            )?;
             Ok(MutationExecutionGuard::Acquired(lease))
         }
-        crate::repo::BeginTaskMutationOutcome::Completed(record) => {
+        crate::repo::BeginTaskMutationOutcome::ReplaySuppressed(record) => {
             Ok(MutationExecutionGuard::Completed(record))
         }
-        crate::repo::BeginTaskMutationOutcome::Uncertain(record) => {
+        crate::repo::BeginTaskMutationOutcome::ReconciliationRequired(record) => {
+            reconcile_uncertain_mutation_if_directed(
+                state,
+                task,
+                action_fingerprint,
+                &action_ref,
+                record,
+            )
+        }
+    }
+}
+
+fn reconcile_uncertain_mutation_if_directed(
+    state: &AppState,
+    task: &ClaimedTask,
+    action_fingerprint: &str,
+    action_ref: &str,
+    record: crate::repo::TaskMutationRecord,
+) -> Result<MutationExecutionGuard, String> {
+    let Some((resolution, projection)) =
+        load_task_mutation_reconciliation_directive(state, task, &record.fingerprint_hash)?
+    else {
+        return Ok(MutationExecutionGuard::Uncertain(record));
+    };
+    let outcome = crate::repo::reconcile_task_mutation(
+        &state.core.db,
+        &state.worker.worker_id,
+        task.claim_attempt,
+        &task.task_id,
+        &record.fingerprint_hash,
+        resolution,
+        &projection,
+    )
+    .map_err(|error| {
+        json!({
+            "error_kind": "mutation_reconciliation_failed",
+            "reason_code": "mutation_reconciliation_failed",
+            "message_key": "clawd.task.mutation_reconciliation_failed",
+            "owner_layer": "task_mutation_ledger",
+            "action_ref": action_ref,
+            "detail_code": crate::truncate_for_agent_trace(&error.to_string()),
+        })
+        .to_string()
+    })?;
+    match outcome {
+        crate::repo::ReconcileTaskMutationOutcome::RetryReady(mut lease) => {
+            crate::repo::start_task_mutation_attempt(&state.core.db, &mut lease)
+                .map_err(|error| error.to_string())?;
+            Ok(MutationExecutionGuard::Acquired(lease))
+        }
+        crate::repo::ReconcileTaskMutationOutcome::Reconciled(lease) => {
+            crate::repo::commit_task_mutation(&state.core.db, &lease)
+                .map_err(|error| error.to_string())?;
+            match crate::repo::begin_task_mutation(
+                &state.core.db,
+                &state.worker.worker_id,
+                task.claim_attempt,
+                &task.task_id,
+                action_fingerprint,
+                action_ref,
+            )
+            .map_err(|error| error.to_string())?
+            {
+                crate::repo::BeginTaskMutationOutcome::ReplaySuppressed(record) => {
+                    Ok(MutationExecutionGuard::Completed(record))
+                }
+                _ => Err("mutation_reconciliation_commit_not_observable".to_string()),
+            }
+        }
+        crate::repo::ReconcileTaskMutationOutcome::ReplaySuppressed(record) => {
+            Ok(MutationExecutionGuard::Completed(record))
+        }
+        crate::repo::ReconcileTaskMutationOutcome::Waiting(record) => {
             Ok(MutationExecutionGuard::Uncertain(record))
         }
     }
+}
+
+pub(crate) fn load_task_mutation_reconciliation_directive(
+    state: &AppState,
+    task: &ClaimedTask,
+    fingerprint_hash: &str,
+) -> Result<Option<(crate::repo::TaskMutationReconciliation, Value)>, String> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|_| "mutation_reconciliation_db_unavailable".to_string())?;
+    let raw = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            rusqlite::params![task.task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|_| "mutation_reconciliation_state_unavailable".to_string())?
+        .flatten();
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let result: Value = serde_json::from_str(&raw)
+        .map_err(|_| "mutation_reconciliation_state_invalid".to_string())?;
+    let Some(directive) =
+        result.pointer("/task_lifecycle/resume_input/new_constraints/mutation_reconciliation")
+    else {
+        return Ok(None);
+    };
+    let Some(directive) = directive.as_object() else {
+        return Err("mutation_reconciliation_directive_invalid".to_string());
+    };
+    if directive
+        .get("fingerprint_hash")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        != Some(fingerprint_hash)
+    {
+        return Ok(None);
+    }
+    let resolution = match directive
+        .get("disposition")
+        .and_then(Value::as_str)
+        .map(str::trim)
+    {
+        Some("applied") => crate::repo::TaskMutationReconciliation::Applied,
+        Some("not_applied") => crate::repo::TaskMutationReconciliation::NotApplied,
+        Some("still_unknown") => crate::repo::TaskMutationReconciliation::StillUnknown,
+        _ => return Err("mutation_reconciliation_disposition_invalid".to_string()),
+    };
+    let projection = safe_reconciliation_projection(directive);
+    Ok(Some((resolution, projection)))
+}
+
+fn safe_reconciliation_projection(directive: &Map<String, Value>) -> Value {
+    let mut projection = Map::new();
+    for key in [
+        "schema_version",
+        "disposition",
+        "status_code",
+        "receipt_ref",
+        "provider",
+        "operation_id",
+        "observed_at",
+    ] {
+        if let Some(value) = directive.get(key).and_then(safe_machine_scalar) {
+            projection.insert(key.to_string(), value);
+        }
+    }
+    Value::Object(projection)
 }
 
 pub(super) fn record_completed_without_replay(
@@ -78,11 +236,13 @@ pub(super) fn record_completed_without_replay(
     let output = json!({
         "schema_version": 1,
         "source": "task_mutation_ledger",
-        "status": "completed",
+        "status": record.phase.as_token(),
         "execution": "suppressed",
         "reason_code": "mutation_already_completed",
         "action_ref": record.action_ref,
         "fingerprint_hash": record.fingerprint_hash,
+        "idempotency_key": record.idempotency_key,
+        "attempt_no": record.attempt_no,
     })
     .to_string();
     loop_state
@@ -105,7 +265,7 @@ pub(super) fn record_completed_without_replay(
             normalized_skill,
             args,
             &step_result,
-            record.outcome.as_ref(),
+            record.receipt.as_ref(),
         ));
     loop_state.executed_step_results.push(step_result);
     crate::append_subtask_result(
@@ -124,7 +284,7 @@ pub(super) fn record_completed_without_replay(
         record.action_ref
     ));
     let structured_extra = record
-        .outcome
+        .receipt
         .as_ref()
         .and_then(|outcome| outcome.get("structured_extra"));
     let stop_signal = super::async_start_checkpoint::publish_pending_async_job_start_checkpoint(
@@ -155,7 +315,7 @@ pub(super) fn publish_uncertain_mutation_checkpoint(
         loop_state,
         &record.action_ref,
         &record.fingerprint_hash,
-        &record.status,
+        record.phase.as_token(),
     );
     SkillActionOutcome {
         ended_with_user_visible_output: false,
@@ -169,13 +329,57 @@ pub(super) fn complete_mutation_execution(
     lease: &crate::repo::TaskMutationLease,
     outcome: &str,
     structured_extra: Option<&Value>,
+    validation_observation: &crate::execution_recipe::ValidationObservation,
+    validation_required: bool,
 ) -> bool {
     let projection = safe_mutation_outcome_projection(structured_extra);
-    match crate::repo::complete_task_mutation(&state.core.db, lease, outcome, projection.as_ref()) {
+    let receipt = crate::repo::record_task_mutation_receipt(
+        &state.core.db,
+        lease,
+        outcome,
+        projection.as_ref(),
+    );
+    if let Err(error) = receipt {
+        warn!(
+            "task mutation receipt persistence failed task_id={} action_ref={} error={}",
+            lease.record.task_id,
+            lease.record.action_ref,
+            crate::truncate_for_log(&error.to_string())
+        );
+        return false;
+    }
+    let (verification_status, verified) = match validation_observation {
+        crate::execution_recipe::ValidationObservation::Passed => ("passed", true),
+        crate::execution_recipe::ValidationObservation::Failed(_) => ("failed", false),
+        crate::execution_recipe::ValidationObservation::Inconclusive if validation_required => {
+            ("inconclusive", false)
+        }
+        crate::execution_recipe::ValidationObservation::Inconclusive => ("not_required", true),
+    };
+    let verification = json!({
+        "schema_version": 1,
+        "status": verification_status,
+        "required": validation_required,
+    });
+    if let Err(error) = crate::repo::record_task_mutation_verification(
+        &state.core.db,
+        lease,
+        &verification,
+        verified,
+    ) {
+        warn!(
+            "task mutation verification persistence failed task_id={} action_ref={} error={}",
+            lease.record.task_id,
+            lease.record.action_ref,
+            crate::truncate_for_log(&error.to_string())
+        );
+        return false;
+    }
+    match crate::repo::commit_task_mutation(&state.core.db, lease) {
         Ok(()) => true,
         Err(error) => {
             warn!(
-                "task mutation completion persistence failed task_id={} action_ref={} error={}",
+                "task mutation commit persistence failed task_id={} action_ref={} error={}",
                 lease.record.task_id,
                 lease.record.action_ref,
                 crate::truncate_for_log(&error.to_string())
@@ -185,7 +389,7 @@ pub(super) fn complete_mutation_execution(
     }
 }
 
-fn safe_mutation_outcome_projection(structured_extra: Option<&Value>) -> Option<Value> {
+pub(crate) fn safe_mutation_outcome_projection(structured_extra: Option<&Value>) -> Option<Value> {
     let extra = structured_extra?;
     let mut projected_extra = Map::new();
     if let Ok(Some(job)) = crate::async_job_contract::parse_pending_async_job_ref_from_extra(
