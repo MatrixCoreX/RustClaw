@@ -204,8 +204,23 @@ fn resolve_log_path(path: &PathBuf) -> Result<PathBuf, String> {
             path.display()
         ));
     }
-    candidates.sort_by(|a, b| b.cmp(a));
-    Ok(candidates.remove(0).2)
+    select_log_candidate(candidates).ok_or_else(|| {
+        format!(
+            "log directory contains no readable files: {}",
+            path.display()
+        )
+    })
+}
+
+fn select_log_candidate(candidates: Vec<(u8, SystemTime, PathBuf)>) -> Option<PathBuf> {
+    candidates
+        .into_iter()
+        .max_by(|a, b| {
+            a.1.cmp(&b.1)
+                .then_with(|| a.0.cmp(&b.0))
+                .then_with(|| a.2.cmp(&b.2))
+        })
+        .map(|(_, _, path)| path)
 }
 
 fn analyze_log_target(
@@ -233,46 +248,14 @@ fn analyze_log_directory(
     max_matches: usize,
     tail_lines: usize,
 ) -> Result<LogAnalysis, String> {
-    let entries = fs::read_dir(path).map_err(|err| format!("read log dir failed: {err}"))?;
-    let mut best: Option<(usize, u8, SystemTime, LogAnalysis)> = None;
-    for entry in entries {
-        let entry = entry.map_err(|err| format!("read log dir entry failed: {err}"))?;
-        let candidate_path = entry.path();
-        if !candidate_path.is_file() {
-            continue;
-        }
-        let metadata = entry
-            .metadata()
-            .map_err(|err| format!("read log file metadata failed: {err}"))?;
-        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        let analysis = match analyze_log_file(
-            &candidate_path,
-            path.display().to_string(),
-            keywords,
-            max_matches,
-            tail_lines,
-        ) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let total_hits = analysis.keyword_counts.values().copied().sum::<usize>();
-        let priority = candidate_priority(&candidate_path);
-        let replace = best
-            .as_ref()
-            .map(|(best_hits, best_priority, best_modified, _)| {
-                (total_hits, priority, modified) > (*best_hits, *best_priority, *best_modified)
-            })
-            .unwrap_or(true);
-        if replace {
-            best = Some((total_hits, priority, modified, analysis));
-        }
-    }
-    best.map(|(_, _, _, analysis)| analysis).ok_or_else(|| {
-        format!(
-            "log directory contains no readable files: {}",
-            path.display()
-        )
-    })
+    let selected = resolve_log_path(path)?;
+    analyze_log_file(
+        &selected,
+        path.display().to_string(),
+        keywords,
+        max_matches,
+        tail_lines,
+    )
 }
 
 fn analyze_log_file(

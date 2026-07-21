@@ -1,9 +1,10 @@
 use super::{
     analyze_log_file, candidate_priority, error_extra, execute, log_level_from_line,
-    sanitize_match_line, SKILL_NAME,
+    sanitize_match_line, select_log_candidate, SKILL_NAME,
 };
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 #[test]
 fn error_extra_exposes_machine_contract() {
@@ -26,6 +27,45 @@ fn candidate_priority_prefers_operational_logs_over_model_io() {
         candidate_priority(Path::new("telegramd.log"))
             > candidate_priority(Path::new("model_io.log"))
     );
+}
+
+#[test]
+fn directory_selection_prefers_newest_file_before_log_priority() {
+    let older = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
+    let newer = SystemTime::UNIX_EPOCH + Duration::from_secs(20);
+    let selected = select_log_candidate(vec![
+        (
+            candidate_priority(Path::new("clawd.log")),
+            older,
+            PathBuf::from("clawd.log"),
+        ),
+        (
+            candidate_priority(Path::new("model_io.log")),
+            newer,
+            PathBuf::from("model_io.log"),
+        ),
+    ]);
+
+    assert_eq!(selected, Some(PathBuf::from("model_io.log")));
+}
+
+#[test]
+fn directory_selection_uses_log_priority_for_equal_timestamps() {
+    let modified = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
+    let selected = select_log_candidate(vec![
+        (
+            candidate_priority(Path::new("model_io.log")),
+            modified,
+            PathBuf::from("model_io.log"),
+        ),
+        (
+            candidate_priority(Path::new("clawd.log")),
+            modified,
+            PathBuf::from("clawd.log"),
+        ),
+    ]);
+
+    assert_eq!(selected, Some(PathBuf::from("clawd.log")));
 }
 
 #[test]
