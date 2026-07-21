@@ -406,6 +406,39 @@ def main() -> int:
         )
         assert markdown_machine_fields_row["assertion"] == "pass"
 
+        observed_container = result_with_steps(
+            [capability_step(observed_fields={"namespaces": []})],
+            text="No namespaces are available.",
+        )
+        observed_container["data"]["result_json"]["task_journal"]["trace"][
+            "step_results"
+        ][0]["observed_evidence"]["items"][-1] = {
+            "field": "extra.namespaces",
+            "kind": "array",
+            "count": 0,
+        }
+        observed_container_path = write_result(
+            root,
+            "observed-container.json",
+            observed_container,
+        )
+        assert (
+            row_for(
+                observed_container_path,
+                "observed_field:namespaces",
+                expect="",
+            )["assertion"]
+            == "pass"
+        )
+        assert (
+            row_for(
+                observed_container_path,
+                "observed_field:documents",
+                expect="",
+            )["assertion"]
+            == "fail"
+        )
+
     print("MANUAL_CASE_ASSERTIONS_TESTS ok")
     return 0
 
