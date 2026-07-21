@@ -8,6 +8,7 @@ mod arg_resolver;
 mod async_start_checkpoint;
 mod attempt_ledger;
 mod capability_result_synthesis;
+mod checkpoint_resume_state;
 #[allow(dead_code)]
 mod context_compaction;
 mod dispatch_support;

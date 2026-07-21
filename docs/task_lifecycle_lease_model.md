@@ -108,6 +108,24 @@ Configured administrator hard ceilings cover cumulative model turns, tool
 calls, tokens, estimated cost, elapsed time, continuations, and non-resumable
 tool runtime. Model output cannot raise them.
 
+### Agent phase resume state
+
+Agent-loop checkpoints include a bounded `agent_loop_resume_state` machine
+snapshot. Its `stage` is one of `planning`, `tool_execution`, `verification`,
+`patch_review`, or `final_synthesis`. The snapshot preserves the recent
+structured observations, compact history, last tool output, latest validation
+result, and already synthesized delivery candidates needed by the next worker.
+Large observations are omitted rather than copied without bounds; durable
+capability results, evidence refs, artifact refs, and completed side-effect
+fingerprints remain authoritative outside this compact snapshot.
+
+On resume, the runtime restores this state before planning or finalization.
+Unknown stage tokens fail back to the `planning` machine stage and cannot
+select a user-facing response or bypass verifier, permission, budget, or
+side-effect guards. The release fault matrix exercises all five stage tokens,
+bounded snapshot behavior, former loop-threshold crossing, administrator hard
+ceilings, and single-increment continuation restore.
+
 ## Side-Effect Outbox
 
 Planner-owned calls and explicit `kind=run_skill` calls share the same

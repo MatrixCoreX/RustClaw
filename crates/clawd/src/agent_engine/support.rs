@@ -567,6 +567,13 @@ fn context_compaction_checkpoint_trigger_json(resume_reason: &str) -> Value {
     })
 }
 
+fn checkpoint_resume_state(
+    loop_state: &super::LoopState,
+    stage: super::checkpoint_resume_state::AgentCheckpointStage,
+) -> Value {
+    super::checkpoint_resume_state::build_checkpoint_resume_state(loop_state, stage)
+}
+
 #[cfg(test)]
 pub(super) fn build_agent_loop_checkpoint_progress_payload(
     task: &ClaimedTask,
@@ -617,6 +624,10 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
             .as_ref()
             .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
         "context_compaction_trigger": context_compaction_checkpoint_trigger_json(resume_reason),
+        "agent_loop_resume_state": checkpoint_resume_state(
+            loop_state,
+            super::checkpoint_resume_state::AgentCheckpointStage::Planning,
+        ),
     });
     if let (Some(obj), Some(message_key)) = (boundary_context.as_object_mut(), message_key) {
         obj.insert("message_key".to_string(), json!(message_key));
@@ -740,6 +751,10 @@ fn build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
             "tool_or_skill": tool_or_skill,
             "action_ref": action_ref,
             "message_key": "clawd.agent_hook.confirmation_required",
+            "agent_loop_resume_state": checkpoint_resume_state(
+                loop_state,
+                super::checkpoint_resume_state::AgentCheckpointStage::ToolExecution,
+            ),
             "task_budget_slice": loop_state
                 .task_budget_slice
                 .as_ref()
@@ -988,6 +1003,10 @@ pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(
             "fingerprint_hash": fingerprint_hash,
             "ledger_status": ledger_status,
             "requires_reconciliation": true,
+            "agent_loop_resume_state": checkpoint_resume_state(
+                loop_state,
+                super::checkpoint_resume_state::AgentCheckpointStage::ToolExecution,
+            ),
             "task_budget_slice": loop_state
                 .task_budget_slice
                 .as_ref()

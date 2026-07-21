@@ -51,6 +51,31 @@ CASES = (
         "skills::builtin::builtin_workspace_mutation::tests::failed_operation_restores_partial_mutation",
     ),
     FaultCase(
+        "E",
+        "agent_phase_restart_matrix",
+        "agent_engine::checkpoint_resume_state::tests::restart_matrix_restores_all_agent_phase_machine_state",
+    ),
+    FaultCase(
+        "E",
+        "checkpoint_snapshot_bounded",
+        "agent_engine::checkpoint_resume_state::tests::restart_snapshot_is_bounded_and_ignores_unknown_stage_tokens",
+    ),
+    FaultCase(
+        "E",
+        "former_loop_thresholds_are_observational",
+        "task_budget_contract::tests::progress_crosses_former_round_and_tool_thresholds",
+    ),
+    FaultCase(
+        "E",
+        "administrator_ceiling_is_authoritative",
+        "task_budget_contract::tests::administrator_ceiling_is_terminal_even_with_progress",
+    ),
+    FaultCase(
+        "E",
+        "budget_checkpoint_resumes_once",
+        "task_budget_contract::tests::checkpoint_round_trip_resumes_once",
+    ),
+    FaultCase(
         "F",
         "expired_event_cursor_bounded",
         "task_event_transport::tests::bounded_replay_marks_an_expired_cursor",
