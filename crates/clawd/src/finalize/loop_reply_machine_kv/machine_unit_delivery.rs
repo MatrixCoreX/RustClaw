@@ -46,7 +46,13 @@ fn labeled_machine_field_value<'a>(line: &'a str, key: &str) -> Option<&'a str> 
         .or_else(|| line.trim().strip_prefix("* "))
         .or_else(|| line.trim().strip_prefix("+ "))
         .unwrap_or_else(|| line.trim());
-    let rest = line.strip_prefix(key)?;
+    let rest = line.strip_prefix(key).or_else(|| {
+        ["**", "__", "`"].into_iter().find_map(|delimiter| {
+            line.strip_prefix(delimiter)?
+                .strip_prefix(key)?
+                .strip_prefix(delimiter)
+        })
+    })?;
     let value = rest
         .strip_prefix('=')
         .or_else(|| rest.strip_prefix(':'))?

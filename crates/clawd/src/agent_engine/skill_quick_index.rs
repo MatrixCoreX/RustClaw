@@ -1,8 +1,10 @@
-use claw_core::skill_registry::{OutputKind, SkillManifest, SkillRiskLevel};
+use claw_core::skill_registry::{
+    OutputKind, PlannerCapabilityMapping, SkillManifest, SkillRiskLevel,
+};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-const QUICK_INDEX_MAX_PLANNER_CAPABILITIES: usize = 6;
+const QUICK_INDEX_MAX_PLANNER_CAPABILITIES: usize = 24;
 const QUICK_INDEX_MAX_SCHEMA_FIELDS: usize = 8;
 const QUICK_INDEX_MAX_OPTIONAL_FIELDS: usize = 8;
 const QUICK_INDEX_MAX_ENUM_FIELDS: usize = 3;
@@ -115,6 +117,30 @@ fn capability_enum_constraints(
         .collect()
 }
 
+fn representative_planner_capabilities(manifest: &SkillManifest) -> Vec<&PlannerCapabilityMapping> {
+    let mut positions = BTreeMap::<String, usize>::new();
+    let mut selected: Vec<&PlannerCapabilityMapping> = Vec::new();
+
+    for capability in &manifest.planner_capabilities {
+        let action = capability.action.as_deref().map(str::trim).unwrap_or("");
+        let key = if action.is_empty() {
+            format!("name:{}", capability.name.trim())
+        } else {
+            format!("action:{action}")
+        };
+        if let Some(index) = positions.get(&key).copied() {
+            if !selected[index].preferred && capability.preferred {
+                selected[index] = capability;
+            }
+            continue;
+        }
+        positions.insert(key, selected.len());
+        selected.push(capability);
+    }
+
+    selected
+}
+
 pub(super) fn output_contract_metadata(manifest: &SkillManifest) -> String {
     let mut attrs = vec![format!("kind={}", output_kind_token(manifest.output_kind))];
     if let Some(schema) = manifest.output_schema.as_ref() {
@@ -139,9 +165,8 @@ pub(super) fn output_contract(manifest: &SkillManifest) -> String {
 }
 
 fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
-    manifest
-        .planner_capabilities
-        .iter()
+    representative_planner_capabilities(manifest)
+        .into_iter()
         .take(QUICK_INDEX_MAX_PLANNER_CAPABILITIES)
         .map(|capability| {
             let name = capability.name.trim();
@@ -236,10 +261,10 @@ pub(super) fn planner_capabilities(manifest: &SkillManifest) -> String {
 }
 
 pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String {
-    let total = manifest.planner_capabilities.len();
-    let mut candidates = manifest
-        .planner_capabilities
-        .iter()
+    let representatives = representative_planner_capabilities(manifest);
+    let total = representatives.len();
+    let mut candidates = representatives
+        .into_iter()
         .take(QUICK_INDEX_MAX_PLANNER_CAPABILITIES)
         .map(|capability| {
             let mut attrs = Vec::new();
