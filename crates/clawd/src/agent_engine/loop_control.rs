@@ -911,6 +911,21 @@ async fn run_agent_round(
         );
         return Ok(outcome);
     }
+    if let Some(outcome) = recover_run_cmd_confirmation_with_scoped_capability_replan(
+        loop_state,
+        &prepared_round.verify_result,
+    ) {
+        info!(
+            "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
+            task.task_id,
+            loop_state.round_no,
+            outcome.executed_actions,
+            outcome.no_progress,
+            outcome.stop_signal.as_deref().unwrap_or(""),
+            outcome.next_goal_hint.as_deref().unwrap_or("")
+        );
+        return Ok(outcome);
+    }
     if verifier_confirmation_gate_requires_checkpoint(&prepared_round.verify_result) {
         let outcome = RoundOutcome {
             executed_actions: 0,
