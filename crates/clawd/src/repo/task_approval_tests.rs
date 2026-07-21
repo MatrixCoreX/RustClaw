@@ -18,7 +18,8 @@ fn db() -> Connection {
             user_id INTEGER NOT NULL DEFAULT 42,
             chat_id INTEGER NOT NULL DEFAULT 7,
             user_key TEXT,
-            channel TEXT NOT NULL DEFAULT 'web'
+            channel TEXT NOT NULL DEFAULT 'web',
+            kind TEXT NOT NULL DEFAULT 'ask'
         );",
     )
     .expect("create tasks");
@@ -180,6 +181,47 @@ fn approval_resumes_checkpoint_and_consumes_exact_binding_once() {
         consume_task_approval_grant_in_db(&db, "task-1", &binding("sha256:args"), 111)
             .expect("consume replay"),
         TaskApprovalConsumeOutcome::NotApproved
+    );
+}
+
+#[test]
+fn direct_run_skill_approval_requeues_without_entering_seeded_agent_recovery() {
+    let db = db();
+    insert_pending(&db, 500);
+    db.execute(
+        "UPDATE tasks SET kind = 'run_skill' WHERE task_id = 'task-1'",
+        [],
+    )
+    .expect("set direct skill kind");
+
+    decide_task_approval_request_in_db(
+        &db,
+        "task-1",
+        "approval-1",
+        ApprovalDecision::ApproveOnce,
+        None,
+        100,
+    )
+    .expect("approve direct skill")
+    .expect("approval update");
+
+    let (status, raw_result): (String, String) = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = 'task-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("requeued direct skill");
+    let result = serde_json::from_str::<Value>(&raw_result).expect("result json");
+    assert_eq!(status, "queued");
+    assert_eq!(result["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        result["task_checkpoint"]["resume_entrypoint"],
+        "await_user_input"
+    );
+    assert_eq!(
+        result["resume_context"]["approval_request"]["status"],
+        "approved"
     );
 }
 

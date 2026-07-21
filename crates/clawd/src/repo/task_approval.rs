@@ -134,7 +134,7 @@ fn decide_task_approval_request_in_db(
     let tx = db.unchecked_transaction()?;
     let record = tx
         .query_row(
-            "SELECT status, result_json, user_id, chat_id, user_key, channel
+            "SELECT status, result_json, user_id, chat_id, user_key, channel, kind
              FROM tasks WHERE task_id = ?1 LIMIT 1",
             params![task_id],
             |row| {
@@ -145,11 +145,13 @@ fn decide_task_approval_request_in_db(
                     row.get::<_, i64>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some((status, Some(raw_result_json), user_id, chat_id, task_user_key, channel)) = record
+    let Some((status, Some(raw_result_json), user_id, chat_id, task_user_key, channel, task_kind)) =
+        record
     else {
         return Ok(None);
     };
@@ -255,7 +257,11 @@ fn decide_task_approval_request_in_db(
         let Some(mut checkpoint) = resume_checkpoint else {
             return Ok(None);
         };
-        checkpoint.resume_entrypoint = crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound;
+        let requeue_direct_skill = task_kind == "run_skill";
+        if !requeue_direct_skill {
+            checkpoint.resume_entrypoint =
+                crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound;
+        }
         let checkpoint_id = checkpoint.checkpoint_id.clone();
         result["task_checkpoint"] = checkpoint.to_machine_json();
         result["task_lifecycle"] = json!({
@@ -272,14 +278,19 @@ fn decide_task_approval_request_in_db(
         });
         tx.execute(
             "UPDATE tasks
-             SET status = 'running', result_json = ?2, error_text = NULL, updated_at = ?3,
+             SET status = ?5, result_json = ?2, error_text = NULL, updated_at = ?3,
                  lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
              WHERE task_id = ?1 AND status = 'running' AND result_json = ?4",
             params![
                 task_id,
                 result.to_string(),
                 now_ts.to_string(),
-                raw_result_json
+                raw_result_json,
+                if requeue_direct_skill {
+                    "queued"
+                } else {
+                    "running"
+                },
             ],
         )?
     } else {
