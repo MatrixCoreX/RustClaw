@@ -486,6 +486,7 @@ export default function App() {
     filteredSkillsBase,
     filteredSkillsImage,
     filteredSkillsAudio,
+    filteredSkillsMultimedia,
     filteredSkillsOther,
     normalizedSkillsSearchQuery,
     skillsSearchQuery,
@@ -1681,6 +1682,7 @@ export default function App() {
               filteredSkillsBase={filteredSkillsBase}
               filteredSkillsImage={filteredSkillsImage}
               filteredSkillsAudio={filteredSkillsAudio}
+              filteredSkillsMultimedia={filteredSkillsMultimedia}
               filteredSkillsOther={filteredSkillsOther}
               normalizedSkillsSearchQuery={normalizedSkillsSearchQuery}
               skillsSearchQuery={skillsSearchQuery}

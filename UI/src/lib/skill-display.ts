@@ -6,6 +6,7 @@ export interface SkillGroups {
   tool: string[];
   image: string[];
   audio: string[];
+  multimedia: string[];
   base: string[];
   other: string[];
 }
@@ -121,16 +122,19 @@ export function groupSkillNames(
   baseSkillNamesSet: ReadonlySet<string>,
   toolSkillNamesSet: ReadonlySet<string>,
 ): SkillGroups {
+  const isMultimedia = (name: string) => name.startsWith("video_") || name.startsWith("music_");
   return {
     tool: sortSkillNames(managedSkills.filter((name) => toolSkillNamesSet.has(name))),
     image: sortSkillNames(managedSkills.filter((name) => name.startsWith("image_") && !toolSkillNamesSet.has(name))),
     audio: sortSkillNames(managedSkills.filter((name) => name.startsWith("audio_") && !toolSkillNamesSet.has(name))),
+    multimedia: sortSkillNames(managedSkills.filter((name) => isMultimedia(name) && !toolSkillNamesSet.has(name))),
     base: sortSkillNames(managedSkills.filter((name) => baseSkillNamesSet.has(name) && !toolSkillNamesSet.has(name))),
     other: sortSkillNames(
       managedSkills.filter(
         (name) =>
           !name.startsWith("image_") &&
           !name.startsWith("audio_") &&
+          !isMultimedia(name) &&
           !baseSkillNamesSet.has(name) &&
           !toolSkillNamesSet.has(name),
       ),

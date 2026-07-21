@@ -30,6 +30,7 @@ export interface SkillSwitchPanelProps {
   filteredSkillsBase: string[];
   filteredSkillsImage: string[];
   filteredSkillsAudio: string[];
+  filteredSkillsMultimedia: string[];
   filteredSkillsOther: string[];
   normalizedSkillsSearchQuery: string;
   skillsSearchQuery: string;
@@ -65,6 +66,7 @@ export function SkillSwitchPanel({
   filteredSkillsBase,
   filteredSkillsImage,
   filteredSkillsAudio,
+  filteredSkillsMultimedia,
   filteredSkillsOther,
   normalizedSkillsSearchQuery,
   skillsSearchQuery,
@@ -323,12 +325,14 @@ export function SkillSwitchPanel({
           {renderSkillGroup(t("固定开启的基础技能", "Always-on core skills"), filteredSkillsBase)}
           {renderSkillGroup(t("图片技能", "Image skills"), filteredSkillsImage)}
           {renderSkillGroup(t("语音技能", "Voice / Audio skills"), filteredSkillsAudio)}
+          {renderSkillGroup(t("多媒体技能", "Multimedia skills"), filteredSkillsMultimedia)}
           {renderSkillGroup(t("其他", "Others"), filteredSkillsOther)}
         </div>
         {normalizedSkillsSearchQuery &&
           filteredSkillsTool.length === 0 &&
           filteredSkillsImage.length === 0 &&
           filteredSkillsAudio.length === 0 &&
+          filteredSkillsMultimedia.length === 0 &&
           filteredSkillsBase.length === 0 &&
           filteredSkillsOther.length === 0 ? (
           <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/60">
