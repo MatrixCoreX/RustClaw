@@ -44,8 +44,7 @@ pub(super) fn extract_skill_provider_model(value: &Value) -> Option<(String, Str
     ))
 }
 
-fn local_clawd_base_url_from_workspace(workspace_root: &Path) -> String {
-    let config_path = workspace_root.join("configs/config.toml");
+fn local_clawd_base_url_from_config(config_path: &Path) -> String {
     let parsed = std::fs::read_to_string(config_path)
         .ok()
         .and_then(|raw| raw.parse::<toml::Value>().ok());
@@ -69,6 +68,8 @@ fn local_clawd_base_url_from_workspace(workspace_root: &Path) -> String {
         .unwrap_or("127.0.0.1:8787");
     let loopback_listen = if listen.starts_with("0.0.0.0:") {
         listen.replacen("0.0.0.0", "127.0.0.1", 1)
+    } else if listen.starts_with("[::]:") {
+        listen.replacen("[::]", "[::1]", 1)
     } else {
         listen.to_string()
     };
@@ -338,6 +339,8 @@ pub(crate) async fn run_skill_with_runner_once(
         "skill_runner_process_sandbox_prepared"
     );
     let sandbox_token_store_dir = prepared.additional_writable_targets.first().cloned();
+    let local_clawd_base_url =
+        local_clawd_base_url_from_config(Path::new(&state.reload_ctx.config_path_for_reload));
     let mut cmd = prepared.command;
     if let Some(report) = apply_skill_runner_env_isolation(&mut cmd) {
         tracing::info!(
@@ -350,6 +353,7 @@ pub(crate) async fn run_skill_with_runner_once(
     place_subprocess_in_own_process_group(&mut cmd);
     cmd.kill_on_drop(true);
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
+        .env("CLAWD_BASE_URL", &local_clawd_base_url)
         .env(
             "WORKSPACE_ROOT",
             state.skill_rt.workspace_root.display().to_string(),
@@ -371,10 +375,7 @@ pub(crate) async fn run_skill_with_runner_once(
     if let Some(token) = &internal_llm_token {
         cmd.env(
             "RUSTCLAW_INTERNAL_LLM_URL",
-            format!(
-                "{}/v1/internal/llm/text",
-                local_clawd_base_url_from_workspace(&state.skill_rt.workspace_root)
-            ),
+            format!("{}/v1/internal/llm/text", local_clawd_base_url),
         )
         .env("RUSTCLAW_INTERNAL_LLM_TOKEN", token)
         .env(
