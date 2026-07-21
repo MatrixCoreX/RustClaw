@@ -14,7 +14,7 @@ fn registry_entry_from(toml: &str, name: &str) -> SkillRegistryEntry {
 }
 
 #[test]
-fn registry_group_controls_capability_domain() {
+fn registry_group_controls_capability_group_token() {
     let entry = registry_entry_from(
         r#"
 [[skills]]
@@ -26,14 +26,11 @@ capabilities = ["net"]
 "#,
         "custom_web_tool",
     );
-    assert_eq!(
-        infer_domain_from_registry_entry(&entry),
-        Some(CapabilityDomain::NewsContent)
-    );
+    assert_eq!(registry_group_token(&entry).as_deref(), Some("news/web"));
 }
 
 #[test]
-fn machine_skill_names_refine_broad_registry_groups() {
+fn machine_skill_name_cannot_override_registry_group() {
     let entry = registry_entry_from(
         r#"
 [[skills]]
@@ -44,46 +41,26 @@ group = "ops"
 "#,
         "task_control",
     );
-    assert_eq!(
-        infer_domain_from_registry_entry(&entry),
-        Some(CapabilityDomain::TaskControl)
-    );
+    assert_eq!(registry_group_token(&entry).as_deref(), Some("ops"));
 }
 
 #[test]
-fn registry_groups_cover_media_and_config_domains() {
-    let config_entry = registry_entry_from(
+fn arbitrary_registry_group_survives_without_compiled_taxonomy() {
+    let entry = registry_entry_from(
         r#"
 [[skills]]
-name = "custom_config_tool"
+name = "custom_science_tool"
 enabled = true
 planner_kind = "tool"
-group = "config"
+group = "Science/Lab"
 "#,
-        "custom_config_tool",
+        "custom_science_tool",
     );
-    let video_entry = registry_entry_from(
-        r#"
-[[skills]]
-name = "custom_video_tool"
-enabled = true
-planner_kind = "skill"
-group = "video"
-"#,
-        "custom_video_tool",
-    );
-    assert_eq!(
-        infer_domain_from_registry_entry(&config_entry),
-        Some(CapabilityDomain::Config)
-    );
-    assert_eq!(
-        infer_domain_from_registry_entry(&video_entry),
-        Some(CapabilityDomain::VideoMedia)
-    );
+    assert_eq!(registry_group_token(&entry).as_deref(), Some("science/lab"));
 }
 
 #[test]
-fn filesystem_capability_infers_domain_without_skill_name() {
+fn missing_registry_group_remains_explicitly_ungrouped() {
     let entry = registry_entry_from(
         r#"
 [[skills]]
@@ -94,10 +71,7 @@ capabilities = ["fs.read"]
 "#,
         "custom_reader",
     );
-    assert_eq!(
-        infer_domain_from_registry_entry(&entry),
-        Some(CapabilityDomain::Filesystem)
-    );
+    assert_eq!(registry_group_token(&entry), None);
 }
 
 #[test]
@@ -176,6 +150,7 @@ fn compact_capability_map_omits_registry_skill_detail_duplication() {
 
     assert!(compact.contains("Current capability map"));
     assert!(compact.contains("agent_runtime_protocols="));
+    assert!(compact.contains("group=ungrouped;"));
     assert!(!compact.contains("Registry skill hints:"));
     assert!(compact.len() < full.len());
 }

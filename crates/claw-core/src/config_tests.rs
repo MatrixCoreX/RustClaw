@@ -1,4 +1,4 @@
-use super::{AppConfig, ToolsConfig};
+use super::{base_skill_names, core_skills_always_enabled, AppConfig, ToolsConfig};
 use std::fs;
 
 fn unique_temp_config_dir(name: &str) -> std::path::PathBuf {
@@ -216,4 +216,12 @@ fn tools_defaults_are_least_privilege_coding_defaults() {
     assert!(tools.deny.is_empty());
     assert!(!tools.allow_sudo);
     assert!(!tools.allow_path_outside_workspace);
+}
+
+#[test]
+fn default_workflow_and_knowledge_skills_are_always_on_in_ui() {
+    for skill in ["schedule", "extension_manager", "kb"] {
+        assert!(base_skill_names().contains(&skill));
+        assert!(core_skills_always_enabled().contains(&skill));
+    }
 }
