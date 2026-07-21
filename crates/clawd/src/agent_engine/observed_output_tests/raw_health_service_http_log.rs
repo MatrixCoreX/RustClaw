@@ -553,11 +553,12 @@ fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
                 "command_tool": "ss",
                 "exit_code": 0,
                 "listener_count": 3,
-                "public_listener_count": 2,
+                "all_interface_listener_count": 2,
                 "localhost_listener_count": 1,
+                "internet_reachability": "not_observed",
                 "ports": ["80", "8787", "46225"],
-                "public_ports": ["80", "8787"],
-                "public_listeners": [
+                "all_interface_ports": ["80", "8787"],
+                "all_interface_listeners": [
                     {
                         "bind_scope": "all_interfaces",
                         "is_loopback": false,
@@ -618,11 +619,12 @@ fn observed_entries_compact_wrapped_process_basic_port_list() {
                 "command_tool": "ss",
                 "exit_code": 0,
                 "listener_count": 3,
-                "public_listener_count": 2,
+                "all_interface_listener_count": 2,
                 "localhost_listener_count": 1,
+                "internet_reachability": "not_observed",
                 "ports": ["80", "8787", "46225"],
-                "public_ports": ["80", "8787"],
-                "public_listeners": [
+                "all_interface_ports": ["80", "8787"],
+                "all_interface_listeners": [
                     {
                         "bind_scope": "all_interfaces",
                         "local_endpoint": "0.0.0.0:80",
@@ -702,10 +704,11 @@ fn direct_answer_uses_generic_selector_for_process_listener_count() {
             "extra": {
                 "action": "port_list",
                 "listener_count": 3,
-                "public_listener_count": 2,
+                "all_interface_listener_count": 2,
+                "internet_reachability": "not_observed",
                 "ports": ["80", "8787", "46225"],
-                "public_ports": ["80", "8787"],
-                "public_listeners": [],
+                "all_interface_ports": ["80", "8787"],
+                "all_interface_listeners": [],
                 "listeners": []
             },
             "text": "exit=0"

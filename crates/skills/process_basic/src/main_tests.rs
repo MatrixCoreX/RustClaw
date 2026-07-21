@@ -76,7 +76,7 @@ fn ss_listener_parser_extracts_scope_port_and_process() {
 }
 
 #[test]
-fn port_list_extra_keeps_public_ports_as_structured_evidence() {
+fn port_list_extra_keeps_all_interface_ports_as_structured_evidence() {
     let text = concat!(
         "exit=0\n",
         "State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\n",
@@ -88,10 +88,10 @@ fn port_list_extra_keeps_public_ports_as_structured_evidence() {
     );
 
     let extra = port_list_extra("ss", text, None);
-    let public_ports = extra
-        .get("public_ports")
+    let all_interface_ports = extra
+        .get("all_interface_ports")
         .and_then(Value::as_array)
-        .expect("public ports");
+        .expect("all-interface ports");
     let listeners = extra
         .get("listeners")
         .and_then(Value::as_array)
@@ -99,12 +99,22 @@ fn port_list_extra_keeps_public_ports_as_structured_evidence() {
 
     assert_eq!(extra.get("listener_count").and_then(Value::as_u64), Some(5));
     assert_eq!(
-        extra.get("public_listener_count").and_then(Value::as_u64),
+        extra
+            .get("all_interface_listener_count")
+            .and_then(Value::as_u64),
         Some(3)
     );
-    assert!(public_ports.iter().any(|port| port.as_str() == Some("22")));
-    assert!(public_ports.iter().any(|port| port.as_str() == Some("80")));
-    assert!(public_ports
+    assert_eq!(
+        extra.get("internet_reachability").and_then(Value::as_str),
+        Some("not_observed")
+    );
+    assert!(all_interface_ports
+        .iter()
+        .any(|port| port.as_str() == Some("22")));
+    assert!(all_interface_ports
+        .iter()
+        .any(|port| port.as_str() == Some("80")));
+    assert!(all_interface_ports
         .iter()
         .any(|port| port.as_str() == Some("8787")));
     assert_eq!(

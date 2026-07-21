@@ -72,6 +72,24 @@ pub(super) fn observed_step_entry(step: &crate::executor::StepExecutionResult) -
     ))
 }
 
+pub(in crate::agent_engine) fn latest_structured_capability_observation(
+    loop_state: &LoopState,
+) -> Option<String> {
+    loop_state
+        .capability_results
+        .iter()
+        .rev()
+        .find_map(|result| {
+            if result.status != claw_core::capability_result::CapabilityResultStatus::Ok {
+                return None;
+            }
+            let normalized =
+                structured_observed_body(&result.capability, &result.data.to_string())?;
+            let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
+            (!sanitized.trim().is_empty()).then_some(sanitized)
+        })
+}
+
 pub(super) fn normalized_structured_observed_fact_allows_artifact_filter_bypass(
     skill: &str,
     output: &str,

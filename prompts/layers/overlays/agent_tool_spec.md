@@ -80,7 +80,7 @@ Skill behavior notes (file/path):
 - For path-scoped file requests where the user omits directory/path, first run a bounded locator search under `default_locator_search_dir`, constrained by `locator_scan_max_depth` and `locator_scan_max_files`. If exactly one concrete file resolves, execute with that path; if none or multiple candidates remain, ask for the exact directory/path with one concise clarification and include similar file or directory candidates as full absolute paths (top few).
 - For repo-local directory requests where the user names a concrete directory, verify existence from the current workspace instead of guessing from older memory or stale summaries.
 - For inline JSON/data transformation requests where the user already pasted the array/object in the message, extract and transform that inline data directly. Do not answer with a generic `please provide JSON` when the JSON is already present.
-- For service runtime status questions, prefer `service_control` (`status`/`verify`) or `process_basic` over checking whether the binary file exists.
+- For service runtime status questions, prefer `service.status`, `service.verify`, `process.ps`, or `process.port_list` over checking whether the binary file exists.
 - For log analysis requests targeting a log directory, either select a concrete log file first or use `log_analyze` with the directory path only when the skill contract explicitly supports directory resolution. Do not pass a directory path to a file-only reader.
 - After a `list_dir` or directory-listing `run_cmd` step, do not treat the directory path itself as readable file content. If the task now depends on content, first resolve concrete file paths from the observed listing; otherwise answer directly from the listing.
 - Do not call `read_file`, `read_text`, `read_text_range`, or document parsers with a directory path as a placeholder for "the largest/matching file inside that directory". First observe the directory listing/metadata, then read the concrete observed file path in a later step or answer from the listing if metadata is sufficient.
@@ -637,16 +637,16 @@ Skill behavior notes (file/path):
 - Prefer `dry_run=true` when intent is not explicit mutation.
 - Forbid unsupported manager/action values.
 
-### process_basic
-- action: `ps|port_list|kill|tail_log`
-- Use `process_basic.ps` for local process inventory, top CPU/process ranking, and "what process is worth noticing" requests. Use `process_basic.port_list` for listening-port inspection. Preserve `run_cmd` only when the user supplied an exact shell command or the needed process query is outside this contract.
+### process capabilities
+- callable capabilities: `process.ps|process.port_list|process.kill|process.tail_log`
+- Use `process.ps` for local process inventory, top CPU/process ranking, and "what process is worth noticing" requests. Use `process.port_list` for listening-port inspection. Preserve `run_cmd` only when the user supplied an exact shell command or the needed process query is outside this contract.
 - required by action:
   - `kill`: `pid` (optional `signal`, default `TERM`)
   - `tail_log`: `path` (optional `n`)
   - `ps`: optional `limit`
 
-#### process_basic JSON-schema style contract (strict)
-- Base shape: `{"type":"call_skill","skill":"process_basic","args":{...}}`
+#### process capability JSON-schema style contract (strict)
+- Base shape: `{"type":"call_capability","capability":"process.ps","args":{...}}` using the exact capability token for the selected action.
 - Use explicit PID for kill operations.
 - Prefer graceful signal defaults unless user explicitly asks forceful signals.
 - Forbid broad pattern-based kill without specific target.

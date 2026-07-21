@@ -470,6 +470,25 @@ fn pending_result_becomes_poll_continuation() {
 }
 
 #[test]
+fn ordinary_domain_running_status_does_not_become_poll_continuation() {
+    let envelope = super::successful_execution_envelope(
+        "process_basic",
+        "step_2",
+        &json!({"action": "ps"}),
+        "process observation",
+        Some(&json!({
+            "action": "ps",
+            "status": "running",
+            "running": true,
+            "process_count": 42
+        })),
+    );
+
+    assert_eq!(envelope.status, CapabilityResultStatus::Ok);
+    assert!(envelope.continuation.is_none());
+}
+
+#[test]
 fn prose_failure_is_data_not_a_routing_signal() {
     let envelope = super::failed_execution_envelope(
         "fs_basic",

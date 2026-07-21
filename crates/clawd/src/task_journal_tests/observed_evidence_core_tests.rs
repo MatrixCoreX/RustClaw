@@ -640,7 +640,7 @@ fn read_text_range_evidence_preserves_grounding_scalars() {
 }
 
 #[test]
-fn process_basic_port_list_evidence_keeps_public_port_samples() {
+fn process_basic_port_list_evidence_keeps_all_interface_port_samples() {
     let mut listeners = (0..30)
         .map(|idx| {
             let port = 40_000 + idx;
@@ -666,7 +666,7 @@ fn process_basic_port_list_evidence_keeps_public_port_samples() {
         "process_name": "clawd",
         "pid": 878474,
     }));
-    let public_listeners = vec![listeners.last().cloned().expect("public listener")];
+    let all_interface_listeners = vec![listeners.last().cloned().expect("all-interface listener")];
     let mut journal = TaskJournal::for_task("task-port-list", "ask", "ports");
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -685,10 +685,11 @@ fn process_basic_port_list_evidence_keeps_public_port_samples() {
                     "listeners_truncated": false,
                     "localhost_listener_count": 30,
                     "ports": ["40000", "8787"],
-                    "public_listener_count": 1,
-                    "public_listeners": public_listeners,
-                    "public_listeners_truncated": false,
-                    "public_ports": ["8787"]
+                    "all_interface_listener_count": 1,
+                    "all_interface_listeners": all_interface_listeners,
+                    "all_interface_listeners_truncated": false,
+                    "all_interface_ports": ["8787"],
+                    "internet_reachability": "not_observed"
                 }
             })
             .to_string(),
@@ -708,24 +709,26 @@ fn process_basic_port_list_evidence_keeps_public_port_samples() {
         .expect("provided evidence");
     assert!(provided
         .iter()
-        .any(|item| item.as_str() == Some("public_ports")));
+        .any(|item| item.as_str() == Some("all_interface_ports")));
     let items = observed
         .get("items")
         .and_then(Value::as_array)
         .expect("evidence items");
-    let public_ports = items
+    let all_interface_ports = items
         .iter()
-        .find(|item| item.get("field").and_then(Value::as_str) == Some("extra.public_ports"))
-        .expect("public ports evidence item");
-    assert!(public_ports
+        .find(|item| item.get("field").and_then(Value::as_str) == Some("extra.all_interface_ports"))
+        .expect("all-interface ports evidence item");
+    assert!(all_interface_ports
         .get("sample_values")
         .and_then(Value::as_array)
         .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("8787"))));
-    let public_listener = items
+    let all_interface_listener = items
         .iter()
-        .find(|item| item.get("field").and_then(Value::as_str) == Some("extra.public_listeners"))
-        .expect("public listener evidence item");
-    assert!(public_listener
+        .find(|item| {
+            item.get("field").and_then(Value::as_str) == Some("extra.all_interface_listeners")
+        })
+        .expect("all-interface listener evidence item");
+    assert!(all_interface_listener
         .get("sample_values")
         .and_then(Value::as_array)
         .is_some_and(|values| values.iter().any(|value| {

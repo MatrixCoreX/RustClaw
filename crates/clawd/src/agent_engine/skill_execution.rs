@@ -348,12 +348,14 @@ async fn handle_skill_step_success(
             "completed_with_inconclusive_non_validation_observation",
         ),
     };
+    let ledger_observed_output =
+        super::observed_output::latest_structured_capability_observation(loop_state);
     super::attempt_ledger::record_attempt(
         loop_state,
         normalized_skill,
         args_summary,
         ledger_status,
-        out,
+        ledger_observed_output.as_deref().unwrap_or(out),
         ledger_error_kind,
         ledger_reason,
     );

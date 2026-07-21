@@ -131,8 +131,9 @@ idempotent = false
 
 #[test]
 fn compact_capability_map_omits_registry_skill_detail_duplication() {
-    let state =
-        crate::AppState::test_default_with_fixture_provider().with_minimal_builtin_registry();
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
     let task = crate::ClaimedTask {
         claim_attempt: 0,
         task_id: "compact-capability-map".to_string(),
@@ -149,9 +150,39 @@ fn compact_capability_map_omits_registry_skill_detail_duplication() {
     let full = build_capability_map_for_task_with_detail(&state, &task, true);
     let compact = build_compact_capability_map_for_task(&state, &task);
 
-    assert!(compact.contains("Current capability map"));
+    assert!(compact.contains("runtime_callable_capability_catalog_v1"));
+    assert!(compact.contains("capability_value_contract=exact_catalog_token"));
     assert!(compact.contains("agent_runtime_protocols="));
-    assert!(compact.contains("group=ungrouped;"));
+    assert!(compact.contains("callable_capabilities="));
+    assert!(!compact.contains("visible_skills="));
     assert!(!compact.contains("Registry skill hints:"));
     assert!(compact.len() < full.len());
+}
+
+#[test]
+fn task_callable_catalog_exposes_capabilities_not_execution_skill_names() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "callable-capability-catalog".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+
+    let names = planner_callable_capability_names_for_task(&state, &task);
+    let compact = build_compact_capability_map_for_task(&state, &task);
+
+    assert!(names.contains(&"process.ps".to_string()));
+    assert!(names.contains(&"process.port_list".to_string()));
+    assert!(!names.contains(&"process_basic".to_string()));
+    assert!(compact.contains("process.ps"));
+    assert!(!compact.contains("process_basic"));
 }

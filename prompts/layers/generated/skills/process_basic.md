@@ -13,6 +13,10 @@
 - Use `port_list` for local listening-port checks, including requests that ask whether a runtime such as `clawd` is listening on a specific port.
 - If a runtime status request asks for service-or-process evidence, use `ps` or `port_list` with a concrete process/filter/query/name value such as `clawd` so the final answer can cite structured `running`, `status`, `match_count`, `listeners`, and `ports` fields.
 - `port_list` chooses OS-native probes first: Linux uses `ss` with `lsof`/`netstat` fallback; macOS uses `lsof` with `netstat` fallback. The successful response includes `extra.platform` and `extra.command_tool`.
+- A wildcard/all-interface bind proves local bind scope only. It does not prove
+  Internet/public reachability, firewall policy, NAT exposure, authentication,
+  or transport safety; `port_list` reports `internet_reachability=not_observed`
+  unless a separate capability supplies that evidence.
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
@@ -41,7 +45,7 @@
 - OS command failures are returned with readable error text.
 - Non-zero subprocess exit codes are returned as `status=error` with `error_text=process command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including fields like `action`, `exit_code`, `platform`, `command_tool` for `port_list`, and `output`.
-- `port_list` additionally emits structured listener evidence in `extra.listeners`, `extra.public_listeners`, `extra.ports`, and `extra.public_ports`; use these machine fields for grounding instead of inferring ports from truncated `output` text.
+- `port_list` additionally emits structured listener evidence in `extra.listeners`, `extra.all_interface_listeners`, `extra.ports`, and `extra.all_interface_ports`; use these machine fields for grounding instead of inferring ports from truncated `output` text.
 - `ps` additionally emits `extra.running`, `extra.status`, `extra.match_count`, and `extra.process_count`; use these machine fields for process status grounding instead of parsing `text` or `extra.output`.
 
 ## Structured Evidence Contract (from interface)
@@ -54,10 +58,11 @@
   - `status`: machine status enum for `ps` such as `running` or `not_running`; evidence role `status`.
   - `match_count`, `process_count`: integer process counts for `ps`; evidence role `count`.
   - `command_tool`: string selected probe for `port_list`; evidence role `field_value`.
-  - `listener_count`, `public_listener_count`, `localhost_listener_count`: integer listener counts for `port_list`; evidence role `count`.
-  - `ports`, `public_ports`: sorted unique port strings observed by `port_list`; evidence role `field_value`.
+  - `listener_count`, `all_interface_listener_count`, `localhost_listener_count`: integer listener counts for `port_list`; evidence role `count`.
+  - `ports`, `all_interface_ports`: sorted unique port strings observed by `port_list`; evidence role `field_value`.
+  - `internet_reachability`: `not_observed` unless a separate network-boundary capability supplied external reachability evidence; evidence role `status`.
   - `listeners`: bounded list of parsed listener objects with `local_endpoint`, `local_address`, `port`, `bind_scope`, `is_wildcard`, `is_loopback`, `process_name`, and `pid`; evidence role `field_value`.
-  - `public_listeners`: bounded subset of `listeners` where `bind_scope=all_interfaces`; evidence role `field_value`.
+  - `all_interface_listeners`: bounded subset of `listeners` where `bind_scope=all_interfaces`; evidence role `field_value`.
   - `limit`, `filter`, `pid`, `signal`, `path`, or `n`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
   - `output`: string bounded process/log observation; fallback evidence only.
 - Sensitive fields: process command lines and log tails can contain secrets or user data. Provider-facing traces should prefer counts, selected fields, excerpts, or hashes.

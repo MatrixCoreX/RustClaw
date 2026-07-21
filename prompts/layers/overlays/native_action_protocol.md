@@ -55,6 +55,10 @@ Protocol rules:
   only to ground the requested report, summary, conclusion, or answer. When the
   user asks to perform an operation and then provide that visible deliverable
   in a constrained shape, apply the constraint to the entire visible answer.
+- When the user asks for a selective, prioritized, notable, or small-subset
+  summary, return only the selected compact subset and its necessary grounding.
+  Do not echo the complete observation inventory or add unrequested categories
+  merely because the tool returned them.
 - The runtime, not the model, resolves capabilities and enforces verification,
   permissions, sandboxing, idempotency, and confirmation.
 - A capability failure is an observation for the next turn. Replan from its

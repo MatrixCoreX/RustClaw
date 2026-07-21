@@ -45,6 +45,11 @@ grounding rather than a visible sibling deliverable unless the user separately
 requested raw output or details. If the requested report, summary, conclusion,
 or answer has a whole-answer shape constraint, remove every unrequested command
 output, listing, table, evidence excerpt, and wrapper outside that deliverable.
+For a selective, prioritized, notable, or small-subset summary, keep only the
+compact selected findings and necessary grounding; remove the remaining
+inventory and unrequested categories. Preserve local endpoint and bind-scope
+facts, but remove Internet/public reachability, firewall, NAT, authentication,
+or transport-safety claims not established by separate observed evidence.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
