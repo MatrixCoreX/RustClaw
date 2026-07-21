@@ -74,10 +74,14 @@ fn initial_migration_remains_restart_safe_after_ledger_schema_upgrade() {
 
     db.execute_batch(crate::INIT_SQL)
         .expect("reapply initial migration after ledger upgrade");
-    assert!(super::table_has_column(&db, "task_mutation_ledger", "phase")
-        .expect("inspect ledger columns"));
-    assert!(!super::table_has_column(&db, "task_mutation_ledger", "status")
-        .expect("inspect legacy ledger column"));
+    assert!(
+        super::table_has_column(&db, "task_mutation_ledger", "phase")
+            .expect("inspect ledger columns")
+    );
+    assert!(
+        !super::table_has_column(&db, "task_mutation_ledger", "status")
+            .expect("inspect legacy ledger column")
+    );
 }
 
 #[test]

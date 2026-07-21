@@ -160,6 +160,11 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
         "context_compaction"
     } else if s.contains("plan_repair") {
         "plan_repair"
+    } else if s.contains("native_action_protocol")
+        || s.contains("native_turn_context")
+        || s.contains("native_plan_contract_repair")
+    {
+        "plan"
     } else if s.contains("single_step_planner")
         || s.contains("single_plan_execution")
         || s.contains("loop_incremental_plan")

@@ -324,12 +324,45 @@ pub(super) async fn plan_round_actions(
     )
     .await?
     {
+        let (native_turn, planner_notes) = match actions_from_native_turn(&native_turn) {
+            Ok(_) => (native_turn, String::new()),
+            Err(error_code) => {
+                warn!(
+                    "native_plan_contract_retry task_id={} round={} error_code={}",
+                    task.task_id, loop_state.round_no, error_code
+                );
+                let repair_signal = native_contract_repair_signal(&error_code);
+                let repair_request = native_contract_retry_request(&native_request, &repair_signal);
+                let repair_prompt = format!("{native_prompt}\n\n{repair_signal}");
+                let repair_source =
+                    format!("{native_prompt_source}+inline:native_plan_contract_repair");
+                let repaired_turn = llm_gateway::run_native_model_turn_with_fallback(
+                    state,
+                    task,
+                    &repair_prompt,
+                    &repair_source,
+                    &repair_request,
+                )
+                .await?
+                .ok_or_else(|| "native_plan_contract_repair_unavailable".to_string())?;
+                actions_from_native_turn(&repaired_turn)?;
+                (
+                    repaired_turn,
+                    format!("native_contract_repair_reason_code={error_code}"),
+                )
+            }
+        };
         let plan_actions =
             normalize_planned_actions(state, actions_from_native_turn(&native_turn)?);
         let raw_plan_text =
             serde_json::to_string(&native_turn).map_err(|error| error.to_string())?;
-        let plan_result =
-            build_plan_result_with_notes(goal, &raw_plan_text, PlanKind::Native, &plan_actions, "");
+        let plan_result = build_plan_result_with_notes(
+            goal,
+            &raw_plan_text,
+            PlanKind::Native,
+            &plan_actions,
+            &planner_notes,
+        );
         log_plan_split(task, loop_state, &plan_result);
         return Ok(plan_result);
     }
@@ -451,6 +484,31 @@ fn native_planner_request(
         stream: true,
         metadata,
     }
+}
+
+fn native_contract_repair_signal(error_code: &str) -> String {
+    json!({
+        "protocol_observation": {
+            "status": "error",
+            "error_code": error_code,
+            "tool_name": "call_capability",
+            "required_argument_fields": ["capability", "args"],
+            "capability_value_source": "RUNTIME_CAPABILITY_MAP",
+            "next_action": "retry_native_tool_call"
+        }
+    })
+    .to_string()
+}
+
+fn native_contract_retry_request(
+    request: &ModelTurnRequest,
+    repair_signal: &str,
+) -> ModelTurnRequest {
+    let mut request = request.clone();
+    request
+        .messages
+        .push(ModelMessage::text(ModelRole::User, repair_signal));
+    request
 }
 
 fn actions_from_native_turn(turn: &ModelTurnResponse) -> Result<Vec<AgentAction>, String> {
