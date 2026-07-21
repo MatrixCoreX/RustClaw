@@ -116,6 +116,26 @@ fn first_round_uses_only_budgeted_compact_index() {
         run_cmd_line.contains("system.preview_background_command"),
         "run_cmd_line={run_cmd_line}"
     );
+    let fs_basic_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("skill=fs_basic"))
+        .expect("fs_basic compact-index line");
+    for capability in [
+        "filesystem.stat_paths",
+        "filesystem.list_entries",
+        "filesystem.read_text_range",
+        "filesystem.find_entries",
+        "filesystem.grep_text",
+        "filesystem.write_file",
+        "workspace.apply_patch",
+        "workspace.review_child_patch",
+    ] {
+        assert!(
+            fs_basic_line.contains(capability),
+            "missing capability={capability}; fs_basic_line={fs_basic_line}"
+        );
+    }
     let video_line = context
         .text
         .lines()

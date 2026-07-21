@@ -198,6 +198,35 @@ fn requested_machine_kv_summary_preserves_richer_colon_labeled_delivery() {
 }
 
 #[test]
+fn requested_machine_kv_summary_preserves_markdown_labeled_model_delivery() {
+    let task = claimed_task("task-machine-kv-summary-markdown-labels");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","path":"/workspace/README.md","line_count":1277,"first_line":"# RustClaw"}}"##,
+    ));
+    let current =
+        "- **path**: /workspace/README.md\n- **line_count**: 1277\n- **第一行内容**: `# RustClaw`";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", current));
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return only machine fields path and line_count.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(delivery_messages, vec![current.to_string()]);
+}
+
+#[test]
 fn requested_machine_kv_summary_repairs_conflicting_colon_value_without_dropping_fields() {
     let task = claimed_task("task-machine-kv-summary-colon-conflict");
     let mut loop_state = crate::agent_engine::LoopState::new();

@@ -182,6 +182,51 @@ fn quick_index_includes_planner_capability_metadata() {
 }
 
 #[test]
+fn quick_index_discloses_distinct_actions_instead_of_alias_prefixes() {
+    let capability = |name: &str, action: &str, preferred: bool| PlannerCapabilityMapping {
+        name: name.to_string(),
+        action: Some(action.to_string()),
+        effect: Some(PlannerCapabilityEffect::Observe),
+        required: vec!["path".to_string()],
+        optional: Vec::new(),
+        risk_level: Some(SkillRiskLevel::Low),
+        preferred,
+        once_per_task: None,
+        dedup_scope: Some(RegistryDedupScope::Args),
+        idempotent: Some(true),
+        execution_mode: Some(CapabilityExecutionMode::SyncShort),
+        async_adapter_kind: None,
+        isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
+        network_access: Some(false),
+        filesystem_write: Some(false),
+        external_publish: Some(false),
+        credential_access: Some(false),
+        subprocess: Some(false),
+        package_install: Some(false),
+        privilege_escalation: Some(false),
+        final_answer_shape: None,
+    };
+    let manifest = test_skill_manifest(vec![
+        capability("filesystem.stat_path_alias", "stat_paths", false),
+        capability("filesystem.stat_paths", "stat_paths", true),
+        capability("filesystem.list_entries", "list_dir", true),
+        capability("filesystem.list_dir", "list_dir", true),
+        capability("filesystem.list_names", "list_dir", true),
+        capability("filesystem.list_file_names", "list_dir", true),
+        capability("filesystem.read_text_range", "read_text_range", true),
+    ]);
+
+    let candidates = skill_quick_index::planner_capability_candidates(&manifest);
+
+    assert!(candidates.contains("filesystem.stat_paths(action=stat_paths"));
+    assert!(candidates.contains("filesystem.list_entries(action=list_dir"));
+    assert!(candidates.contains("filesystem.read_text_range(action=read_text_range"));
+    assert!(!candidates.contains("filesystem.stat_path_alias"));
+    assert!(!candidates.contains("filesystem.list_dir(action=list_dir"));
+    assert!(!candidates.contains("+"));
+}
+
+#[test]
 fn seed_loop_state_extracts_file_delivery_target_candidates() {
     let observation = serde_json::json!({
         "kind": "agent_loop_boundary_observations",
