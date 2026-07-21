@@ -91,6 +91,7 @@ mod task_context_builder;
 mod task_contract;
 mod task_event_archive;
 mod task_event_transport;
+mod task_execution_policy;
 mod task_journal;
 mod task_lifecycle;
 mod token_estimator;
@@ -994,6 +995,20 @@ async fn submit_task(
     let normalized_external_user_id = submit_ctx.normalized_external_user_id.clone();
     let normalized_external_chat_id = submit_ctx.normalized_external_chat_id.clone();
     let effective_chat_id = submit_ctx.effective_chat_id;
+    let client_origin = headers
+        .get(task_execution_policy::CLIENT_ORIGIN_HEADER)
+        .and_then(|value| value.to_str().ok());
+    let requested_execution_mode = headers
+        .get(task_execution_policy::EXECUTION_MODE_HEADER)
+        .and_then(|value| value.to_str().ok());
+    if let Err(error) = task_execution_policy::stamp_authenticated_submission_policy(
+        &mut req.payload,
+        submit_ctx.resolved_identity.as_ref(),
+        client_origin,
+        requested_execution_mode,
+    ) {
+        return api_err::<SubmitTaskResponse>(error.status_code(), error.as_token());
+    }
 
     match check_submit_task_access(&state, &submit_ctx) {
         Ok(()) => {}
@@ -1114,6 +1129,7 @@ async fn submit_task(
         &call_id,
     );
     let payload_text = payload.to_string();
+    let execution_mode = task_execution_policy::stamped_execution_mode(&payload);
 
     let write_result = insert_submitted_task(
         &state,
@@ -1143,12 +1159,13 @@ async fn submit_task(
             kind,
             effective_chat_id,
             effective_user_key.as_deref(),
+            execution_mode,
         )),
         None,
     );
     info!(
-        "task_submit accepted call_id={} task_id={} kind={} user_id={} chat_id={}",
-        task_id, task_id, kind, effective_user_id, effective_chat_id
+        "task_submit accepted call_id={} task_id={} kind={} user_id={} chat_id={} execution_mode={}",
+        task_id, task_id, kind, effective_user_id, effective_chat_id, execution_mode
     );
     if let Err(err) = task_event_transport::publish_event(
         &state,
@@ -1158,6 +1175,7 @@ async fn submit_task(
             "kind": kind,
             "channel": channel,
             "task_status": "queued",
+            "execution_mode": execution_mode,
         }),
     ) {
         warn!(

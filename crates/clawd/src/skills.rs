@@ -1495,6 +1495,23 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     mut args: serde_json::Value,
     execution_context: Option<&SkillExecutionContext>,
 ) -> Result<SkillRunOutcome, String> {
+    if let Some(reason_code) =
+        crate::task_execution_policy::execution_policy_authorization_error(state, task)
+    {
+        return Err(policy_block_error(
+            reason_code,
+            vec![format!("task_id: {}", task.task_id)],
+            vec![
+                "action=execute_skill".to_string(),
+                "required_authority=enabled_admin_key".to_string(),
+                format!(
+                    "decision={}",
+                    crate::policy_decision::PolicyDecision::Deny.as_token()
+                ),
+            ],
+        ));
+    }
+    let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let mut skill_name = state.resolve_canonical_skill_name(skill_name);
     if skill_name.is_empty() {
         return Err("skill_name is empty".to_string());
@@ -1581,7 +1598,7 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         ));
     }
     if let Some(reason_code) =
-        crate::verifier::skill_sandbox_denial_reason(state, &skill_name, &args)
+        crate::verifier::skill_sandbox_denial_reason(state, Some(task), &skill_name, &args)
     {
         return Err(structured_skill_error_from_parts(
             &skill_name,
@@ -1592,14 +1609,15 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                 "reason_code": reason_code,
                 "message_key": "clawd.execution.sandbox_policy_denied",
                 "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
-                "sandbox_mode": state.skill_rt.tools_policy.sandbox_mode_token(),
+                "sandbox_mode": execution_policy.sandbox_mode.as_token(),
                 "sandbox_backend": state.skill_rt.tools_policy.sandbox_backend_token(),
                 "sandbox_backend_diagnostics": crate::process_sandbox::sandbox_backend_diagnostics(
                     state.skill_rt.tools_policy.sandbox_backend,
-                    state.skill_rt.tools_policy.sandbox_mode,
+                    execution_policy.sandbox_mode,
                     crate::process_sandbox::ProcessNetworkPolicy::Deny,
                 ),
-                "approval_policy": state.skill_rt.tools_policy.approval_policy_token(),
+                "approval_policy": execution_policy.approval_policy.as_token(),
+                "task_execution_policy": execution_policy.to_machine_json(),
                 "skill": skill_name,
                 "action": skill_action_token(&args),
             })),

@@ -147,6 +147,7 @@ pub(crate) async fn run_skill_with_runner_once(
     // process. Missing declared secrets fail before spawn instead of becoming
     // empty runtime environment variables.
     let action_mapping = action_scoped_planner_mapping(state, canonical_skill_name, args);
+    let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let caps: Vec<Capability> = state
         .get_skills_registry()
         .as_ref()
@@ -308,10 +309,8 @@ pub(crate) async fn run_skill_with_runner_once(
     } else {
         crate::process_sandbox::ProcessNetworkPolicy::Deny
     };
-    let sandbox_mode = action_scoped_runner_sandbox_mode(
-        state.skill_rt.tools_policy.sandbox_mode,
-        action_mapping.as_ref(),
-    );
+    let sandbox_mode =
+        action_scoped_runner_sandbox_mode(execution_policy.sandbox_mode, action_mapping.as_ref());
     let prepared = crate::process_sandbox::prepare_process_command(
         &state.skill_rt.skill_runner_path,
         crate::process_sandbox::ProcessSandboxRequest {
@@ -507,7 +506,9 @@ fn action_scoped_runner_sandbox_mode(
     default_mode: ToolSandboxMode,
     mapping: Option<&PlannerCapabilityMapping>,
 ) -> ToolSandboxMode {
-    if mapping.is_some_and(|mapping| {
+    if default_mode == ToolSandboxMode::DangerFull {
+        ToolSandboxMode::DangerFull
+    } else if mapping.is_some_and(|mapping| {
         mapping.isolation_profile == Some(CapabilityIsolationProfile::ReadOnly)
             || mapping.filesystem_write == Some(false)
     }) {

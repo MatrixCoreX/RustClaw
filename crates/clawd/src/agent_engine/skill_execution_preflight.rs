@@ -742,7 +742,7 @@ pub(super) fn preflight_permission_decision(
                 .unwrap_or(false),
     );
     let sandbox_denial_reason =
-        crate::verifier::skill_sandbox_denial_reason(state, &canonical_skill, args);
+        crate::verifier::skill_sandbox_denial_reason(state, None, &canonical_skill, args);
     let sandbox_network = if capability_policy
         .get("network_access")
         .and_then(Value::as_bool)

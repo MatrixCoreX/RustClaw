@@ -16,6 +16,7 @@ pub(crate) struct CodeCapabilityOptions {
     pub(crate) jsonl_output: bool,
     pub(crate) timeout_seconds: Option<u64>,
     pub(crate) interval_ms: u64,
+    pub(crate) submission_options: task::TaskSubmissionOptions,
 }
 
 pub(crate) fn workspace_diff_args(checkpoint_id: Option<&str>, paths: &[String]) -> Value {
@@ -46,7 +47,8 @@ pub(crate) fn run_code_capability(
     if !options.detach {
         crate::interrupt::install()?;
     }
-    let task_id = task::submit_capability(base_url, key, capability, args)?;
+    let task_id =
+        task::submit_capability(base_url, key, capability, args, options.submission_options)?;
     if options.detach {
         let summary = json!({
             "task_id": task_id,

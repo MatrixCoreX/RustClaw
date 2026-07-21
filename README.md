@@ -30,7 +30,8 @@ RustClaw's main natural-language path now uses a Codex / Claude style agent loop
 ```mermaid
 flowchart TD
     A[Channel / UI / API request] --> B[POST /v1/tasks]
-    B --> C[Persist task + queue]
+    B --> BA[Authenticated task execution policy<br/>server-owned machine envelope]
+    BA --> C[Persist task + queue]
     C --> D[Return task_id<br/>caller can poll]
     D --> E0[worker_once recovery tick<br/>stale running + due checkpoint]
     E0 --> E1[Claim next queued task]
@@ -90,6 +91,7 @@ flowchart TD
 ```
 
 - `POST /v1/tasks`: channel daemons, the browser UI, and HTTP callers converge on the same persisted task queue.
+- `Authenticated task execution policy`: `clawcli` stays on the configured approval/sandbox policy unless an enabled admin key explicitly requests global `--yolo`. Other communication adapters authenticated with an enabled admin key default to YOLO. The server removes caller-supplied policy envelopes, reissues the machine contract after authentication, and revalidates the current admin key before each use. YOLO means `approval_policy=never` plus `sandbox_mode=danger_full`; it does not bypass registry allow/deny, schemas, path validation, external-publish controls, cancellation, budgets, redaction, or audit evidence.
 - `task_id polling`: API/channel request timeouts only affect how long the caller waits. The background task remains queryable through `GET /v1/tasks/{task_id}` unless worker lifecycle logic marks it terminal.
 - `worker_once recovery tick`: before claiming new queued work, the worker checks stale running tasks, protected paused checkpoints, due resume work, async poll results, and result projections.
 - `Task kind`: `kind=ask` enters the planner-owned natural-language path; `kind=run_skill` bypasses the planner loop, capability selection, and plan verifier, then calls the explicitly requested skill through the same shared skill dispatcher/protocol used by planner skill calls. Both task kinds persist results under the original `task_id`, so callers can still inspect final state through task query APIs.
@@ -211,8 +213,10 @@ network, credential, and privilege policy before an adapter starts.
 
 ```mermaid
 flowchart TD
-    A[Verified process-backed step<br/>run_cmd / runner skill / trusted command hook] --> B[ToolSandboxMode<br/>read_only / workspace_write / isolated_worktree / danger_full]
-    B -->|danger_full explicitly selected| C[Direct process<br/>no sandbox claim]
+    A[Verified task process<br/>run_cmd / runner skill] --> B[ToolSandboxMode<br/>read_only / workspace_write / isolated_worktree / danger_full]
+    AH[Trusted command hook] --> AR[Forced read_only<br/>independent policy boundary]
+    AR --> D
+    B -->|danger_full from config or authenticated task YOLO| C[Direct process<br/>no sandbox claim]
     B -->|restricted mode| D{ToolSandboxBackend}
     D -->|auto on Linux| E[Bubblewrap adapter]
     D -->|auto on macOS| F[Seatbelt adapter<br/>/usr/bin/sandbox-exec]
@@ -238,7 +242,15 @@ flowchart TD
 | Bubblewrap | Linux | `auto` or `bubblewrap` | Filesystem write scope, PID/IPC/UTS namespaces, optional network namespace, parent-bound or durable lifetime. Missing `bwrap` fails closed. |
 | Seatbelt | macOS | `auto` or `macos_seatbelt` | Read-all/write-scoped profile, optional network access, process policy, parent-bound or durable lifetime. Missing `sandbox-exec` fails closed. |
 | Remote container | Any | explicit `remote_container` | Reserved executor contract only. It returns `sandbox_remote_backend_not_configured` until a remote executor is configured and is never an automatic fallback. |
-| Direct | Any | explicit `sandbox_mode = "danger_full"` | No sandbox claim. This is an operator-selected bypass, not an availability fallback. |
+| Direct | Any | explicit `sandbox_mode = "danger_full"` or authenticated per-task YOLO | No sandbox claim. This is an operator-selected bypass, not an availability fallback. |
+
+`clawcli --yolo <task-producing command>` requests direct execution for that
+task and requires a currently enabled admin key. It is intentionally not the
+CLI default. Communication adapters other than `clawcli` default to the same
+mode when their request is authenticated as admin, so channel admin keys must
+be treated as full execution credentials. The backend remains the only policy
+authority; request payloads, browser state, planner output, and user wording
+cannot grant this mode.
 
 Diagnostics report the requested/resolved backend, platform, availability,
 fail-closed state, reason code, and filesystem/network/process/credential/
@@ -500,6 +512,7 @@ Important lifecycle details:
 - `clawcli get`, `clawcli watch`, and `clawcli wait <task_id> --until terminal|completed|background|needs-user` render or wait on lifecycle machine fields; `clawcli cancel-task <task_id>` uses the direct task-id cancellation API, while `clawcli cancel-index` is kept only for active-list index compatibility.
 - `clawcli resume-task <task_id>` marks an existing checkpoint due for recovery; `clawcli continue <task_id> [message]` is a shorter structured resume entrypoint; `clawcli pause-task <task_id> --pause-seconds N` delays an existing waiting/background checkpoint. These commands do not restart tasks without checkpoint state.
 - `clawcli submit --detach` returns a `task_id` quickly; `clawcli submit --wait` polls until terminal state; `--json` keeps submit/watch output script-friendly.
+- `clawcli --yolo submit|exec|code|chat|run-skill ...` requests `approval_policy=never` and `sandbox_mode=danger_full` for newly submitted tasks. The backend accepts it only for a currently enabled admin key. This is a high-risk mode: it removes local approval prompts and process sandbox isolation, while registry, schema, external-publish, cancellation, budget, redaction, and audit controls remain active.
 - `clawcli exec` is the CI/script-oriented runner: it submits or resumes an ask task, waits by default, returns stable exit classes/codes, supports `--profile quick|coding|release-gate|long-tail`, can stop on background checkpoints, prints budget/coding/resume evidence as `exec_compact_*` machine lines when present, and can write `summary.json`, `task.json`, `events.jsonl`, `verification.json`, `diff_summary.json`, `llm_summary.json`, `resume.json`, and `index.json` artifacts. `clawcli code` is the concise coding-agent shortcut for `exec --profile coding`. See `docs/clawcli_exec_replay.md`.
 - `clawcli goal start/status/pause/resume/edit/clear` manages structured long-task goal contracts with `objective`, `done_conditions`, `verification_commands`, constraints, checkpoint resume fields, and redacted control responses.
 - `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl` and machine filters such as `--event-type`, `--checkpoint-id`, `--policy-decision`, `--subagent-id`, and `--async-job-id`.
@@ -735,6 +748,7 @@ Permission and policy decision flow:
 flowchart TD
     A[Planner/runtime step<br/>call_capability / call_tool / call_skill] --> B[CapabilityResolver]
     B --> C[Registry metadata<br/>risk + effect + required args + idempotency + dedup]
+    TP[Authenticated task execution policy<br/>configured or admin YOLO] --> D
     C --> D[PlanVerifier]
     D --> E[PermissionDecision<br/>allowed / needs_confirmation / denied / dry_run_required]
     E -->|allowed| F[Pre-tool hooks]

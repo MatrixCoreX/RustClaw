@@ -184,6 +184,19 @@ fn exec_effective_config_json(options: &ExecEffectiveOptions) -> Value {
     })
 }
 
+fn exec_effective_config_with_submission_json(
+    options: &ExecEffectiveOptions,
+    submission_options: task::TaskSubmissionOptions,
+) -> Value {
+    let mut config = exec_effective_config_json(options);
+    config["execution_mode_request"] = json!(if submission_options.yolo {
+        "yolo"
+    } else {
+        "configured"
+    });
+    config
+}
+
 pub(super) fn exec_summary_json(
     task: &task::TaskStatusView,
     outcome: ExecWaitOutcome,
@@ -457,6 +470,7 @@ pub(crate) fn run_exec(
     fail_on_background: bool,
     artifact_dir: Option<&PathBuf>,
     print_effective_config: bool,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<u8> {
     let effective = match exec_effective_options(
         profile_name,
@@ -490,7 +504,7 @@ pub(crate) fn run_exec(
 
     if print_effective_config {
         print_exec_structured(
-            &exec_effective_config_json(&effective),
+            &exec_effective_config_with_submission_json(&effective, submission_options),
             effective.json_output,
             effective.jsonl_output,
         )?;
@@ -504,7 +518,7 @@ pub(crate) fn run_exec(
             "exit_code": exit_class.code(),
             "error_code": "exec_background_policy_conflict",
             "resume": exec_resume_summary(resume_task_id),
-            "effective_config": exec_effective_config_json(&effective),
+            "effective_config": exec_effective_config_with_submission_json(&effective, submission_options),
         });
         if effective.json_output || effective.jsonl_output {
             print_exec_structured(&summary, effective.json_output, effective.jsonl_output)?;
@@ -520,9 +534,9 @@ pub(crate) fn run_exec(
         crate::interrupt::install()?;
     }
     let task_id = if let Some(resume_task_id) = resume_task_id {
-        task::submit_resume_ask(base_url, key, resume_task_id, prompt)?
+        task::submit_resume_ask(base_url, key, resume_task_id, prompt, submission_options)?
     } else {
-        task::submit_ask(base_url, key, prompt)?
+        task::submit_ask(base_url, key, prompt, submission_options)?
     };
     if effective.detach {
         let exit_class = ExecExitClass::Success;
@@ -532,7 +546,7 @@ pub(crate) fn run_exec(
             "exit_class": exit_class.as_str(),
             "exit_code": exit_class.code(),
             "resume": exec_resume_summary(resume_task_id),
-            "effective_config": exec_effective_config_json(&effective),
+            "effective_config": exec_effective_config_with_submission_json(&effective, submission_options),
         });
         if effective.json_output || effective.jsonl_output {
             print_exec_structured(&summary, effective.json_output, effective.jsonl_output)?;
@@ -566,7 +580,7 @@ pub(crate) fn run_exec(
     if let Some(map) = summary.as_object_mut() {
         map.insert(
             "effective_config".to_string(),
-            exec_effective_config_json(&effective),
+            exec_effective_config_with_submission_json(&effective, submission_options),
         );
         map.insert("resume_hint".to_string(), exec_resume_artifact_json(&task));
         if let Some(artifact_index) = artifact_index {

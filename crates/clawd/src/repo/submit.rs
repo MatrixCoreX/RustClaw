@@ -69,6 +69,7 @@ pub(crate) fn submit_task_audit_detail(
     kind: &str,
     effective_chat_id: i64,
     effective_user_key: Option<&str>,
+    execution_mode: &str,
 ) -> String {
     serde_json::json!({
         "call_id": call_id,
@@ -76,6 +77,7 @@ pub(crate) fn submit_task_audit_detail(
         "kind": kind,
         "chat_id": effective_chat_id,
         "user_key": effective_user_key,
+        "execution_mode": execution_mode,
     })
     .to_string()
 }

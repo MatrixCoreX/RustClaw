@@ -354,6 +354,7 @@ fn scheduler_persists_and_serializes_overlapping_local_worktree_children() {
         channel: "ui".to_string(),
         external_user_id: None,
         external_chat_id: None,
+        execution_policy_stamp: None,
     };
 
     let scheduled = enqueue_child_task_specs(&state, &parent, &[writer, worker], 4, 1)

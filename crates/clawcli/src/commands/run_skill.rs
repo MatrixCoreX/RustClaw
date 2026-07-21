@@ -15,9 +15,10 @@ pub(crate) fn run_skill(
     wait: bool,
     json_output: bool,
     interval_ms: u64,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
     let args = parse_run_skill_args(args_json, args_file)?;
-    let task_id = task::submit_run_skill(base_url, key, skill_name, args)?;
+    let task_id = task::submit_run_skill(base_url, key, skill_name, args, submission_options)?;
     if wait {
         let task = wait_for_terminal_task(base_url, key, &task_id, interval_ms)?;
         if json_output {

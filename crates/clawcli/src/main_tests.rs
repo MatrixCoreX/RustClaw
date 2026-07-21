@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn clawcli_yolo_is_global_and_opt_in() {
+    let safe = Cli::try_parse_from(["clawcli", "exec", "inspect"]).expect("parse safe exec");
+    assert!(!safe.yolo);
+
+    let before = Cli::try_parse_from(["clawcli", "--yolo", "exec", "inspect"])
+        .expect("parse global yolo before command");
+    assert!(before.yolo);
+
+    let after = Cli::try_parse_from(["clawcli", "exec", "--yolo", "inspect"])
+        .expect("parse global yolo after command");
+    assert!(after.yolo);
+}
+
+#[test]
+fn clawcli_yolo_is_present_in_help_and_completions() {
+    let mut help_command = Cli::command();
+    let help = help_command.render_long_help().to_string();
+    assert!(help.contains("--yolo"));
+    assert!(help.contains("High risk"));
+
+    let mut completion_command = Cli::command();
+    let bin_name = completion_command.get_name().to_string();
+    let mut completion = Vec::new();
+    clap_complete::generate(
+        clap_complete::Shell::Bash,
+        &mut completion_command,
+        bin_name,
+        &mut completion,
+    );
+    let completion = String::from_utf8(completion).expect("utf8 completion");
+    assert!(completion.contains("--yolo"));
+}
+
+#[test]
 fn clawcli_exposes_coding_workflow_command_surface() {
     let cmd = Cli::command();
     let command_names = cmd

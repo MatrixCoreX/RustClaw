@@ -18,6 +18,7 @@ pub(crate) fn run_goal_start(
     detach: bool,
     json_output: bool,
     interval_ms: u64,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
     if wait && detach {
         anyhow::bail!("goal_start_wait_detach_conflict");
@@ -29,7 +30,7 @@ pub(crate) fn run_goal_start(
         verification_commands,
         constraints,
     );
-    let task_id = task::submit_goal_ask(base_url, key, payload)?;
+    let task_id = task::submit_goal_ask(base_url, key, payload, submission_options)?;
     if wait {
         let task = wait_for_terminal_task(base_url, key, &task_id, interval_ms)?;
         if json_output {

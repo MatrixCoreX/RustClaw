@@ -308,17 +308,49 @@ fn subagent_action_projects_workspace_context_evidence() {
 #[test]
 fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() {
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let admin_key = "rk-persistent-subagent-admin";
+    let db = state.core.db.get().expect("get db");
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS auth_keys (
+            user_key TEXT PRIMARY KEY,
+            role TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT
+        );",
+    )
+    .expect("auth key table");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
+         VALUES (?1, 'admin', 1, 'now')",
+        rusqlite::params![admin_key],
+    )
+    .expect("insert admin key");
+    drop(db);
+    let mut payload = serde_json::json!({"text": "parent task"});
+    crate::task_execution_policy::stamp_authenticated_submission_policy(
+        &mut payload,
+        Some(&claw_core::types::AuthIdentity {
+            user_key: admin_key.to_string(),
+            role: "admin".to_string(),
+            user_id: 42,
+            chat_id: 7,
+        }),
+        Some("clawcli"),
+        Some("yolo"),
+    )
+    .expect("stamp parent yolo policy");
     let task = crate::ClaimedTask {
         claim_attempt: 0,
         task_id: "task-persistent-subagent-parent".to_string(),
         user_id: 42,
         chat_id: 7,
-        user_key: Some("test-key".to_string()),
+        user_key: Some(admin_key.to_string()),
         channel: "ui".to_string(),
         external_user_id: Some("ui-user".to_string()),
         external_chat_id: Some("ui-chat".to_string()),
         kind: "ask".to_string(),
-        payload_json: serde_json::json!({"text": "parent task"}).to_string(),
+        payload_json: payload.to_string(),
     };
     insert_running_parent_task(&state, &task);
     let mut loop_state = LoopState::new();
@@ -370,6 +402,14 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
     assert_eq!(child_status, "queued");
     assert_eq!(child_payload["task_role"], "subagent_child");
     assert_eq!(child_payload["parent_task_id"], task.task_id);
+    assert_eq!(
+        child_payload[crate::task_execution_policy::POLICY_PAYLOAD_FIELD]["mode"],
+        "yolo"
+    );
+    assert_eq!(
+        child_payload[crate::task_execution_policy::POLICY_PAYLOAD_FIELD]["derivation"],
+        "authenticated_parent_task"
+    );
     assert_eq!(
         child_payload["child_task_contract"]["permission_profile"],
         "read_only"

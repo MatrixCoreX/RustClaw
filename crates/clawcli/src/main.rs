@@ -30,6 +30,10 @@ struct Cli {
     #[arg(short, long)]
     key: Option<String>,
 
+    /// High risk: request admin-only approval bypass and danger-full execution.
+    #[arg(long, global = true)]
+    yolo: bool,
+
     #[command(subcommand)]
     cmd: Option<Command>,
 }
@@ -779,6 +783,7 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| cli.base_url.clone());
     let base_url = base_url.trim_end_matches('/');
     let key: Option<String> = cli.key.or_else(auth::default_admin_key);
+    let submission_options = task::TaskSubmissionOptions { yolo: cli.yolo };
     let cmd = cli.cmd.unwrap_or(Command::Chat {
         new_thread: false,
         thread_id: None,
@@ -792,7 +797,14 @@ fn main() -> Result<()> {
             jsonl,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            chat::run_chat(base_url, k, thread_id.as_deref(), *new_thread, *jsonl)
+            chat::run_chat(
+                base_url,
+                k,
+                thread_id.as_deref(),
+                *new_thread,
+                *jsonl,
+                submission_options,
+            )
         }
         Command::Health => commands::run_health(base_url, key.as_deref()),
         Command::Submit {
@@ -803,7 +815,16 @@ fn main() -> Result<()> {
             interval_ms,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            commands::run_submit(base_url, k, text, *wait, *detach, *json, *interval_ms)
+            commands::run_submit(
+                base_url,
+                k,
+                text,
+                *wait,
+                *detach,
+                *json,
+                *interval_ms,
+                submission_options,
+            )
         }
         Command::Exec {
             prompt,
@@ -836,6 +857,7 @@ fn main() -> Result<()> {
                 *fail_on_background,
                 artifact_dir.as_ref(),
                 *print_effective_config,
+                submission_options,
             )
         }
         Command::Code { command } => match command {
@@ -869,6 +891,7 @@ fn main() -> Result<()> {
                     *fail_on_background,
                     artifact_dir.as_ref(),
                     *print_effective_config,
+                    submission_options,
                 )
             }
             CodeCommand::Status {
@@ -916,6 +939,7 @@ fn main() -> Result<()> {
                     *jsonl,
                     *timeout_seconds,
                     *poll_interval_ms,
+                    submission_options,
                 )
             }
             CodeCommand::Rewind {
@@ -937,6 +961,7 @@ fn main() -> Result<()> {
                     *jsonl,
                     *timeout_seconds,
                     *poll_interval_ms,
+                    submission_options,
                 )
             }
             CodeCommand::Prompt(prompt) => {
@@ -957,6 +982,7 @@ fn main() -> Result<()> {
                     false,
                     None,
                     false,
+                    submission_options,
                 )
             }
         },
@@ -986,6 +1012,7 @@ fn main() -> Result<()> {
                     *detach,
                     *json,
                     *interval_ms,
+                    submission_options,
                 )
             }
             GoalCommand::Status { task_id, json } => {
@@ -1070,7 +1097,13 @@ fn main() -> Result<()> {
             }
             SessionCommand::ContinueLatest { message, json } => {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-                commands::run_session_continue_latest(base_url, k, &message.join(" "), *json)
+                commands::run_session_continue_latest(
+                    base_url,
+                    k,
+                    &message.join(" "),
+                    *json,
+                    submission_options,
+                )
             }
             SessionCommand::Archive { session_id, json } => {
                 commands::run_session_archive(session_id, *json)
@@ -1102,11 +1135,12 @@ fn main() -> Result<()> {
                 *wait,
                 *json,
                 *interval_ms,
+                submission_options,
             )
         }
         Command::Resume { task_id, text } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            commands::run_resume(base_url, k, task_id, text)
+            commands::run_resume(base_url, k, task_id, text, submission_options)
         }
         Command::Get {
             task_id,
@@ -1490,6 +1524,7 @@ fn run_exec_command(
     fail_on_background: bool,
     artifact_dir: Option<&PathBuf>,
     print_effective_config: bool,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
     let exit_code = commands::run_exec(
         base_url,
@@ -1506,6 +1541,7 @@ fn run_exec_command(
         fail_on_background,
         artifact_dir,
         print_effective_config,
+        submission_options,
     )?;
     if exit_code == 0 {
         Ok(())
@@ -1525,6 +1561,7 @@ fn run_code_capability_command(
     jsonl_output: bool,
     timeout_seconds: Option<u64>,
     interval_ms: u64,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
     let exit_code = commands::run_code_capability(
         base_url,
@@ -1537,6 +1574,7 @@ fn run_code_capability_command(
             jsonl_output,
             timeout_seconds: timeout_seconds.or(Some(900)),
             interval_ms,
+            submission_options,
         },
     )?;
     if exit_code == 0 {

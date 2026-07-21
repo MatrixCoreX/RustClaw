@@ -85,6 +85,7 @@ pub(crate) fn run_session_continue_latest(
     key: &str,
     message: &str,
     json_output: bool,
+    submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
     let mut store = load_session_store()?;
     let mut thread = session_store_select_latest_chat_thread(&store)?;
@@ -96,6 +97,7 @@ pub(crate) fn run_session_continue_latest(
         &thread.thread_id,
         &thread.session_id,
         source_task_id.as_deref(),
+        submission_options,
     )?;
     session_store_record_chat_task(&mut store, &mut thread, &task_id)?;
     save_session_store(&store)?;

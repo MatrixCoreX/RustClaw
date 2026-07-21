@@ -18,6 +18,7 @@ fn enqueue_child_specs_persists_and_serializes_current_workspace_writers() {
         channel: "ui".to_string(),
         external_user_id: None,
         external_chat_id: None,
+        execution_policy_stamp: None,
     };
     let mut first_write =
         sample_repo_child_spec("task-parent-role-profile", "task-child-role-write-1", true);
@@ -102,6 +103,7 @@ fn parent_failure_cancels_unfinished_graph_and_publishes_snapshot() {
         channel: "ui".to_string(),
         external_user_id: None,
         external_chat_id: None,
+        execution_policy_stamp: None,
     };
     let mut verifier =
         sample_repo_child_spec("task-parent-graph-failure", "task-child-verifier", true);

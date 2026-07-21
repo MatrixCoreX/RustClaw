@@ -5,6 +5,11 @@ use serde_json::{json, Value};
 use crate::client;
 use crate::events::{task_event_lines, TaskEventLine};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TaskSubmissionOptions {
+    pub(crate) yolo: bool,
+}
+
 pub(crate) struct TaskStatusView {
     pub(crate) task_id: String,
     pub(crate) status: String,
@@ -177,13 +182,19 @@ fn push_value_token(parts: &mut Vec<String>, key: &str, value: Option<&Value>) {
     }
 }
 
-pub(crate) fn submit_ask(base_url: &str, key: &str, text: &str) -> Result<String> {
+pub(crate) fn submit_ask(
+    base_url: &str,
+    key: &str,
+    text: &str,
+    options: TaskSubmissionOptions,
+) -> Result<String> {
     submit_ask_with_payload(
         base_url,
         key,
         json!({
             "text": text
         }),
+        options,
     )
 }
 
@@ -192,6 +203,7 @@ pub(crate) fn submit_resume_ask(
     key: &str,
     task_id: &str,
     text: &str,
+    options: TaskSubmissionOptions,
 ) -> Result<String> {
     submit_ask_with_payload(
         base_url,
@@ -201,6 +213,7 @@ pub(crate) fn submit_resume_ask(
             "resume_task_id": task_id,
             "resume_trigger": "user_followup"
         }),
+        options,
     )
 }
 
@@ -211,11 +224,13 @@ pub(crate) fn submit_thread_ask(
     thread_id: &str,
     session_id: &str,
     resume_task_id: Option<&str>,
+    options: TaskSubmissionOptions,
 ) -> Result<String> {
     submit_ask_with_payload(
         base_url,
         key,
         threaded_ask_payload(text, thread_id, session_id, resume_task_id),
+        options,
     )
 }
 
@@ -246,8 +261,9 @@ pub(crate) fn submit_goal_ask(
     base_url: &str,
     key: &str,
     payload: serde_json::Value,
+    options: TaskSubmissionOptions,
 ) -> Result<String> {
-    submit_ask_with_payload(base_url, key, payload)
+    submit_ask_with_payload(base_url, key, payload, options)
 }
 
 pub(crate) fn submit_capability(
@@ -255,8 +271,14 @@ pub(crate) fn submit_capability(
     key: &str,
     capability: &str,
     args: Value,
+    options: TaskSubmissionOptions,
 ) -> Result<String> {
-    submit_ask_with_payload(base_url, key, capability_task_payload(capability, args))
+    submit_ask_with_payload(
+        base_url,
+        key,
+        capability_task_payload(capability, args),
+        options,
+    )
 }
 
 pub(super) fn capability_task_payload(capability: &str, args: Value) -> Value {
@@ -273,6 +295,7 @@ pub(crate) fn submit_run_skill(
     key: &str,
     skill_name: &str,
     args: Value,
+    options: TaskSubmissionOptions,
 ) -> Result<String> {
     submit_task_with_kind_payload(
         base_url,
@@ -282,6 +305,7 @@ pub(crate) fn submit_run_skill(
             "skill_name": skill_name,
             "args": args,
         }),
+        options,
     )
 }
 
@@ -289,8 +313,9 @@ fn submit_ask_with_payload(
     base_url: &str,
     key: &str,
     payload: serde_json::Value,
+    options: TaskSubmissionOptions,
 ) -> Result<String> {
-    submit_task_with_kind_payload(base_url, key, "ask", payload)
+    submit_task_with_kind_payload(base_url, key, "ask", payload, options)
 }
 
 fn submit_task_with_kind_payload(
@@ -298,6 +323,7 @@ fn submit_task_with_kind_payload(
     key: &str,
     kind: &str,
     payload: serde_json::Value,
+    options: TaskSubmissionOptions,
 ) -> Result<String> {
     let url = format!("{}/tasks", client::base_v1(base_url));
     let body = json!({
@@ -306,13 +332,18 @@ fn submit_task_with_kind_payload(
         "kind": kind,
         "payload": payload
     });
-    let resp = client::make_client()?
+    let request = client::make_client()?
         .post(&url)
         .header("x-rustclaw-key", key)
+        .header("x-rustclaw-client", "clawcli")
         .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .context("submit task failed")?;
+        .json(&body);
+    let request = if options.yolo {
+        request.header("x-rustclaw-execution-mode", "yolo")
+    } else {
+        request
+    };
+    let resp = request.send().context("submit task failed")?;
     let status = resp.status();
     let body: serde_json::Value = resp.json().context("parse submit response")?;
     if !status.is_success() {
