@@ -31,10 +31,18 @@ fn local_code_context_with_required_fields(
     }
 }
 
+fn require_content_evidence(journal: &mut crate::task_journal::TaskJournal) {
+    journal.record_output_contract(&crate::IntentOutputContract {
+        requires_content_evidence: true,
+        ..Default::default()
+    });
+}
+
 #[test]
 fn post_write_guard_requires_content_evidence_after_code_write_and_validation() {
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-post-write-guard", "ask", "prompt");
+    require_content_evidence(&mut journal);
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -70,6 +78,41 @@ fn post_write_guard_requires_content_evidence_after_code_write_and_validation() 
     assert!(!summary.pass);
     assert_eq!(summary.missing_evidence_fields, vec!["content_excerpt"]);
     assert!(summary.should_retry);
+}
+
+#[test]
+fn successful_code_validation_does_not_require_unrequested_content_readback() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-post-write-no-content-contract",
+        "ask",
+        "prompt",
+    );
+    journal.record_output_contract(&crate::IntentOutputContract::default());
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"},"text":"written 98 bytes"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "run_cmd",
+            "Ran 3 tests in 0.000s\nOK",
+        ));
+    let mut reply = AskReply::non_llm(
+        r#"{"changed_files":["calc_core.py"],"test_status":"passed"}"#.to_string(),
+    )
+    .with_task_journal(journal);
+
+    assert!(!enforce_post_write_content_evidence_guard(&mut reply));
+    assert!(reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .is_none());
 }
 
 #[test]
@@ -171,6 +214,7 @@ fn post_write_readback_recovery_reserves_bounded_plan_capacity() {
 fn post_write_guard_overrides_output_format_gap_when_content_evidence_missing() {
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-post-write-gap-priority", "ask", "prompt");
+    require_content_evidence(&mut journal);
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -474,6 +518,7 @@ fn post_write_guard_clears_stale_gap_after_later_readback() {
 fn post_write_guard_detects_run_cmd_shell_redirection_code_write_without_inline_content() {
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-post-write-shell-guard", "ask", "prompt");
+    require_content_evidence(&mut journal);
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(

@@ -34,6 +34,16 @@ pub(super) fn enforce_post_write_content_evidence_guard(reply: &mut AskReply) ->
                     .answer_incomplete_reason
                     .starts_with("post_write_content_evidence_required")
         });
+    let content_evidence_required = journal
+        .output_contract
+        .as_ref()
+        .is_some_and(|contract| contract.requires_content_evidence);
+    if !content_evidence_required {
+        if existing_post_write_gap {
+            journal.answer_verifier_summary = None;
+        }
+        return false;
+    }
     let records = post_write_step_action_records(&journal.step_results);
     if !records
         .iter()
