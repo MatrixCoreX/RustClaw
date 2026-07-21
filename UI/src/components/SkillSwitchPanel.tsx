@@ -120,7 +120,7 @@ export function SkillSwitchPanel({
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm text-white/90">{name}</span>
-          <span className="mt-0.5 block truncate text-[11px] leading-4 text-white/50">
+          <span className="mt-0.5 block break-words text-[11px] leading-4 text-white/50">
             {skillDescription(name, lang, skillItem?.description)}
           </span>
           {statusMeta.length > 0 ? (

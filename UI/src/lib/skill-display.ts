@@ -42,6 +42,8 @@ const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
   browser_web: { zh: "打开网页并提取页面内容。", en: "Open webpages and extract page content." },
   config_guard: { zh: "检查配置是否缺项或明显不合理。", en: "Check configs for missing or risky values." },
   config_basic: { zh: "读取并校验结构化配置字段。", en: "Read and validate structured config fields." },
+  config_edit: { zh: "预览、修改并校验配置。", en: "Preview, update, and validate configuration." },
+  code_index: { zh: "索引并搜索代码结构和符号。", en: "Index and search code structure and symbols." },
   crypto: { zh: "查看币价、账户、订单和交易相关能力。", en: "Handle crypto quotes, balances, orders, and trading tasks." },
   db_basic: { zh: "查看和处理数据库里的基础数据。", en: "Inspect and work with basic database data." },
   doc_parse: { zh: "解析文档内容，提取可读文本。", en: "Parse documents and extract readable text." },
@@ -79,6 +81,10 @@ const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
   video_generate: { zh: "根据描述或图片生成视频。", en: "Generate videos from prompts or images." },
   weather: { zh: "查询天气和基础预报信息。", en: "Check weather and basic forecasts." },
   web_search_extract: { zh: "搜索网页并提取关键内容。", en: "Search the web and extract key content." },
+  workspace_patch: {
+    zh: "用可检查、可回退的补丁修改工作区文件。",
+    en: "Modify workspace files with reviewable, reversible patches.",
+  },
   write_file: { zh: "写入或修改文件内容。", en: "Write or update file contents." },
   x: { zh: "xurl调用技能。", en: "xurl invocation skill." },
 };
@@ -143,10 +149,10 @@ export function groupSkillNames(
 }
 
 export function skillDescription(name: string, lang: UiLanguage, itemDescription?: string | null): string {
-  const description = itemDescription?.trim();
-  if (description) return description;
   const summary = SKILL_SUMMARY[name];
   if (summary) return copy(lang, summary.zh, summary.en);
+  const description = itemDescription?.trim();
+  if (description) return description;
   return copy(lang, "该技能无简短说明。", "No short description for this skill.");
 }
 

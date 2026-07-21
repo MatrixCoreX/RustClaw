@@ -78,6 +78,16 @@ test("normalizes and applies skill search text", () => {
 test("formats skill descriptions and risk labels", () => {
   assert.equal(skillDescription("image_generate", "en"), "Generate images from prompts.");
   assert.equal(skillDescription("image_generate", "zh"), "根据描述生成图片。");
+  assert.equal(skillDescription("code_index", "zh"), "索引并搜索代码结构和符号。");
+  assert.equal(skillDescription("config_edit", "en"), "Preview, update, and validate configuration.");
+  assert.equal(
+    skillDescription("workspace_patch", "zh"),
+    "用可检查、可回退的补丁修改工作区文件。",
+  );
+  assert.equal(
+    skillDescription("workspace_patch", "zh", "English registry description"),
+    "用可检查、可回退的补丁修改工作区文件。",
+  );
   assert.equal(skillDescription("unknown_skill", "en"), "No short description for this skill.");
   assert.equal(skillDescription("unknown_skill", "en", " Registry text "), "Registry text");
   assert.equal(skillRiskLabel("high", "en"), "High risk");
