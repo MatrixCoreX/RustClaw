@@ -56,6 +56,15 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
     loop_state
         .capability_results
         .extend(checkpoint.capability_results.iter().cloned());
+    let resume_stage = super::checkpoint_resume_state::restore_checkpoint_resume_state(
+        loop_state,
+        &checkpoint.boundary_context,
+    );
+    if loop_state.task_observations.is_empty() {
+        loop_state
+            .task_observations
+            .extend(checkpoint.observations.iter().cloned());
+    }
     let changed_files = checkpoint
         .artifact_refs
         .iter()
@@ -113,9 +122,10 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
     }
 
     loop_state.history_compact.push(format!(
-        "checkpoint_resume checkpoint_id={} entrypoint={} round={} step={} tool_calls={} side_effects={} observations={}",
+        "checkpoint_resume checkpoint_id={} entrypoint={} stage={} round={} step={} tool_calls={} side_effects={} observations={}",
         checkpoint.checkpoint_id,
         resume_entrypoint,
+        resume_stage.as_str(),
         restored_round,
         restored_step,
         restored_tool_calls,

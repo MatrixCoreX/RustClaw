@@ -147,6 +147,11 @@ fn build_pending_async_job_checkpoint_progress_payload(
         "skill": normalized_skill,
         "global_step": global_step,
         "step_in_round": step_in_round,
+        "agent_loop_resume_state":
+            super::checkpoint_resume_state::build_checkpoint_resume_state(
+                loop_state,
+                super::checkpoint_resume_state::AgentCheckpointStage::ToolExecution,
+            ),
         "task_budget_slice": loop_state
             .task_budget_slice
             .as_ref()
