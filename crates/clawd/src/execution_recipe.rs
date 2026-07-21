@@ -673,7 +673,7 @@ fn shell_contains_command_invocation(command_lower: &str, word: &str) -> bool {
             .any(|prefix| command_lower.contains(&format!("{prefix} {word} ")))
 }
 
-fn run_cmd_looks_validation(command: &str) -> bool {
+pub(crate) fn run_cmd_looks_validation(command: &str) -> bool {
     let lower = command.to_ascii_lowercase();
     let first_word = normalized_first_command_word(command);
     contains_any(
