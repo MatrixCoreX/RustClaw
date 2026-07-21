@@ -29,6 +29,42 @@ fn verify_result(kinds: &[crate::verifier::VerifyIssueKind]) -> crate::verifier:
     }
 }
 
+fn run_cmd_confirmation_verify_result(literal_user_command: bool) -> crate::verifier::VerifyResult {
+    let mut args = serde_json::json!({
+        "command": "python3 -c 'open(\"src/lib.rs\",\"w\").write(\"ok\")'"
+    });
+    if literal_user_command {
+        args[crate::agent_engine::CLAWD_LITERAL_COMMAND_ARG] = serde_json::json!(true);
+    }
+    crate::verifier::VerifyResult {
+        mode: crate::verifier::VerifyMode::Enforce,
+        approved: true,
+        blocked_reason: None,
+        shadow_blocked_reason: Some("ConfirmationRequired".to_string()),
+        permission_decision: serde_json::json!({
+            "schema_version": 1,
+            "owner_layer": "plan_verifier",
+        }),
+        approved_steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "run_cmd".to_string(),
+            args,
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        needs_confirmation: true,
+        rewritten_steps: Vec::new(),
+        issues: vec![crate::verifier::VerifyIssue {
+            step_id: "step_1".to_string(),
+            kind: crate::verifier::VerifyIssueKind::ConfirmationRequired,
+            detail: "skill `run_cmd` may require explicit confirmation".to_string(),
+            missing_fields: Vec::new(),
+        }],
+        capability_resolutions: Vec::new(),
+    }
+}
+
 #[test]
 fn invalid_planner_arguments_enter_bounded_replan() {
     let mut loop_state = LoopState::default();
@@ -84,5 +120,76 @@ fn mixed_repairable_and_policy_issues_do_not_bypass_policy() {
     );
 
     assert!(outcome.is_none());
+    assert!(loop_state.history_compact.is_empty());
+}
+
+#[test]
+fn planner_generated_run_cmd_confirmation_gets_one_scoped_capability_replan() {
+    let mut loop_state = LoopState::default();
+    let verify_result = run_cmd_confirmation_verify_result(false);
+
+    let first =
+        recover_run_cmd_confirmation_with_scoped_capability_replan(&mut loop_state, &verify_result)
+            .expect("first confirmation boundary should replan");
+    assert_eq!(
+        first.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert_eq!(
+        first.next_goal_hint.as_deref(),
+        Some("replan_with_scoped_capabilities")
+    );
+    let signal: serde_json::Value = serde_json::from_str(
+        loop_state
+            .last_output
+            .as_deref()
+            .expect("machine replan signal"),
+    )
+    .expect("valid signal");
+    assert_eq!(
+        signal["status_code"],
+        "plan_verifier_scoped_capability_replan_required"
+    );
+    assert_eq!(signal["preferred_capabilities"][0], "filesystem.make_dir");
+    assert_eq!(signal["confirmation_policy_unchanged"], true);
+
+    assert!(recover_run_cmd_confirmation_with_scoped_capability_replan(
+        &mut loop_state,
+        &verify_result,
+    )
+    .is_none());
+}
+
+#[test]
+fn literal_user_run_cmd_confirmation_never_enters_scoped_capability_replan() {
+    let mut loop_state = LoopState::default();
+    let verify_result = run_cmd_confirmation_verify_result(true);
+
+    assert!(recover_run_cmd_confirmation_with_scoped_capability_replan(
+        &mut loop_state,
+        &verify_result,
+    )
+    .is_none());
+    assert!(loop_state.history_compact.is_empty());
+}
+
+#[test]
+fn mixed_confirmation_and_sandbox_denial_remains_fail_closed() {
+    let mut loop_state = LoopState::default();
+    let mut verify_result = run_cmd_confirmation_verify_result(false);
+    verify_result.approved = false;
+    verify_result.blocked_reason = Some("SandboxPolicyDenied".to_string());
+    verify_result.issues.push(crate::verifier::VerifyIssue {
+        step_id: "step_1".to_string(),
+        kind: crate::verifier::VerifyIssueKind::SandboxPolicyDenied,
+        detail: "reason_code=sandbox_backend_unavailable".to_string(),
+        missing_fields: Vec::new(),
+    });
+
+    assert!(recover_run_cmd_confirmation_with_scoped_capability_replan(
+        &mut loop_state,
+        &verify_result,
+    )
+    .is_none());
     assert!(loop_state.history_compact.is_empty());
 }
