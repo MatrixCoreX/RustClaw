@@ -586,6 +586,21 @@ fn verify_step_args(
             missing_fields: Vec::new(),
         });
     }
+    for violation in crate::schema_contract::executable_type_constraint_violations(
+        state,
+        normalized_skill,
+        &step.args,
+    ) {
+        issues.push(VerifyIssue {
+            step_id: step.step_id.clone(),
+            kind: VerifyIssueKind::InvalidArgumentValue,
+            detail: format!(
+                "error_code=invalid_argument_value field={} constraint=type expected={}",
+                violation.field, violation.expected
+            ),
+            missing_fields: Vec::new(),
+        });
+    }
     for violation in crate::schema_contract::executable_unknown_argument_violations(
         state,
         normalized_skill,

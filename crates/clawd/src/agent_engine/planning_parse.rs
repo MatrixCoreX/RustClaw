@@ -43,6 +43,15 @@ fn plan_actions_follow_machine_contract(state: &AppState, actions: &[AgentAction
             );
             valid = false;
         }
+        for violation in
+            crate::schema_contract::executable_type_constraint_violations(state, &canonical, args)
+        {
+            info!(
+                "plan_result_type_constraint_rejected executable={} field={} constraint=type expected={}",
+                canonical, violation.field, violation.expected
+            );
+            valid = false;
+        }
     }
     valid
 }
