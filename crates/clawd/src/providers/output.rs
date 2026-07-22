@@ -1,7 +1,7 @@
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::{IsTerminal, Write as IoWrite};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chrono::{Local, TimeZone};
 use serde_json::{json, Value};
@@ -12,6 +12,8 @@ use crate::{
     llm_model_kind, llm_vendor_name, now_ts_u64, truncate_for_log, AppState, ClaimedTask,
     LlmProviderRuntime,
 };
+
+static MODEL_IO_LOG_LOCK: Mutex<()> = Mutex::new(());
 
 pub(super) fn strip_think_blocks(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
@@ -123,6 +125,7 @@ pub(crate) fn append_model_io_log(
     state: &AppState,
     task: &ClaimedTask,
     provider: &Arc<LlmProviderRuntime>,
+    logical_call_index: u64,
     status: &str,
     prompt_source: &str,
     prompt: &str,
@@ -140,22 +143,7 @@ pub(crate) fn append_model_io_log(
     // 这样即使生产关闭 prompt 调试，也保留事件链路，方便事后追溯。
     let verbose = state.policy.routing.debug_log_prompt;
     let logs_dir = state.skill_rt.workspace_root.join("logs");
-    if let Err(err) = create_dir_all(&logs_dir) {
-        warn!("create model io logs dir failed: {err}");
-        return;
-    }
     let file_path = logs_dir.join("model_io.log");
-    let mut file = match OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&file_path)
-    {
-        Ok(f) => f,
-        Err(err) => {
-            warn!("open model io log file failed: {err}");
-            return;
-        }
-    };
     let (safe_raw_response, raw_response_sanitized) = raw_response
         .map(sanitize_provider_raw_response)
         .map(|(safe, changed)| (Some(safe), changed))
@@ -168,6 +156,7 @@ pub(crate) fn append_model_io_log(
             "mode": "verbose",
             "call_id": task.task_id,
             "task_id": task.task_id,
+            "logical_call_index": logical_call_index,
             "user_id": task.user_id,
             "chat_id": task.chat_id,
             "vendor": llm_vendor_name(provider),
@@ -202,6 +191,7 @@ pub(crate) fn append_model_io_log(
             "ts": now_ts_u64(),
             "mode": "slim",
             "task_id": task.task_id,
+            "logical_call_index": logical_call_index,
             "user_id": task.user_id,
             "chat_id": task.chat_id,
             "vendor": llm_vendor_name(provider),
@@ -219,13 +209,27 @@ pub(crate) fn append_model_io_log(
     }
     .to_string();
 
-    if let Err(err) = writeln!(file, "{line}") {
+    if let Err(err) = append_model_io_line(&file_path, &line) {
         warn!("write model io log failed: {err}");
     }
     // NOTE: 之前这里每写一行都会全量 read_to_string + JSON 解析 + write 整个
     // `model_io.log`，高频 LLM 调用下是 O(N²) 的磁盘放大。现在改由
     // `spawn_cleanup_worker`（默认 300s 一次）调用 `rotate_model_io_log_daily`
     // 完成"按日归档 + 旧档过期"，append 侧保持 O(1)。
+}
+
+fn append_model_io_line(file_path: &Path, line: &str) -> std::io::Result<()> {
+    let _guard = MODEL_IO_LOG_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(parent) = file_path.parent() {
+        create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(file_path)?;
+    writeln!(file, "{line}")
 }
 
 #[cfg(test)]
@@ -243,6 +247,9 @@ pub(crate) const MODEL_IO_LOG_KEEP_DAYS: u64 = 7;
 /// 不友好；本函数把跨天的行迁到 dated archive 后再裁剪，保留 N 天可追溯窗口。
 pub(crate) fn rotate_model_io_log_daily(file_path: &Path, keep_days: u64) -> anyhow::Result<()> {
     use std::collections::BTreeMap;
+    let _guard = MODEL_IO_LOG_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if !file_path.exists() {
         // 文件不存在，仍然要做一次旧归档清理。
         cleanup_model_io_log_archives(file_path, keep_days)?;
@@ -262,6 +269,7 @@ pub(crate) fn rotate_model_io_log_daily(file_path: &Path, keep_days: u64) -> any
             continue;
         }
         let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+            today_lines.push(trimmed.to_string());
             continue;
         };
         let ts = value
@@ -269,9 +277,11 @@ pub(crate) fn rotate_model_io_log_daily(file_path: &Path, keep_days: u64) -> any
             .and_then(|item| item.as_i64())
             .filter(|v| *v > 0);
         let Some(ts) = ts else {
+            today_lines.push(trimmed.to_string());
             continue;
         };
         let Some(dt) = Local.timestamp_opt(ts, 0).single() else {
+            today_lines.push(trimmed.to_string());
             continue;
         };
         let date = dt.date_naive();
@@ -305,7 +315,9 @@ pub(crate) fn rotate_model_io_log_daily(file_path: &Path, keep_days: u64) -> any
     if !rewritten.is_empty() {
         rewritten.push('\n');
     }
-    std::fs::write(file_path, rewritten)?;
+    let rewrite_path = file_path.with_extension("log.rotate.tmp");
+    std::fs::write(&rewrite_path, rewritten)?;
+    std::fs::rename(&rewrite_path, file_path)?;
 
     cleanup_model_io_log_archives(file_path, keep_days)?;
     Ok(())
