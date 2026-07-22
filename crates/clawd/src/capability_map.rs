@@ -6,7 +6,15 @@ use claw_core::skill_registry::{
 };
 
 const UNGROUPED_CAPABILITY_TOKEN: &str = "ungrouped";
-const NATIVE_LEAF_CONTRACT_CHAR_BUDGET: usize = 32_000;
+const NATIVE_GROUP_DESCRIPTION_CHAR_BUDGET: usize = 2_048;
+const NATIVE_GROUP_TOOL_NAME_CHAR_BUDGET: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlannerNativeCapabilityGroup {
+    pub(crate) tool_name: String,
+    pub(crate) description: String,
+    pub(crate) capability_names: Vec<String>,
+}
 
 fn registry_group_token(entry: &SkillRegistryEntry) -> Option<String> {
     entry
@@ -202,141 +210,116 @@ pub(crate) fn planner_callable_capability_names_for_task(
     names.into_iter().collect()
 }
 
-pub(crate) fn planner_callable_leaf_contracts_for_task(
+pub(crate) fn planner_native_capability_groups_for_task(
     state: &AppState,
     task: &ClaimedTask,
-) -> String {
+) -> Vec<PlannerNativeCapabilityGroup> {
     let allowed = child_allowed_capabilities(task);
-    let mut contracts = BTreeMap::new();
-    if let Some(registry) = state.get_skills_registry() {
-        for skill in state.planner_available_skills_for_task(task) {
-            let Some(entry) = registry.get(&skill) else {
-                continue;
-            };
-            let mut representatives: BTreeMap<String, &PlannerCapabilityMapping> = BTreeMap::new();
-            for mapping in &entry.planner_capabilities {
-                if allowed
+    let mut skills = state.planner_available_skills_for_task(task);
+    skills.sort();
+    let mut used_tool_names = BTreeSet::new();
+    let mut groups = Vec::new();
+    let Some(registry) = state.get_skills_registry() else {
+        return groups;
+    };
+    for (index, skill) in skills.into_iter().enumerate() {
+        let Some(entry) = registry.get(&skill) else {
+            continue;
+        };
+        let capability_names = entry
+            .planner_capabilities
+            .iter()
+            .map(|mapping| mapping.name.trim())
+            .filter(|name| !name.is_empty())
+            .filter(|name| {
+                allowed
                     .as_ref()
-                    .is_some_and(|allowed| !allowed.contains(&mapping.name))
-                {
-                    continue;
-                }
-                let action_key = mapping
-                    .action
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|action| !action.is_empty())
-                    .unwrap_or(&mapping.name)
-                    .to_string();
-                match representatives.get(&action_key) {
-                    Some(existing) if existing.preferred || !mapping.preferred => {}
-                    _ => {
-                        representatives.insert(action_key, mapping);
-                    }
-                }
-            }
-            let mut inherited_capabilities = Vec::new();
-            for mapping in representatives.into_values() {
-                let has_leaf_semantics =
-                    mapping.description.is_some() || !mapping.semantic_tags.is_empty();
-                if !has_leaf_semantics {
-                    inherited_capabilities.push(mapping.name.clone());
-                    continue;
-                }
-                let description = mapping
-                    .description
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|description| !description.is_empty())
-                    .or_else(|| {
-                        entry
-                            .description
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|description| !description.is_empty())
-                    });
-                let tag_source = if mapping.semantic_tags.is_empty() {
-                    &entry.semantic_tags
-                } else {
-                    &mapping.semantic_tags
-                };
-                let semantic_tags = tag_source
-                    .iter()
-                    .map(|tag| tag.trim())
-                    .filter(|tag| !tag.is_empty())
-                    .take(8)
-                    .collect::<Vec<_>>();
-                if description.is_none() && semantic_tags.is_empty() {
-                    continue;
-                }
-                let mut attributes = vec!["semantic_scope=leaf".to_string()];
-                if let Some(description) = description {
-                    attributes.push(format!("purpose={}", compact_leaf_description(description)));
-                }
-                if !semantic_tags.is_empty() {
-                    attributes.push(format!("semantic_tags={}", semantic_tags.join("|")));
-                }
-                contracts
-                    .entry(mapping.name.clone())
-                    .or_insert_with(|| format!("{}({})", mapping.name, attributes.join(",")));
-            }
-            if inherited_capabilities.is_empty() {
-                continue;
-            }
-            let description = entry
-                .description
-                .as_deref()
-                .map(str::trim)
-                .filter(|description| !description.is_empty());
-            let semantic_tags = entry
-                .semantic_tags
-                .iter()
-                .map(|tag| tag.trim())
-                .filter(|tag| !tag.is_empty())
-                .take(8)
-                .collect::<Vec<_>>();
-            if description.is_none() && semantic_tags.is_empty() {
-                continue;
-            }
-            let mut attributes = vec![
-                format!("tokens={}", inherited_capabilities.join("|")),
-                "semantic_scope=skill".to_string(),
-            ];
-            if let Some(description) = description {
-                attributes.push(format!("purpose={}", compact_leaf_description(description)));
-            }
-            if !semantic_tags.is_empty() {
-                attributes.push(format!("semantic_tags={}", semantic_tags.join("|")));
-            }
-            contracts.insert(
-                format!("group:{skill}"),
-                format!("capability_group({})", attributes.join(",")),
-            );
-        }
-    }
-
-    let mut selected = Vec::new();
-    let mut used_chars = 0usize;
-    let mut omitted = 0usize;
-    for contract in contracts.into_values() {
-        let separator_chars = usize::from(!selected.is_empty());
-        let contract_chars = contract.chars().count();
-        if used_chars + separator_chars + contract_chars > NATIVE_LEAF_CONTRACT_CHAR_BUDGET {
-            omitted += 1;
+                    .is_none_or(|allowed| allowed.contains(*name))
+            })
+            .map(ToString::to_string)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if capability_names.is_empty() {
             continue;
         }
-        used_chars += separator_chars + contract_chars;
-        selected.push(contract);
-    }
-    if omitted > 0 {
-        let marker = format!("omitted_leaf_contracts={omitted}");
-        let separator_chars = usize::from(!selected.is_empty());
-        if used_chars + separator_chars + marker.chars().count() <= NATIVE_LEAF_CONTRACT_CHAR_BUDGET
+        let tool_name = native_capability_group_tool_name(&skill, index, &mut used_tool_names);
+        let mut description_parts = vec!["runtime_capability_group_v1".to_string()];
+        if let Some(description) = entry
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|description| !description.is_empty())
         {
-            selected.push(marker);
+            description_parts.push(format!("purpose={}", compact_leaf_description(description)));
         }
+        let semantic_tags = entry
+            .semantic_tags
+            .iter()
+            .map(|tag| tag.trim())
+            .filter(|tag| !tag.is_empty())
+            .take(8)
+            .collect::<Vec<_>>();
+        if !semantic_tags.is_empty() {
+            description_parts.push(format!("semantic_tags={}", semantic_tags.join("|")));
+        }
+        let leaf_contracts = entry
+            .planner_capabilities
+            .iter()
+            .filter(|mapping| mapping.description.is_some() || !mapping.semantic_tags.is_empty())
+            .filter(|mapping| capability_names.contains(&mapping.name))
+            .map(planner_capability_hint)
+            .collect::<Vec<_>>();
+        if !leaf_contracts.is_empty() {
+            description_parts.push(format!("leaf_contracts={}", leaf_contracts.join(";")));
+        }
+        let description = description_parts
+            .join("; ")
+            .chars()
+            .take(NATIVE_GROUP_DESCRIPTION_CHAR_BUDGET)
+            .collect();
+        groups.push(PlannerNativeCapabilityGroup {
+            tool_name,
+            description,
+            capability_names,
+        });
     }
-    selected.join(";")
+    groups
+}
+
+fn native_capability_group_tool_name(
+    skill: &str,
+    index: usize,
+    used: &mut BTreeSet<String>,
+) -> String {
+    let sanitized = skill
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let sanitized = sanitized.trim_matches('_');
+    let sanitized = if sanitized.is_empty() {
+        "capability"
+    } else {
+        sanitized
+    };
+    let mut base = format!("call_{sanitized}")
+        .chars()
+        .take(NATIVE_GROUP_TOOL_NAME_CHAR_BUDGET)
+        .collect::<String>();
+    if used.insert(base.clone()) {
+        return base;
+    }
+    let suffix = format!("_{}", index + 1);
+    let prefix_budget = NATIVE_GROUP_TOOL_NAME_CHAR_BUDGET.saturating_sub(suffix.len());
+    base = base.chars().take(prefix_budget).collect::<String>() + &suffix;
+    used.insert(base.clone());
+    base
 }
 
 fn child_allowed_capabilities(task: &ClaimedTask) -> Option<BTreeSet<String>> {

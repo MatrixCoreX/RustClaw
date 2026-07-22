@@ -139,13 +139,13 @@ fn real_config_capability_hints_keep_leaf_semantics_distinct() {
 }
 
 #[test]
-fn native_leaf_contracts_project_registry_owned_semantics() {
+fn native_capability_groups_expose_distinct_registry_tools() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()
         .with_real_skill_registry();
     let task = crate::ClaimedTask {
         claim_attempt: 0,
-        task_id: "native-leaf-contracts".to_string(),
+        task_id: "native-capability-groups".to_string(),
         user_id: 1,
         chat_id: 2,
         user_key: None,
@@ -156,21 +156,28 @@ fn native_leaf_contracts_project_registry_owned_semantics() {
         payload_json: "{}".to_string(),
     };
 
-    let contracts = planner_callable_leaf_contracts_for_task(&state, &task);
+    let groups = planner_native_capability_groups_for_task(&state, &task);
+    let doc_parse = groups
+        .iter()
+        .find(|group| group.capability_names.contains(&"doc_parse".to_string()))
+        .expect("doc_parse native group");
+    let filesystem = groups
+        .iter()
+        .find(|group| {
+            group
+                .capability_names
+                .contains(&"filesystem.read_text_range".to_string())
+        })
+        .expect("filesystem native group");
 
-    assert!(contracts.contains("config.validate(semantic_scope=leaf"));
-    assert!(contracts.contains("purpose=Parse structured configuration syntax"));
-    assert!(contracts.contains("semantic_tags=syntax_validation|structured_parse"));
-    assert!(contracts.contains("config.guard_rustclaw_config(semantic_scope=leaf"));
-    assert!(contracts.contains("purpose=Run the authoritative RustClaw semantic safety"));
-    assert!(contracts
-        .contains("semantic_tags=rustclaw_config_safety|config_risk_scan|config_problem_check"));
-    assert!(contracts.contains("capability_group(tokens=doc_parse,semantic_scope=skill"));
-    assert!(contracts.contains("purpose=Parse supported local documents"));
-    assert!(contracts.contains("semantic_tags=document_parsing|document_summary"));
-    assert!(!contracts.contains("document.parse("));
-    assert!(!contracts.contains("omitted_leaf_contracts="));
-    assert!(contracts.chars().count() <= NATIVE_LEAF_CONTRACT_CHAR_BUDGET);
+    assert_eq!(doc_parse.tool_name, "call_doc_parse");
+    assert!(doc_parse.description.contains("document_summary"));
+    assert_ne!(doc_parse.tool_name, filesystem.tool_name);
+    assert!(groups.iter().all(|group| {
+        !group.capability_names.is_empty()
+            && group.tool_name.chars().count() <= NATIVE_GROUP_TOOL_NAME_CHAR_BUDGET
+            && group.description.chars().count() <= NATIVE_GROUP_DESCRIPTION_CHAR_BUDGET
+    }));
 }
 
 #[test]
@@ -289,6 +296,10 @@ fn child_task_catalog_exposes_only_contract_allowed_capabilities() {
     };
 
     let names = planner_callable_capability_names_for_task(&state, &task);
+    let native_group_names = planner_native_capability_groups_for_task(&state, &task)
+        .into_iter()
+        .flat_map(|group| group.capability_names)
+        .collect::<BTreeSet<_>>();
     let compact = build_capability_map_for_task_with_detail(&state, &task, true);
 
     assert_eq!(
@@ -298,6 +309,7 @@ fn child_task_catalog_exposes_only_contract_allowed_capabilities() {
             "filesystem.read_text_range".to_string()
         ]
     );
+    assert_eq!(native_group_names, names.iter().cloned().collect());
     assert!(compact.contains("filesystem.find_entries"));
     assert!(compact.contains("filesystem.read_text_range"));
     assert!(!compact.contains("agent.subagent"));
