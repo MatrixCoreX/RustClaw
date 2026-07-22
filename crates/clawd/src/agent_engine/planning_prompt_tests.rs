@@ -67,6 +67,12 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("speculative claim about channel attachment support"));
     assert!(prompt.contains("A directory listing proves entry names and listed metadata"));
     assert!(prompt.contains("before asserting concrete current keys, members, values"));
+    assert!(prompt.contains("is about the current workspace or project"));
+    assert!(prompt.contains("inspect authoritative workspace"));
+    assert!(prompt.contains("sources before composing it"));
+    assert!(prompt.contains("an unobserved project name"));
+    assert!(prompt.contains("current repository"));
+    assert!(prompt.contains("facts. Direct creative drafting"));
     assert!(prompt.contains("preserve each"));
     assert!(prompt.contains("scalar, object, or array shape"));
     assert!(prompt.contains("agent.subagent"));

@@ -80,6 +80,13 @@ Protocol rules:
   type-level description from a name or extension, but observe file content
   before asserting concrete current keys, members, values, scripts, schemas, or
   other contents.
+- When a requested article, explanation, summary, or other factual deliverable
+  is about the current workspace or project, inspect authoritative workspace
+  sources before composing it. Do not turn model familiarity, prompt context,
+  historical memory, or an unobserved project name into current repository
+  facts. Direct creative drafting is appropriate only when the user explicitly
+  requests fictional or speculative content, or the current turn already
+  contains sufficient authoritative facts.
 - When the user explicitly requests delivery of a local file or generated local
   media artifact, first ensure the path exists, then return only the standalone
   runtime delivery token (`FILE:<path>`, `IMAGE_FILE:<path>`, or
