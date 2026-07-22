@@ -1,6 +1,9 @@
 use super::super::loop_control_post_write_evidence_guard::{
     enforce_code_mutation_validation_success_guard, enforce_post_write_content_evidence_guard,
 };
+use super::super::{
+    answer_verifier_gap_requires_planner_observation, prepare_answer_verifier_evidence_replan,
+};
 use super::{
     answer_contract, answer_verifier_retry_summary, commit_answer_verifier_retry_answer, ok_step,
     post_write_content_evidence_recovery_policy,
@@ -14,7 +17,7 @@ use crate::{
     agent_engine::LoopState, executor::StepExecutionStatus, AskReply, OutputDeliveryIntent,
     OutputLocatorKind, OutputResponseShape,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 
 fn local_code_context_with_required_fields(
     fields: serde_json::Value,
@@ -766,6 +769,81 @@ fn answer_verifier_retry_summary_requires_retryable_high_confidence_gap() {
 
     let summary = answer_verifier_retry_summary(&reply, None).expect("retry gap");
     assert_eq!(summary.missing_evidence_fields, vec!["path"]);
+}
+
+#[test]
+fn answer_verifier_evidence_gap_requires_planner_observation() {
+    let summary = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string(), "field_value".to_string()],
+        answer_incomplete_reason: "machine evidence missing".to_string(),
+        should_retry: true,
+        retry_instruction: "ignored by machine classification".to_string(),
+        confidence: 0.9,
+    };
+
+    assert!(answer_verifier_gap_requires_planner_observation(&summary));
+}
+
+#[test]
+fn answer_verifier_output_format_only_stays_on_synthesis_retry() {
+    let summary = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "terminal shape mismatch".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite the terminal shape".to_string(),
+        confidence: 0.9,
+    };
+
+    assert!(!answer_verifier_gap_requires_planner_observation(&summary));
+}
+
+#[test]
+fn answer_verifier_evidence_replan_is_bounded_and_clears_stale_delivery() {
+    let summary = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string(), "field_value".to_string()],
+        answer_incomplete_reason: "evidence missing".to_string(),
+        should_retry: true,
+        retry_instruction: "untrusted model prose".to_string(),
+        confidence: 0.95,
+    };
+    let mut loop_state = LoopState {
+        delivery_messages: vec!["stale answer".to_string()],
+        last_user_visible_respond: Some("stale answer".to_string()),
+        last_publishable_synthesis_output: Some("stale answer".to_string()),
+        last_capability_synthesis_output: Some("stale answer".to_string()),
+        ..LoopState::default()
+    };
+
+    assert!(prepare_answer_verifier_evidence_replan(
+        &mut loop_state,
+        &summary
+    ));
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.last_user_visible_respond.is_none());
+    assert!(loop_state.last_publishable_synthesis_output.is_none());
+    assert!(loop_state.last_capability_synthesis_output.is_none());
+    assert_eq!(
+        loop_state.last_stop_signal.as_deref(),
+        Some("answer_verifier_evidence_replan")
+    );
+    let observation: Value = serde_json::from_str(
+        loop_state
+            .last_output
+            .as_deref()
+            .expect("machine observation"),
+    )
+    .expect("valid observation json");
+    assert_eq!(observation["status"], "needs_more_evidence");
+    assert_eq!(observation["next_action"], "collect_missing_evidence");
+    assert_eq!(observation["terminal_response_allowed"], false);
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+    assert!(!prepare_answer_verifier_evidence_replan(
+        &mut loop_state,
+        &summary
+    ));
 }
 
 #[test]
