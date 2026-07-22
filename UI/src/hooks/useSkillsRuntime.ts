@@ -9,7 +9,7 @@ import {
   normalizeSkillSearchQuery,
   visibleSkillNames,
 } from "../lib/skill-display";
-import { skillStoreErrorMessage } from "../lib/skill-store";
+import { resolveSkillStoreActionName, skillStoreErrorMessage } from "../lib/skill-store";
 import type {
   ApiResponse,
   BrowserFileWithPath,
@@ -41,7 +41,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const [skillStoreLoading, setSkillStoreLoading] = useState(false);
   const [skillStoreError, setSkillStoreError] = useState<string | null>(null);
   const [skillStoreMessage, setSkillStoreMessage] = useState<string | null>(null);
-  const [skillStoreActionName, setSkillStoreActionName] = useState<string | null>(null);
+  const [localSkillStoreActionName, setLocalSkillStoreActionName] = useState<string | null>(null);
   const [skillSwitchSaveMessage, setSkillSwitchSaveMessage] = useState<string | null>(null);
   const [skillsSearchQuery, setSkillsSearchQuery] = useState("");
   const [skillImportSource, setSkillImportSource] = useState("");
@@ -53,6 +53,8 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const [localImportPickerOpen, setLocalImportPickerOpen] = useState(false);
   const folderImportInputRef = useRef<HTMLInputElement | null>(null);
   const fileImportInputRef = useRef<HTMLInputElement | null>(null);
+  const previousSkillStoreOperationRef = useRef<SkillStoreResponse["active_operation"]>(null);
+  const skillStoreActionName = resolveSkillStoreActionName(localSkillStoreActionName, skillStoreData);
 
   const fetchSkills = async () => {
     try {
@@ -99,7 +101,32 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(skillStoreErrorMessage(body.error, t));
       }
+      const previousOperation = previousSkillStoreOperationRef.current;
+      const activeOperation = body.data.active_operation ?? null;
+      previousSkillStoreOperationRef.current = activeOperation;
       setSkillStoreData(body.data);
+      if (previousOperation && !activeOperation) {
+        const item = body.data.items.find((candidate) => candidate.name === previousOperation.skill_name);
+        const operationSucceeded = previousOperation.action === "install" ? item?.installed === true : item?.configured_installed === false;
+        setSkillStoreMessage(
+          operationSucceeded
+            ? previousOperation.action === "install"
+              ? t(
+                  `${previousOperation.skill_name} 已完成安装并可以使用。`,
+                  `${previousOperation.skill_name} finished installing and is ready to use.`,
+                )
+              : t(
+                  `${previousOperation.skill_name} 已完成删除。`,
+                  `${previousOperation.skill_name} finished removing.`,
+                )
+            : t(
+                `${previousOperation.skill_name} 的操作已经结束，但未达到预期状态，请重试或查看服务日志。`,
+                `${previousOperation.skill_name} finished processing but did not reach the expected state. Retry or check the service log.`,
+              ),
+        );
+        await fetchSkillsConfig();
+        await fetchSkills();
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       setSkillStoreError(message);
@@ -209,6 +236,21 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       setRecentImportedSkillName(null);
     }
   }, [managedSkills, recentImportedSkillName, skillImportPreview]);
+
+  useEffect(() => {
+    const activeOperation = skillStoreData?.active_operation;
+    if (!activeOperation) return;
+    const timer = window.setInterval(() => {
+      void fetchSkillStore();
+    }, 1_500);
+    return () => window.clearInterval(timer);
+    // The operation identity is the server-owned polling boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    skillStoreData?.active_operation?.action,
+    skillStoreData?.active_operation?.skill_name,
+    skillStoreData?.active_operation?.started_ts,
+  ]);
 
   const saveSkillSwitches = async (restartSystem?: RestartSystem) => {
     setSkillSwitchSaving(true);
@@ -368,7 +410,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   };
 
   const mutateSkillStoreItem = async (skillName: string, installed: boolean, preserveConfig = true) => {
-    setSkillStoreActionName(skillName);
+    setLocalSkillStoreActionName(skillName);
     setSkillStoreError(null);
     setSkillStoreMessage(null);
     try {
@@ -422,7 +464,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       setSkillStoreError(message);
     } finally {
-      setSkillStoreActionName(null);
+      setLocalSkillStoreActionName(null);
     }
   };
 

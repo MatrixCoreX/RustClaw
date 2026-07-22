@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   filterSkillStoreItems,
+  resolveSkillStoreActionName,
   skillStoreErrorMessage,
   skillStoreInstallState,
 } from "./skill-store.ts";
-import type { SkillStoreItem } from "../types/api.ts";
+import type { SkillStoreItem, SkillStoreResponse } from "../types/api.ts";
 
 const item = (name: string, installed: boolean, group: string): SkillStoreItem => ({
   name,
@@ -60,4 +61,20 @@ test("renders structured store errors in the selected UI language", () => {
   assert.match(skillStoreErrorMessage("skill_store_build_failed", en), /build failed/i);
   assert.match(skillStoreErrorMessage("skill_store_operation_busy", en), /another skill/i);
   assert.match(skillStoreErrorMessage("future_error_code", en), /try again/i);
+});
+
+test("restores the active skill action from server catalog state after refresh", () => {
+  const store: SkillStoreResponse = {
+    items: [],
+    uninstalled_skill_names: [],
+    active_operation: {
+      skill_name: "weather",
+      action: "install",
+      started_ts: 1_790_000_000,
+    },
+  };
+
+  assert.equal(resolveSkillStoreActionName(null, store), "weather");
+  assert.equal(resolveSkillStoreActionName("stock", store), "stock");
+  assert.equal(resolveSkillStoreActionName(null, { ...store, active_operation: null }), null);
 });

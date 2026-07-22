@@ -107,6 +107,7 @@ export function SkillStoreCatalog({
     return filterSkillStoreItems(data?.items ?? [], query);
   }, [data?.items, query]);
   const mutationRunning = actionName !== null;
+  const activeOperation = data?.active_operation ?? null;
 
   const confirmRemoval = async (preserveConfig: boolean) => {
     if (!pendingRemoval) return;
@@ -178,7 +179,7 @@ export function SkillStoreCatalog({
               className="inline-flex w-full items-center justify-center gap-2 rounded border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {actionRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              {t("删除", "Remove")}
+              {actionRunning ? t("正在删除…", "Removing…") : t("删除", "Remove")}
             </button>
           ) : (
             <button
@@ -194,7 +195,11 @@ export function SkillStoreCatalog({
               ) : (
                 <Download className="h-4 w-4" />
               )}
-              {repairRequired ? t("修复安装", "Repair install") : t("安装", "Install")}
+              {actionRunning
+                ? t("正在安装…", "Installing…")
+                : repairRequired
+                  ? t("修复安装", "Repair install")
+                  : t("安装", "Install")}
             </button>
           )}
         </div>
@@ -232,6 +237,20 @@ export function SkillStoreCatalog({
         </div>
       </div>
       {error ? <p className="mt-4 border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-200 rounded">{error}</p> : null}
+      {activeOperation ? (
+        <p className="mt-4 flex items-center gap-2 rounded border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+          {activeOperation.action === "install"
+            ? t(
+                `${activeOperation.skill_name} 正在编译并安装，刷新页面后仍会继续显示进度。`,
+                `${activeOperation.skill_name} is compiling and installing. Its progress remains visible after a page refresh.`,
+              )
+            : t(
+                `${activeOperation.skill_name} 正在删除，请稍候。`,
+                `${activeOperation.skill_name} is being removed. Please wait.`,
+              )}
+        </p>
+      ) : null}
       {message ? <p className="mt-4 border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200 rounded">{message}</p> : null}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{items.map(renderItem)}</div>
       {!loading && items.length === 0 ? (

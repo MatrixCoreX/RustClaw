@@ -355,7 +355,8 @@ async fn skill_store_repairs_configured_skill_when_runner_is_missing() {
 #[tokio::test]
 async fn skill_store_rejects_overlapping_mutations() {
     let (state, workspace) = isolated_skill_store_state();
-    let _permit = begin_skill_store_mutation(&state).expect("hold skill-store mutation permit");
+    let _permit = begin_skill_store_mutation(&state, "weather", "install")
+        .expect("hold skill-store mutation permit");
     let router = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state);
@@ -370,5 +371,30 @@ async fn skill_store_rejects_overlapping_mutations() {
 
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(response["error"], "skill_store_operation_busy");
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn skill_store_catalog_publishes_and_clears_active_operation() {
+    let (state, workspace) = isolated_skill_store_state();
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state.clone());
+    let operation = begin_skill_store_mutation(&state, "weather", "install")
+        .expect("begin visible skill-store operation");
+
+    let (status, active) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(active["data"]["active_operation"]["skill_name"], "weather");
+    assert_eq!(active["data"]["active_operation"]["action"], "install");
+    assert!(active["data"]["active_operation"]["started_ts"]
+        .as_u64()
+        .is_some_and(|timestamp| timestamp > 0));
+
+    drop(operation);
+    let (status, idle) = call_skill_store_api(router, Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(idle["data"]["active_operation"].is_null());
     let _ = std::fs::remove_dir_all(workspace);
 }

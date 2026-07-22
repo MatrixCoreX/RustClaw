@@ -1,4 +1,4 @@
-import type { SkillStoreItem } from "../types/api";
+import type { SkillStoreItem, SkillStoreResponse } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -36,6 +36,13 @@ export function filterSkillStoreItems(items: SkillStoreItem[], query: string): S
 export function skillStoreInstallState(item: SkillStoreItem): "installed" | "repair_required" | "not_installed" {
   if (item.installed) return "installed";
   return item.installation_issue === "runner_missing" ? "repair_required" : "not_installed";
+}
+
+export function resolveSkillStoreActionName(
+  localActionName: string | null,
+  store: SkillStoreResponse | null,
+): string | null {
+  return localActionName || store?.active_operation?.skill_name || null;
 }
 
 export function skillStoreErrorMessage(errorCode: string | undefined, t: Translate): string {

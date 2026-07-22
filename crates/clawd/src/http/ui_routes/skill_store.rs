@@ -176,6 +176,13 @@ async fn get_skill_store_catalog(
         ));
     };
     let runtime_enabled = state.get_skills_list();
+    let active_operation = skill_store_active_operation(&state).map(|operation| {
+        json!({
+            "skill_name": operation.skill_name,
+            "action": operation.action,
+            "started_ts": operation.started_ts,
+        })
+    });
     let mut names = registry.all_names();
     names.sort_unstable();
     let items = names
@@ -234,6 +241,7 @@ async fn get_skill_store_catalog(
             data: Some(json!({
                 "items": items,
                 "uninstalled_skill_names": uninstalled,
+                "active_operation": active_operation,
             })),
             error: None,
         }),
@@ -252,7 +260,7 @@ async fn install_skill_store_item(
         Ok(name) => name,
         Err(error) => return skill_store_error_response(error),
     };
-    let _mutation_permit = match begin_skill_store_mutation(&state) {
+    let _mutation_guard = match begin_skill_store_mutation(&state, &skill_name, "install") {
         Ok(permit) => permit,
         Err(error) => return skill_store_error_response(error),
     };
@@ -309,7 +317,7 @@ async fn remove_skill_store_item(
         Ok(name) => name,
         Err(error) => return skill_store_error_response(error),
     };
-    let _mutation_permit = match begin_skill_store_mutation(&state) {
+    let _mutation_guard = match begin_skill_store_mutation(&state, &skill_name, "remove") {
         Ok(permit) => permit,
         Err(error) => return skill_store_error_response(error),
     };
