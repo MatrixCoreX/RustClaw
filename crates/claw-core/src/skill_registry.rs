@@ -134,6 +134,10 @@ pub struct PlannerCapabilityMapping {
     #[serde(default)]
     pub action: Option<String>,
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub semantic_tags: Vec<String>,
+    #[serde(default)]
     pub effect: Option<PlannerCapabilityEffect>,
     #[serde(default)]
     pub required: Vec<String>,
@@ -678,6 +682,8 @@ fn normalize_planner_capabilities(
             name,
             action: trim_optional_string(mapping.action.as_deref())
                 .map(|value| normalize_schema_token(&value)),
+            description: trim_optional_string(mapping.description.as_deref()),
+            semantic_tags: normalize_metadata_tokens(&mapping.semantic_tags),
             effect: mapping.effect,
             required: normalize_schema_tokens(&mapping.required),
             optional: normalize_schema_tokens(&mapping.optional),
