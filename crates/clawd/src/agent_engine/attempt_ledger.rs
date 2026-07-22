@@ -63,30 +63,59 @@ pub(super) fn record_attempt_with_retry_instruction(
     let attempt_id = format!("a{}", loop_state.attempt_ledger_entries.len() + 1);
     let action_ref = action_ref(tool_or_skill);
     let args_fingerprint = args_fingerprint(&action_ref, args_summary);
-    let error_kind = error_kind
-        .map(str::to_string)
-        .or_else(|| structured_error_kind(why_not_satisfied))
-        .or_else(|| structured_error_kind(observed_output));
-    let error_code = structured_error_code(why_not_satisfied)
-        .or_else(|| structured_error_code(observed_output))
-        .or_else(|| error_kind.clone());
-    let exit_code =
-        structured_exit_code(why_not_satisfied).or_else(|| structured_exit_code(observed_output));
+    let failed = matches!(status, crate::executor::StepExecutionStatus::Error);
+    let error_kind = failed
+        .then(|| {
+            error_kind
+                .map(str::to_string)
+                .or_else(|| structured_error_kind(why_not_satisfied))
+                .or_else(|| structured_error_kind(observed_output))
+        })
+        .flatten();
+    let error_code = failed
+        .then(|| {
+            structured_error_code(why_not_satisfied)
+                .or_else(|| structured_error_code(observed_output))
+                .or_else(|| error_kind.clone())
+        })
+        .flatten();
+    let exit_code = failed
+        .then(|| {
+            structured_exit_code(why_not_satisfied)
+                .or_else(|| structured_exit_code(observed_output))
+        })
+        .flatten();
     let retryable = retryable_from_status(status, error_kind.as_deref());
-    let retry_instruction = retry_instruction
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(crate::truncate_for_agent_trace);
-    let contract_policy = contract_policy_from_structured_error(why_not_satisfied)
-        .or_else(|| contract_policy_from_structured_error(observed_output));
-    let provider_status = provider_status_from_structured_error(why_not_satisfied)
-        .or_else(|| provider_status_from_structured_error(observed_output));
-    let missing_evidence = missing_evidence_fields(
-        args_summary,
-        why_not_satisfied,
-        observed_output,
-        &contract_policy,
-    );
+    let retry_instruction = failed
+        .then(|| {
+            retry_instruction
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(crate::truncate_for_agent_trace)
+        })
+        .flatten();
+    let contract_policy = failed
+        .then(|| {
+            contract_policy_from_structured_error(why_not_satisfied)
+                .or_else(|| contract_policy_from_structured_error(observed_output))
+        })
+        .flatten();
+    let provider_status = failed
+        .then(|| {
+            provider_status_from_structured_error(why_not_satisfied)
+                .or_else(|| provider_status_from_structured_error(observed_output))
+        })
+        .flatten();
+    let missing_evidence = if failed {
+        missing_evidence_fields(
+            args_summary,
+            why_not_satisfied,
+            observed_output,
+            &contract_policy,
+        )
+    } else {
+        Vec::new()
+    };
     let recovery_action = recovery_action_token(
         status,
         error_kind.as_deref(),
@@ -95,7 +124,9 @@ pub(super) fn record_attempt_with_retry_instruction(
         &contract_policy,
         provider_status.as_ref(),
     );
-    let verifier_reason_code = verifier_reason_code(&action_ref, error_kind.as_deref());
+    let verifier_reason_code = failed
+        .then(|| verifier_reason_code(&action_ref, error_kind.as_deref()))
+        .flatten();
     let forbidden_repeat_signature = forbidden_repeat_signature(&action_ref, &args_fingerprint);
     loop_state.attempt_ledger_entries.push(AttemptLedgerEntry {
         attempt_id,
@@ -162,21 +193,47 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
             let output_text = step.output.as_deref().unwrap_or_default();
             let action_ref = action_ref(&step.skill);
             let args_fingerprint = args_fingerprint(&action_ref, "not_recorded_in_step_result");
-            let error_kind = structured_error_kind(error_text);
-            let contract_policy = contract_policy_from_structured_error(error_text)
-                .or_else(|| contract_policy_from_structured_error(output_text));
-            let provider_status = provider_status_from_structured_error(error_text)
-                .or_else(|| provider_status_from_structured_error(output_text));
+            let failed = matches!(step.status, crate::executor::StepExecutionStatus::Error);
+            let error_kind = failed
+                .then(|| {
+                    structured_error_kind(error_text).or_else(|| structured_error_kind(output_text))
+                })
+                .flatten();
+            let contract_policy = failed
+                .then(|| {
+                    contract_policy_from_structured_error(error_text)
+                        .or_else(|| contract_policy_from_structured_error(output_text))
+                })
+                .flatten();
+            let provider_status = failed
+                .then(|| {
+                    provider_status_from_structured_error(error_text)
+                        .or_else(|| provider_status_from_structured_error(output_text))
+                })
+                .flatten();
             let retryable = retryable_from_status(step.status, error_kind.as_deref());
-            let error_code = structured_error_code(error_text)
-                .or_else(|| structured_error_code(output_text))
-                .or_else(|| error_kind.clone());
-            let missing_evidence = missing_evidence_fields(
-                "not_recorded_in_step_result",
-                error_text,
-                output_text,
-                &contract_policy,
-            );
+            let error_code = failed
+                .then(|| {
+                    structured_error_code(error_text)
+                        .or_else(|| structured_error_code(output_text))
+                        .or_else(|| error_kind.clone())
+                })
+                .flatten();
+            let exit_code = failed
+                .then(|| {
+                    structured_exit_code(error_text).or_else(|| structured_exit_code(output_text))
+                })
+                .flatten();
+            let missing_evidence = if failed {
+                missing_evidence_fields(
+                    "not_recorded_in_step_result",
+                    error_text,
+                    output_text,
+                    &contract_policy,
+                )
+            } else {
+                Vec::new()
+            };
             let recovery_action = recovery_action_token(
                 step.status,
                 error_kind.as_deref(),
@@ -185,7 +242,8 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
                 &contract_policy,
                 provider_status.as_ref(),
             );
-            let why_not_satisfied = why_not_satisfied_from_status(step.status, output_text, error_text);
+            let why_not_satisfied =
+                why_not_satisfied_from_status(step.status, output_text, error_text);
             let forbidden_repeat = forbidden_repeat_signature(&action_ref, &args_fingerprint);
             json!({
                 "attempt_id": format!("a{}", idx + 1),
@@ -197,9 +255,11 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
                 "observed_output": crate::truncate_for_agent_trace(output_text),
                 "error_code": error_code.clone(),
                 "error_kind": error_kind.clone(),
-                "exit_code": structured_exit_code(error_text).or_else(|| structured_exit_code(output_text)),
+                "exit_code": exit_code,
                 "missing_evidence": missing_evidence.clone(),
-                "verifier_reason_code": verifier_reason_code(&action_ref, error_kind.as_deref()),
+                "verifier_reason_code": failed
+                    .then(|| verifier_reason_code(&action_ref, error_kind.as_deref()))
+                    .flatten(),
                 "retry_allowed": retryable,
                 "retryable": retryable,
                 "recovery_action": recovery_action,

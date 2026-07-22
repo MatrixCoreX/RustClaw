@@ -843,6 +843,12 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
         &answer,
         &request_language_hint,
+    ) || model_qualified_observed_passthrough_can_override_language(
+        &parsed,
+        parsed_from_schema,
+        direct_passthrough_disallowed,
+        &answer,
+        loop_state,
     );
     if !answer.is_empty() && !language_compatible {
         tracing::info!(
@@ -898,6 +904,25 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             ..Default::default()
         },
     )))
+}
+
+fn model_qualified_observed_passthrough_can_override_language(
+    parsed: &ObservedAnswerFallbackOut,
+    parsed_from_schema: bool,
+    direct_passthrough_disallowed: bool,
+    answer: &str,
+    loop_state: &LoopState,
+) -> bool {
+    const HIGH_CONFIDENCE_THRESHOLD: f64 = 0.8;
+
+    parsed_from_schema
+        && !direct_passthrough_disallowed
+        && parsed.qualified
+        && parsed.publishable
+        && !parsed.needs_clarify
+        && !parsed.is_meta_instruction
+        && parsed.confidence >= HIGH_CONFIDENCE_THRESHOLD
+        && answer_matches_observed_output_passthrough(answer, loop_state)
 }
 
 fn strict_exact_tail_read_observed_answer(

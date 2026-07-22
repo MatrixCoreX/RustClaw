@@ -12,6 +12,7 @@ use super::{
     extract_direct_scalar_from_generic_output_with_locator_hint,
     extract_field_direct_answer_candidate, freeform_observed_answer_fallback,
     has_observed_answer_candidates, inventory_dir_direct_answer_candidate,
+    model_qualified_observed_passthrough_can_override_language,
     multi_count_observation_guard_entry, multi_field_machine_record_is_language_neutral,
     non_code_markdown_text, normalized_observed_listing,
     observed_answer_fallback_prompt_logical_path, observed_answer_language_compatible,

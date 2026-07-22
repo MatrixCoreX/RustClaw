@@ -182,6 +182,45 @@ fn observed_answer_language_compatibility_does_not_treat_prose_as_machine_fields
 }
 
 #[test]
+fn high_confidence_model_can_publish_exact_tail_observation_across_languages() {
+    let answer = "WARN provider retry pending\nINFO background job ready";
+    let mut loop_state = LoopState::new();
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","mode":"tail","requested_n":2,"excerpt":"98|WARN provider retry pending\n99|INFO background job ready","path":"/tmp/clawd.log"}"#,
+    ));
+    let parsed = ObservedAnswerFallbackOut {
+        answer: answer.to_string(),
+        qualified: true,
+        needs_clarify: false,
+        is_meta_instruction: false,
+        publishable: true,
+        confidence: 0.95,
+        _reason: "exact_observed_tail".to_string(),
+    };
+
+    assert!(answer_is_direct_observation_passthrough(
+        answer,
+        &loop_state
+    ));
+    assert!(model_qualified_observed_passthrough_can_override_language(
+        &parsed,
+        true,
+        false,
+        answer,
+        &loop_state,
+    ));
+    assert!(!model_qualified_observed_passthrough_can_override_language(
+        &parsed,
+        true,
+        true,
+        answer,
+        &loop_state,
+    ));
+}
+
+#[test]
 fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_machine_output() {
     let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(

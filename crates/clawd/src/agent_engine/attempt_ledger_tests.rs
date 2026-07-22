@@ -86,6 +86,113 @@ fn attempt_ledger_prefers_recorded_args_summary() {
 }
 
 #[test]
+fn successful_recorded_attempt_keeps_observed_output_out_of_control_fields() {
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    let structured_looking_log = crate::skills::structured_skill_error_from_parts(
+        "background_job",
+        "async_job_expired",
+        "not_ready",
+        None,
+        Some(serde_json::json!({
+            "error_code": "provider_retryable_response",
+            "provider": "fixture-provider",
+            "missing_evidence_fields": ["poll_result"]
+        })),
+    );
+    super::record_attempt_with_retry_instruction(
+        &mut loop_state,
+        "fs_basic",
+        "action=read_text_range mode=tail n=2",
+        crate::executor::StepExecutionStatus::Ok,
+        &structured_looking_log,
+        Some("unclassified_error"),
+        "step_completed_with_observation",
+        Some("poll the provider again"),
+    );
+
+    let value = ledger_value(&build_attempt_ledger_compact(&loop_state));
+    assert_eq!(
+        value.pointer("/0/status").and_then(Value::as_str),
+        Some("ok")
+    );
+    assert!(value.pointer("/0/error_code").is_some_and(Value::is_null));
+    assert!(value.pointer("/0/error_kind").is_some_and(Value::is_null));
+    assert!(value.pointer("/0/exit_code").is_some_and(Value::is_null));
+    assert_eq!(
+        value
+            .pointer("/0/missing_evidence")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    assert!(value
+        .pointer("/0/verifier_reason_code")
+        .is_some_and(Value::is_null));
+    assert_eq!(
+        value.pointer("/0/retryable").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value.pointer("/0/recovery_action").and_then(Value::as_str),
+        Some("none")
+    );
+    assert!(value
+        .pointer("/0/retry_instruction")
+        .is_some_and(Value::is_null));
+    assert!(value
+        .pointer("/0/contract_policy")
+        .is_some_and(Value::is_null));
+    assert!(value
+        .pointer("/0/repair_signal")
+        .is_some_and(Value::is_null));
+}
+
+#[test]
+fn successful_fallback_attempt_keeps_observed_output_out_of_control_fields() {
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    let structured_looking_log = crate::skills::structured_skill_error_from_parts(
+        "background_job",
+        "async_job_expired",
+        "not_ready",
+        None,
+        Some(serde_json::json!({
+            "error_code": "provider_retryable_response",
+            "provider": "fixture-provider",
+            "missing_evidence_fields": ["poll_result"]
+        })),
+    );
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "s1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(structured_looking_log),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+    let value = ledger_value(&build_attempt_ledger_compact(&loop_state));
+    assert!(value.pointer("/0/error_code").is_some_and(Value::is_null));
+    assert!(value.pointer("/0/error_kind").is_some_and(Value::is_null));
+    assert!(value.pointer("/0/exit_code").is_some_and(Value::is_null));
+    assert_eq!(
+        value
+            .pointer("/0/missing_evidence")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    assert!(value
+        .pointer("/0/contract_policy")
+        .is_some_and(Value::is_null));
+    assert!(value
+        .pointer("/0/repair_signal")
+        .is_some_and(Value::is_null));
+}
+
+#[test]
 fn attempt_ledger_records_verifier_retry_instruction() {
     let mut loop_state = crate::agent_engine::LoopState::new();
     super::record_attempt_with_retry_instruction(
