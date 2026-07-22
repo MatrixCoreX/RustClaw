@@ -1312,6 +1312,9 @@ fn requested_machine_kv_summary_ignores_internal_user_request_machine_tokens() {
         r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":2,"total":2},"files_only":true,"names_by_kind":{"dirs":[],"files":["release_checklist.md","service_notes.md"],"other":[]},"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs","resolved_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs","sort_by":"name"}}"#,
     ));
     let answer = "release_checklist.md\nservice_notes.md";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", answer));
     loop_state.last_user_visible_respond = Some(answer.to_string());
     let mut delivery_messages = vec![answer.to_string()];
     let mut finalizer_summary = None;

@@ -884,6 +884,21 @@ pub(super) fn current_delivery_is_latest_publishable_synthesis(
         && crate::finalize::parse_delivery_token(synthesis).is_none()
 }
 
+pub(super) fn current_delivery_is_latest_terminal_respond(
+    loop_state: &LoopState,
+    current_delivery: &str,
+) -> bool {
+    let current_delivery = current_delivery.trim();
+    let latest = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find(|step| step.is_ok() && step.skill == "respond")
+        .and_then(|step| step.output.as_deref())
+        .map(str::trim);
+    terminal_respond_delivery_candidate(current_delivery) && latest == Some(current_delivery)
+}
+
 pub(crate) fn route_expects_synthesis_over_direct_observation(
     route: &crate::IntentOutputContract,
 ) -> bool {

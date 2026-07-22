@@ -71,7 +71,7 @@ fn machine_kv_renderer_restores_http_status_output_path_over_file_token() {
         .executed_step_results
         .push(crate::executor::StepExecutionResult {
             step_id: "step_2".to_string(),
-            skill: "synthesize_answer".to_string(),
+            skill: "respond".to_string(),
             status: crate::executor::StepExecutionStatus::Ok,
             output: Some(observed_answer.clone()),
             error: None,
@@ -198,4 +198,51 @@ fn machine_kv_renderer_does_not_expand_missing_path_into_domain_template() {
         delivery_messages,
         vec!["path: missing.md\nexists: false\nerror_code: path_not_found".to_string()]
     );
+}
+
+#[test]
+fn machine_kv_renderer_preserves_authoritative_model_file_name_list() {
+    let task = claimed_task("task-model-file-name-list");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"names_by_kind":{"dirs":["archive"],"files":["release_checklist.md","service_notes.md"]}}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    let model_answer = "release_checklist.md\nservice_notes.md".to_string();
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(model_answer.clone()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    loop_state.last_user_visible_respond = Some(model_answer.clone());
+    let mut finalizer_summary = None;
+    let mut delivery_messages = vec![model_answer.clone()];
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "List only the file names under docs.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![model_answer.clone()]);
+    assert_eq!(loop_state.last_user_visible_respond, Some(model_answer));
 }
