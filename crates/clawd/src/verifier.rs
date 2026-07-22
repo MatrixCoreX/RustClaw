@@ -616,6 +616,21 @@ fn verify_step_args(
             missing_fields: Vec::new(),
         });
     }
+    for violation in crate::schema_contract::executable_nested_required_constraint_violations(
+        state,
+        normalized_skill,
+        &step.args,
+    ) {
+        issues.push(VerifyIssue {
+            step_id: step.step_id.clone(),
+            kind: VerifyIssueKind::MissingRequiredArg,
+            detail: format!(
+                "error_code=missing_required_arg field={} constraint=schema_required",
+                violation.field
+            ),
+            missing_fields: vec![violation.field],
+        });
+    }
     let manifest_required = manifest_required_args(state, normalized_skill);
     let fallback_required = required_args_for_skill(normalized_skill);
     let mut required: Vec<String> = if manifest_required.is_empty() {

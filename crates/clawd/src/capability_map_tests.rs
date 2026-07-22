@@ -182,7 +182,57 @@ fn task_callable_catalog_exposes_capabilities_not_execution_skill_names() {
 
     assert!(names.contains(&"process.ps".to_string()));
     assert!(names.contains(&"process.port_list".to_string()));
+    assert!(names.contains(&"agent.subagent".to_string()));
+    assert!(names.contains(&"agent.subagent_batch".to_string()));
+    assert!(names.contains(&"agent.subagent_persistent".to_string()));
     assert!(!names.contains(&"process_basic".to_string()));
     assert!(compact.contains("process.ps"));
+    assert!(compact.contains("agent.subagent"));
+    assert!(compact.contains("agent.subagent_batch"));
     assert!(!compact.contains("process_basic"));
+}
+
+#[test]
+fn child_task_catalog_exposes_only_contract_allowed_capabilities() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "child-capability-catalog".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({
+            "task_role": "subagent_child",
+            "child_task_contract": {
+                "scope": {
+                    "allowed_capabilities": [
+                        "filesystem.read_text_range",
+                        "filesystem.find_entries"
+                    ]
+                }
+            }
+        })
+        .to_string(),
+    };
+
+    let names = planner_callable_capability_names_for_task(&state, &task);
+    let compact = build_capability_map_for_task_with_detail(&state, &task, true);
+
+    assert_eq!(
+        names,
+        vec![
+            "filesystem.find_entries".to_string(),
+            "filesystem.read_text_range".to_string()
+        ]
+    );
+    assert!(compact.contains("filesystem.find_entries"));
+    assert!(compact.contains("filesystem.read_text_range"));
+    assert!(!compact.contains("agent.subagent"));
+    assert!(!compact.contains("process.ps"));
 }

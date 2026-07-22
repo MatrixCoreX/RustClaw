@@ -865,6 +865,7 @@ pub(super) async fn execute_prepared_skill_action(
                 &exec_args,
                 action_trace_kind,
                 step_error_signal,
+                fingerprint,
             );
             record_subagent_hook_stage(
                 state,
@@ -914,6 +915,7 @@ pub(super) async fn execute_prepared_skill_action(
             &exec_args,
             action_trace_kind,
             stop_signal.as_deref(),
+            fingerprint,
         );
         record_subagent_hook_stage(
             state,

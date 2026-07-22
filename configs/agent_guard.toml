@@ -63,7 +63,7 @@
 # persisted DAG boundary and may run concurrently only with disjoint path ownership.
 max_parallel_readonly = 4
 # 子 agent 未显式给 budget.timeout_ms 时使用的默认 timeout；0 或缺失表示使用 parent loop 默认。
-default_timeout_ms = 30000
+default_timeout_ms = 180000
 
 [agent.subagents.role_definitions.observe]
 family = "explorer"

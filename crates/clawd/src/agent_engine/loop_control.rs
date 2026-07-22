@@ -626,6 +626,45 @@ fn task_budget_profile(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChildLoopBudgetLimits {
+    max_rounds: u64,
+    max_tool_calls: u64,
+    timeout_ms: u64,
+}
+
+fn child_loop_budget_limits(payload_json: &str) -> Option<ChildLoopBudgetLimits> {
+    let payload = serde_json::from_str::<Value>(payload_json).ok()?;
+    if payload.get("task_role").and_then(Value::as_str) != Some("subagent_child") {
+        return None;
+    }
+    let budget = payload.pointer("/child_task_contract/budget")?;
+    Some(ChildLoopBudgetLimits {
+        max_rounds: budget.get("max_rounds")?.as_u64()?.clamp(1, 256),
+        max_tool_calls: budget.get("max_tool_calls")?.as_u64()?.clamp(1, 512),
+        timeout_ms: budget.get("timeout_ms")?.as_u64()?.clamp(1_000, 86_400_000),
+    })
+}
+
+fn clamp_child_loop_guard_policy(task: &ClaimedTask, policy: &mut AgentLoopGuardPolicy) {
+    let Some(limits) = child_loop_budget_limits(&task.payload_json) else {
+        return;
+    };
+    policy.max_steps = policy.max_steps.min(limits.max_tool_calls as usize).max(1);
+}
+
+fn clamp_child_task_budget_policy(
+    task: &ClaimedTask,
+    policy: &mut crate::task_budget_contract::TaskBudgetPolicy,
+) {
+    let Some(limits) = child_loop_budget_limits(&task.payload_json) else {
+        return;
+    };
+    policy.hard_ceilings.model_turns = policy.hard_ceilings.model_turns.min(limits.max_rounds);
+    policy.hard_ceilings.tool_calls = policy.hard_ceilings.tool_calls.min(limits.max_tool_calls);
+    policy.hard_ceilings.elapsed_ms = policy.hard_ceilings.elapsed_ms.min(limits.timeout_ms);
+}
+
 fn initialize_task_budget_slice(
     loop_state: &mut LoopState,
     profile: super::support::LoopBudgetProfile,
@@ -946,6 +985,7 @@ async fn run_agent_round(
     let (profile, profile_changed) =
         select_round_task_budget_profile(current_profile, candidate_profile);
     *policy = policy.adjusted_for_task_budget_profile(profile);
+    clamp_child_loop_guard_policy(task, policy);
     apply_task_budget_profile(loop_state, task_budget_policy, profile);
     loop_state.output_vars.insert(
         "agent_loop.planner_budget_profile".to_string(),
@@ -1263,8 +1303,9 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     initial_task_observations: &[Value],
 ) -> Result<AskReply, String> {
     let base_policy = load_agent_loop_guard_policy(state);
-    let task_budget_policy =
+    let mut task_budget_policy =
         crate::task_budget_contract::load_task_budget_policy(&state.skill_rt.workspace_root);
+    clamp_child_task_budget_policy(task, &mut task_budget_policy);
     let mut loop_state = LoopState::new();
     super::seed_loop_state_for_agent_run(&mut loop_state, agent_run_context, resume_checkpoint);
     loop_state
@@ -1277,6 +1318,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     let budget_profile =
         AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, None);
     let mut policy = base_policy.adjusted_for_context(loop_state.execution_recipe, None);
+    clamp_child_loop_guard_policy(task, &mut policy);
     base_policy.apply_recipe_runtime_overrides(&mut loop_state.execution_recipe);
     let enabled_rollout_switches = policy.enabled_rollout_switches();
     if !enabled_rollout_switches.is_empty() {

@@ -229,6 +229,7 @@ fn subagent_step_execution_promotes_runtime_observation_to_step_output() {
         &serde_json::json!({"role": "researcher"}),
         "call_tool",
         None,
+        "skill:subagent:batch",
     );
 
     assert_eq!(loop_state.executed_step_results.len(), 1);
@@ -267,6 +268,40 @@ fn subagent_step_execution_promotes_runtime_observation_to_step_output() {
         claw_core::capability_result::CapabilityResultStatus::Ok
     );
     assert_eq!(result.data["output"]["owner_layer"], "subagent_runtime");
+    assert!(loop_state.successful_action_fingerprints.is_empty());
+}
+
+#[test]
+fn completed_subagent_step_persists_replay_fingerprint() {
+    let task = test_task();
+    let mut loop_state = LoopState::new();
+    loop_state.task_observations.push(serde_json::json!({
+        "schema_version": 1,
+        "owner_layer": "subagent_runtime",
+        "status": "completed",
+        "delegated_terminal_evidence": true,
+        "global_step": 1,
+        "step_in_round": 1,
+        "round_no": 0
+    }));
+
+    record_subagent_step_execution(
+        &task,
+        &mut loop_state,
+        1,
+        1,
+        &serde_json::json!({"role": "review"}),
+        "call_capability",
+        None,
+        "skill:subagent:delegation-scope",
+    );
+
+    assert_eq!(
+        loop_state
+            .successful_action_fingerprints
+            .get("skill:subagent:delegation-scope"),
+        Some(&1)
+    );
 }
 
 #[test]

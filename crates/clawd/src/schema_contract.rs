@@ -18,6 +18,11 @@ pub(crate) struct TypeConstraintViolation {
     pub(crate) expected: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RequiredConstraintViolation {
+    pub(crate) field: String,
+}
+
 pub(crate) fn executable_enum_violations(
     state: &AppState,
     executable: &str,
@@ -41,30 +46,49 @@ pub(crate) fn enum_constraint_violations(
     input_schema: &Value,
     args: &Value,
 ) -> Vec<EnumConstraintViolation> {
-    let Some(properties) = input_schema.get("properties").and_then(Value::as_object) else {
-        return Vec::new();
-    };
-    let Some(args) = args.as_object() else {
-        return Vec::new();
-    };
-
     let mut violations = Vec::new();
-    for (field, value) in args {
-        let Some(allowed) = properties
-            .get(field)
-            .and_then(|property| property.get("enum"))
-            .and_then(Value::as_array)
-        else {
-            continue;
-        };
-        if !allowed.iter().any(|candidate| candidate == value) {
-            violations.push(EnumConstraintViolation {
-                field: field.clone(),
-            });
-        }
-    }
+    collect_enum_constraint_violations(input_schema, args, "", &mut violations);
     violations.sort_by(|left, right| left.field.cmp(&right.field));
     violations
+}
+
+fn collect_enum_constraint_violations(
+    schema: &Value,
+    value: &Value,
+    path: &str,
+    violations: &mut Vec<EnumConstraintViolation>,
+) {
+    if let (Some(properties), Some(object)) = (
+        schema.get("properties").and_then(Value::as_object),
+        value.as_object(),
+    ) {
+        for (field, field_value) in object {
+            let Some(field_schema) = properties.get(field) else {
+                continue;
+            };
+            let field_path = object_field_path(path, field);
+            if field_schema
+                .get("enum")
+                .and_then(Value::as_array)
+                .is_some_and(|allowed| !allowed.iter().any(|candidate| candidate == field_value))
+            {
+                violations.push(EnumConstraintViolation {
+                    field: field_path.clone(),
+                });
+            }
+            collect_enum_constraint_violations(field_schema, field_value, &field_path, violations);
+        }
+    }
+    if let (Some(items), Some(array)) = (schema.get("items"), value.as_array()) {
+        for (index, item) in array.iter().enumerate() {
+            collect_enum_constraint_violations(
+                items,
+                item,
+                &array_item_path(path, index),
+                violations,
+            );
+        }
+    }
 }
 
 pub(crate) fn executable_unknown_argument_violations(
@@ -129,30 +153,54 @@ pub(crate) fn type_constraint_violations(
     input_schema: &Value,
     args: &Value,
 ) -> Vec<TypeConstraintViolation> {
-    let Some(properties) = input_schema.get("properties").and_then(Value::as_object) else {
-        return Vec::new();
-    };
-    let Some(args) = args.as_object() else {
-        return Vec::new();
-    };
-
     let mut violations = Vec::new();
-    for (field, value) in args {
-        let Some(field_schema) = properties.get(field) else {
-            continue;
-        };
-        let Some(expected) = expected_type_description(field_schema) else {
-            continue;
-        };
-        if !schema_accepts_value_type(field_schema, value) {
-            violations.push(TypeConstraintViolation {
-                field: field.clone(),
-                expected,
-            });
-        }
-    }
+    collect_type_constraint_violations(input_schema, args, "", &mut violations);
     violations.sort_by(|left, right| left.field.cmp(&right.field));
     violations
+}
+
+fn collect_type_constraint_violations(
+    schema: &Value,
+    value: &Value,
+    path: &str,
+    violations: &mut Vec<TypeConstraintViolation>,
+) {
+    if let (Some(properties), Some(object)) = (
+        schema.get("properties").and_then(Value::as_object),
+        value.as_object(),
+    ) {
+        for (field, field_value) in object {
+            let Some(field_schema) = properties.get(field) else {
+                continue;
+            };
+            let field_path = object_field_path(path, field);
+            if let Some(expected) = expected_type_description(field_schema) {
+                if !schema_accepts_value_type(field_schema, field_value) {
+                    violations.push(TypeConstraintViolation {
+                        field: field_path,
+                        expected,
+                    });
+                    continue;
+                }
+            }
+            collect_type_constraint_violations(field_schema, field_value, &field_path, violations);
+        }
+    }
+    if let (Some(items), Some(array)) = (schema.get("items"), value.as_array()) {
+        for (index, item) in array.iter().enumerate() {
+            let item_path = array_item_path(path, index);
+            if let Some(expected) = expected_type_description(items) {
+                if !schema_accepts_value_type(items, item) {
+                    violations.push(TypeConstraintViolation {
+                        field: item_path,
+                        expected,
+                    });
+                    continue;
+                }
+            }
+            collect_type_constraint_violations(items, item, &item_path, violations);
+        }
+    }
 }
 
 fn schema_accepts_value_type(schema: &Value, value: &Value) -> bool {
@@ -222,32 +270,139 @@ pub(crate) fn unknown_argument_violations(
     input_schema: &Value,
     args: &Value,
 ) -> Vec<UnknownArgumentViolation> {
-    if input_schema
-        .get("additionalProperties")
-        .is_some_and(|value| value == &Value::Bool(true) || value.is_object())
-    {
-        return Vec::new();
-    }
-    let Some(properties) = input_schema.get("properties").and_then(Value::as_object) else {
-        return Vec::new();
-    };
-    let Some(args) = args.as_object() else {
-        return Vec::new();
-    };
-
-    let mut violations = args
-        .keys()
-        .filter(|field| {
-            field.as_str() != "action"
-                && !field.starts_with("_clawd_")
-                && !properties.contains_key(*field)
-        })
-        .map(|field| UnknownArgumentViolation {
-            field: field.clone(),
-        })
-        .collect::<Vec<_>>();
+    let mut violations = Vec::new();
+    collect_unknown_argument_violations(input_schema, args, "", true, &mut violations);
     violations.sort_by(|left, right| left.field.cmp(&right.field));
     violations
+}
+
+fn collect_unknown_argument_violations(
+    schema: &Value,
+    value: &Value,
+    path: &str,
+    root: bool,
+    violations: &mut Vec<UnknownArgumentViolation>,
+) {
+    if let (Some(properties), Some(object)) = (
+        schema.get("properties").and_then(Value::as_object),
+        value.as_object(),
+    ) {
+        let open = schema
+            .get("additionalProperties")
+            .is_some_and(|value| value == &Value::Bool(true) || value.is_object());
+        for (field, field_value) in object {
+            if let Some(field_schema) = properties.get(field) {
+                collect_unknown_argument_violations(
+                    field_schema,
+                    field_value,
+                    &object_field_path(path, field),
+                    false,
+                    violations,
+                );
+            } else if !open
+                && !(root && field == "action")
+                && !(root && field.starts_with("_clawd_"))
+            {
+                violations.push(UnknownArgumentViolation {
+                    field: object_field_path(path, field),
+                });
+            }
+        }
+    }
+    if let (Some(items), Some(array)) = (schema.get("items"), value.as_array()) {
+        for (index, item) in array.iter().enumerate() {
+            collect_unknown_argument_violations(
+                items,
+                item,
+                &array_item_path(path, index),
+                false,
+                violations,
+            );
+        }
+    }
+}
+
+pub(crate) fn executable_nested_required_constraint_violations(
+    state: &AppState,
+    executable: &str,
+    args: &Value,
+) -> Vec<RequiredConstraintViolation> {
+    let input_schema = state
+        .mcp_tool(executable)
+        .map(|tool| tool.input_schema)
+        .or_else(|| {
+            state
+                .skill_manifest(executable)
+                .and_then(|manifest| manifest.input_schema)
+        });
+    let mut violations = Vec::new();
+    if let Some(schema) = input_schema.as_ref() {
+        collect_required_constraint_violations(schema, args, "", 0, &mut violations);
+    }
+    violations.sort_by(|left, right| left.field.cmp(&right.field));
+    violations
+}
+
+fn collect_required_constraint_violations(
+    schema: &Value,
+    value: &Value,
+    path: &str,
+    depth: usize,
+    violations: &mut Vec<RequiredConstraintViolation>,
+) {
+    if let Some(object) = value.as_object() {
+        if depth > 0 {
+            for required in schema
+                .get("required")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                if !object.contains_key(required) {
+                    violations.push(RequiredConstraintViolation {
+                        field: object_field_path(path, required),
+                    });
+                }
+            }
+        }
+        if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+            for (field, field_value) in object {
+                if let Some(field_schema) = properties.get(field) {
+                    collect_required_constraint_violations(
+                        field_schema,
+                        field_value,
+                        &object_field_path(path, field),
+                        depth + 1,
+                        violations,
+                    );
+                }
+            }
+        }
+    }
+    if let (Some(items), Some(array)) = (schema.get("items"), value.as_array()) {
+        for (index, item) in array.iter().enumerate() {
+            collect_required_constraint_violations(
+                items,
+                item,
+                &array_item_path(path, index),
+                depth + 1,
+                violations,
+            );
+        }
+    }
+}
+
+fn object_field_path(path: &str, field: &str) -> String {
+    if path.is_empty() {
+        field.to_string()
+    } else {
+        format!("{path}.{field}")
+    }
+}
+
+fn array_item_path(path: &str, index: usize) -> String {
+    format!("{path}[{index}]")
 }
 
 #[cfg(test)]

@@ -144,3 +144,38 @@ fn type_constraints_accept_union_and_numeric_types() {
     )
     .is_empty());
 }
+
+#[test]
+fn nested_object_and_array_constraints_report_stable_paths() {
+    let schema = json!({
+        "properties": {
+            "children": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "role": {"type": "string", "enum": ["review", "test"]},
+                        "objective": {"type": "string"}
+                    }
+                }
+            }
+        }
+    });
+    let args = json!({
+        "children": [
+            {"role": "writer", "objective": 7, "task": "undeclared"}
+        ]
+    });
+
+    assert_eq!(
+        enum_constraint_violations(&schema, &args)[0].field,
+        "children[0].role"
+    );
+    let types = type_constraint_violations(&schema, &args);
+    assert_eq!(types[0].field, "children[0].objective");
+    assert_eq!(types[0].expected, "string");
+    assert_eq!(
+        unknown_argument_violations(&schema, &args)[0].field,
+        "children[0].task"
+    );
+}

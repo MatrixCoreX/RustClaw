@@ -675,6 +675,80 @@ fn canonical_capability_resolution_records_registry_identity() {
 }
 
 #[test]
+fn real_registry_resolves_inline_and_persistent_subagent_capabilities() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+
+    let (inline, inline_record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "agent.subagent",
+        json!({
+            "role": "review",
+            "objective": "inspect_runtime_boundary",
+            "context_refs": ["AGENTS.md"],
+            "isolation_profile": "danger_full",
+            "network_access": true
+        }),
+    );
+    let Some(AgentAction::CallTool { tool, args }) = inline else {
+        panic!("inline subagent capability must resolve to an internal tool");
+    };
+    assert_eq!(tool, "subagent");
+    assert_eq!(args["role"], "review");
+    assert_eq!(args["action"], "inline_readonly");
+    assert!(args.get("isolation_profile").is_none());
+    assert!(args.get("network_access").is_none());
+    assert_eq!(inline_record.source, "registry");
+    assert_eq!(
+        inline_record.canonical_capability_ref.as_deref(),
+        Some("agent.subagent")
+    );
+
+    let (batch, batch_record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "agent.subagent_batch",
+        json!({
+            "children": [
+                {"role": "review", "objective": "inspect_runtime_boundary"},
+                {"role": "test", "objective": "inspect_test_boundary"}
+            ]
+        }),
+    );
+    let Some(AgentAction::CallTool { tool, args }) = batch else {
+        panic!("batch subagent capability must resolve to an internal tool");
+    };
+    assert_eq!(tool, "subagent");
+    assert_eq!(args["action"], "bounded_parallel_readonly");
+    assert_eq!(args["children"].as_array().map(Vec::len), Some(2));
+    assert_eq!(batch_record.source, "registry");
+    assert_eq!(
+        batch_record.canonical_capability_ref.as_deref(),
+        Some("agent.subagent_batch")
+    );
+
+    let (persistent, persistent_record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "agent.subagent_persistent",
+        json!({
+            "role": "reviewer",
+            "objective": "inspect_runtime_boundary",
+            "allowed_capabilities": ["filesystem.read_text"]
+        }),
+    );
+    let Some(AgentAction::CallTool { tool, args }) = persistent else {
+        panic!("persistent subagent capability must resolve to an internal tool");
+    };
+    assert_eq!(tool, "subagent");
+    assert_eq!(args["action"], "persistent_child_task");
+    assert_eq!(persistent_record.source, "registry");
+    assert_eq!(
+        persistent_record.canonical_capability_ref.as_deref(),
+        Some("agent.subagent_persistent")
+    );
+}
+
+#[test]
 fn filesystem_write_text_capability_normalizes_write_mode_alias() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

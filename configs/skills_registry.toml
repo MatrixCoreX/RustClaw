@@ -393,6 +393,32 @@ input_schema = { type = "object", required = ["action"], properties = { action =
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
+name = "subagent"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+group = "workflow"
+aliases = []
+timeout_seconds = 3600
+output_kind = "text"
+risk_level = "low"
+auto_invocable = true
+requires_confirmation = false
+side_effect = false
+retryable = true
+supported_os = ["linux", "macos"]
+platform_notes = ["Runs inside the shared Rust agent runtime; child process, worktree, and path boundaries use the existing Linux/macOS platform adapters."]
+description = "Delegate bounded read-only review, exploration, and verification to trusted child-agent roles, or schedule persistent isolated child work through an explicit high-risk capability."
+semantic_tags = ["agent_delegation", "child_agent", "readonly_review", "bounded_parallel", "persistent_child_task"]
+planner_capabilities = [
+  { name = "agent.subagent", action = "inline_readonly", effect = "observe", required = ["role", "objective", "context_refs", "allowed_capabilities"], optional = ["findings", "required", "budget", "context_slice", "result_contract", "dry_run", "expected_failure"], risk_level = "low", preferred = true, once_per_task = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "agent.subagent_batch", action = "bounded_parallel_readonly", effect = "observe", required = ["children"], optional = ["dry_run", "expected_failure", "max_parallel"], risk_level = "low", preferred = true, once_per_task = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "agent.subagent_persistent", action = "persistent_child_task", effect = "mutate", required = ["role|children", "objective|children", "allowed_capabilities|children"], optional = ["context_refs", "required", "budget", "context_slice", "result_contract", "children", "max_parallel", "permission_profile", "node_id", "depends_on", "owned_paths", "model_policy", "tool_policy"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_worktree", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "lifecycle_result" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["inline_readonly", "bounded_parallel_readonly", "persistent_child_task"] }, role = { type = "string" }, objective = { type = "string" }, context_refs = { type = "array", items = { type = "string" } }, findings = {}, required = { type = "boolean" }, allowed_capabilities = { type = "array", items = { type = "string" } }, budget = { type = "object" }, context_slice = { type = "object" }, result_contract = { type = "object" }, dry_run = { type = "boolean" }, expected_failure = { type = "boolean" }, children = { type = "array", items = { type = "object", required = ["role", "objective"], properties = { role = { type = "string" }, objective = { type = "string" }, context_refs = { type = "array", items = { type = "string" } }, findings = {}, required = { type = "boolean" }, allowed_capabilities = { type = "array", items = { type = "string" } }, budget = { type = "object" }, context_slice = { type = "object" }, result_contract = { type = "object" }, permission_profile = { type = "string" }, node_id = { type = "string" }, depends_on = { type = "array" }, owned_paths = { type = "array", items = { type = "string" } }, model_policy = { type = "object" }, tool_policy = { type = "object" } } } }, max_parallel = { type = "integer" }, permission_profile = { type = "string" }, node_id = { type = "string" }, depends_on = { type = "array" }, owned_paths = { type = "array", items = { type = "string" } }, model_policy = { type = "object" }, tool_policy = { type = "object" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
+
+[[skills]]
 name = "x"
 enabled = true
 kind = "runner"

@@ -399,6 +399,8 @@ minimax_models = ["MiniMax-M3"]
         let entries = vec![TaskDebugEntry {
             ts: Some(10),
             task_id: Some("task-1".to_string()),
+            parent_task_id: None,
+            child_task_id: None,
             call_id: Some("task-1:planner".to_string()),
             vendor: Some("minimax".to_string()),
             provider: Some("vendor-minimax".to_string()),
@@ -470,6 +472,8 @@ minimax_models = ["MiniMax-M3"]
         let entries = vec![TaskDebugEntry {
             ts: Some(10),
             task_id: Some("task-1".to_string()),
+            parent_task_id: None,
+            child_task_id: None,
             call_id: Some("task-1:planner".to_string()),
             vendor: Some("minimax".to_string()),
             provider: Some("vendor-minimax".to_string()),

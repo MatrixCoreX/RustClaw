@@ -24,6 +24,7 @@ const FALLBACK_BASE_SKILL_NAMES = [
   "make_dir",
   "remove_file",
   "schedule",
+  "subagent",
   "extension_manager",
   "kb",
   "rss_fetch",
@@ -76,6 +77,7 @@ const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
   schedule: { zh: "创建、查询或管理定时任务。", en: "Create, inspect, or manage scheduled tasks." },
   service_control: { zh: "启动、停止或重启服务。", en: "Start, stop, or restart services." },
   stock: { zh: "股票市场技能。", en: "Stock market skill." },
+  subagent: { zh: "把单个或批量只读检查、隔离任务交给受限子代理。", en: "Delegate single or batched read-only reviews and isolated work to bounded child agents." },
   task_control: { zh: "查看、取消当前会话未完成任务。", en: "List and cancel unfinished tasks in the current chat." },
   system_basic: { zh: "查看系统信息和基础环境。", en: "Inspect system information and environment basics." },
   transform: { zh: "转换文本、数据或文件格式。", en: "Transform text, data, or file formats." },
@@ -138,6 +140,10 @@ const SKILL_USAGE_EXAMPLES: Record<string, { zh: readonly string[]; en: readonly
   schedule: {
     zh: ["先解析‘每周一上午九点提醒我开周会’，不要创建任务。", "每天晚上十点提醒我备份文件。", "列出我当前的定时任务。"],
     en: ["Parse 'remind me every Monday at 9 AM' without creating it.", "Remind me to back up files every day at 10 PM.", "List my current scheduled tasks."],
+  },
+  subagent: {
+    zh: ["让只读 review 子代理检查这两个文件是否一致。", "让两个只读子代理分别检查配置和测试，再汇总结果。", "创建一个可恢复的隔离子任务检查这次代码修改。"],
+    en: ["Ask a read-only review child agent to compare these two files.", "Have two read-only child agents inspect the config and tests, then aggregate their findings.", "Create a resumable isolated child task to review this code change."],
   },
   x: {
     zh: ["帮我草拟一条产品更新动态，不要发布。", "预览这条 X 动态是否超过长度限制。", "把这条已确认的动态发布到 X。"],

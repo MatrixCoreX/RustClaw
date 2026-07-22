@@ -69,6 +69,35 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("before asserting concrete current keys, members, values"));
     assert!(prompt.contains("preserve each"));
     assert!(prompt.contains("scalar, object, or array shape"));
+    assert!(prompt.contains("agent.subagent"));
+    assert!(prompt.contains("agent.subagent_batch"));
+    assert!(prompt.contains("agent.subagent_persistent"));
+}
+
+#[test]
+fn planner_overlays_select_subagents_through_capabilities_only() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    for relative_path in [
+        "single_plan_execution_prompt.md",
+        "loop_incremental_plan_prompt.md",
+        "plan_repair_prompt.md",
+        "agent_tool_spec.md",
+    ] {
+        let prompt =
+            std::fs::read_to_string(overlays.join(relative_path)).expect("read planner overlay");
+        assert!(
+            prompt.contains("agent.subagent"),
+            "{relative_path} must expose the registry capability"
+        );
+        assert!(
+            prompt.contains("agent.subagent_batch"),
+            "{relative_path} must expose the bounded batch capability"
+        );
+        assert!(
+            !prompt.contains("\"tool\":\"subagent\""),
+            "{relative_path} must not revive the retired direct-tool protocol"
+        );
+    }
 }
 
 #[test]

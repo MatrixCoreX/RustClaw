@@ -1418,7 +1418,7 @@ pub(super) fn action_fingerprint(state: &AppState, action: &AgentAction) -> Stri
             let normalized_skill = state
                 .resolve_canonical_skill_name(tool.trim())
                 .to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(&normalized_skill, args);
+            let normalized_args = normalize_args_for_fingerprint(state, &normalized_skill, args);
             format!(
                 "skill:{}:{}",
                 normalized_skill,
@@ -1429,7 +1429,7 @@ pub(super) fn action_fingerprint(state: &AppState, action: &AgentAction) -> Stri
             let normalized_skill = state
                 .resolve_canonical_skill_name(skill)
                 .to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(&normalized_skill, args);
+            let normalized_args = normalize_args_for_fingerprint(state, &normalized_skill, args);
             format!(
                 "skill:{}:{}",
                 normalized_skill,
@@ -1449,7 +1449,7 @@ pub(super) fn action_fingerprint(state: &AppState, action: &AgentAction) -> Stri
         ),
         AgentAction::CallCapability { capability, args } => {
             let normalized = capability.trim().to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(&normalized, args);
+            let normalized_args = normalize_args_for_fingerprint(state, &normalized, args);
             format!(
                 "capability:{}:{}",
                 normalized,
@@ -1680,7 +1680,12 @@ fn normalize_path_string_for_fingerprint(raw: &str) -> String {
     format!("{quote_prefix}{out}{quote_suffix}")
 }
 
-fn normalize_args_for_fingerprint(action_name: &str, args: &Value) -> Value {
+fn normalize_args_for_fingerprint(state: &AppState, action_name: &str, args: &Value) -> Value {
+    if action_name == "subagent"
+        && args.get("action").and_then(Value::as_str) == Some("inline_readonly")
+    {
+        return normalize_inline_subagent_args_for_fingerprint(state, args);
+    }
     let mut out = args.clone();
     if action_name == "run_cmd" {
         if let Some(obj) = out.as_object_mut() {
@@ -1699,6 +1704,32 @@ fn normalize_args_for_fingerprint(action_name: &str, args: &Value) -> Value {
         }
     }
     out
+}
+
+fn normalize_inline_subagent_args_for_fingerprint(state: &AppState, args: &Value) -> Value {
+    let config = super::subagent_runtime::load_subagent_runtime_config(state);
+    let role_family = args
+        .get("role")
+        .and_then(Value::as_str)
+        .and_then(|token| config.resolve_role(token))
+        .map(|role| role.family.as_str())
+        .unwrap_or("unresolved");
+    let mut context_refs = args
+        .get("context_refs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(normalize_path_string_for_fingerprint)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    context_refs.sort();
+    context_refs.dedup();
+    json!({
+        "action": "inline_readonly",
+        "role_family": role_family,
+        "context_refs": context_refs,
+    })
 }
 
 fn canonicalize_json_value(value: &Value) -> Value {

@@ -358,6 +358,7 @@ skills_list = [
     "remove_file",
     "workspace_patch",
     "schedule",
+    "subagent",
     "system_basic",
     "http_basic",
     "git_basic",

@@ -43,6 +43,8 @@ fn teaching_trace_redacts_nested_and_free_text_secrets_without_hiding_prompt_str
     let mut entries = vec![TaskDebugEntry {
         ts: Some(1),
         task_id: Some("task-redact".to_string()),
+        parent_task_id: None,
+        child_task_id: None,
         call_id: Some("call-1".to_string()),
         vendor: Some("fixture".to_string()),
         provider: Some("fixture".to_string()),

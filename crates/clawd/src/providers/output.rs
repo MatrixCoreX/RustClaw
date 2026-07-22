@@ -142,6 +142,15 @@ pub(crate) fn append_model_io_log(
     //   * `debug_log_prompt=false` → "slim" 行，只有 metadata + 字符数 + usage
     // 这样即使生产关闭 prompt 调试，也保留事件链路，方便事后追溯。
     let verbose = state.policy.routing.debug_log_prompt;
+    let task_payload = serde_json::from_str::<Value>(&task.payload_json).ok();
+    let parent_task_id = task_payload
+        .as_ref()
+        .and_then(|payload| payload.get("parent_task_id"))
+        .and_then(Value::as_str);
+    let child_task_id = task_payload
+        .as_ref()
+        .and_then(|payload| payload.get("child_task_id"))
+        .and_then(Value::as_str);
     let logs_dir = state.skill_rt.workspace_root.join("logs");
     let file_path = logs_dir.join("model_io.log");
     let (safe_raw_response, raw_response_sanitized) = raw_response
@@ -156,6 +165,8 @@ pub(crate) fn append_model_io_log(
             "mode": "verbose",
             "call_id": task.task_id,
             "task_id": task.task_id,
+            "parent_task_id": parent_task_id,
+            "child_task_id": child_task_id,
             "logical_call_index": logical_call_index,
             "user_id": task.user_id,
             "chat_id": task.chat_id,
@@ -191,6 +202,8 @@ pub(crate) fn append_model_io_log(
             "ts": now_ts_u64(),
             "mode": "slim",
             "task_id": task.task_id,
+            "parent_task_id": parent_task_id,
+            "child_task_id": child_task_id,
             "logical_call_index": logical_call_index,
             "user_id": task.user_id,
             "chat_id": task.chat_id,

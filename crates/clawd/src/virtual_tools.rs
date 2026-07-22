@@ -268,6 +268,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             } else {
                 promote_globish_pattern_to_ext(&mut obj);
             }
+            drop_wildcard_only_name_pattern(&mut obj);
             demote_existing_directory_pattern_to_root(&mut obj);
             let has_pattern = has_non_empty_arg(&obj, "pattern");
             let has_ext = has_non_empty_arg(&obj, "ext");
@@ -890,6 +891,43 @@ fn has_non_empty_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
 
 fn has_any_non_empty_arg(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> bool {
     keys.iter().any(|key| has_non_empty_arg(obj, key))
+}
+
+fn drop_wildcard_only_name_pattern(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let Some(value) = obj.get_mut("pattern") else {
+        return false;
+    };
+    match value {
+        Value::String(pattern) if wildcard_only_name_pattern(pattern) => {
+            obj.remove("pattern");
+            true
+        }
+        Value::Array(patterns) => {
+            let before = patterns.len();
+            patterns.retain(|pattern| !pattern.as_str().is_some_and(wildcard_only_name_pattern));
+            let changed = patterns.len() != before;
+            if patterns.is_empty() {
+                obj.remove("pattern");
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+fn wildcard_only_name_pattern(pattern: &str) -> bool {
+    let mut saw_wildcard = false;
+    for ch in pattern.trim().chars() {
+        if matches!(
+            ch,
+            '*' | '?' | '[' | ']' | '{' | '}' | '(' | ')' | '!' | ','
+        ) {
+            saw_wildcard = true;
+        } else if !matches!(ch, ' ' | '\t' | '\r' | '\n' | '\'' | '"') {
+            return false;
+        }
+    }
+    saw_wildcard
 }
 
 fn explicit_find_entries_exact_basename_selector(obj: &serde_json::Map<String, Value>) -> bool {

@@ -169,7 +169,29 @@ pub(crate) fn planner_callable_capability_names_for_task(
             .into_iter()
             .map(|tool| tool.capability),
     );
+    if let Some(allowed) = child_allowed_capabilities(task) {
+        names.retain(|name| allowed.contains(name));
+    }
     names.into_iter().collect()
+}
+
+fn child_allowed_capabilities(task: &ClaimedTask) -> Option<BTreeSet<String>> {
+    let payload = serde_json::from_str::<serde_json::Value>(&task.payload_json).ok()?;
+    if !crate::repo::child_tasks::is_child_subagent_payload(&payload) {
+        return None;
+    }
+    Some(
+        payload
+            .pointer("/child_task_contract/scope/allowed_capabilities")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+    )
 }
 
 fn build_capability_map_for_task_with_detail(
@@ -197,7 +219,16 @@ fn build_capability_map_for_task_with_detail(
     let visible = state.planner_available_skills_for_task(task);
     let available_set = visible.iter().cloned().collect::<BTreeSet<_>>();
     let unavailable_hints = unavailable_skill_hints(state, &all_visible, &available_set);
-    let mcp_tools = state.mcp_planner_tools();
+    let allowed_child_capabilities = child_allowed_capabilities(task);
+    let mcp_tools = state
+        .mcp_planner_tools()
+        .into_iter()
+        .filter(|tool| {
+            allowed_child_capabilities
+                .as_ref()
+                .is_none_or(|allowed| allowed.contains(&tool.capability))
+        })
+        .collect::<Vec<_>>();
     let callable_capabilities = planner_callable_capability_names_for_task(state, task);
     if callable_capabilities.is_empty() {
         let mut lines = vec![
@@ -220,6 +251,12 @@ fn build_capability_map_for_task_with_detail(
                 .planner_kind(skill)
                 .unwrap_or(PlannerCapabilityKind::Skill);
             for mapping in registry.planner_capabilities(skill) {
+                if allowed_child_capabilities
+                    .as_ref()
+                    .is_some_and(|allowed| !allowed.contains(&mapping.name))
+                {
+                    continue;
+                }
                 grouped
                     .entry(classify_skill(state, skill))
                     .or_default()
@@ -278,6 +315,14 @@ fn build_capability_map_for_task_with_detail(
                 let Some(entry) = registry.get(skill) else {
                     continue;
                 };
+                if allowed_child_capabilities.as_ref().is_some_and(|allowed| {
+                    !entry
+                        .planner_capabilities
+                        .iter()
+                        .any(|mapping| allowed.contains(&mapping.name))
+                }) {
+                    continue;
+                }
                 let aliases = entry
                     .aliases
                     .iter()
@@ -313,6 +358,11 @@ fn build_capability_map_for_task_with_detail(
                 let planner_capability_tokens = entry
                     .planner_capabilities
                     .iter()
+                    .filter(|mapping| {
+                        allowed_child_capabilities
+                            .as_ref()
+                            .is_none_or(|allowed| allowed.contains(&mapping.name))
+                    })
                     .map(planner_capability_hint)
                     .take(12)
                     .collect::<Vec<_>>();

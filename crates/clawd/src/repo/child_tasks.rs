@@ -9,7 +9,7 @@ use crate::{
         child_scheduler_decision, merge_child_task_results, ChildTaskPermissionProfile,
         ChildTaskSpec, CHILD_TASK_SCHEMA_VERSION,
     },
-    now_ts, AppState,
+    now_ts, now_ts_u64, AppState, ClaimedTask,
 };
 
 #[derive(Debug, Clone)]
@@ -109,6 +109,92 @@ pub(crate) fn enqueue_child_task_specs(
         "scheduler": scheduler,
         "child_task_graph": graph_snapshot,
     }))
+}
+
+pub(crate) fn start_inline_child_task(
+    state: &AppState,
+    parent: &ChildTaskParentContext,
+    spec: &ChildTaskSpec,
+) -> anyhow::Result<(ClaimedTask, Value)> {
+    if spec.parent_task_id != parent.parent_task_id {
+        anyhow::bail!("child_parent_mismatch");
+    }
+    let graph = super::child_task_graph::prepare_child_task_graph(std::slice::from_ref(spec), 1)?;
+    let payload = child_task_payload(spec, parent.execution_policy_stamp.as_ref())?;
+    let mut result_json = queued_child_task_result(spec);
+    result_json["source"] = json!("inline_child_task_start");
+    result_json["task_lifecycle"]["state"] = json!("running");
+    result_json["task_lifecycle"]["state_source"] = json!("inline_child_task_start");
+
+    let now = now_ts();
+    let claimed_at = now_ts_u64() as i64;
+    let lease_expires_at = crate::repo::worker_task_lease_expires_at(state, claimed_at);
+    let mut db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let tx = db.transaction()?;
+    super::child_task_graph::persist_child_task_graph(&tx, &graph, &now)?;
+    tx.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, external_user_id,
+            external_chat_id, message_id, kind, payload_json, status,
+            result_json, error_text, created_at, updated_at, lease_owner,
+            lease_expires_at, claim_attempt, claimed_at
+         ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 'ask', ?8, 'running',
+            ?9, NULL, ?10, ?10, ?11, ?12, 1, ?13
+         )",
+        params![
+            spec.child_task_id,
+            parent.user_id,
+            parent.chat_id,
+            parent.user_key,
+            parent.channel,
+            parent.external_user_id,
+            parent.external_chat_id,
+            payload.to_string(),
+            result_json.to_string(),
+            now,
+            state.worker.worker_id,
+            lease_expires_at,
+            claimed_at,
+        ],
+    )?;
+    tx.execute(
+        "UPDATE child_task_graph_nodes
+         SET readiness = 'running', updated_at = ?2
+         WHERE child_task_id = ?1 AND readiness IN ('ready', 'running')",
+        params![spec.child_task_id, now],
+    )?;
+    tx.commit()?;
+    let graph_snapshot = super::child_task_graph::graph_snapshot(&db, &parent.parent_task_id)?;
+    drop(db);
+    if let Some(snapshot) = graph_snapshot {
+        let _ = crate::task_event_transport::publish_event(
+            state,
+            &parent.parent_task_id,
+            "subagent_graph",
+            snapshot,
+        );
+    }
+
+    Ok((
+        ClaimedTask {
+            claim_attempt: 1,
+            task_id: spec.child_task_id.clone(),
+            user_id: parent.user_id,
+            chat_id: parent.chat_id,
+            user_key: parent.user_key.clone(),
+            channel: parent.channel.clone(),
+            external_user_id: parent.external_user_id.clone(),
+            external_chat_id: parent.external_chat_id.clone(),
+            kind: "ask".to_string(),
+            payload_json: payload.to_string(),
+        },
+        payload,
+    ))
 }
 
 fn graph_scheduler_projection(
