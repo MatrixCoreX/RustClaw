@@ -191,8 +191,10 @@ fn quick_index_discloses_distinct_actions_instead_of_alias_prefixes() {
     let capability = |name: &str, action: &str, preferred: bool| PlannerCapabilityMapping {
         name: name.to_string(),
         action: Some(action.to_string()),
-        description: None,
-        semantic_tags: Vec::new(),
+        description: Some(format!(
+            "Owns the {action} result without raw primitive reconstruction"
+        )),
+        semantic_tags: vec![format!("{action}_result")],
         effect: Some(PlannerCapabilityEffect::Observe),
         required: vec!["path".to_string()],
         optional: Vec::new(),
@@ -227,6 +229,8 @@ fn quick_index_discloses_distinct_actions_instead_of_alias_prefixes() {
     let candidates = skill_quick_index::planner_capability_candidates(&manifest);
 
     assert!(candidates.contains("filesystem.stat_paths(action=stat_paths"));
+    assert!(candidates.contains("purpose=Owns the stat_paths result"));
+    assert!(candidates.contains("semantic_tags=stat_paths_result"));
     assert!(candidates.contains("filesystem.list_entries(action=list_dir"));
     assert!(candidates.contains("filesystem.read_text_range(action=read_text_range"));
     assert!(!candidates.contains("filesystem.stat_path_alias"));
