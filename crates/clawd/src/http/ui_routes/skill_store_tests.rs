@@ -255,3 +255,46 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     );
     let _ = std::fs::remove_dir_all(workspace);
 }
+
+#[tokio::test]
+async fn skill_store_mutates_the_active_runtime_config_path() {
+    let (mut state, workspace) = isolated_skill_store_state();
+    let default_config = workspace.join("configs/config.toml");
+    let active_config = workspace.join("profiles/active.toml");
+    std::fs::create_dir_all(active_config.parent().expect("active config parent"))
+        .expect("create active config directory");
+    std::fs::copy(&default_config, &active_config).expect("copy active runtime config");
+    let default_before = std::fs::read_to_string(&default_config).expect("read default config");
+    state.reload_ctx.config_path_for_reload = active_config.to_string_lossy().into_owned();
+    reload_skill_views(&state).expect("reload active runtime config");
+
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+    let (status, installed) = call_skill_store_api(
+        router,
+        Method::POST,
+        "/v1/skills/store/install",
+        Some(serde_json::json!({"skill_name": "weather"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(installed["data"]["enabled"], true);
+    let active = std::fs::read_to_string(active_config).expect("read active config");
+    let parsed = toml::from_str::<toml::Value>(&active).expect("parse active config");
+    assert_eq!(
+        parsed["skills"]["skill_switches"]["weather"].as_bool(),
+        Some(true)
+    );
+    assert!(!parsed["skills"]["uninstalled_skills"]
+        .as_array()
+        .expect("active uninstalled skills")
+        .iter()
+        .any(|name| name.as_str() == Some("weather")));
+    assert_eq!(
+        std::fs::read_to_string(default_config).expect("reread default config"),
+        default_before
+    );
+    let _ = std::fs::remove_dir_all(workspace);
+}
