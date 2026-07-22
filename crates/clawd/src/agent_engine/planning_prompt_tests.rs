@@ -84,6 +84,24 @@ fn answer_verifier_distinguishes_listing_metadata_from_file_contents() {
 }
 
 #[test]
+fn planner_and_verifier_reject_truncated_search_as_exhaustive_inventory() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    let single = std::fs::read_to_string(overlays.join("single_plan_execution_prompt.md"))
+        .expect("read single plan prompt");
+    let incremental = std::fs::read_to_string(overlays.join("loop_incremental_plan_prompt.md"))
+        .expect("read incremental plan prompt");
+    let verifier = std::fs::read_to_string(overlays.join("answer_verifier_prompt.md"))
+        .expect("read answer verifier prompt");
+
+    assert!(single.contains("complete direct-child inventories"));
+    assert!(single.contains("bounded recursive search"));
+    assert!(incremental.contains("truncated=true"));
+    assert!(incremental.contains("direct listing capability"));
+    assert!(verifier.contains("truncated=true"));
+    assert!(verifier.contains("non-truncated direct inventory"));
+}
+
+#[test]
 fn final_synthesis_prompts_preserve_named_machine_field_shapes() {
     let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
     for relative_path in [

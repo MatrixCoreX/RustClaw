@@ -154,6 +154,10 @@ fn first_round_uses_only_budgeted_compact_index() {
             "missing capability={capability}; fs_basic_line={fs_basic_line}"
         );
     }
+    assert!(
+        fs_basic_line.contains("Use list_entries for complete direct-child inventories"),
+        "fs_basic_line={fs_basic_line}"
+    );
     let video_line = context
         .text
         .lines()

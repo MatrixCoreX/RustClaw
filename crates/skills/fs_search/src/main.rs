@@ -486,7 +486,7 @@ fn execute(args: Value) -> Result<Value, String> {
         .get("max_results")
         .and_then(|v| v.as_u64())
         .unwrap_or(100)
-        .min(1000) as usize;
+        .clamp(1, 1000) as usize;
 
     let root = workspace_root();
     let search_root = resolve_path(
@@ -539,13 +539,15 @@ fn execute(args: Value) -> Result<Value, String> {
                 if target_kind == "any" || target_kind == kind {
                     results.push(to_rel(&root, p));
                 }
-                results.len() >= max_results
+                results.len() > max_results
             };
             if target_kind == "dir" {
                 walk_collect_dirs(&search_root, scan_limits, &mut collect)?;
             } else {
                 walk_collect_nodes(&search_root, scan_limits, &mut collect)?;
             }
+            let truncated = results.len() > max_results;
+            results.truncate(max_results);
             Ok(json!({
                 "action": "find_name",
                 "root": to_rel(&root, &search_root),
@@ -553,6 +555,9 @@ fn execute(args: Value) -> Result<Value, String> {
                 "patterns": pattern_norms,
                 "exact": exact_name,
                 "count": results.len(),
+                "returned_count": results.len(),
+                "result_limit": max_results,
+                "truncated": truncated,
                 "results": results,
             }))
         }
@@ -588,8 +593,10 @@ fn execute(args: Value) -> Result<Value, String> {
                 if exts.iter().any(|ext| ext == &got) && name_matches {
                     results.push(to_rel(&root, p));
                 }
-                results.len() >= max_results
+                results.len() > max_results
             })?;
+            let truncated = results.len() > max_results;
+            results.truncate(max_results);
             let ext = exts.first().cloned().unwrap_or_default();
             Ok(json!({
                 "action": "find_ext",
@@ -599,6 +606,9 @@ fn execute(args: Value) -> Result<Value, String> {
                 "exts": exts,
                 "patterns": pattern_norms,
                 "count": results.len(),
+                "returned_count": results.len(),
+                "result_limit": max_results,
+                "truncated": truncated,
                 "results": results,
             }))
         }
