@@ -325,6 +325,7 @@ include!("ui_routes/workspace_update.rs");
 include!("ui_routes/health_skills_import.rs");
 include!("ui_routes/model_provider_config.rs");
 include!("ui_routes/skill_import_config.rs");
+include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
 include!("ui_routes/llm_skill_config.rs");
 include!("ui_routes/messaging_login.rs");

@@ -60,6 +60,27 @@ pub fn core_skills_always_enabled() -> &'static [&'static str] {
     ]
 }
 
+/// Bundled skills distributed through Skill Store. They remain discoverable in
+/// the registry but are not enabled or compiled by the default installation.
+pub fn skill_store_optional_skill_names() -> &'static [&'static str] {
+    &[
+        "crypto",
+        "invest_copy",
+        "map_merchant",
+        "photo_organize",
+        "stock",
+        "weather",
+        "x",
+    ]
+}
+
+pub(super) fn default_uninstalled_skills() -> Vec<String> {
+    skill_store_optional_skill_names()
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect()
+}
+
 pub(super) fn default_skills_list() -> Vec<String> {
     // Keep in sync with `configs/skills_registry.toml` [[skills]] names (no-registry fallback baseline).
     vec![
@@ -74,7 +95,6 @@ pub(super) fn default_skills_list() -> Vec<String> {
         "make_dir".to_string(),
         "remove_file".to_string(),
         "schedule".to_string(),
-        "x".to_string(),
         "system_basic".to_string(),
         "http_basic".to_string(),
         "git_basic".to_string(),
@@ -98,13 +118,8 @@ pub(super) fn default_skills_list() -> Vec<String> {
         "service_control".to_string(),
         "task_control".to_string(),
         "config_guard".to_string(),
-        "map_merchant".to_string(),
-        "crypto".to_string(),
-        "stock".to_string(),
-        "weather".to_string(),
         "doc_parse".to_string(),
         "transform".to_string(),
-        "invest_copy".to_string(),
         "web_search_extract".to_string(),
         "kb".to_string(),
         "browser_web".to_string(),

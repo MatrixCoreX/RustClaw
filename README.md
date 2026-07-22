@@ -1296,7 +1296,7 @@ UI notes:
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-rustclaw-cmd.sh` also deploys UI/nginx by default unless you pass `--no-deploy-ui`
 - the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
-- `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, and third-party import flows
+- `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, configuration retention, and third-party import flows
 - service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings
 - `webd` can sit in front of `clawd` as a reverse proxy and login/session bridge
 
@@ -1314,11 +1314,17 @@ RustClaw currently ships a broad skill set. Representative groups:
 Skill installation and enablement are separate states. `skill_switches=false` keeps
 an installed skill available in the normal inventory but disables it.
 `uninstalled_skills` removes an optional skill from runtime, planner visibility,
-and the normal Tools/Skills inventory while keeping it discoverable in Skill Store
-for one-action reinstallation. Core skills and registry entries whose
-`planner_kind=tool` are always available and cannot be removed through Skill Store.
-Third-party import validates and registers the bundle, clears stale uninstall
-state, enables it, and then exposes it in both Skill Store and Tools/Skills.
+and the normal Tools/Skills inventory while keeping it discoverable in Skill Store.
+Bundled entries marked `install_mode="on_demand"` are excluded from the normal
+`build-all.sh` release build. The default on-demand set is `crypto`, `invest_copy`,
+`map_merchant`, `photo_organize`, `stock`, `weather`, and `x`; clicking Install
+builds only that registry-declared Cargo package before enabling and reloading it.
+Removing one of these skills deletes its compiled runner and asks whether its
+registry-declared dedicated configuration files should be preserved. Reinstalling
+never overwrites configuration files that still exist. Core skills and registry
+entries whose `planner_kind=tool` are always available and cannot be removed through
+Skill Store. Third-party import validates and registers the bundle, clears stale
+uninstall state, enables it, and then exposes it in both Skill Store and Tools/Skills.
 
 If you need to answer “how is this skill configured / bound / enabled, and what prerequisite is missing”, start with `prompts/references/skill_setup_guide.md`.
 

@@ -6,7 +6,9 @@ mod defaults;
 mod runtime;
 
 use defaults::*;
-pub use defaults::{base_skill_names, core_skills_always_enabled};
+pub use defaults::{
+    base_skill_names, core_skills_always_enabled, skill_store_optional_skill_names,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -1127,7 +1129,7 @@ pub struct SkillsConfig {
     #[serde(default)]
     pub skill_switches: HashMap<String, bool>,
     /// 已从活动运行时移除、但仍可从 Skill Store 重新安装的技能。
-    #[serde(default)]
+    #[serde(default = "default_uninstalled_skills")]
     pub uninstalled_skills: Vec<String>,
     /// 技能注册表文件路径（相对 workspace 或绝对）。设则启用 registry 驱动发现/启用/别名/超时。
     #[serde(default)]
@@ -1141,7 +1143,7 @@ impl Default for SkillsConfig {
             skill_max_concurrency: default_skill_max_concurrency(),
             skills_list: default_skills_list(),
             skill_switches: HashMap::new(),
-            uninstalled_skills: Vec::new(),
+            uninstalled_skills: default_uninstalled_skills(),
             registry_path: None,
         }
     }

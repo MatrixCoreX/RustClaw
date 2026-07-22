@@ -1,4 +1,5 @@
 import { AlertCircle, CircleHelp, Database, Loader2, RefreshCw, Trash2, Wrench } from "lucide-react";
+import { useState } from "react";
 
 import {
   skillCapabilityLabel,
@@ -10,7 +11,8 @@ import {
   skillUsageExamples,
   type UiLanguage,
 } from "../lib/skill-display";
-import type { SkillListItem, SkillsConfigResponse } from "../types/api";
+import type { SkillListItem, SkillStoreResponse, SkillsConfigResponse } from "../types/api";
+import { SkillRemovalDialog } from "./SkillRemovalDialog";
 
 type Translate = (zh: string, en: string) => string;
 type TranslateSlash = (text: string) => string;
@@ -45,11 +47,12 @@ export interface SkillSwitchPanelProps {
   baseSkillNamesSet: ReadonlySet<string>;
   removableSkillNamesSet: ReadonlySet<string>;
   skillStoreActionName: string | null;
+  skillStoreData: SkillStoreResponse | null;
   onFetchSkillsConfig: () => unknown | Promise<unknown>;
   onSaveSkillSwitches: () => unknown | Promise<unknown>;
   onSkillsSearchQueryChange: (value: string) => void;
   onToggleSkillEnabled: (name: string, nextEnabled: boolean) => void;
-  onRemoveSkillFromStore: (name: string) => unknown | Promise<unknown>;
+  onRemoveSkillFromStore: (name: string, preserveConfig: boolean) => unknown | Promise<unknown>;
 }
 
 export function SkillSwitchPanel({
@@ -82,13 +85,22 @@ export function SkillSwitchPanel({
   baseSkillNamesSet,
   removableSkillNamesSet,
   skillStoreActionName,
+  skillStoreData,
   onFetchSkillsConfig,
   onSaveSkillSwitches,
   onSkillsSearchQueryChange,
   onToggleSkillEnabled,
   onRemoveSkillFromStore,
 }: SkillSwitchPanelProps) {
+  const [pendingRemovalName, setPendingRemovalName] = useState<string | null>(null);
   const storeMutationRunning = skillStoreActionName !== null;
+  const pendingRemovalItem = skillStoreData?.items.find((item) => item.name === pendingRemovalName);
+  const confirmRemoval = async (preserveConfig: boolean) => {
+    if (!pendingRemovalName) return;
+    const name = pendingRemovalName;
+    setPendingRemovalName(null);
+    await onRemoveSkillFromStore(name, preserveConfig);
+  };
   const renderSkillRow = (name: string) => {
     const skillItem = skillItemsByName.get(name);
     const runtimeIssue = skillRuntimeIssue(skillItem, lang);
@@ -246,7 +258,7 @@ export function SkillSwitchPanel({
           {canRemove ? (
             <button
               type="button"
-              onClick={() => void onRemoveSkillFromStore(name)}
+              onClick={() => setPendingRemovalName(name)}
               disabled={storeMutationRunning}
               className="inline-flex items-center gap-1 rounded border border-red-500/25 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
               title={t("从工具/技能中删除，可在 Skill Store 重新安装", "Remove from Tools/Skills; reinstall from Skill Store")}
@@ -287,6 +299,7 @@ export function SkillSwitchPanel({
   };
 
   return (
+    <>
     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h4 className="text-sm font-semibold">{t("工具/技能开关", "Tools/Skills Switches")}</h4>
@@ -383,5 +396,15 @@ export function SkillSwitchPanel({
         ) : null}
       </div>
     </div>
+    {pendingRemovalName ? (
+      <SkillRemovalDialog
+        skillName={pendingRemovalName}
+        existingConfigFiles={pendingRemovalItem?.existing_config_files}
+        t={t}
+        onCancel={() => setPendingRemovalName(null)}
+        onConfirm={confirmRemoval}
+      />
+    ) : null}
+    </>
   );
 }

@@ -506,6 +506,19 @@ pub struct SkillRegistryEntry {
     pub idempotent: Option<bool>,
     #[serde(default)]
     pub group: Option<String>,
+    /// Installation lifecycle for UI-managed optional skills. `on_demand`
+    /// entries are excluded from the normal release build and compiled only
+    /// when an operator installs them from Skill Store.
+    #[serde(default)]
+    pub install_mode: Option<String>,
+    /// Cargo package built for an on-demand runner skill. When omitted, the
+    /// conventional runner binary name is used as the package name.
+    #[serde(default)]
+    pub install_package: Option<String>,
+    /// Workspace-relative, user-editable configuration files owned by this
+    /// skill. Removing a skill may preserve or delete only these declared files.
+    #[serde(default)]
+    pub config_files: Vec<String>,
     #[serde(default)]
     pub primary_fallback_role: Option<PrimaryFallbackRole>,
     /// Host OS families where this skill/tool is expected to work, e.g.

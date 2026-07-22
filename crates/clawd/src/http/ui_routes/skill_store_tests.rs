@@ -31,6 +31,11 @@ fn isolated_skill_store_state() -> (AppState, PathBuf) {
         configs.join("skills_registry.toml"),
     )
     .expect("copy skills registry");
+    std::fs::copy(
+        repository.join("configs/weather.toml"),
+        configs.join("weather.toml"),
+    )
+    .expect("copy weather config");
 
     let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     state.skill_rt.workspace_root = workspace.clone();
@@ -136,8 +141,12 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     let (status, initial) =
         call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(store_item(&initial, "weather")["installed"], true);
+    assert_eq!(store_item(&initial, "weather")["installed"], false);
     assert_eq!(store_item(&initial, "weather")["catalog_section"], "other");
+    assert_eq!(
+        store_item(&initial, "weather")["existing_config_files"][0],
+        "configs/weather.toml"
+    );
     assert_eq!(
         store_item_names(&initial),
         BTreeSet::from([
@@ -151,21 +160,29 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
         ]),
     );
 
-    let (status, removed) = call_skill_store_api(
+    let (status, installed) = call_skill_store_api(
         router.clone(),
         Method::POST,
-        "/v1/skills/store/remove",
+        "/v1/skills/store/install",
         Some(serde_json::json!({"skill_name": "weather"})),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(removed["data"]["installed"], false);
+    assert_eq!(installed["data"]["installed"], true);
+    assert_eq!(installed["data"]["enabled"], true);
+    assert_eq!(installed["data"]["compiled"], true);
+    assert_eq!(
+        installed["data"]["reused_config_files"][0],
+        "configs/weather.toml"
+    );
+    assert!(workspace.join("target/release/weather-skill").is_file());
 
-    let (status, after_remove) =
+    let (status, after_install) =
         call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(store_item(&after_remove, "weather")["installed"], false);
-    assert!(after_remove["data"]["uninstalled_skill_names"]
+    assert_eq!(store_item(&after_install, "weather")["installed"], true);
+    assert_eq!(store_item(&after_install, "weather")["enabled"], true);
+    assert!(!after_install["data"]["uninstalled_skill_names"]
         .as_array()
         .expect("uninstalled skill names")
         .iter()
@@ -181,7 +198,21 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(status, StatusCode::CONFLICT);
     assert!(!locked["ok"].as_bool().expect("locked response ok flag"));
 
-    let (status, installed) = call_skill_store_api(
+    let (status, removed) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/store/remove",
+        Some(serde_json::json!({"skill_name": "weather", "preserve_config": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(removed["data"]["installed"], false);
+    assert_eq!(removed["data"]["binary_removed"], true);
+    assert_eq!(removed["data"]["config_preserved"], true);
+    assert!(!workspace.join("target/release/weather-skill").exists());
+    assert!(workspace.join("configs/weather.toml").is_file());
+
+    let (status, reinstalled) = call_skill_store_api(
         router.clone(),
         Method::POST,
         "/v1/skills/store/install",
@@ -189,26 +220,37 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(installed["data"]["installed"], true);
-    assert_eq!(installed["data"]["enabled"], true);
+    assert_eq!(
+        reinstalled["data"]["reused_config_files"][0],
+        "configs/weather.toml"
+    );
 
-    let (status, after_install) =
+    let (status, removed_with_config) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/store/remove",
+        Some(serde_json::json!({"skill_name": "weather", "preserve_config": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(removed_with_config["data"]["config_preserved"], false);
+    assert_eq!(
+        removed_with_config["data"]["deleted_config_files"][0],
+        "configs/weather.toml"
+    );
+    assert!(!workspace.join("configs/weather.toml").exists());
+
+    let (status, after_remove) =
         call_skill_store_api(router, Method::GET, "/v1/skills/store", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(store_item(&after_install, "weather")["installed"], true);
-    assert_eq!(store_item(&after_install, "weather")["enabled"], true);
-    assert!(!after_install["data"]["uninstalled_skill_names"]
-        .as_array()
-        .expect("uninstalled skill names")
-        .iter()
-        .any(|name| name == "weather"));
+    assert_eq!(store_item(&after_remove, "weather")["installed"], false);
 
     let config = std::fs::read_to_string(workspace.join("configs/config.toml"))
         .expect("read isolated config");
     let parsed = toml::from_str::<toml::Value>(&config).expect("parse isolated config");
     assert_eq!(
         parsed["skills"]["skill_switches"]["weather"].as_bool(),
-        Some(true)
+        Some(false)
     );
     let _ = std::fs::remove_dir_all(workspace);
 }

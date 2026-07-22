@@ -1,15 +1,25 @@
 #[derive(Debug, Deserialize)]
 struct SkillStoreMutationRequest {
     skill_name: String,
+    #[serde(default)]
+    preserve_config: Option<bool>,
 }
 
 fn collect_uninstalled_skills(value: &toml::Value, state: &AppState) -> BTreeSet<String> {
-    value
+    let configured = value
         .get("skills")
         .and_then(|skills| skills.get("uninstalled_skills"))
-        .and_then(toml::Value::as_array)
-        .into_iter()
-        .flatten()
+        .and_then(toml::Value::as_array);
+    let names = configured
+        .cloned()
+        .unwrap_or_else(|| {
+            claw_core::config::skill_store_optional_skill_names()
+                .iter()
+                .map(|name| toml::Value::String((*name).to_string()))
+                .collect()
+        });
+    names
+        .iter()
         .filter_map(toml::Value::as_str)
         .map(str::trim)
         .filter(|name| !name.is_empty())
@@ -175,6 +185,7 @@ async fn get_skill_store_catalog(
         .filter_map(|name| {
             let entry = registry.get(&name)?;
             let installed = !uninstalled.contains(&name);
+            let (config_files, existing_config_files) = skill_config_state(&state, &name);
             Some(json!({
                 "name": name,
                 "description": entry.description,
@@ -185,6 +196,9 @@ async fn get_skill_store_catalog(
                 "source": entry.external_source_url,
                 "installed": installed,
                 "enabled": installed && runtime_enabled.contains(&entry.name),
+                "install_mode": entry.install_mode,
+                "config_files": config_files,
+                "existing_config_files": existing_config_files,
                 "skill": build_skill_list_item(&state, &entry.name),
             }))
         })
@@ -214,15 +228,61 @@ async fn install_skill_store_item(
         Ok(name) => name,
         Err(response) => return response,
     };
+    let spec = match skill_store_install_spec(&state, &skill_name) {
+        Ok(spec) => spec,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(error),
+                }),
+            )
+        }
+    };
+    let binary_path = match spec.as_ref() {
+        Some(spec) => match compile_skill_store_runner(&state, spec).await {
+            Ok(path) => Some(path),
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(error),
+                    }),
+                )
+            }
+        },
+        None => None,
+    };
     match update_skill_store_installation(&state, &skill_name, true) {
-        Ok(data) => (
+        Ok(mut data) => {
+            let (_, existing_config_files) = skill_config_state(&state, &skill_name);
+            if let Some(object) = data.as_object_mut() {
+                object.insert("compiled".to_string(), json!(spec.is_some()));
+                object.insert(
+                    "binary_path".to_string(),
+                    json!(binary_path.as_ref().and_then(|path| path
+                        .strip_prefix(&state.skill_rt.workspace_root)
+                        .ok())
+                        .map(|path| path.to_string_lossy().into_owned())),
+                );
+                object.insert(
+                    "reused_config_files".to_string(),
+                    json!(existing_config_files),
+                );
+            }
+            (
             StatusCode::OK,
             Json(ApiResponse {
                 ok: true,
                 data: Some(data),
                 error: None,
             }),
-        ),
+            )
+        }
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -246,15 +306,72 @@ async fn remove_skill_store_item(
         Ok(name) => name,
         Err(response) => return response,
     };
+    let preserve_config = request.preserve_config.unwrap_or(true);
+    let spec = match skill_store_install_spec(&state, &skill_name) {
+        Ok(spec) => spec,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(error),
+                }),
+            )
+        }
+    };
     match update_skill_store_installation(&state, &skill_name, false) {
-        Ok(data) => (
+        Ok(mut data) => {
+            let binary_removed = match spec.as_ref() {
+                Some(spec) => match remove_skill_store_binary(&state, spec) {
+                    Ok(removed) => removed,
+                    Err(error) => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ApiResponse {
+                                ok: false,
+                                data: None,
+                                error: Some(error),
+                            }),
+                        )
+                    }
+                },
+                None => false,
+            };
+            let deleted_config_files = if preserve_config {
+                Vec::new()
+            } else {
+                match delete_declared_skill_configs(&state, &skill_name) {
+                    Ok(paths) => paths,
+                    Err(error) => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ApiResponse {
+                                ok: false,
+                                data: None,
+                                error: Some(error),
+                            }),
+                        )
+                    }
+                }
+            };
+            if let Some(object) = data.as_object_mut() {
+                object.insert("binary_removed".to_string(), json!(binary_removed));
+                object.insert("config_preserved".to_string(), json!(preserve_config));
+                object.insert(
+                    "deleted_config_files".to_string(),
+                    json!(deleted_config_files),
+                );
+            }
+            (
             StatusCode::OK,
             Json(ApiResponse {
                 ok: true,
                 data: Some(data),
                 error: None,
             }),
-        ),
+            )
+        }
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
