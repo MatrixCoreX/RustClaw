@@ -34,6 +34,7 @@ fn find_name_reaches_nested_prompt_paths_with_explicit_depth() {
     .expect("find_name succeeds");
 
     assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+    assert_eq!(out.get("truncated").and_then(Value::as_bool), Some(false));
     let results = out
         .get("results")
         .and_then(Value::as_array)
@@ -43,6 +44,34 @@ fn find_name_reaches_nested_prompt_paths_with_explicit_depth() {
             .as_str()
             .is_some_and(|s| s.ends_with("prompts/layers/overlays/intent_normalizer_prompt.md"))),
         "results={results:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_reports_result_limit_truncation() {
+    let root = unique_temp_dir("find-name-truncated");
+    std::fs::create_dir_all(&root).expect("create root");
+    for name in ["match-a.txt", "match-b.txt", "match-c.txt"] {
+        std::fs::write(root.join(name), "match\n").expect("write fixture");
+    }
+
+    let out = execute(json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy().to_string(),
+        "max_results": 2
+    }))
+    .expect("find_name succeeds");
+
+    assert_eq!(out.get("count").and_then(Value::as_u64), Some(2));
+    assert_eq!(out.get("returned_count").and_then(Value::as_u64), Some(2));
+    assert_eq!(out.get("result_limit").and_then(Value::as_u64), Some(2));
+    assert_eq!(out.get("truncated").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        out.get("results").and_then(Value::as_array).map(Vec::len),
+        Some(2)
     );
 
     let _ = std::fs::remove_dir_all(root);
@@ -377,6 +406,7 @@ fn find_ext_respects_max_results_across_subdirectories() {
         .and_then(Value::as_array)
         .expect("results array");
     assert_eq!(out.get("count").and_then(Value::as_u64), Some(2));
+    assert_eq!(out.get("truncated").and_then(Value::as_bool), Some(true));
     assert_eq!(results.len(), 2, "results={results:?}");
 
     let _ = std::fs::remove_dir_all(root);
