@@ -67,6 +67,23 @@ kind = "runner"
 }
 
 #[test]
+fn config_guard_ownership_leads_the_compact_registry_description() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = SkillsRegistry::load_from_path(&path).expect("load workspace registry");
+    let description = registry
+        .get("config_basic")
+        .and_then(|entry| entry.description.as_deref())
+        .expect("config_basic description");
+
+    assert!(description.starts_with("config.guard_rustclaw_config owns"));
+    assert!(description.contains("config.validate parses syntax only"));
+    assert!(
+        description.len() <= 180,
+        "compact summary must remain visible"
+    );
+}
+
+#[test]
 fn integrity_report_flags_missing_and_wrong_kind() {
     let toml = r#"
 [[skills]]
