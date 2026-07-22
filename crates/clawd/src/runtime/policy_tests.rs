@@ -117,6 +117,51 @@ fn full_profile_remains_an_explicit_operator_opt_in() {
 }
 
 #[test]
+fn yolo_execution_bypasses_only_the_default_access_profile() {
+    let policy = ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy");
+    assert!(!policy.is_allowed("skill:docker_basic", None));
+    assert!(policy.is_any_allowed_for_execution(&["skill:docker_basic"], None, true));
+
+    let mut denied_config = ToolsConfig::default();
+    denied_config.deny = vec!["skill:docker_basic".to_string()];
+    let denied = ToolsPolicy::from_config(&denied_config).expect("denied tools policy");
+    assert!(!denied.is_any_allowed_for_execution(&["skill:docker_basic"], None, true));
+
+    let mut allow_config = ToolsConfig::default();
+    allow_config.allow = vec!["skill:fs_basic".to_string()];
+    let allow_only = ToolsPolicy::from_config(&allow_config).expect("allow-only tools policy");
+    assert!(!allow_only.is_any_allowed_for_execution(&["skill:docker_basic"], None, true));
+
+    let mut provider_config = ToolsConfig::default();
+    provider_config
+        .by_provider
+        .entry("openai".to_string())
+        .or_default()
+        .deny = vec!["skill:docker_basic".to_string()];
+    let provider_denied =
+        ToolsPolicy::from_config(&provider_config).expect("provider-denied tools policy");
+    assert!(!provider_denied.is_any_allowed_for_execution(
+        &["skill:docker_basic"],
+        Some("openai_compat"),
+        true,
+    ));
+
+    let mut combined_config = ToolsConfig::default();
+    combined_config.allow = vec!["skill:docker_basic".to_string()];
+    combined_config
+        .by_provider
+        .entry("openai".to_string())
+        .or_default()
+        .deny = vec!["skill:docker_basic".to_string()];
+    let combined = ToolsPolicy::from_config(&combined_config).expect("combined tools policy");
+    assert!(!combined.is_any_allowed_for_execution(
+        &["skill:docker_basic"],
+        Some("openai_compat"),
+        true,
+    ));
+}
+
+#[test]
 fn sandbox_mode_and_approval_policy_are_independent() {
     let mut config = ToolsConfig::default();
     config.sandbox_mode = ToolSandboxMode::ReadOnly;

@@ -147,12 +147,15 @@ pub(crate) async fn execute_builtin_skill_with_task(
     skill_name: &str,
     args: &Value,
 ) -> Result<String, String> {
+    let execution_policy = task
+        .map(|task| crate::task_execution_policy::effective_policy_for_task(state, task))
+        .unwrap_or_else(|| crate::task_execution_policy::configured_policy(state));
     let policy_token = format!("skill:{skill_name}");
-    if !state
-        .skill_rt
-        .tools_policy
-        .is_allowed(&policy_token, state.core.active_provider_type.as_deref())
-    {
+    if !state.skill_rt.tools_policy.is_any_allowed_for_execution(
+        &[&policy_token],
+        state.core.active_provider_type.as_deref(),
+        execution_policy.mode == crate::task_execution_policy::TaskExecutionMode::Yolo,
+    ) {
         return Err(crate::skills::policy_block_error(
             "skill_policy_denied",
             vec![
@@ -168,10 +171,6 @@ pub(crate) async fn execute_builtin_skill_with_task(
     }
 
     let map = ensure_args_object(args)?;
-    let execution_policy = task
-        .map(|task| crate::task_execution_policy::effective_policy_for_task(state, task))
-        .unwrap_or_else(|| crate::task_execution_policy::configured_policy(state));
-
     match skill_name {
         "code_index" => {
             let workspace_root = state.skill_rt.workspace_root.clone();

@@ -1547,11 +1547,11 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     if let Some(capability_policy_token) = capability_policy_token.as_deref() {
         policy_tokens.push(capability_policy_token);
     }
-    if !state
-        .skill_rt
-        .tools_policy
-        .is_any_allowed(&policy_tokens, state.core.active_provider_type.as_deref())
-    {
+    if !state.skill_rt.tools_policy.is_any_allowed_for_execution(
+        &policy_tokens,
+        state.core.active_provider_type.as_deref(),
+        execution_policy.mode == crate::task_execution_policy::TaskExecutionMode::Yolo,
+    ) {
         let observed_facts = vec![
             format!("skill: {skill_name}"),
             format!("policy_token: {policy_token}"),
