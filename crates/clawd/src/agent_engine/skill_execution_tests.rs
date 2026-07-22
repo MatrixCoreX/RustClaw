@@ -12,8 +12,8 @@ use super::{
     record_subagent_step_execution, skill_extra_requests_user_input,
     structured_extra_evidence_output, structured_observation_path_argument_error,
     try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
-    validate_skill_output_contract, validation_observation_with_process_status,
-    AgentLoopGuardPolicy, LoopState,
+    validate_skill_output_contract, validation_failure_requires_workspace_repair,
+    validation_observation_with_process_status, AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -27,6 +27,9 @@ use rusqlite::params;
 
 #[path = "skill_execution_scope_tests.rs"]
 mod scope_tests;
+
+#[path = "skill_execution_validation_tests.rs"]
+mod validation_tests;
 
 pub(super) fn test_state() -> AppState {
     let db_pool = crate::db_init::test_pool();

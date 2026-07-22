@@ -1232,7 +1232,11 @@ fn output_is_exit_zero_sentinel(output: &str) -> bool {
 fn explicit_exit_status_observation(output: &str) -> Option<ValidationObservation> {
     output.lines().rev().find_map(|line| {
         let (key, value) = line.trim().split_once('=')?;
-        if !key.eq_ignore_ascii_case("exit") {
+        let normalized_key = key.trim().trim_start_matches('-');
+        if !matches!(
+            normalized_key.to_ascii_lowercase().as_str(),
+            "exit" | "exit_code"
+        ) {
             return None;
         }
         let exit_code = value.trim().parse::<i32>().ok()?;
