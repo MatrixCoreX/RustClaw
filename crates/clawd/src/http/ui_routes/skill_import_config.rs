@@ -1,5 +1,18 @@
+fn active_runtime_config_path(state: &AppState) -> PathBuf {
+    let configured = state.reload_ctx.config_path_for_reload.trim();
+    if configured.is_empty() {
+        return state.skill_rt.workspace_root.join("configs/config.toml");
+    }
+    let path = Path::new(configured);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        state.skill_rt.workspace_root.join(path)
+    }
+}
+
 fn read_skill_config_file(state: &AppState) -> anyhow::Result<(String, toml::Value)> {
-    let path = state.skill_rt.workspace_root.join("configs/config.toml");
+    let path = active_runtime_config_path(state);
     let raw = std::fs::read_to_string(&path)?;
     let parsed = toml::from_str::<toml::Value>(&raw)?;
     Ok((raw, parsed))
@@ -28,7 +41,24 @@ fn write_workspace_and_mounted_file(
 }
 
 fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()> {
-    write_workspace_and_mounted_file(&state.skill_rt.workspace_root, "configs/config.toml", raw)
+    let active_path = active_runtime_config_path(state);
+    if let Some(parent) = active_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&active_path, raw)?;
+
+    let workspace_default = state.skill_rt.workspace_root.join("configs/config.toml");
+    if active_path == workspace_default {
+        let mounted_path = state
+            .skill_rt
+            .workspace_root
+            .join("docker/config/config.toml");
+        if let Some(parent) = mounted_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(mounted_path, raw)?;
+    }
+    Ok(())
 }
 
 fn read_skills_registry_file(state: &AppState) -> std::io::Result<String> {
