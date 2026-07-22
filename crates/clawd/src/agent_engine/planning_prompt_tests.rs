@@ -133,6 +133,9 @@ fn planner_tool_spec_prefers_domain_capabilities_over_raw_primitives() {
     assert!(prompt.contains("description and semantic tags own the requested"));
     assert!(prompt.contains("Use raw filesystem, HTTP, database, or shell primitives"));
     assert!(prompt.contains("Do not replace a catalog-owned domain operation"));
+    assert!(prompt.contains("it proves parse/schema syntax only"));
+    assert!(prompt.contains("Select it directly instead of reading raw config text"));
+    assert!(!prompt.contains("use `validation_profile`"));
 }
 
 #[test]

@@ -958,3 +958,21 @@ fn config_basic_validate_rewrites_to_structured_validation() {
         Some("configs/config.toml")
     );
 }
+
+#[test]
+fn config_basic_semantic_guard_profile_rewrites_to_config_guard() {
+    let args = json!({
+        "action":"validate",
+        "path":"configs/config.toml",
+        "validation_profile":"rustclaw_semantic_guard"
+    });
+    let rewrite = rewrite_virtual_tool_call("config_basic", args)
+        .unwrap()
+        .expect("rewrite");
+    assert_eq!(rewrite.runtime_tool, "config_edit");
+    assert_eq!(
+        rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+        Some("guard_config")
+    );
+    assert!(rewrite.runtime_args.get("validation_profile").is_none());
+}

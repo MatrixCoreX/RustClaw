@@ -430,6 +430,16 @@ fn rewrite_config_basic_call(args: Value) -> Result<VirtualToolRewrite, String> 
         }
         "validate" => {
             move_value_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
+            if obj.get("validation_profile").and_then(Value::as_str)
+                == Some("rustclaw_semantic_guard")
+            {
+                obj.remove("validation_profile");
+                obj.insert(
+                    "action".to_string(),
+                    Value::String("guard_config".to_string()),
+                );
+                return Ok(rewrite_to("config_edit", obj));
+            }
             obj.insert(
                 "action".to_string(),
                 Value::String("validate_structured".to_string()),

@@ -428,9 +428,9 @@ Skill behavior notes (file/path):
 ### config_basic
 - Use `config_basic` for read-only structured config field extraction, key listing, and syntax/schema validation.
 - Actions: `read_field|read_fields|list_keys|validate|guard_rustclaw_config`.
-- `validate`: required `path`; optional `format`, `validation_profile`.
-- `validation_profile="syntax_only"` means parse/schema validation only. `validation_profile="rustclaw_semantic_guard"` means the remaining operation is a RustClaw semantic config guard; runtime may rewrite it to `config_edit.guard_config`.
-- Do not encode semantic guard intent through natural-language phrases inside runtime arguments; use `validation_profile` or call `config_edit.guard_config` directly.
+- `validate`: required `path`; it proves parse/schema syntax only.
+- `guard_rustclaw_config`: required `path`; it owns RustClaw semantic safety, risk, and problem checks. Select it directly instead of reading raw config text or overloading `validate`.
+- Do not encode semantic guard intent through natural-language phrases inside runtime arguments; select `config.guard_rustclaw_config` directly.
 
 ### config_guard
 - Do not choose `config_guard` in new planner output. Use `config_edit` with `action="guard_config"` instead; `config_guard` remains the runtime backing tool and compatibility entry.

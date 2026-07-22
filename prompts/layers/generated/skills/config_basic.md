@@ -30,9 +30,8 @@ Use `{"type":"call_tool","tool":"config_basic","args":{...}}` for structured TOM
 | `list_keys` | `path` | yes | string(path) | - | JSON/TOML/YAML file path. |
 | `list_keys` | `field_path` | no | string | root | Optional object/array location. |
 | `list_keys` | `max_keys` | no | integer | impl default | Output cap. |
-| `validate` | `path` | yes | string(path) | - | Structured file to parse. |
+| `validate` | `path` | yes | string(path) | - | Structured file to parse. This capability checks syntax only. |
 | `validate` | `format` | no | string | auto | `json|toml|yaml`. |
-| `validate` | `validation_profile` | no | string enum | `syntax_only` | `syntax_only` for parse/schema validation; `rustclaw_semantic_guard` when the remaining task is a RustClaw semantic config guard. |
 | `validate` | result | - | object | - | Returns `valid=true/false`; do not treat key listing as validation output. |
 | `guard_rustclaw_config` | `path` | no | string(path) | discovered config | RustClaw config file to scan. |
 
@@ -42,7 +41,7 @@ Use `{"type":"call_tool","tool":"config_basic","args":{...}}` for structured TOM
 - When a complete validation or guard action is available, do not replace it
   with one or more bounded raw reads. Raw reads may gather supplementary
   evidence only after the validator explicitly reports a structured gap.
-- If using `validate` as a structured pre-step for RustClaw semantic config guard, set `validation_profile="rustclaw_semantic_guard"`; plain syntax/schema validation should use `validation_profile="syntax_only"` or omit the profile.
+- `validate` proves parse/schema syntax only. RustClaw semantic safety, risk, or problem checks must use `guard_rustclaw_config` directly; do not approximate them with raw file reads.
 - Field paths support dot/bracket selectors. For arrays of objects, `<item-name>.<field>` may resolve the unique object whose `name`, `id`, or `key` equals `<item-name>` before reading `<field>`.
 - Do not plan `patch_field`, `write`, `set`, or other generic config mutation through `config_basic` in v1.
 - Confirmed structured config edits should use `config_edit` when available, followed by validation, guard checks, and read-back. Use broad file or command workflows only when the requested mutation cannot be represented as a config field path and typed value.
