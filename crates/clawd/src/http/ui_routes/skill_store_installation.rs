@@ -4,7 +4,93 @@ struct SkillStoreInstallSpec {
     binary: String,
 }
 
-fn runner_binary_name(raw_name: &str) -> Result<String, String> {
+#[derive(Debug, Clone, Copy)]
+enum SkillStoreErrorCode {
+    NameRequired,
+    UnknownSkill,
+    LockedSkill,
+    RegistryUnavailable,
+    ConfigReadFailed,
+    ConfigWriteFailed,
+    RuntimeReloadFailed,
+    InvalidRunnerName,
+    InstallNotOnDemand,
+    InvalidInstallPackage,
+    UnsafeConfigPath,
+    BuildStartFailed,
+    BuildFailed,
+    #[cfg(not(test))]
+    BuildBinaryMissing,
+    BinaryRemoveFailed,
+    ConfigRemoveFailed,
+}
+
+impl SkillStoreErrorCode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NameRequired => "skill_store_name_required",
+            Self::UnknownSkill => "skill_store_unknown_skill",
+            Self::LockedSkill => "skill_store_locked_skill",
+            Self::RegistryUnavailable => "skill_store_registry_unavailable",
+            Self::ConfigReadFailed => "skill_store_config_read_failed",
+            Self::ConfigWriteFailed => "skill_store_config_write_failed",
+            Self::RuntimeReloadFailed => "skill_store_runtime_reload_failed",
+            Self::InvalidRunnerName => "skill_store_invalid_runner_name",
+            Self::InstallNotOnDemand => "skill_store_install_not_on_demand",
+            Self::InvalidInstallPackage => "skill_store_invalid_install_package",
+            Self::UnsafeConfigPath => "skill_store_unsafe_config_path",
+            Self::BuildStartFailed => "skill_store_build_start_failed",
+            Self::BuildFailed => "skill_store_build_failed",
+            #[cfg(not(test))]
+            Self::BuildBinaryMissing => "skill_store_build_binary_missing",
+            Self::BinaryRemoveFailed => "skill_store_binary_remove_failed",
+            Self::ConfigRemoveFailed => "skill_store_config_remove_failed",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SkillStoreOperationError {
+    status: StatusCode,
+    code: SkillStoreErrorCode,
+    diagnostic: String,
+}
+
+impl SkillStoreOperationError {
+    fn new(
+        status: StatusCode,
+        code: SkillStoreErrorCode,
+        diagnostic: impl std::fmt::Display,
+    ) -> Self {
+        Self {
+            status,
+            code,
+            diagnostic: diagnostic.to_string(),
+        }
+    }
+}
+
+type SkillStoreOperationResult<T> = Result<T, SkillStoreOperationError>;
+
+fn skill_store_error_response(
+    error: SkillStoreOperationError,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    tracing::warn!(
+        error_code = error.code.as_str(),
+        diagnostic = %error.diagnostic,
+        "skill_store_operation_failed"
+    );
+    (
+        error.status,
+        Json(ApiResponse {
+            ok: false,
+            data: None,
+            error: Some(error.code.as_str().to_string()),
+        }),
+    )
+}
+
+fn runner_binary_name(raw_name: &str) -> SkillStoreOperationResult<String> {
     let raw_name = raw_name.trim();
     if raw_name.is_empty()
         || raw_name.contains('/')
@@ -13,7 +99,11 @@ fn runner_binary_name(raw_name: &str) -> Result<String, String> {
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
     {
-        return Err("invalid runner name in skill registry".to_string());
+        return Err(SkillStoreOperationError::new(
+            StatusCode::BAD_REQUEST,
+            SkillStoreErrorCode::InvalidRunnerName,
+            format!("runner={raw_name}"),
+        ));
     }
     let normalized = raw_name.replace('_', "-");
     Ok(if normalized.ends_with("-skill") {
@@ -26,19 +116,31 @@ fn runner_binary_name(raw_name: &str) -> Result<String, String> {
 fn skill_store_install_spec(
     state: &AppState,
     skill_name: &str,
-) -> Result<Option<SkillStoreInstallSpec>, String> {
+) -> SkillStoreOperationResult<Option<SkillStoreInstallSpec>> {
     let registry = state
         .get_skills_registry()
-        .ok_or_else(|| "skills registry is not available".to_string())?;
-    let entry = registry
-        .get(skill_name)
-        .ok_or_else(|| format!("unknown skill: {skill_name}"))?;
+        .ok_or_else(|| {
+            SkillStoreOperationError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                SkillStoreErrorCode::RegistryUnavailable,
+                "registry=unavailable",
+            )
+        })?;
+    let entry = registry.get(skill_name).ok_or_else(|| {
+        SkillStoreOperationError::new(
+            StatusCode::NOT_FOUND,
+            SkillStoreErrorCode::UnknownSkill,
+            format!("skill={skill_name}"),
+        )
+    })?;
     if entry.kind != SkillKind::Runner {
         return Ok(None);
     }
     if entry.install_mode.as_deref() != Some("on_demand") {
-        return Err(format!(
-            "skill {skill_name} is not declared as an on-demand install"
+        return Err(SkillStoreOperationError::new(
+            StatusCode::CONFLICT,
+            SkillStoreErrorCode::InstallNotOnDemand,
+            format!("skill={skill_name} install_mode={:?}", entry.install_mode),
         ));
     }
     let binary = runner_binary_name(&registry.runner_name(skill_name))?;
@@ -53,7 +155,11 @@ fn skill_store_install_spec(
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
     {
-        return Err("invalid install package in skill registry".to_string());
+        return Err(SkillStoreOperationError::new(
+            StatusCode::BAD_REQUEST,
+            SkillStoreErrorCode::InvalidInstallPackage,
+            format!("package={package}"),
+        ));
     }
     Ok(Some(SkillStoreInstallSpec { package, binary }))
 }
@@ -61,7 +167,7 @@ fn skill_store_install_spec(
 fn declared_skill_config_paths(
     state: &AppState,
     skill_name: &str,
-) -> Result<Vec<PathBuf>, String> {
+) -> SkillStoreOperationResult<Vec<PathBuf>> {
     let Some(registry) = state.get_skills_registry() else {
         return Ok(Vec::new());
     };
@@ -79,8 +185,10 @@ fn declared_skill_config_paths(
                     .all(|part| matches!(part, std::path::Component::Normal(_)))
                 && relative_path.starts_with("configs");
             if !safe {
-                return Err(format!(
-                    "unsafe config path for skill {skill_name}: {relative}"
+                return Err(SkillStoreOperationError::new(
+                    StatusCode::BAD_REQUEST,
+                    SkillStoreErrorCode::UnsafeConfigPath,
+                    format!("skill={skill_name} path={relative}"),
                 ));
             }
             Ok(state.skill_rt.workspace_root.join(relative_path))
@@ -127,7 +235,7 @@ fn bounded_command_error(bytes: &[u8]) -> String {
 async fn compile_skill_store_runner(
     state: &AppState,
     spec: &SkillStoreInstallSpec,
-) -> Result<PathBuf, String> {
+) -> SkillStoreOperationResult<PathBuf> {
     let output = Command::new("cargo")
         .args(["build", "--release", "-p", spec.package.as_str()])
         .current_dir(&state.skill_rt.workspace_root)
@@ -137,12 +245,22 @@ async fn compile_skill_store_runner(
         )
         .output()
         .await
-        .map_err(|error| format!("start skill build failed: {error}"))?;
+        .map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::BuildStartFailed,
+                format!("package={} error={error}", spec.package),
+            )
+        })?;
     if !output.status.success() {
-        return Err(format!(
-            "skill build failed for {}: {}",
-            spec.package,
-            bounded_command_error(&output.stderr)
+        return Err(SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::BuildFailed,
+            format!(
+                "package={} stderr={}",
+                spec.package,
+                bounded_command_error(&output.stderr)
+            ),
         ));
     }
     let binary_path = state
@@ -151,9 +269,10 @@ async fn compile_skill_store_runner(
         .join("target/release")
         .join(&spec.binary);
     if !binary_path.is_file() {
-        return Err(format!(
-            "skill build completed without binary: {}",
-            binary_path.display()
+        return Err(SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::BuildBinaryMissing,
+            format!("path={}", binary_path.display()),
         ));
     }
     Ok(binary_path)
@@ -163,7 +282,7 @@ async fn compile_skill_store_runner(
 async fn compile_skill_store_runner(
     state: &AppState,
     spec: &SkillStoreInstallSpec,
-) -> Result<PathBuf, String> {
+) -> SkillStoreOperationResult<PathBuf> {
     let _package = &spec.package;
     let binary_path = state
         .skill_rt
@@ -171,13 +290,28 @@ async fn compile_skill_store_runner(
         .join("target/release")
         .join(&spec.binary);
     if let Some(parent) = binary_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        fs::create_dir_all(parent).map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::BuildStartFailed,
+                error,
+            )
+        })?;
     }
-    fs::write(&binary_path, b"skill-store-test-binary").map_err(|error| error.to_string())?;
+    fs::write(&binary_path, b"skill-store-test-binary").map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::BuildFailed,
+            error,
+        )
+    })?;
     Ok(binary_path)
 }
 
-fn remove_skill_store_binary(state: &AppState, spec: &SkillStoreInstallSpec) -> Result<bool, String> {
+fn remove_skill_store_binary(
+    state: &AppState,
+    spec: &SkillStoreInstallSpec,
+) -> SkillStoreOperationResult<bool> {
     let path = state
         .skill_rt
         .workspace_root
@@ -186,19 +320,32 @@ fn remove_skill_store_binary(state: &AppState, spec: &SkillStoreInstallSpec) -> 
     if !path.exists() {
         return Ok(false);
     }
-    fs::remove_file(&path)
-        .map_err(|error| format!("remove skill binary {} failed: {error}", path.display()))?;
+    fs::remove_file(&path).map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::BinaryRemoveFailed,
+            format!("path={} error={error}", path.display()),
+        )
+    })?;
     Ok(true)
 }
 
-fn delete_declared_skill_configs(state: &AppState, skill_name: &str) -> Result<Vec<String>, String> {
+fn delete_declared_skill_configs(
+    state: &AppState,
+    skill_name: &str,
+) -> SkillStoreOperationResult<Vec<String>> {
     let mut deleted = Vec::new();
     for path in declared_skill_config_paths(state, skill_name)? {
         if !path.exists() {
             continue;
         }
-        fs::remove_file(&path)
-            .map_err(|error| format!("remove skill config {} failed: {error}", path.display()))?;
+        fs::remove_file(&path).map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::ConfigRemoveFailed,
+                format!("path={} error={error}", path.display()),
+            )
+        })?;
         if let Ok(relative) = path.strip_prefix(&state.skill_rt.workspace_root) {
             deleted.push(relative.to_string_lossy().into_owned());
         }

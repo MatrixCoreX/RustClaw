@@ -197,6 +197,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert!(!locked["ok"].as_bool().expect("locked response ok flag"));
+    assert_eq!(locked["error"], "skill_store_locked_skill");
 
     let (status, removed) = call_skill_store_api(
         router.clone(),

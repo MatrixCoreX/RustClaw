@@ -283,9 +283,16 @@ fn runtime_status(obj: &Map<String, Value>) -> SkillResult<String> {
         .or_else(|| obj.get("field"))
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            SkillError::invalid_input(
-                "runtime_status requires kind: current_user|host_name|kernel_release|current_time|current_working_directory",
-            )
+            SkillError::invalid_input("runtime_status_kind_required").with_extra(json!({
+                "error_code": "runtime_status_kind_required",
+                "allowed_kinds": [
+                    "current_user",
+                    "host_name",
+                    "kernel_release",
+                    "current_time",
+                    "current_working_directory"
+                ]
+            }))
         })?;
     let kind = normalize_runtime_status_kind(raw_kind);
     let value = match kind.as_str() {
@@ -297,9 +304,19 @@ fn runtime_status(obj: &Map<String, Value>) -> SkillResult<String> {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|_| "-".to_string()),
         _ => {
-            return Err(SkillError::invalid_input(
-                "unsupported runtime_status kind; use current_user|host_name|kernel_release|current_time|current_working_directory",
-            ));
+            return Err(
+                SkillError::invalid_input("runtime_status_kind_unsupported").with_extra(json!({
+                    "error_code": "runtime_status_kind_unsupported",
+                    "received_kind": raw_kind,
+                    "allowed_kinds": [
+                        "current_user",
+                        "host_name",
+                        "kernel_release",
+                        "current_time",
+                        "current_working_directory"
+                    ]
+                })),
+            );
         }
     };
     Ok(json!({

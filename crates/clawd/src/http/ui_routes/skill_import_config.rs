@@ -694,16 +694,7 @@ fn finalize_imported_bundle(
 
     let installation = match update_skill_store_installation(state, &plan.canonical_name, true) {
         Ok(result) => result,
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("reload skill views failed: {err}")),
-                }),
-            );
-        }
+        Err(error) => return skill_store_error_response(error),
     };
 
     (

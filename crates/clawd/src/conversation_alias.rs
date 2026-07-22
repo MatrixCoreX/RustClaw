@@ -597,7 +597,7 @@ pub(super) fn merge_alias_bindings_from_capability_results(
     let now_ts = crate::now_ts_u64();
     for result in results {
         if result.status != claw_core::capability_result::CapabilityResultStatus::Ok
-            || result.capability != "session.bind_alias"
+            || result.capability != "task_control"
             || result.action.as_deref() != Some("bind_session_alias")
         {
             continue;

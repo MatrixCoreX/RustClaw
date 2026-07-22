@@ -4,7 +4,7 @@
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard
 # include_risky=False
-# stats=files_seen=111 files_skipped_risky=2 files_skipped_temp=0 rows_deduped=689 rows_emitted=1799 rows_expect_dropped=621 rows_output=2100 rows_padded=301 rows_seen=2175 rows_skipped_excluded_skill=0 rows_skipped_risky=8
+# stats=files_seen=111 files_skipped_risky=2 files_skipped_temp=0 rows_deduped=689 rows_emitted=1799 rows_expect_dropped=625 rows_output=2100 rows_padded=301 rows_seen=2175 rows_skipped_excluded_skill=0 rows_skipped_risky=8
 # target_rows=0 means no row-count padding.
 # Default external publishing-channel exclusions are configured in the aggregate builder.
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -638,7 +638,7 @@ continuous|nl_cases_clarify_surface_state_residuals_clarify_fixture_release_deli
 continuous|nl_cases_clarify_surface_state_residuals_clarify_fixture_release_delivery_missing_turn2|clarify_chain,client_like,aggregate,allow_clarify|scripts/nl_tests/fixtures/device_local/docs/not_exists_release_checklist.md
 # source: scripts/nl_tests/cases/nl_cases_client_like_continuous_stress.txt
 continuous|nl_cases_client_like_continuous_stress_cn_memory_marker_set|cn,memory,state,group:continuous_stress_cn,client_like,aggregate|本轮连续测试里，请记住编号 RC-CONT-CN-0428-A。只用一句中文确认。
-continuous|nl_cases_client_like_continuous_stress_cn_memory_marker_recall|cn,memory,state,group:continuous_stress_cn,client_like,aggregate|刚才让你记住的连续测试编号是什么？只回答编号。
+continuous|nl_cases_client_like_continuous_stress_cn_memory_marker_recall|cn,memory,state,group:continuous_stress_cn,expect_exact_scalar,client_like,aggregate|刚才让你记住的连续测试编号是什么？只回答编号。|expect=RC-CONT-CN-0428-A
 continuous|nl_cases_client_like_continuous_stress_cn_split_task_start|cn,task_append,drafting,group:continuous_stress_cn,allow_clarify,client_like,aggregate|帮我写个方案
 continuous|nl_cases_client_like_continuous_stress_cn_split_task_audience|cn,task_append,drafting,group:continuous_stress_cn,allow_clarify,client_like,aggregate|面向老板
 continuous|nl_cases_client_like_continuous_stress_cn_split_task_constraints|cn,task_append,drafting,group:continuous_stress_cn,client_like,aggregate|不要太技术，控制在 80 字内，只输出正文
@@ -650,16 +650,16 @@ continuous|nl_cases_client_like_continuous_stress_cn_resume_previous_task|cn,tas
 continuous|nl_cases_client_like_continuous_stress_cn_new_task_interrupt_raw_pwd|cn,new_task,command,raw,group:continuous_stress_cn,client_like,aggregate|先别管方案，请执行 pwd，只输出命令结果。
 continuous|nl_cases_client_like_continuous_stress_cn_compound_no_connector_raw|cn,compound,command,raw,group:continuous_stress_cn,client_like,aggregate|pwd whoami hostname 三个结果每个一行 不要总结
 continuous|nl_cases_client_like_continuous_stress_cn_fixture_package_scalar|cn,file,scalar,group:continuous_stress_cn,client_like,aggregate|读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。
-continuous|nl_cases_client_like_continuous_stress_cn_alias_bind_service_notes|cn,alias,state,group:continuous_stress_cn,client_like,aggregate|先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。
-continuous|nl_cases_client_like_continuous_stress_cn_alias_read_service_title|cn,alias,file,scalar,group:continuous_stress_cn,client_like,aggregate|读取甲文件的标题，只输出标题。
-continuous|nl_cases_client_like_continuous_stress_cn_alias_rebind_release|cn,alias,correction,state,group:continuous_stress_cn,client_like,aggregate|不对，甲文件改成 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。只回复已更新。
-continuous|nl_cases_client_like_continuous_stress_cn_alias_read_release_title|cn,alias,file,scalar,group:continuous_stress_cn,client_like,aggregate|读取甲文件的标题，只输出标题。
+continuous|nl_cases_client_like_continuous_stress_cn_alias_bind_service_notes|cn,alias,state,group:continuous_stress_cn,requires_tool_call=true,capability:session.bind_alias,expect_exact_scalar,client_like,aggregate|先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。|expect=已记住
+continuous|nl_cases_client_like_continuous_stress_cn_alias_read_service_title|cn,alias,file,scalar,group:continuous_stress_cn,requires_tool_call=true,expect_exact_scalar,client_like,aggregate|读取甲文件的标题，只输出标题。|expect=Service Notes
+continuous|nl_cases_client_like_continuous_stress_cn_alias_rebind_release|cn,alias,correction,state,group:continuous_stress_cn,requires_tool_call=true,capability:session.bind_alias,expect_exact_scalar,client_like,aggregate|不对，甲文件改成 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。只回复已更新。|expect=已更新
+continuous|nl_cases_client_like_continuous_stress_cn_alias_read_release_title|cn,alias,file,scalar,group:continuous_stress_cn,requires_tool_call=true,expect_exact_scalar,client_like,aggregate|读取甲文件的标题，只输出标题。|expect=Release Checklist
 continuous|nl_cases_client_like_continuous_stress_cn_ambiguous_delivery_should_clarify|cn,clarify,delivery,group:continuous_stress_cn,client_like,aggregate,allow_clarify|把那个最大的发给我。
 continuous|nl_cases_client_like_continuous_stress_cn_stop_delivery_convert_to_clarify|cn,run_control,clarify,group:continuous_stress_cn,client_like,aggregate,allow_clarify|停一下，不要发文件，改为只告诉我你需要我确认哪个文件。
 continuous|nl_cases_client_like_continuous_stress_cn_quality_feedback_rewrite|cn,feedback,drafting,group:continuous_stress_cn,client_like,aggregate|刚才那句如果太生硬，就更口语化一点，只输出新版。
 continuous|nl_cases_client_like_continuous_stress_cn_error_recovery_guidance|cn,error_report,recovery,group:continuous_stress_cn,client_like,aggregate|如果刚才因为指代不清没法执行，只用一句话说明下一步需要我提供什么。
 continuous|nl_cases_client_like_continuous_stress_en_memory_marker_set|en,memory,state,group:continuous_stress_en,client_like,aggregate|For this continuous test, remember marker RC-CONT-EN-0428-B. Reply with one short confirmation.
-continuous|nl_cases_client_like_continuous_stress_en_memory_marker_recall|en,memory,state,group:continuous_stress_en,client_like,aggregate|What continuous test marker did I ask you to remember? Answer only the marker.
+continuous|nl_cases_client_like_continuous_stress_en_memory_marker_recall|en,memory,state,group:continuous_stress_en,expect_exact_scalar,client_like,aggregate|What continuous test marker did I ask you to remember? Answer only the marker.|expect=RC-CONT-EN-0428-B
 continuous|nl_cases_client_like_continuous_stress_en_split_task_start|en,task_append,drafting,group:continuous_stress_en,client_like,aggregate|Write a short release note for RustClaw.
 continuous|nl_cases_client_like_continuous_stress_en_split_task_audience|en,task_append,drafting,group:continuous_stress_en,client_like,aggregate|Make it for non-technical users.
 continuous|nl_cases_client_like_continuous_stress_en_replace_goal_checklist|en,task_replace,drafting,group:continuous_stress_en,client_like,aggregate|Actually switch it to a three-step checklist.
@@ -670,11 +670,11 @@ continuous|nl_cases_client_like_continuous_stress_en_side_question_no_pollution|
 continuous|nl_cases_client_like_continuous_stress_en_resume_previous_task|en,task_resume,drafting,group:continuous_stress_en,client_like,aggregate|Return to the checklist and output only three short bullets.
 continuous|nl_cases_client_like_continuous_stress_en_new_task_raw_pwd|en,new_task,command,raw,group:continuous_stress_en,client_like,aggregate|Run pwd and output only the raw result.
 continuous|nl_cases_client_like_continuous_stress_en_compound_package_compare|en,compound,file,summary,group:continuous_stress_en,client_like,aggregate|Read the name from scripts/nl_tests/fixtures/device_local/package.json. Read package.name from crates/clawd/Cargo.toml. Then answer in one line with the two names and whether they are the same or different.
-continuous|nl_cases_client_like_continuous_stress_en_alias_bind_service_notes|en,alias,state,group:continuous_stress_en,client_like,aggregate|Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.
-continuous|nl_cases_client_like_continuous_stress_en_alias_read_service_title|en,alias,file,scalar,group:continuous_stress_en,client_like,aggregate|Read the note file title and output only the title.
-continuous|nl_cases_client_like_continuous_stress_en_alias_rebind_release|en,alias,correction,state,group:continuous_stress_en,client_like,aggregate|Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.
-continuous|nl_cases_client_like_continuous_stress_en_alias_read_release_title|en,alias,file,scalar,group:continuous_stress_en,client_like,aggregate|Read the note file title and output only the title.
-continuous|nl_cases_client_like_continuous_stress_en_status_query_alias_basename|en,status_query,state,group:continuous_stress_en,client_like,aggregate|What file does the note file refer to now? Output only the basename.
+continuous|nl_cases_client_like_continuous_stress_en_alias_bind_service_notes|en,alias,state,group:continuous_stress_en,requires_tool_call=true,capability:session.bind_alias,expect_exact_scalar,client_like,aggregate|Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.|expect=confirmed
+continuous|nl_cases_client_like_continuous_stress_en_alias_read_service_title|en,alias,file,scalar,group:continuous_stress_en,requires_tool_call=true,expect_exact_scalar,client_like,aggregate|Read the note file title and output only the title.|expect=Service Notes
+continuous|nl_cases_client_like_continuous_stress_en_alias_rebind_release|en,alias,correction,state,group:continuous_stress_en,requires_tool_call=true,capability:session.bind_alias,expect_exact_scalar,client_like,aggregate|Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.|expect=updated
+continuous|nl_cases_client_like_continuous_stress_en_alias_read_release_title|en,alias,file,scalar,group:continuous_stress_en,requires_tool_call=true,expect_exact_scalar,client_like,aggregate|Read the note file title and output only the title.|expect=Release Checklist
+continuous|nl_cases_client_like_continuous_stress_en_status_query_alias_basename|en,status_query,state,group:continuous_stress_en,expect_exact_scalar,client_like,aggregate|What file does the note file refer to now? Output only the basename.|expect=release_checklist.md
 continuous|nl_cases_client_like_continuous_stress_en_refusal_no_execution|en,approval,run_control,group:continuous_stress_en,client_like,aggregate|Do not execute anything. Answer whether you are waiting for my approval in one short sentence.
 continuous|nl_cases_client_like_continuous_stress_en_priority_order|en,priority,format,group:continuous_stress_en,client_like,aggregate|For the next answer, give the conclusion first, then at most two details.
 continuous|nl_cases_client_like_continuous_stress_en_final_context_summary|en,status_query,summary,group:continuous_stress_en,client_like,aggregate|Summarize what this continuous test has covered so far in one short English sentence.

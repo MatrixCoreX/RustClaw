@@ -199,6 +199,119 @@ pub(crate) fn parse_machine_kv_units(text: &str) -> Vec<String> {
         .collect()
 }
 
+pub(crate) fn labeled_markdown_scalar(line: &str) -> Option<&str> {
+    let line = line.trim_end();
+    ["`", "**", "__"].into_iter().find_map(|delimiter| {
+        let without_closing = line.strip_suffix(delimiter)?;
+        let opening_offset = without_closing.rfind(delimiter)?;
+        let label = without_closing[..opening_offset].trim_end();
+        let label = label
+            .strip_suffix(':')
+            .or_else(|| label.strip_suffix('='))?;
+        if label.trim().is_empty() {
+            return None;
+        }
+        let scalar = without_closing[opening_offset + delimiter.len()..].trim();
+        (!scalar.is_empty()).then_some(scalar)
+    })
+}
+
+pub(crate) fn machine_scalar_matches_requested_value(
+    key: &str,
+    candidate: &str,
+    expected: &str,
+) -> bool {
+    candidate == expected
+        || is_path_machine_key(key) && path_component_suffix_equivalent(candidate, expected)
+}
+
+fn is_path_machine_key(key: &str) -> bool {
+    key == "path" || key.ends_with("_path") || key.ends_with(".path")
+}
+
+fn path_component_suffix_equivalent(left: &str, right: &str) -> bool {
+    fn absolute_ends_with_relative(absolute: &str, relative: &str) -> bool {
+        let absolute = std::path::Path::new(absolute);
+        let relative = std::path::Path::new(relative);
+        if !absolute.is_absolute() || relative.is_absolute() {
+            return false;
+        }
+        let components = relative.components().collect::<Vec<_>>();
+        components.len() >= 2
+            && components
+                .iter()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
+            && absolute.ends_with(relative)
+    }
+
+    absolute_ends_with_relative(left, right) || absolute_ends_with_relative(right, left)
+}
+
+pub(crate) fn labeled_machine_field_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let (value, _) = labeled_machine_field_raw_value_and_separator_offset(line, key)?;
+    let value = strip_paired_markdown_scalar(value);
+    (!value.is_empty()).then_some(value)
+}
+
+fn labeled_machine_field_raw_value_and_separator_offset<'a>(
+    line: &'a str,
+    key: &str,
+) -> Option<(&'a str, usize)> {
+    let content = line.trim_start();
+    let mut content_offset = line.len().saturating_sub(content.len());
+    let content = ["- ", "* ", "+ "]
+        .into_iter()
+        .find_map(|prefix| content.strip_prefix(prefix))
+        .map(|content| {
+            content_offset += 2;
+            content
+        })
+        .unwrap_or(content);
+    let rest = content.strip_prefix(key).or_else(|| {
+        ["**", "__", "`"].into_iter().find_map(|delimiter| {
+            content
+                .strip_prefix(delimiter)?
+                .strip_prefix(key)?
+                .strip_prefix(delimiter)
+        })
+    })?;
+    let separator_offset = content_offset + content.len().saturating_sub(rest.len());
+    let value = rest
+        .strip_prefix('=')
+        .or_else(|| rest.strip_prefix(':'))?
+        .trim();
+    (!value.is_empty()).then_some((value, separator_offset))
+}
+
+fn strip_paired_markdown_scalar(value: &str) -> &str {
+    let value = value.trim();
+    if let Some(delimiter) = paired_markdown_scalar_delimiter(value) {
+        return value[delimiter.len()..value.len() - delimiter.len()].trim();
+    }
+    value
+}
+
+fn paired_markdown_scalar_delimiter(value: &str) -> Option<&'static str> {
+    ["`", "**", "__"].into_iter().find(|delimiter| {
+        value.len() > delimiter.len() * 2
+            && value.starts_with(delimiter)
+            && value.ends_with(delimiter)
+    })
+}
+
+pub(crate) fn replace_labeled_machine_field_value(
+    line: &str,
+    key: &str,
+    expected: &str,
+) -> Option<String> {
+    let (raw_value, separator_offset) =
+        labeled_machine_field_raw_value_and_separator_offset(line, key)?;
+    let expected = paired_markdown_scalar_delimiter(raw_value)
+        .map(|delimiter| format!("{delimiter}{expected}{delimiter}"))
+        .unwrap_or_else(|| expected.to_string());
+    Some(format!("{} {expected}", &line[..separator_offset + 1]))
+}
+
 fn trim_machine_unit_value(value: &str) -> &str {
     let value = value.trim();
     if matches!(value.as_bytes().first(), Some(b'[' | b'{'))

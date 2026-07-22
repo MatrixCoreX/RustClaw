@@ -9,6 +9,7 @@ import {
   normalizeSkillSearchQuery,
   visibleSkillNames,
 } from "../lib/skill-display";
+import { skillStoreErrorMessage } from "../lib/skill-store";
 import type {
   ApiResponse,
   BrowserFileWithPath,
@@ -96,7 +97,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       const res = await apiFetch(`/v1/skills/store`);
       const body = (await res.json()) as ApiResponse<SkillStoreResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `skill store fetch failed (${res.status})`);
+        throw new Error(skillStoreErrorMessage(body.error, t));
       }
       setSkillStoreData(body.data);
     } catch (err) {
@@ -382,7 +383,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       });
       const body = (await res.json()) as ApiResponse<SkillStoreMutationResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `skill store ${action} failed (${res.status})`);
+        throw new Error(skillStoreErrorMessage(body.error, t));
       }
       if (!installed && recentImportedSkillName === skillName) {
         setRecentImportedSkillName(null);
