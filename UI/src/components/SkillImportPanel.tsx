@@ -45,14 +45,14 @@ export function SkillImportPanel({
       <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.28em] text-sky-100/70">{t("导入外部技能", "Import External Skills")}</p>
+            <p className="text-[10px] uppercase tracking-[0.28em] text-sky-100/70">{t("第三方技能", "Third-party skills")}</p>
             <h3 className="mt-2 text-base font-semibold text-white">
               {t("把别人做好的技能接入进来，扩展 RustClaw 的能力。", "Bring in ready-made skills to extend what RustClaw can do.")}
             </h3>
             <p className="mt-2 text-sm text-white/65">
               {t(
-                "你可以贴一个技能链接，也可以直接上传本地技能文件夹或文件。导入完成后，再决定要不要启用它。",
-                "You can paste a skill link, or directly upload a local skill folder or file. After import, you can decide whether to enable it.",
+                "你可以贴一个技能链接，也可以上传本地技能文件夹或文件。验证通过后会自动安装并开启。",
+                "Paste a skill link or upload a local skill folder or file. It is installed and enabled after validation passes.",
               )}
             </p>
           </div>
@@ -173,8 +173,8 @@ export function SkillImportPanel({
             <p className="mt-2 text-sm text-white/85">{skillImportPreview.description}</p>
             <p className="mt-2 text-sm text-emerald-200">
               {t(
-                "下面的技能列表里已经帮你定位到它了。点“设为开启”，再点右上角“保存开关”，确认后系统会自动重启。",
-                "It is now highlighted in the skill list below. Choose Enable, then click Save Switches. The system will restart automatically after you confirm.",
+                "技能已经安装并加入 Skill Store；你可以在工具/技能页关闭它，或在这里删除后再重新安装。",
+                "The skill is installed and listed in Skill Store. Disable it in Tools/Skills, or remove and reinstall it here.",
               )}
             </p>
             {skillImportPreview.require_bins.length > 0 ? (

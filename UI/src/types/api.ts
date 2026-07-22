@@ -352,10 +352,34 @@ export interface SkillsConfigResponse {
   /** 后端判定的 UI 锁定名单，保存时也会被强制保持开启 */
   locked_skill_names?: string[];
   external_skill_names?: string[];
+  uninstalled_skill_names?: string[];
   skill_items?: SkillListItem[];
   effective_enabled_skills_preview: string[];
   runtime_enabled_skills: string[];
   restart_required: boolean;
+}
+
+export interface SkillStoreItem {
+  name: string;
+  description?: string | null;
+  group?: string | null;
+  kind: string;
+  source_kind: "bundled" | "third_party";
+  source?: string | null;
+  installed: boolean;
+  enabled: boolean;
+  skill: SkillListItem;
+}
+
+export interface SkillStoreResponse {
+  items: SkillStoreItem[];
+  uninstalled_skill_names: string[];
+}
+
+export interface SkillStoreMutationResponse {
+  skill_name: string;
+  installed: boolean;
+  enabled: boolean;
 }
 
 export interface MemoryCounts {
@@ -966,4 +990,4 @@ export interface ServiceActionNotice {
 }
 
 export type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" | "lark";
-export type ConsolePage = "dashboard" | "chat" | "nni" | "services" | "channels" | "models" | "skills" | "memory" | "logs" | "tasks";
+export type ConsolePage = "dashboard" | "chat" | "nni" | "services" | "channels" | "models" | "skills" | "skill_store" | "memory" | "logs" | "tasks";

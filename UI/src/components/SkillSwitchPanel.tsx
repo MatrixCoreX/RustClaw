@@ -43,12 +43,13 @@ export interface SkillSwitchPanelProps {
   lockedSkillNamesSet: ReadonlySet<string>;
   toolSkillNamesSet: ReadonlySet<string>;
   baseSkillNamesSet: ReadonlySet<string>;
-  skillUninstallingName: string | null;
+  removableSkillNamesSet: ReadonlySet<string>;
+  skillStoreActionName: string | null;
   onFetchSkillsConfig: () => unknown | Promise<unknown>;
   onSaveSkillSwitches: () => unknown | Promise<unknown>;
   onSkillsSearchQueryChange: (value: string) => void;
   onToggleSkillEnabled: (name: string, nextEnabled: boolean) => void;
-  onUninstallExternalSkill: (name: string) => unknown | Promise<unknown>;
+  onRemoveSkillFromStore: (name: string) => unknown | Promise<unknown>;
 }
 
 export function SkillSwitchPanel({
@@ -79,13 +80,15 @@ export function SkillSwitchPanel({
   lockedSkillNamesSet,
   toolSkillNamesSet,
   baseSkillNamesSet,
-  skillUninstallingName,
+  removableSkillNamesSet,
+  skillStoreActionName,
   onFetchSkillsConfig,
   onSaveSkillSwitches,
   onSkillsSearchQueryChange,
   onToggleSkillEnabled,
-  onUninstallExternalSkill,
+  onRemoveSkillFromStore,
 }: SkillSwitchPanelProps) {
+  const storeMutationRunning = skillStoreActionName !== null;
   const renderSkillRow = (name: string) => {
     const skillItem = skillItemsByName.get(name);
     const runtimeIssue = skillRuntimeIssue(skillItem, lang);
@@ -100,7 +103,8 @@ export function SkillSwitchPanel({
     const isExternalSkill = externalSkillNamesSet.has(name);
     const isLockedSkill = lockedSkillNamesSet.has(name);
     const isToolSkill = toolSkillNamesSet.has(name);
-    const isUninstalling = skillUninstallingName === name;
+    const canRemove = removableSkillNamesSet.has(name);
+    const isRemoving = skillStoreActionName === name;
     const usageExamples = skillUsageExamples(name, lang, skillItem?.description);
     const usageExamplesId = `skill-usage-examples-${name}`;
     const statusMeta = [
@@ -215,14 +219,20 @@ export function SkillSwitchPanel({
           <button
             type="button"
             onClick={() => onToggleSkillEnabled(name, !configuredEnabled)}
-            disabled={isLockedSkill}
+            disabled={isLockedSkill || storeMutationRunning}
             className={
-              isLockedSkill
-                ? "cursor-not-allowed rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-100/80"
+              isLockedSkill || storeMutationRunning
+                ? `cursor-not-allowed rounded border px-1.5 py-0.5 text-[10px] ${
+                    isLockedSkill
+                      ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100/80"
+                      : "border-white/10 bg-white/5 text-white/35"
+                  }`
                 : "rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/80 hover:bg-white/10"
             }
             title={
-              isLockedSkill
+              storeMutationRunning && !isLockedSkill
+                ? t("技能列表正在更新，请稍候。", "The skill list is updating. Please wait.")
+                : isLockedSkill
                 ? isToolSkill
                   ? t("这是底层工具能力，UI 中不能关闭。", "This is a low-level tool capability and cannot be disabled in the UI.")
                   : t("这是系统基础能力，UI 中不能关闭。", "This is a core system capability and cannot be disabled in the UI.")
@@ -233,16 +243,16 @@ export function SkillSwitchPanel({
           >
             {isLockedSkill ? t("固定", "Fixed") : configuredEnabled ? t("关", "Off") : isRecentImport ? t("启用", "Enable") : t("开", "On")}
           </button>
-          {isExternalSkill ? (
+          {canRemove ? (
             <button
               type="button"
-              onClick={() => void onUninstallExternalSkill(name)}
-              disabled={isUninstalling}
+              onClick={() => void onRemoveSkillFromStore(name)}
+              disabled={storeMutationRunning}
               className="inline-flex items-center gap-1 rounded border border-red-500/25 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
-              title={t("卸载这个外部技能", "Uninstall this imported skill")}
+              title={t("从工具/技能中删除，可在 Skill Store 重新安装", "Remove from Tools/Skills; reinstall from Skill Store")}
             >
-              {isUninstalling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-              {t("卸载", "Uninstall")}
+              {isRemoving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+              {t("删除", "Remove")}
             </button>
           ) : null}
         </span>
@@ -279,12 +289,12 @@ export function SkillSwitchPanel({
   return (
     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h4 className="text-sm font-semibold">{t("工具与技能开关", "Tool and Skill Switches")}</h4>
+        <h4 className="text-sm font-semibold">{t("工具/技能开关", "Tools/Skills Switches")}</h4>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => void onFetchSkillsConfig()}
-            disabled={skillsConfigLoading}
+            disabled={skillsConfigLoading || storeMutationRunning}
             className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
           >
             {skillsConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -293,7 +303,7 @@ export function SkillSwitchPanel({
           <button
             type="button"
             onClick={() => void onSaveSkillSwitches()}
-            disabled={skillSwitchSaving || skillsConfigLoading || !hasUnsavedSkillSwitchChanges}
+            disabled={skillSwitchSaving || skillsConfigLoading || storeMutationRunning || !hasUnsavedSkillSwitchChanges}
             className="theme-accent-btn px-3 py-2 text-xs"
           >
             {skillSwitchSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
@@ -326,7 +336,7 @@ export function SkillSwitchPanel({
       <div className="mt-4 space-y-4">
         <div className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
           <div className="flex items-center justify-between gap-3">
-            <h5 className="text-sm font-semibold text-white">{t("工具与技能分组", "Tools and skills by group")}</h5>
+            <h5 className="text-sm font-semibold text-white">{t("工具/技能分组", "Tools/Skills by group")}</h5>
             <span className="theme-meta-pill !rounded-xl !px-2.5 !py-1 text-[11px]">
               {filteredManagedSkills.length}/{managedSkills.length}
             </span>

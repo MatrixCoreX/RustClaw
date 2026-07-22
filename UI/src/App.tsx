@@ -13,6 +13,7 @@ import { ModelConfigPage } from "./components/ModelConfigPage";
 import { NniPage } from "./components/NniPage";
 import { SignInPage } from "./components/SignInPage";
 import { SkillsPage } from "./components/SkillsPage";
+import { SkillStorePage } from "./components/SkillStorePage";
 import { TasksPage } from "./components/TasksPage";
 import { maskStoredKey } from "./lib/auth-keys";
 import { formatDuration, toLocalTime } from "./lib/display-format";
@@ -63,7 +64,7 @@ import type {
   ConsolePage,
 } from "./types/api";
 
-const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "nni", "services", "channels", "models", "skills", "memory", "logs", "tasks"];
+const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "nni", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
 
 const STORAGE_KEYS = {
   baseUrl: "rustclaw.monitor.baseUrl",
@@ -499,13 +500,20 @@ export default function App() {
     lockedSkillNamesSet,
     toolSkillNamesSet,
     baseSkillNamesSet,
-    skillUninstallingName,
+    removableSkillNamesSet,
+    skillStoreData,
+    skillStoreLoading,
+    skillStoreError,
+    skillStoreMessage,
+    skillStoreActionName,
     fetchSkills,
     fetchSkillsConfig,
+    fetchSkillStore,
     saveSkillSwitches,
     importExternalSkill,
     uploadImportedSkillFiles,
-    uninstallExternalSkill,
+    installSkillFromStore,
+    removeSkillFromStore,
     toggleSkillEnabled,
     clearSkillsConfigError,
   } = useSkillsRuntime({ apiFetch, t });
@@ -1128,6 +1136,7 @@ export default function App() {
     void fetchAuthMe();
     void fetchSkills();
     void fetchSkillsConfig();
+    void fetchSkillStore();
     void fetchLlmConfig();
     void fetchMultimodalConfig();
     void fetchModelCatalog();
@@ -1224,6 +1233,12 @@ export default function App() {
       void fetchTelegramConfig();
     }
   }, [currentPage, uiAuthReady, isAdminIdentity]);
+
+  useEffect(() => {
+    if (!uiAuthReady || currentPage !== "skill_store") return;
+    void fetchSkillStore();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady]);
 
   useEffect(() => {
     if (!uiAuthReady || !isAdminIdentity || currentPage !== "models") return;
@@ -1656,20 +1671,6 @@ export default function App() {
               lang={lang}
               t={t}
               tSlash={tSlash}
-              skillImportSource={skillImportSource}
-              skillImportLoading={skillImportLoading}
-              skillImportError={skillImportError}
-              skillImportMessage={skillImportMessage}
-              systemRestartMessage={systemRestartMessage}
-              skillImportPreview={skillImportPreview}
-              localImportPickerOpen={localImportPickerOpen}
-              folderImportInputRef={folderImportInputRef}
-              fileImportInputRef={fileImportInputRef}
-              onSkillImportSourceChange={setSkillImportSource}
-              onImportExternalSkill={importExternalSkill}
-              onLocalImportPickerOpenChange={setLocalImportPickerOpen}
-              onUploadImportedSkillFiles={uploadImportedSkillFiles}
-              onDismissSkillImportPreview={() => setSkillImportPreview(null)}
               skillsConfigData={skillsConfigData}
               skillsConfigLoading={skillsConfigLoading}
               skillsConfigError={skillsConfigError}
@@ -1694,12 +1695,42 @@ export default function App() {
               lockedSkillNamesSet={lockedSkillNamesSet}
               toolSkillNamesSet={toolSkillNamesSet}
               baseSkillNamesSet={baseSkillNamesSet}
-              skillUninstallingName={skillUninstallingName}
+              removableSkillNamesSet={removableSkillNamesSet}
+              skillStoreActionName={skillStoreActionName}
               onFetchSkillsConfig={fetchSkillsConfig}
               onSaveSkillSwitches={() => saveSkillSwitches(restartSystem)}
               onSkillsSearchQueryChange={setSkillsSearchQuery}
               onToggleSkillEnabled={toggleSkillEnabled}
-              onUninstallExternalSkill={uninstallExternalSkill}
+              onRemoveSkillFromStore={removeSkillFromStore}
+            />
+          ) : null}
+
+          {currentPage === "skill_store" ? (
+            <SkillStorePage
+              lang={lang}
+              t={t}
+              data={skillStoreData}
+              loading={skillStoreLoading}
+              error={skillStoreError}
+              message={skillStoreMessage}
+              actionName={skillStoreActionName}
+              onRefresh={fetchSkillStore}
+              onInstall={installSkillFromStore}
+              onRemove={removeSkillFromStore}
+              skillImportSource={skillImportSource}
+              skillImportLoading={skillImportLoading}
+              skillImportError={skillImportError}
+              skillImportMessage={skillImportMessage}
+              systemRestartMessage={systemRestartMessage}
+              skillImportPreview={skillImportPreview}
+              localImportPickerOpen={localImportPickerOpen}
+              folderImportInputRef={folderImportInputRef}
+              fileImportInputRef={fileImportInputRef}
+              onSkillImportSourceChange={setSkillImportSource}
+              onImportExternalSkill={importExternalSkill}
+              onLocalImportPickerOpenChange={setLocalImportPickerOpen}
+              onUploadImportedSkillFiles={uploadImportedSkillFiles}
+              onDismissSkillImportPreview={() => setSkillImportPreview(null)}
             />
           ) : null}
 

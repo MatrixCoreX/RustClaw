@@ -9,6 +9,7 @@ import {
   Server,
   Sparkles,
   SquareTerminal,
+  Store,
   Wrench,
 } from "lucide-react";
 
@@ -391,8 +392,13 @@ export function useConsoleProjections({
       },
       {
         id: "skills" as const,
-        label: t("工具与技能", "Tools & Skills"),
+        label: t("工具/技能", "Tools/Skills"),
         icon: <Wrench className="h-4 w-4" />,
+      },
+      {
+        id: "skill_store" as const,
+        label: "Skill Store",
+        icon: <Store className="h-4 w-4" />,
       },
       {
         id: "memory" as const,

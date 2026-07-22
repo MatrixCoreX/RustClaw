@@ -1244,6 +1244,9 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
 - `GET /v1/models/catalog`: returns the secret-free model/provider capability catalog used by the UI Models page and teaching-mode `model_catalog_trace`
+- `GET /v1/skills/store`: returns the registry-driven catalog for optional bundled and imported skills, including separate `installed` and `enabled` states
+- `POST /v1/skills/store/install`: installs and enables an optional catalog skill, then reloads runtime skill views
+- `POST /v1/skills/store/remove`: removes an optional skill from runtime and planner visibility while retaining its bundled or imported package for reinstallation; always-on core and tool skills reject this action
 - `GET /v1/nni/device/status`: reports NNI helper status, supported actions, and whether a device-signing chip is present
 - `POST /v1/nni/device/action`: runs one of `pubkey`, `sign_timestamp`, `tng_device_pubkey`, `tng_device_cert`, `tng_signer_cert`, or `tng_root_cert`
 - NNI request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`; `configs/config.toml` keeps only current NNI state and legacy record fallback.
@@ -1293,6 +1296,7 @@ UI notes:
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-rustclaw-cmd.sh` also deploys UI/nginx by default unless you pass `--no-deploy-ui`
 - the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
+- `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, and third-party import flows
 - service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings
 - `webd` can sit in front of `clawd` as a reverse proxy and login/session bridge
 
@@ -1306,6 +1310,15 @@ RustClaw currently ships a broad skill set. Representative groups:
 - multimodal and media generation: `image_generate` (`image.generate` / `image.poll` / `image.cancel`), `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize` (`audio.synthesize` / `audio.poll` / `audio.cancel`), `video_generate` (`video.generate` / `video.poll` / `video.cancel`), `music_generate` (`music.generate` / `music.poll` / `music.cancel`)
 - workflow and publishing: `schedule`, `extension_manager`, `photo_organize`, `invest_copy`, `x`
 - domain and knowledge skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`
+
+Skill installation and enablement are separate states. `skill_switches=false` keeps
+an installed skill available in the normal inventory but disables it.
+`uninstalled_skills` removes an optional skill from runtime, planner visibility,
+and the normal Tools/Skills inventory while keeping it discoverable in Skill Store
+for one-action reinstallation. Core skills and registry entries whose
+`planner_kind=tool` are always available and cannot be removed through Skill Store.
+Third-party import validates and registers the bundle, clears stale uninstall
+state, enables it, and then exposes it in both Skill Store and Tools/Skills.
 
 If you need to answer “how is this skill configured / bound / enabled, and what prerequisite is missing”, start with `prompts/references/skill_setup_guide.md`.
 
