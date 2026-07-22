@@ -613,6 +613,44 @@ planner_capabilities = [
 }
 
 #[test]
+fn module_preview_install_is_read_only_and_sandbox_allowed() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "install_module"
+enabled = true
+kind = "runner"
+planner_kind = "tool"
+planner_capabilities = [
+  { name = "module.preview_install", action = "preview_install", effect = "observe", required = ["module|modules"], risk_level = "low", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], risk_level = "high", subprocess = true, package_install = true, privilege_escalation = false },
+]
+"#,
+        &["install_module"],
+    );
+    let args = serde_json::json!({
+        "action": "preview_install",
+        "modules": ["requests"],
+        "ecosystem": "python"
+    });
+
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(&state, "install_module", &args);
+    assert!(effect.observes);
+    assert!(!effect.mutates);
+    assert!(state.skill_rt.tools_policy.is_any_allowed(
+        &["skill:install_module", "capability:module.preview_install"],
+        None,
+    ));
+    assert_eq!(
+        crate::verifier::skill_sandbox_denial_reason(&state, None, "install_module", &args,),
+        None
+    );
+}
+
+#[test]
 fn evidence_policy_preflight_allows_user_named_output_path_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new();

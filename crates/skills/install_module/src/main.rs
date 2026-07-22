@@ -76,6 +76,7 @@ fn error_extra(error_kind: &str) -> Value {
 }
 
 fn install_modules(args: Value) -> Result<(String, Value), String> {
+    let action = extract_action(&args)?;
     let ecosystem = extract_ecosystem(&args);
     let modules = extract_modules(&args)?;
     if modules.is_empty() {
@@ -89,7 +90,7 @@ fn install_modules(args: Value) -> Result<(String, Value), String> {
     }
 
     let version = extract_version(&args);
-    let dry_run = extract_dry_run(&args);
+    let dry_run = action == "preview_install" || extract_dry_run(&args);
     let installer_available = installer_available(ecosystem)?;
     if !dry_run && !installer_available {
         return Err(installer_unavailable_message(ecosystem));
@@ -102,6 +103,7 @@ fn install_modules(args: Value) -> Result<(String, Value), String> {
 
     if dry_run {
         let text = module_install_summary(
+            action,
             ecosystem,
             &modules,
             version.as_deref(),
@@ -112,7 +114,7 @@ fn install_modules(args: Value) -> Result<(String, Value), String> {
         return Ok((
             text.clone(),
             json!({
-                "action": "install",
+                "action": action,
                 "skill": "install_module",
                 "ecosystem": ecosystem,
                 "module": single_module(&modules),
@@ -146,6 +148,7 @@ fn install_modules(args: Value) -> Result<(String, Value), String> {
     }
 
     let text = module_install_summary(
+        action,
         ecosystem,
         &installed,
         version.as_deref(),
@@ -156,7 +159,7 @@ fn install_modules(args: Value) -> Result<(String, Value), String> {
     Ok((
         text.clone(),
         json!({
-            "action": "install",
+            "action": action,
             "skill": "install_module",
             "ecosystem": ecosystem,
             "module": single_module(&installed),
@@ -187,6 +190,19 @@ fn extract_ecosystem(args: &Value) -> &'static str {
         "rust" | "cargo" => "rust",
         "go" | "golang" => "go",
         _ => "python",
+    }
+}
+
+fn extract_action(args: &Value) -> Result<&'static str, String> {
+    match args
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("install")
+        .trim()
+    {
+        "install" => Ok("install"),
+        "preview_install" => Ok("preview_install"),
+        action => Err(format!("unsupported action: {action}")),
     }
 }
 
@@ -300,6 +316,7 @@ fn run_install_command(command_args: &[String]) -> Result<std::process::Output, 
 }
 
 fn module_install_summary(
+    action: &str,
     ecosystem: &str,
     modules: &[String],
     version: Option<&str>,
@@ -309,7 +326,7 @@ fn module_install_summary(
 ) -> String {
     let mut fields = vec![
         "skill=install_module".to_string(),
-        "action=install".to_string(),
+        format!("action={action}"),
         format!("ecosystem={ecosystem}"),
         format!("dry_run={dry_run}"),
         format!("installer_available={installer_available}"),

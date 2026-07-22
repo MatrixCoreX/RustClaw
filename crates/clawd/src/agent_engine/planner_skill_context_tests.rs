@@ -189,6 +189,13 @@ fn first_round_uses_only_budgeted_compact_index() {
         .expect("process capability compact-index line");
     assert!(process_line.contains("process.port_list(action=port_list"));
     assert!(!context.text.contains("process_basic"));
+    let module_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("module.preview_install(action=preview_install"))
+        .expect("module preview compact-index line");
+    assert!(module_line.contains("module.install(action=install"));
+    assert!(module_line.contains("Use module.preview_install for every preview-only request"));
 }
 
 #[test]
