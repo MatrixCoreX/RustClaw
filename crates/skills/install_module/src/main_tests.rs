@@ -48,3 +48,20 @@ fn dry_run_python_module_returns_structured_plan_without_installing() {
         Some("python3 -m pip install --user requests")
     );
 }
+
+#[test]
+fn preview_install_action_is_always_non_mutating() {
+    let (text, extra) = install_modules(serde_json::json!({
+        "action": "preview_install",
+        "modules": ["requests"],
+        "ecosystem": "python",
+        "dry_run": false
+    }))
+    .expect("preview module install");
+
+    assert!(text.contains("action=preview_install"));
+    assert!(text.contains("dry_run=true"));
+    assert_eq!(extra["action"], "preview_install");
+    assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["modules"], serde_json::json!(["requests"]));
+}

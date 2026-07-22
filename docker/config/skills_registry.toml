@@ -507,7 +507,7 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 aliases = ["module_install", "install_modules"]
-description = "Install or dry-run preview language ecosystem modules through structured module fields; use dry_run=true for preview-only requests."
+description = "Use module.preview_install for every preview-only request; module.install is the separate high-risk mutating capability."
 timeout_seconds = 30
 prompt_file = "prompts/skills/install_module.md"
 output_kind = "text"
@@ -519,9 +519,10 @@ confirmation_exempt_when = [
   { action = "install", dry_run = true },
 ]
 planner_capabilities = [
-  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem", "version", "dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = false },
+  { name = "module.preview_install", action = "preview_install", effect = "observe", required = ["module|modules"], optional = ["ecosystem", "version"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem", "version"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = false },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["install"] }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, ecosystem = { type = "string", enum = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, version = { type = "string" }, dry_run = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_install", "install"] }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, ecosystem = { type = "string", enum = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, version = { type = "string" }, dry_run = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
