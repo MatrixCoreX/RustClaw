@@ -37,7 +37,7 @@ Targets:
   --target <rust-target-triple>          explicit Rust target triple
 
 Build selection:
-  --workspace                            build the whole workspace (default)
+  --workspace                            build runtime packages; exclude on-demand Skill Store packages (default)
   --package <name>                       build one Cargo package
   --bin <name>                           build one binary target
 

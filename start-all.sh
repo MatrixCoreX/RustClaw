@@ -207,12 +207,18 @@ PY
 		esac
 	}
 
+	local on_demand_skill_runners=""
+	on_demand_skill_runners="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format runners)"
+
 	if [[ -n "${SKILLS_LIST:-}" ]]; then
 		IFS=',' read -r -a SKILLS_ARR <<<"$SKILLS_LIST"
 		for skill in "${SKILLS_ARR[@]}"; do
 			skill="$(echo "$skill" | xargs)"
 			[[ -z "$skill" ]] && continue
 			if ! bin_name="$(skill_bin_name "$skill")"; then
+				continue
+			fi
+			if grep -Fqx "$bin_name" <<<"$on_demand_skill_runners"; then
 				continue
 			fi
 			if [[ ! -x "$SCRIPT_DIR/$target_dir/$bin_name" ]]; then
@@ -222,7 +228,7 @@ PY
 		done
 	fi
 
-	if [[ ",${SKILLS_LIST:-}," == *",x,"* ]]; then
+	if [[ ",${SKILLS_LIST:-}," == *",x,"* ]] && ! grep -Fqx "x-skill" <<<"$on_demand_skill_runners"; then
 		echo "Checking X skill dependency (xurl)..."
 		if ! command -v npm >/dev/null 2>&1; then
 			echo "npm not found."
@@ -733,7 +739,7 @@ echo "Step 4/5: Build check" # zh: 第 4/5 步：检查编译产物
 if [[ ! -x "$CLAWD_BIN" ]]; then
 	echo "Prebuilt binaries missing for profile=$PROFILE." # zh: 缺少预编译二进制
 	echo "Required: $CLAWD_BIN"
-	echo "Copy your built binaries to target/$PROFILE/ or run: cargo build --workspace --release"
+	echo "Copy your built binaries to target/$PROFILE/ or run: ./build-all.sh no-ui"
 	exit 1
 fi
 echo "Detected prebuilt binaries under target/$PROFILE; starting directly in background." # zh: 已检测到预编译二进制，直接后台启动。

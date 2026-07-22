@@ -174,6 +174,8 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
   - `false`：强制关闭 / force disable
 - 外部技能在验证/编译通过并执行 `register_external_skill` 后，默认自动记录为 `true`；需要停用时再显式改为 `false`。
   External skills are automatically recorded as `true` after validation/compilation and `register_external_skill`; set them to `false` only when explicitly disabling them.
+- Registry 中 `install_mode = "on_demand"` 的 Skill Store 技能不得由普通构建、发布打包、安装器、交叉编译 `all` 模式或启动初始化脚本主动编译；只能由 UI Skill Store 安装动作或开发者显式的单 `skill` / `crate` 命令编译。所有脚本必须通过 `scripts/skill_store_packages.py` 读取动态名单，修改相关脚本后运行 `python3 scripts/check_on_demand_skill_builds.py`，不得维护第二套写死技能列表。
+  Skill Store entries with registry `install_mode = "on_demand"` must not be proactively compiled by normal builds, release packaging, installers, cross-build `all` modes, or startup setup scripts. They may be compiled only by a UI Skill Store install action or an explicit developer `skill` / `crate` command. Build scripts must obtain the dynamic set through `scripts/skill_store_packages.py`; after changing these scripts, run `python3 scripts/check_on_demand_skill_builds.py` and do not maintain a second hardcoded skill list.
 - 关闭技能后 / When a skill is disabled:
   - 二层提示词会显示 disabled 简化提示
     The second-layer prompt uses a disabled simplified hint

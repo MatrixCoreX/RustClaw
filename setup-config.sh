@@ -288,6 +288,8 @@ skill_bin_name() {
   esac
 }
 
+ON_DEMAND_SKILL_RUNNERS="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format runners)"
+
 if [[ -n "${SKILLS_LIST:-}" ]]; then
   IFS=',' read -r -a SKILLS_ARR <<< "$SKILLS_LIST"
   for skill in "${SKILLS_ARR[@]}"; do
@@ -297,6 +299,10 @@ if [[ -n "${SKILLS_LIST:-}" ]]; then
       echo "Skip unknown skill in skills_list: $skill" # zh: skills_list 中存在未知技能，已跳过
       continue
     fi
+    if grep -Fqx "$bin_name" <<< "$ON_DEMAND_SKILL_RUNNERS"; then
+      echo "Skip on-demand Skill Store binary during setup: $bin_name"
+      continue
+    fi
     if [[ ! -x "$SCRIPT_DIR/$TARGET_DIR/$bin_name" ]]; then
       echo "Building missing skill binary: $bin_name" # zh: 正在编译缺失的技能二进制
       cargo build --bin "$bin_name" "${CARGO_PROFILE_FLAG[@]}"
@@ -304,7 +310,7 @@ if [[ -n "${SKILLS_LIST:-}" ]]; then
   done
 fi
 
-if [[ ",${SKILLS_LIST:-}," == *",x,"* ]]; then
+if [[ ",${SKILLS_LIST:-}," == *",x,"* ]] && ! grep -Fqx "x-skill" <<< "$ON_DEMAND_SKILL_RUNNERS"; then
   echo "Checking X skill dependency (xurl)..." # zh: 检查 X 技能依赖（xurl）...
   if ! command -v npm >/dev/null 2>&1; then
     echo "npm not found. Please install npm first." # zh: 未找到 npm，请先安装 npm
