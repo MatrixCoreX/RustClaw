@@ -217,6 +217,28 @@ fn config_validation_resolves_without_domain_output_contract() {
 }
 
 #[test]
+fn config_guard_resolves_to_dedicated_machine_action() {
+    let state = state_with_workspace_registry();
+    let (action, _record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "config.guard_rustclaw_config",
+        json!({"path": "configs/config.toml"}),
+    );
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected config guard tool action");
+    };
+    assert_eq!(tool, "config_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("guard_rustclaw_config")
+    );
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("configs/config.toml")
+    );
+}
+
+#[test]
 fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() {
     let state = state_with_workspace_registry();
     let (action, _record) = resolve_capability_action_with_record_for_state(
