@@ -667,6 +667,9 @@ async function extractPage(page, url, waitUntil, options = {}) {
             extraction_trace: extracted.extraction_trace,
             final_url: finalUrl,
             min_content_chars: minChars,
+            partial_title: finalTitle,
+            partial_text: finalText,
+            partial_content_excerpt: buildExcerpt(finalText),
         });
     }
 
@@ -863,27 +866,9 @@ async function openExtract(input) {
                 };
                 items.push(item);
             } catch (err) {
-                const classified = classifyError(err);
-                const meta = err && err.meta && typeof err.meta === 'object' ? err.meta : null;
+                const { classified, item } = partialExtractionItem(url, err, executablePath, runtimeCheck);
                 const pageOrdinal = items.length + 1;
-                items.push({
-                    url,
-                    final_url: url,
-                    title: '',
-                    text: '',
-                    content_excerpt: '',
-                    source: parseDomain(url),
-                    published_at: null,
-                    fetch_method: 'unavailable',
-                    extracted_at: new Date().toISOString(),
-                    error_code: classified.code,
-                    error: classified.message,
-                    diagnostics: meta,
-                    runtime: {
-                        chromium_executable_path: executablePath || 'playwright-default',
-                        runtime_restriction_signals: runtimeCheck,
-                    },
-                });
+                items.push(item);
                 if (capture.enabled) {
                     await appendJsonl(capture.files.manifest, {
                         run_id: capture.runId,
@@ -891,12 +876,12 @@ async function openExtract(input) {
                         ordinal: pageOrdinal,
                         status: 'error',
                         url,
-                        final_url: url,
-                        title: '',
-                        fetched_at: new Date().toISOString(),
-                        fetch_method: 'unavailable',
-                        text_chars: 0,
-                        content_hash_sha256: null,
+                        final_url: item.final_url,
+                        title: item.title,
+                        fetched_at: item.extracted_at,
+                        fetch_method: item.fetch_method,
+                        text_chars: item.text.length,
+                        content_hash_sha256: item.text ? sha256Hex(item.text) : null,
                         html_hash_sha256: null,
                         html_path: null,
                         text_path: null,
@@ -936,6 +921,37 @@ async function openExtract(input) {
             manifest_path: capture.files.manifest,
             chunks_path: capture.files.chunks,
         } : null,
+    };
+}
+
+function partialExtractionItem(url, err, executablePath, runtimeCheck) {
+    const classified = classifyError(err);
+    const meta = err && err.meta && typeof err.meta === 'object' ? err.meta : null;
+    const title = normalizeWhitespace(meta && meta.partial_title ? meta.partial_title : '');
+    const text = normalizeWhitespace(meta && meta.partial_text ? meta.partial_text : '');
+    const finalUrl = normalizeWhitespace(meta && meta.final_url ? meta.final_url : '') || url;
+    return {
+        classified,
+        item: {
+            url,
+            final_url: finalUrl,
+            title,
+            text,
+            content_excerpt: normalizeWhitespace(
+                meta && meta.partial_content_excerpt ? meta.partial_content_excerpt : buildExcerpt(text)
+            ),
+            source: parseDomain(finalUrl),
+            published_at: null,
+            fetch_method: title || text ? 'browser_partial' : 'unavailable',
+            extracted_at: new Date().toISOString(),
+            error_code: classified.code,
+            error: classified.message,
+            diagnostics: meta,
+            runtime: {
+                chromium_executable_path: executablePath || 'playwright-default',
+                runtime_restriction_signals: runtimeCheck,
+            },
+        },
     };
 }
 
@@ -1198,8 +1214,12 @@ async function main() {
     }
 }
 
-main().catch((error) => {
-    const classified = classifyError(error);
-    process.stderr.write(`[${classified.code}] ${classified.message}\n`);
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch((error) => {
+        const classified = classifyError(error);
+        process.stderr.write(`[${classified.code}] ${classified.message}\n`);
+        process.exit(1);
+    });
+}
+
+module.exports = { SkillError, partialExtractionItem };
