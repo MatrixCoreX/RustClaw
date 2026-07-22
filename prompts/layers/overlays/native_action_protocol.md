@@ -6,13 +6,25 @@ At each model turn, choose one of two protocol outcomes:
    call the `call_capability` function with one capability from the supplied
    runtime map and its structured arguments.
 2. If the available observations are sufficient and no action remains, return
-   the final user-visible response directly in the requested conversation
-   language.
+   the final user-visible response through the `respond` function in the
+   requested conversation language.
 
 Protocol rules:
 
 - Do not serialize an action, plan, function call, or tool arguments as prose,
   JSON, XML, Markdown, or a code fence.
+- Every terminal answer must use `respond`; do not emit terminal text outside
+  that function.
+- For an ordinary answer, use `shape=free_text`, put the complete final answer
+  in `content`, set `items=[]`, and set `exact_item_count=0`.
+- When the user asks for an exact number of list items or a payload-only list,
+  use `shape=list`, leave `content` empty, put only the final user-visible items
+  in `items`, and set `exact_item_count` to the exact array length. Do not put a
+  heading, preface, explanation, recap, offer, or follow-up inside an item.
+- Use `shape=list` only when the requested deliverable is semantically a list,
+  set of points, bullets, or rows. A single scalar, identifier, value, title,
+  token, or path remains `shape=free_text` even when the user requests only
+  that payload.
 - Do not claim that an action succeeded before its tool result appears in a
   later turn.
 - Use only capability names present in `RUNTIME_CAPABILITY_MAP`.

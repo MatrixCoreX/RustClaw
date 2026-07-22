@@ -23,7 +23,7 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. Before the first planner call, the front door only materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. It does not call a semantic router or decide whether an ordinary request should respond, clarify, or execute. Every ordinary `ask` enters the agent loop, which owns those semantic decisions and can respond, call a capability, synthesize from evidence, repair, continue, checkpoint, or stop. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. The old intent normalizer, contract-repair judge, pre-agent semantic route switch, and route-selected rollback path have been physically removed.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. Before the first planner call, the front door only materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. It does not call a semantic router or decide whether an ordinary request should respond, clarify, or execute. Every ordinary `ask` enters the agent loop, which owns those semantic decisions. A native model turn selects either `call_capability` for another observation/effect or `respond` for the terminal model-authored answer; compatibility providers can still use the validated fallback plan protocol. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. The old intent normalizer, contract-repair judge, pre-agent semantic route switch, and route-selected rollback path have been physically removed.
 
 ### Request And Agent Loop Flow
 
@@ -42,11 +42,11 @@ flowchart TD
     G --> H[Ask context bundle<br/>memory provenance + recent execution + goal/journal refs]
     H --> J[Agent loop<br/>ordinary semantic authority]
     J --> L{Loop round}
-    L --> N[Planner LLM<br/>respond / clarify / call_capability / synthesize]
+    L --> N[Planner LLM<br/>native call_capability / respond<br/>validated fallback plan when required]
     N --> O
     O --> P[PlanVerifier<br/>permission_decision + risk + effect + contract]
     P --> Q{Verified step}
-    Q -->|respond| R[Terminal response]
+    Q -->|respond| R[Structured terminal response<br/>free_text or exact list contract]
     Q -->|synthesize_answer| S[Grounded synthesis]
     Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
     QP --> MG{Non-idempotent mutation?}
@@ -117,7 +117,7 @@ Quick facts for direct skill tasks:
 Operationally: use `kind=ask` when the user gave a natural-language request and RustClaw should decide whether to answer, ask, plan, or execute. Use `kind=run_skill` when an API caller already knows the exact skill and args and only wants RustClaw to run that explicit skill under the task queue, auth, lifecycle, and result projection machinery.
 
 - `Planner-owned front door`: materializes text/audio/attachments and builds `TurnBoundaryEnvelope` from task identity, explicit API fields, structured locator facts, and safety/budget profiles. It performs no semantic LLM call and contains no ordinary respond/clarify/execute branch.
-- `Agent-loop semantic authority`: every ordinary natural-language task enters the loop. The planner decides whether to respond, clarify, call a capability, execute a tool or skill, synthesize from evidence, repair, checkpoint, or stop.
+- `Agent-loop semantic authority`: every ordinary natural-language task enters the loop. Native turns choose `call_capability` or structured `respond`; validated fallback providers may express the equivalent tool, skill, synthesis, clarification, repair, checkpoint, or stop steps through the fallback plan protocol.
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
 - `Side-effect outbox`: non-idempotent mutations from both planner-owned execution and explicit `kind=run_skill` persist `intent_recorded` and `attempt_started` before invocation. A deterministic key derived from task plus canonical action fingerprint enters runner context, external HTTP `Idempotency-Key`, or supported local-adapter environment. Receipt, verification, reconciliation, and commit transitions are fenced by the exact worker claim. Receipt-bearing states suppress original-action replay; ambiguous timeout/crash state checkpoints as `mutation_reconciliation` and accepts only a fingerprint-bound structured `applied|not_applied|still_unknown` resume constraint.
@@ -139,7 +139,7 @@ flowchart TD
     C --> D[Context bundle<br/>memory provenance + goal/journal/artifact refs]
     D --> G[Agent-loop context]
     G --> K[LLM: planner round]
-    K --> L[Plan JSON steps]
+    K --> L[Native machine action<br/>call_capability / respond<br/>or validated fallback plan]
     L --> M
     N[Skill registry<br/>planner_capabilities] --> M
     O[Generated INTERFACE prompts] --> K
@@ -165,7 +165,7 @@ flowchart TD
     Y --> Z
     Z --> ZEV[Task journal event<br/>goal/context + tool lifecycle + coding/team evidence refs]
     Q -->|synthesize_answer| ZA[LLM: grounded synthesis]
-    Q -->|respond| ZB[Terminal response]
+    Q -->|respond| ZB[Structured terminal response<br/>free_text or exact list items/count]
     ZA --> ZC[Evidence coverage]
     ZEV --> ZC
     ZC -->|repair needed| ZR[RepairEnvelope<br/>bounded recovery signal]
@@ -179,6 +179,7 @@ flowchart TD
 - `TurnBoundaryEnvelope`: is built deterministically from authenticated task/session state, attachments, explicit API fields, locators, and policy profiles. It is context for the planner, not a semantic route result.
 - `Planner prompt`: is the first semantic LLM call for an ordinary `ask`. Resume and async-poll executors may restore a previously admitted machine checkpoint, but they cannot introduce a new pre-planner semantic decision path.
 - `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
+- `respond`: is the native terminal action. Ordinary answers carry model-authored `free_text`; strict list answers carry only a structured item array and exact count. Runtime checks the contract and renders those items without parsing multilingual user text or allowing an extra preface/recap. A single scalar, identifier, title, token, or path stays `free_text` rather than becoming a one-item list.
 - `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
 - `Exact machine output`: the planner requests `response_shape=strict` plus a validated `structured_field_selector` such as `command_output`; the runtime projects only that field from `CapabilityResultEnvelope`. Free-form and one-sentence contracts remain model-synthesized.
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.

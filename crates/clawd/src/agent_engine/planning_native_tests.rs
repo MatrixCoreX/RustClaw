@@ -20,6 +20,14 @@ fn turn(tool_calls: Vec<ModelToolCall>, text: &str) -> ModelTurnResponse {
     }
 }
 
+fn respond_call(arguments: Value) -> ModelToolCall {
+    ModelToolCall {
+        id: "respond-1".to_string(),
+        name: "respond".to_string(),
+        arguments,
+    }
+}
+
 #[test]
 fn planner_prefers_structured_capability_observation_over_raw_step_output() {
     let mut loop_state = LoopState::default();
@@ -95,14 +103,141 @@ fn native_tool_call_maps_only_to_capability_action() {
 }
 
 #[test]
-fn native_text_is_a_terminal_model_response() {
-    let actions = actions_from_native_turn(&turn(Vec::new(), "Done."), &callable_capabilities())
-        .expect("terminal action");
+fn native_terminal_text_requires_the_structured_respond_tool() {
+    assert_eq!(
+        actions_from_native_turn(&turn(Vec::new(), "Done."), &callable_capabilities())
+            .expect_err("bare terminal text rejected"),
+        "native_plan_respond_tool_required"
+    );
+}
+
+#[test]
+fn native_respond_maps_free_text_contract_to_terminal_action() {
+    let actions = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "shape": "free_text",
+                "content": "Done.",
+                "items": [],
+                "exact_item_count": 0
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect("terminal action");
 
     assert!(matches!(
         &actions[0],
         AgentAction::Respond { content } if content == "Done."
     ));
+}
+
+#[test]
+fn native_respond_preserves_single_scalar_without_a_list_marker() {
+    let actions = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "shape": "free_text",
+                "content": "RC-CONT-CN-0428-A",
+                "items": [],
+                "exact_item_count": 0
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect("scalar response");
+
+    assert!(matches!(
+        &actions[0],
+        AgentAction::Respond { content } if content == "RC-CONT-CN-0428-A"
+    ));
+}
+
+#[test]
+fn native_respond_renders_only_the_exact_structured_list_items() {
+    let actions = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "shape": "list",
+                "content": "",
+                "items": ["first", "second", "third"],
+                "exact_item_count": 3
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect("list response");
+
+    assert!(matches!(
+        &actions[0],
+        AgentAction::Respond { content }
+            if content == "1. first\n2. second\n3. third"
+    ));
+}
+
+#[test]
+fn native_respond_rejects_list_count_mismatch_and_extra_content() {
+    let count_mismatch = turn(
+        vec![respond_call(json!({
+            "shape": "list",
+            "content": "",
+            "items": ["first", "second"],
+            "exact_item_count": 3
+        }))],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn(&count_mismatch, &callable_capabilities())
+            .expect_err("count mismatch rejected"),
+        "native_respond_list_count_mismatch"
+    );
+
+    let extra_content = turn(
+        vec![respond_call(json!({
+            "shape": "list",
+            "content": "preface",
+            "items": ["first"],
+            "exact_item_count": 1
+        }))],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn(&extra_content, &callable_capabilities())
+            .expect_err("list preface rejected"),
+        "native_respond_list_content_not_empty"
+    );
+}
+
+#[test]
+fn native_respond_cannot_be_mixed_with_runtime_actions() {
+    let mixed = turn(
+        vec![
+            ModelToolCall {
+                id: "call-1".to_string(),
+                name: "call_capability".to_string(),
+                arguments: json!({
+                    "capability": "fs.read",
+                    "args": {"path": "README.md"}
+                }),
+            },
+            respond_call(json!({
+                "shape": "free_text",
+                "content": "Done.",
+                "items": [],
+                "exact_item_count": 0
+            })),
+        ],
+        "",
+    );
+
+    assert_eq!(
+        actions_from_native_turn(&mixed, &callable_capabilities())
+            .expect_err("mixed terminal and executable actions rejected"),
+        "native_respond_mixed_actions"
+    );
 }
 
 #[test]
@@ -203,6 +338,12 @@ fn native_request_separates_system_protocol_from_user_turn() {
         request.tools[0].input_schema["properties"]["capability"]["enum"],
         json!(["fs.read", "process.ps"])
     );
+    assert_eq!(request.tools.len(), 2);
+    assert_eq!(request.tools[1].name, "respond");
+    assert_eq!(
+        request.tools[1].input_schema["properties"]["shape"]["enum"],
+        json!(["free_text", "list"])
+    );
 }
 
 #[test]
@@ -231,5 +372,21 @@ fn native_contract_retry_preserves_tool_schema_and_adds_machine_observation() {
     assert_eq!(
         repaired.messages[2].content,
         vec![ModelContentPart::Text { text: signal }]
+    );
+}
+
+#[test]
+fn native_response_contract_retry_targets_the_respond_schema() {
+    let signal = native_contract_repair_signal("native_respond_list_count_mismatch");
+    let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
+
+    assert_eq!(observation["protocol_observation"]["tool_name"], "respond");
+    assert_eq!(
+        observation["protocol_observation"]["required_argument_fields"],
+        json!(["shape", "content", "items", "exact_item_count"])
+    );
+    assert_eq!(
+        observation["protocol_observation"]["next_action"],
+        "retry_native_respond_call"
     );
 }
