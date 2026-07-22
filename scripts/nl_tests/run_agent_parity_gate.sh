@@ -176,8 +176,9 @@ elif [[ "$CHINESE_PROVIDER_ENV_FILE_STATE" != "disabled" ]]; then
 fi
 
 metrics_args() {
-  local out_path="$1"
-  shift
+  local apply_case_dedupe="$1"
+  local out_path="$2"
+  shift 2
   local args=(
     "$@"
     --output "$out_path"
@@ -195,7 +196,7 @@ metrics_args() {
   if [[ -n "$MAX_PROMPT_BYTES_BEFORE" ]]; then
     args+=(--max-prompt-bytes-before "$MAX_PROMPT_BYTES_BEFORE")
   fi
-  if [[ "$DEDUPE_LATEST_CASE" -eq 1 ]]; then
+  if [[ "$apply_case_dedupe" -eq 1 && "$DEDUPE_LATEST_CASE" -eq 1 ]]; then
     args+=(--dedupe-latest-case)
     if [[ "$EXPECT_CASE_COUNT" != "0" ]]; then
       args+=(--expect-case-count "$EXPECT_CASE_COUNT")
@@ -205,9 +206,10 @@ metrics_args() {
 }
 
 run_metrics_gate() {
-  local out_path="$1"
-  shift
-  array_from_command_lines args metrics_args "$out_path" "$@"
+  local apply_case_dedupe="$1"
+  local out_path="$2"
+  shift 2
+  array_from_command_lines args metrics_args "$apply_case_dedupe" "$out_path" "$@"
   python3 "${SCRIPT_DIR}/summarize_rollout_metrics.py" "${args[@]}"
 }
 
@@ -448,6 +450,10 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_finalizer_architecture.py"
 } > "${OUT_DIR}/maintainability_skill_contracts.txt"
 
+echo "AGENT_PARITY_GATE_STEP on_demand_skill_builds"
+python3 "${ROOT_DIR}/scripts/check_on_demand_skill_builds.py" \
+  > "${OUT_DIR}/on_demand_skill_builds.txt"
+
 echo "AGENT_PARITY_GATE_STEP agent_parity_gate_inventory_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_agent_parity_gate_inventory.py" --self-test
@@ -538,7 +544,7 @@ if [[ "$SKIP_CODING_FIXTURE" -eq 0 ]]; then
     --expectations "${SCRIPT_DIR}/expectations/coding_loop_repair_fixture.jsonl" \
     > "${OUT_DIR}/coding_loop_repair_eval.txt"
 
-  run_metrics_gate \
+  run_metrics_gate 0 \
     "${OUT_DIR}/coding_loop_repair_metrics.json" \
     "${SCRIPT_DIR}/fixtures/client_like_runs/coding_loop_repair" \
     > "${OUT_DIR}/coding_loop_repair_metrics.txt"
@@ -546,7 +552,7 @@ fi
 
 if [[ "${#RUN_DIRS[@]}" -gt 0 && "$SKIP_METRICS" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP live_run_metrics count=${#RUN_DIRS[@]}"
-  run_metrics_gate "${OUT_DIR}/run_metrics.json" "${RUN_DIRS[@]}" \
+  run_metrics_gate 1 "${OUT_DIR}/run_metrics.json" "${RUN_DIRS[@]}" \
     > "${OUT_DIR}/run_metrics.txt"
   LIVE_METRICS_RAN=1
 elif [[ "${#RUN_DIRS[@]}" -eq 0 ]]; then
@@ -577,6 +583,7 @@ fi
   echo "agent_architecture_boundary_contracts=1"
   echo "deterministic_boundary_inventory_contracts=1"
   echo "maintainability_skill_contracts=1"
+  echo "on_demand_skill_builds=1"
   echo "agent_parity_gate_inventory_contracts=1"
   echo "evidence_extractor_contracts=1"
   echo "secret_scan_contract_self_test=1"
