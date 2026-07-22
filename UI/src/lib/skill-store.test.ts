@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   filterSkillStoreItems,
+  removableSkillNames,
   resolveSkillStoreActionName,
   skillStoreErrorMessage,
   skillStoreInstallState,
@@ -77,4 +78,14 @@ test("restores the active skill action from server catalog state after refresh",
   assert.equal(resolveSkillStoreActionName(null, store), "weather");
   assert.equal(resolveSkillStoreActionName("stock", store), "stock");
   assert.equal(resolveSkillStoreActionName(null, { ...store, active_operation: null }), null);
+});
+
+test("lets imported skills be removed regardless of their display group", () => {
+  const removable = removableSkillNames(
+    ["weather"],
+    new Set(["image_partner", "audio_partner"]),
+    new Set(["audio_partner"]),
+  );
+
+  assert.deepEqual(Array.from(removable).sort(), ["image_partner", "weather"]);
 });

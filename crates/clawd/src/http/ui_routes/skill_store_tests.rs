@@ -7,8 +7,8 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use super::{
-    begin_skill_store_mutation, build_ui_router, remove_skill_registry_block,
-    render_skill_store_config,
+    begin_skill_store_mutation, build_ui_router, imported_skill_machine_alias,
+    remove_skill_registry_block, render_skill_store_config,
 };
 use crate::{reload_skill_views, AppState};
 
@@ -104,6 +104,39 @@ fn store_item_names(payload: &Value) -> BTreeSet<&str> {
         .collect()
 }
 
+fn value_array_contains(value: &Value, expected: &str) -> bool {
+    value
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(expected)))
+}
+
+fn register_external_skill_fixture(state: &AppState, workspace: &Path, skill_name: &str) {
+    let bundle_dir = workspace.join("third_party").join(skill_name);
+    std::fs::create_dir_all(&bundle_dir).expect("create external skill bundle");
+    let skill_md = format!(
+        "---\nname: {skill_name}\ndescription: External fixture\n---\n# External fixture\n"
+    );
+    std::fs::write(bundle_dir.join("SKILL.md"), &skill_md).expect("write external skill fixture");
+    let (status, response) = super::finalize_imported_bundle(
+        state,
+        &bundle_dir,
+        &format!("third_party/{skill_name}"),
+        "local-test",
+        true,
+        &skill_md,
+    );
+    assert_eq!(status, StatusCode::OK);
+    assert!(response.0.ok);
+    assert_eq!(
+        response
+            .0
+            .data
+            .as_ref()
+            .and_then(|data| data["skill_name"].as_str()),
+        Some(skill_name)
+    );
+}
+
 #[test]
 fn skill_store_config_keeps_switch_and_uninstall_state_distinct() {
     let raw = "[skills]\nskill_switches = { weather = true }\nskills_list = [\"weather\"]\n";
@@ -132,6 +165,119 @@ fn reimport_removes_every_existing_registry_block_before_append() {
     assert!(removed);
     assert!(!updated.contains("name = \"demo\""));
     assert_eq!(updated.matches("name = \"keep\"").count(), 1);
+}
+
+#[test]
+fn imported_skill_aliases_remain_language_neutral_machine_tokens() {
+    assert_eq!(
+        imported_skill_machine_alias("Vendor.Skill", "vendor_skill"),
+        Some("vendor.skill".to_string())
+    );
+    assert_eq!(imported_skill_machine_alias("My Skill", "my_skill"), None);
+    assert_eq!(
+        imported_skill_machine_alias("图像工具", "external_skill"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn imported_external_skill_can_be_disabled_removed_and_reinstalled() {
+    let (state, workspace) = isolated_skill_store_state();
+    let skill_name = "image_partner";
+    register_external_skill_fixture(&state, &workspace, skill_name);
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state.clone());
+
+    let (status, initial_config) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/config", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(value_array_contains(
+        &initial_config["data"]["managed_skills"],
+        skill_name
+    ));
+    assert!(value_array_contains(
+        &initial_config["data"]["external_skill_names"],
+        skill_name
+    ));
+
+    let mut switches = initial_config["data"]["skill_switches"]
+        .as_object()
+        .expect("skill switches object")
+        .clone();
+    switches.insert(skill_name.to_string(), Value::Bool(false));
+    let (status, disabled) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/config",
+        Some(serde_json::json!({"skill_switches": switches})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(disabled["data"]["skill_switches"][skill_name], false);
+    assert!(!value_array_contains(
+        &disabled["data"]["effective_enabled_skills_preview"],
+        skill_name
+    ));
+    reload_skill_views(&state).expect("apply disabled external skill state");
+
+    let (status, catalog) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let imported = store_item(&catalog, skill_name);
+    assert_eq!(imported["catalog_section"], "other");
+    assert_eq!(imported["source_kind"], "third_party");
+    assert_eq!(imported["installed"], true);
+    assert_eq!(imported["enabled"], false);
+
+    let (status, removed) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/store/remove",
+        Some(serde_json::json!({"skill_name": skill_name, "preserve_config": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(removed["data"]["installed"], false);
+    assert_eq!(removed["data"]["config_preserved"], true);
+    assert!(workspace
+        .join("third_party")
+        .join(skill_name)
+        .join("SKILL.md")
+        .is_file());
+
+    let (status, removed_config) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/config", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!value_array_contains(
+        &removed_config["data"]["managed_skills"],
+        skill_name
+    ));
+    assert!(!value_array_contains(
+        &removed_config["data"]["external_skill_names"],
+        skill_name
+    ));
+
+    let (status, reinstalled) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/store/install",
+        Some(serde_json::json!({"skill_name": skill_name})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reinstalled["data"]["installed"], true);
+    assert_eq!(reinstalled["data"]["compiled"], false);
+
+    let (status, restored_config) =
+        call_skill_store_api(router, Method::GET, "/v1/skills/config", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(value_array_contains(
+        &restored_config["data"]["external_skill_names"],
+        skill_name
+    ));
+    assert_eq!(restored_config["data"]["skill_switches"][skill_name], true);
+    let _ = std::fs::remove_dir_all(workspace);
 }
 
 #[tokio::test]
