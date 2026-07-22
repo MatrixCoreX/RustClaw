@@ -29,11 +29,12 @@ import {
   Trash2,
   Video,
   Volume2,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
 import { skillDescription, skillRiskLabel, skillRuntimeIssue, type UiLanguage } from "../lib/skill-display";
-import { filterSkillStoreItems } from "../lib/skill-store";
+import { filterSkillStoreItems, skillStoreInstallState } from "../lib/skill-store";
 import type { SkillStoreItem, SkillStoreResponse } from "../types/api";
 import { SkillRemovalDialog } from "./SkillRemovalDialog";
 
@@ -118,6 +119,7 @@ export function SkillStoreCatalog({
     const Icon = skillStoreIcon(item.name);
     const runtimeIssue = skillRuntimeIssue(item.skill, lang);
     const actionRunning = actionName === item.name;
+    const repairRequired = skillStoreInstallState(item) === "repair_required";
     return (
       <article key={item.name} className="flex min-h-56 flex-col border border-white/10 bg-[#12151f] p-4 shadow-sm rounded-lg">
         <div className="flex items-start justify-between gap-3">
@@ -132,7 +134,11 @@ export function SkillStoreCatalog({
             }
           >
             {item.installed ? <CheckCircle2 className="h-3 w-3" /> : null}
-            {item.installed ? t("已安装", "Installed") : t("未安装", "Not installed")}
+            {item.installed
+              ? t("已安装", "Installed")
+              : repairRequired
+                ? t("需要修复", "Repair needed")
+                : t("未安装", "Not installed")}
           </span>
         </div>
         <div className="mt-3 min-w-0">
@@ -155,6 +161,14 @@ export function SkillStoreCatalog({
         {runtimeIssue && item.installed ? (
           <p className="mt-3 text-xs leading-5 text-amber-200/85">{runtimeIssue}</p>
         ) : null}
+        {repairRequired ? (
+          <p className="mt-3 text-xs leading-5 text-amber-200/85">
+            {t(
+              "技能设置仍在，但运行文件缺失。修复安装会重新编译并继续使用原有配置。",
+              "The skill settings remain, but its runner is missing. Repairing recompiles it and keeps the existing configuration.",
+            )}
+          </p>
+        ) : null}
         <div className="mt-auto pt-4">
           {item.installed ? (
             <button
@@ -173,8 +187,14 @@ export function SkillStoreCatalog({
               disabled={mutationRunning}
               className="theme-accent-btn w-full justify-center px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {actionRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {t("安装", "Install")}
+              {actionRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : repairRequired ? (
+                <Wrench className="h-4 w-4" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              {repairRequired ? t("修复安装", "Repair install") : t("安装", "Install")}
             </button>
           )}
         </div>

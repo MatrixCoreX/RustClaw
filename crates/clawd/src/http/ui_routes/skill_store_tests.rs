@@ -6,7 +6,10 @@ use axum::http::{Method, Request, StatusCode};
 use serde_json::Value;
 use tower::ServiceExt;
 
-use super::{build_ui_router, remove_skill_registry_block, render_skill_store_config};
+use super::{
+    begin_skill_store_mutation, build_ui_router, remove_skill_registry_block,
+    render_skill_store_config,
+};
 use crate::{reload_skill_views, AppState};
 
 const STORE_TEST_KEY: &str = "skill-store-test-admin";
@@ -296,5 +299,76 @@ async fn skill_store_mutates_the_active_runtime_config_path() {
         std::fs::read_to_string(default_config).expect("reread default config"),
         default_before
     );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn skill_store_repairs_configured_skill_when_runner_is_missing() {
+    let (state, workspace) = isolated_skill_store_state();
+    let config_path = workspace.join("configs/config.toml");
+    let raw = std::fs::read_to_string(&config_path).expect("read isolated config");
+    let configured = render_skill_store_config(
+        &raw,
+        &BTreeMap::from([("weather".to_string(), true)]),
+        &BTreeSet::new(),
+    );
+    std::fs::write(&config_path, configured).expect("write configured install state");
+    reload_skill_views(&state).expect("reload configured install state");
+
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+    let (status, before_repair) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let weather = store_item(&before_repair, "weather");
+    assert_eq!(weather["configured_installed"], true);
+    assert_eq!(weather["runner_available"], false);
+    assert_eq!(weather["installed"], false);
+    assert_eq!(weather["enabled"], false);
+    assert_eq!(weather["installation_issue"], "runner_missing");
+
+    let (status, repaired) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/store/install",
+        Some(serde_json::json!({"skill_name": "weather"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(repaired["data"]["installed"], true);
+    assert!(workspace.join("target/release/weather-skill").is_file());
+
+    let (status, after_repair) =
+        call_skill_store_api(router, Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let weather = store_item(&after_repair, "weather");
+    assert_eq!(weather["configured_installed"], true);
+    assert_eq!(weather["runner_available"], true);
+    assert_eq!(weather["installed"], true);
+    assert_eq!(weather["enabled"], true);
+    assert!(weather["installation_issue"].is_null());
+
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn skill_store_rejects_overlapping_mutations() {
+    let (state, workspace) = isolated_skill_store_state();
+    let _permit = begin_skill_store_mutation(&state).expect("hold skill-store mutation permit");
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+
+    let (status, response) = call_skill_store_api(
+        router,
+        Method::POST,
+        "/v1/skills/store/install",
+        Some(serde_json::json!({"skill_name": "weather"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(response["error"], "skill_store_operation_busy");
     let _ = std::fs::remove_dir_all(workspace);
 }

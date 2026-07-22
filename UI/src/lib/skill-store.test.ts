@@ -40,9 +40,16 @@ test("keeps only items assigned to the tools and skills other group", () => {
 test("keeps removed skills distinct from disabled installed skills", () => {
   const installedButDisabled = { ...item("weather", true, "information"), enabled: false };
   const removed = item("photo_organize", false, "media");
+  const missingRunner = {
+    ...item("invest_copy", false, "finance"),
+    configured_installed: true,
+    runner_available: false,
+    installation_issue: "runner_missing" as const,
+  };
 
   assert.equal(skillStoreInstallState(installedButDisabled), "installed");
   assert.equal(skillStoreInstallState(removed), "not_installed");
+  assert.equal(skillStoreInstallState(missingRunner), "repair_required");
 });
 
 test("renders structured store errors in the selected UI language", () => {
@@ -51,5 +58,6 @@ test("renders structured store errors in the selected UI language", () => {
 
   assert.match(skillStoreErrorMessage("skill_store_build_failed", zh), /编译失败/);
   assert.match(skillStoreErrorMessage("skill_store_build_failed", en), /build failed/i);
+  assert.match(skillStoreErrorMessage("skill_store_operation_busy", en), /another skill/i);
   assert.match(skillStoreErrorMessage("future_error_code", en), /try again/i);
 });

@@ -184,7 +184,28 @@ async fn get_skill_store_catalog(
         .filter(|name| skill_store_item_belongs_to_other_group(&state, name))
         .filter_map(|name| {
             let entry = registry.get(&name)?;
-            let installed = !uninstalled.contains(&name);
+            let configured_installed = !uninstalled.contains(&name);
+            let runner_available = if entry.kind == SkillKind::Runner {
+                runner_binary_name(&registry.runner_name(&name))
+                    .ok()
+                    .map(|binary| {
+                        state
+                            .skill_rt
+                            .workspace_root
+                            .join("target/release")
+                            .join(binary)
+                            .is_file()
+                    })
+                    .unwrap_or(false)
+            } else {
+                true
+            };
+            let installed = configured_installed && runner_available;
+            let installation_issue = if configured_installed && !runner_available {
+                Some("runner_missing")
+            } else {
+                None
+            };
             let (config_files, existing_config_files) = skill_config_state(&state, &name);
             Some(json!({
                 "name": name,
@@ -195,6 +216,9 @@ async fn get_skill_store_catalog(
                 "source_kind": if entry.kind == SkillKind::External { "third_party" } else { "bundled" },
                 "source": entry.external_source_url,
                 "installed": installed,
+                "configured_installed": configured_installed,
+                "runner_available": runner_available,
+                "installation_issue": installation_issue,
                 "enabled": installed && runtime_enabled.contains(&entry.name),
                 "install_mode": entry.install_mode,
                 "config_files": config_files,
@@ -226,6 +250,10 @@ async fn install_skill_store_item(
     }
     let skill_name = match validate_skill_store_mutation(&state, &request.skill_name) {
         Ok(name) => name,
+        Err(error) => return skill_store_error_response(error),
+    };
+    let _mutation_permit = match begin_skill_store_mutation(&state) {
+        Ok(permit) => permit,
         Err(error) => return skill_store_error_response(error),
     };
     let spec = match skill_store_install_spec(&state, &skill_name) {
@@ -279,6 +307,10 @@ async fn remove_skill_store_item(
     }
     let skill_name = match validate_skill_store_mutation(&state, &request.skill_name) {
         Ok(name) => name,
+        Err(error) => return skill_store_error_response(error),
+    };
+    let _mutation_permit = match begin_skill_store_mutation(&state) {
+        Ok(permit) => permit,
         Err(error) => return skill_store_error_response(error),
     };
     let preserve_config = request.preserve_config.unwrap_or(true);
