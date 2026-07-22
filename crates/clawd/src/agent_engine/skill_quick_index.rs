@@ -176,6 +176,27 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
                     attrs.push(format!("action={}", action.trim()));
                 }
             }
+            if let Some(description) = capability.description.as_deref() {
+                let compact = description.split_whitespace().collect::<Vec<_>>().join(" ");
+                if !compact.is_empty() {
+                    attrs.push(format!(
+                        "purpose={}",
+                        compact.chars().take(160).collect::<String>()
+                    ));
+                }
+            }
+            if !capability.semantic_tags.is_empty() {
+                attrs.push(format!(
+                    "semantic_tags={}",
+                    capability
+                        .semantic_tags
+                        .iter()
+                        .take(8)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("|")
+                ));
+            }
             if let Some(effect) = capability.effect {
                 attrs.push(format!("effect={}", effect.as_token()));
             }

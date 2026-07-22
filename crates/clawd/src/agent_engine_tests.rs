@@ -126,6 +126,8 @@ fn quick_index_includes_planner_capability_metadata() {
     let mut manifest = test_skill_manifest(vec![PlannerCapabilityMapping {
         name: "filesystem.list_entries".to_string(),
         action: Some("list_dir".to_string()),
+        description: Some("List direct entries with bounded metadata.".to_string()),
+        semantic_tags: vec!["directory_listing".to_string()],
         effect: Some(PlannerCapabilityEffect::Observe),
         required: vec!["path".to_string()],
         optional: vec!["limit".to_string()],
@@ -162,6 +164,8 @@ fn quick_index_includes_planner_capability_metadata() {
 
     assert!(text.contains("planner_capabilities: filesystem.list_entries"));
     assert!(text.contains("action=list_dir"));
+    assert!(text.contains("purpose=List direct entries with bounded metadata."));
+    assert!(text.contains("semantic_tags=directory_listing"));
     assert!(text.contains("effect=observe"));
     assert!(text.contains("required=path"));
     assert!(text.contains("optional=limit"));
@@ -187,6 +191,8 @@ fn quick_index_discloses_distinct_actions_instead_of_alias_prefixes() {
     let capability = |name: &str, action: &str, preferred: bool| PlannerCapabilityMapping {
         name: name.to_string(),
         action: Some(action.to_string()),
+        description: None,
+        semantic_tags: Vec::new(),
         effect: Some(PlannerCapabilityEffect::Observe),
         required: vec!["path".to_string()],
         optional: Vec::new(),

@@ -28,6 +28,21 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(action) = mapping.action.as_deref() {
         parts.push(format!("action={action}"));
     }
+    if let Some(description) = mapping.description.as_deref() {
+        parts.push(format!("purpose={}", compact_leaf_description(description)));
+    }
+    if !mapping.semantic_tags.is_empty() {
+        parts.push(format!(
+            "semantic_tags={}",
+            mapping
+                .semantic_tags
+                .iter()
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("|")
+        ));
+    }
     if let Some(effect) = mapping.effect {
         parts.push(format!("effect={}", effect.as_token()));
     }
@@ -95,6 +110,17 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
         mapping.name.clone()
     } else {
         format!("{}({})", mapping.name, parts.join(","))
+    }
+}
+
+fn compact_leaf_description(description: &str) -> String {
+    let compact = description.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = compact.chars();
+    let prefix = chars.by_ref().take(160).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}...")
+    } else {
+        prefix
     }
 }
 
