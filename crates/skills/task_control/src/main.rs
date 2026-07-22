@@ -65,6 +65,7 @@ struct SkillInput {
     alias: Option<String>,
     alias_target: Option<String>,
     failure_class: Option<String>,
+    repair_kind: Option<String>,
     index: Option<usize>,
     task_id: Option<String>,
     checkpoint_id: Option<String>,
@@ -169,6 +170,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         "preview_resume" | "resume_preview" => "preview_resume",
         "preview_provider_failure" => "preview_provider_failure",
         "preview_retryable_failure_observation" => "preview_retryable_failure_observation",
+        "preview_repair_observation" => "preview_repair_observation",
         "preview_coding_repair" => "preview_coding_repair",
         "bind_session_alias" => "bind_session_alias",
         "resume" | "resume_task" | "continue_task" => "resume",
@@ -211,6 +213,12 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
     }
     let failure_class = obj
         .get("failure_class")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let repair_kind = obj
+        .get("repair_kind")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -264,6 +272,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
             alias,
             alias_target,
             failure_class,
+            repair_kind,
             index,
             task_id,
             checkpoint_id,
@@ -279,6 +288,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         alias,
         alias_target,
         failure_class,
+        repair_kind,
         index,
         task_id,
         checkpoint_id,
@@ -490,6 +500,25 @@ fn execute(
             }
             "preview_retryable_failure_observation" => {
                 let extra = retryable_failure_observation_preview_extra();
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
+            "preview_repair_observation" => {
+                let Some(repair_kind) = input.repair_kind.as_deref() else {
+                    let extra = task_control_input_status_extra(
+                        "preview_repair_observation",
+                        "missing_repair_kind",
+                        None,
+                    );
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                };
+                let Some(extra) = repair_observation_preview_extra(repair_kind) else {
+                    let extra = task_control_input_status_extra(
+                        "preview_repair_observation",
+                        "unsupported_repair_kind",
+                        None,
+                    );
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                };
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "preview_coding_repair" => {
