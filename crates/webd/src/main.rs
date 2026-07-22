@@ -27,6 +27,7 @@ use uuid::Uuid;
 struct AppState {
     upstream: String,
     client: reqwest::Client,
+    long_running_client: reqwest::Client,
     forward_x_forwarded: bool,
     max_incoming_body_bytes: usize,
     cookie_name: String,
@@ -74,6 +75,11 @@ async fn main() -> anyhow::Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("build reqwest client failed")?;
+    let long_running_client = reqwest::Client::builder()
+        .connect_timeout(connect)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("build long-running reqwest client failed")?;
 
     let upstream = config.webd.upstream.trim().to_string();
     if upstream.is_empty() {
@@ -84,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         upstream,
         client,
+        long_running_client,
         forward_x_forwarded: config.webd.forward_x_forwarded,
         max_incoming_body_bytes: config.webd.max_incoming_body_bytes.max(1),
         cookie_name: config.webd.session_cookie_name.clone(),
@@ -345,6 +352,7 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
         .path_and_query()
         .map(|pq| pq.as_str())
         .unwrap_or("/");
+    let use_long_running_client = uses_long_running_upstream_wait(&method, path_and_query);
     let base = state.upstream.trim_end_matches('/');
     let full_url = format!("{}{}", base, path_and_query);
 
@@ -384,8 +392,12 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
         }
     };
 
-    let rb = state
-        .client
+    let client = if use_long_running_client {
+        &state.long_running_client
+    } else {
+        &state.client
+    };
+    let rb = client
         .request(method.clone(), &full_url)
         .headers(out_headers);
     let rb = if bytes.is_empty() { rb } else { rb.body(bytes) };
@@ -424,6 +436,14 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
             )
         }
     }
+}
+
+fn uses_long_running_upstream_wait(method: &axum::http::Method, path_and_query: &str) -> bool {
+    *method == axum::http::Method::POST
+        && path_and_query
+            .split('?')
+            .next()
+            .is_some_and(|path| path == "/v1/skills/store/install")
 }
 
 fn plain_error(status: StatusCode, msg: &str, origin: Option<&HeaderValue>) -> Response {

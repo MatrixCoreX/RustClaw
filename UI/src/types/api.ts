@@ -368,6 +368,9 @@ export interface SkillStoreItem {
   source_kind: "bundled" | "third_party";
   source?: string | null;
   installed: boolean;
+  configured_installed?: boolean;
+  runner_available?: boolean;
+  installation_issue?: "runner_missing" | null;
   enabled: boolean;
   install_mode?: string | null;
   config_files?: string[];

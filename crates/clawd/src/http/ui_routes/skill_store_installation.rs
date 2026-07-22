@@ -23,6 +23,7 @@ enum SkillStoreErrorCode {
     BuildBinaryMissing,
     BinaryRemoveFailed,
     ConfigRemoveFailed,
+    OperationBusy,
 }
 
 impl SkillStoreErrorCode {
@@ -45,6 +46,7 @@ impl SkillStoreErrorCode {
             Self::BuildBinaryMissing => "skill_store_build_binary_missing",
             Self::BinaryRemoveFailed => "skill_store_binary_remove_failed",
             Self::ConfigRemoveFailed => "skill_store_config_remove_failed",
+            Self::OperationBusy => "skill_store_operation_busy",
         }
     }
 }
@@ -71,6 +73,32 @@ impl SkillStoreOperationError {
 }
 
 type SkillStoreOperationResult<T> = Result<T, SkillStoreOperationError>;
+
+fn begin_skill_store_mutation(state: &AppState) -> SkillStoreOperationResult<OwnedSemaphorePermit> {
+    static GATES: OnceLock<Mutex<HashMap<PathBuf, Arc<Semaphore>>>> = OnceLock::new();
+    let gate = GATES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::OperationBusy,
+                error,
+            )
+        })?
+        .entry(state.skill_rt.workspace_root.clone())
+        .or_insert_with(|| Arc::new(Semaphore::new(1)))
+        .clone();
+    gate
+        .try_acquire_owned()
+        .map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::CONFLICT,
+                SkillStoreErrorCode::OperationBusy,
+                error,
+            )
+        })
+}
 
 fn skill_store_error_response(
     error: SkillStoreOperationError,

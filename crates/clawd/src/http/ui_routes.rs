@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::super::{
     attach_pending_channel_bind_session_install_flow, bind_channel_identity,
