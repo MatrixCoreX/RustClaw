@@ -267,6 +267,16 @@ fn structured_extra_string(structured: &StructuredSkillError, key: &str) -> Opti
         .map(str::to_string)
 }
 
+fn structured_error_allows_bounded_replan(structured: &StructuredSkillError) -> bool {
+    let Some(extra) = structured.extra.as_ref().and_then(Value::as_object) else {
+        return false;
+    };
+    extra.get("retryable").and_then(Value::as_bool) == Some(true)
+        && extra.get("side_effect_applied").and_then(Value::as_bool) == Some(false)
+        && extra.get("failure_phase").and_then(Value::as_str) == Some("pre_dispatch")
+        && extra.get("recovery_action").and_then(Value::as_str) == Some("replan_arguments")
+}
+
 pub(crate) fn policy_block_error(
     reason_code: &str,
     observed_facts: Vec<String>,
@@ -801,6 +811,9 @@ fn merge_object_fields(target: &mut Value, source: Value) {
 
 pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
     if let Some(structured) = parse_structured_skill_error(err) {
+        if structured_error_allows_bounded_replan(&structured) {
+            return true;
+        }
         if structured_crypto_account_access_error(skill_name, &structured).is_some() {
             return true;
         }

@@ -70,6 +70,68 @@ struct SkillOutput {
     extra: Option<Value>,
 }
 
+#[derive(Debug, Clone)]
+struct SkillFailure {
+    error_text: String,
+    extra: Value,
+}
+
+impl SkillFailure {
+    fn invalid_input(error_text: impl Into<String>) -> Self {
+        Self {
+            error_text: error_text.into(),
+            extra: error_extra("invalid_input"),
+        }
+    }
+
+    fn execution_failed(error_text: impl Into<String>) -> Self {
+        Self {
+            error_text: error_text.into(),
+            extra: error_extra("execution_failed"),
+        }
+    }
+
+    fn category_not_configured(cfg: &RootConfig, category: &str) -> Self {
+        let mut available_categories = cfg.rss.categories.keys().cloned().collect::<Vec<_>>();
+        available_categories.sort();
+        let default_category = cfg
+            .rss
+            .default_category
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        Self {
+            error_text: format!("no configured feeds for category={category}"),
+            extra: json!({
+                "schema_version": 1,
+                "source_skill": SKILL_NAME,
+                "status": "error",
+                "error_kind": "category_not_configured",
+                "message_key": "skill.rss_fetch.category_not_configured",
+                "retryable": true,
+                "failure_phase": "pre_dispatch",
+                "side_effect_applied": false,
+                "recovery_action": "replan_arguments",
+                "invalid_argument": "category",
+                "rejected_value": category,
+                "default_category": default_category,
+                "available_categories": available_categories,
+            }),
+        }
+    }
+
+    #[cfg(test)]
+    fn contains(&self, pattern: &str) -> bool {
+        self.error_text.contains(pattern)
+    }
+}
+
+impl std::fmt::Display for SkillFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.error_text)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RootConfig {
     #[serde(default)]
@@ -229,10 +291,13 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => {
+                let config_before = config_snapshot(&cfg);
                 let result = execute(&mut cfg, req.args);
-                if let Err(e) = save_config(&cfg) {
-                    let _ = std::io::stderr()
-                        .write_fmt(format_args!("rss_fetch save_config failed: {}\n", e));
+                if config_changed(config_before.as_deref(), &cfg) {
+                    if let Err(e) = save_config(&cfg) {
+                        let _ = std::io::stderr()
+                            .write_fmt(format_args!("rss_fetch save_config failed: {}\n", e));
+                    }
                 }
                 match result {
                     Ok(output) => Resp {
@@ -246,8 +311,8 @@ fn main() -> anyhow::Result<()> {
                         request_id: req.request_id,
                         status: "error".to_string(),
                         text: String::new(),
-                        extra: Some(error_extra("execution_failed")),
-                        error_text: Some(err),
+                        extra: Some(err.extra),
+                        error_text: Some(err.error_text),
                     },
                 }
             }
@@ -274,6 +339,14 @@ fn error_extra(error_kind: &str) -> Value {
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
+}
+
+fn config_snapshot(cfg: &RootConfig) -> Option<String> {
+    toml::to_string(cfg).ok()
+}
+
+fn config_changed(before: Option<&str>, cfg: &RootConfig) -> bool {
+    before != config_snapshot(cfg).as_deref()
 }
 
 /// Legacy / mistaken `action` names from older callers or schedules; normalized before dispatch.
@@ -337,12 +410,12 @@ fn direct_feed_selector_present(obj: &serde_json::Map<String, Value>) -> bool {
     false
 }
 
-fn execute(cfg: &mut RootConfig, args: Value) -> Result<SkillOutput, String> {
+fn execute(cfg: &mut RootConfig, args: Value) -> Result<SkillOutput, SkillFailure> {
     let mut obj = args
         .as_object()
         .cloned()
-        .ok_or_else(|| "args must be object".to_string())?;
-    normalize_rss_legacy_actions(&mut obj)?;
+        .ok_or_else(|| SkillFailure::invalid_input("args must be object"))?;
+    normalize_rss_legacy_actions(&mut obj).map_err(SkillFailure::invalid_input)?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -351,9 +424,11 @@ fn execute(cfg: &mut RootConfig, args: Value) -> Result<SkillOutput, String> {
         .to_ascii_lowercase();
 
     match action.as_str() {
-        "fetch" => fetch_direct_feeds(&obj),
+        "fetch" => fetch_direct_feeds(&obj).map_err(SkillFailure::invalid_input),
         "latest" | "news" => fetch_layered_news(cfg, &obj),
-        _ => Err("unsupported action; use fetch|latest|news".to_string()),
+        _ => Err(SkillFailure::invalid_input(
+            "unsupported action; use fetch|latest|news",
+        )),
     }
 }
 
@@ -502,7 +577,7 @@ fn now_iso_secs() -> String {
 fn fetch_layered_news(
     cfg: &mut RootConfig,
     obj: &serde_json::Map<String, Value>,
-) -> Result<SkillOutput, String> {
+) -> Result<SkillOutput, SkillFailure> {
     let default_category = cfg
         .rss
         .default_category
@@ -587,7 +662,12 @@ fn fetch_layered_news(
     };
 
     if urls_with_state.is_empty() {
-        return Err(format!("no configured feeds for category={category}"));
+        if is_explicit {
+            return Err(SkillFailure::invalid_input(
+                "latest/news requires at least one valid http(s) feed URL",
+            ));
+        }
+        return Err(SkillFailure::category_not_configured(cfg, &category));
     }
 
     let per_feed_limit = (limit * 3).max(20).min(100);
@@ -657,10 +737,10 @@ fn fetch_layered_news(
     let items: Vec<FeedItem> = deduped.into_iter().take(limit).collect();
 
     if items.is_empty() {
-        return Err(format!(
+        return Err(SkillFailure::execution_failed(format!(
             "no feed items available: all {} source(s) failed or returned no items",
             urls_with_state.len()
-        ));
+        )));
     }
 
     let header = format!(

@@ -58,9 +58,7 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("an authoritative structured operation owned by a matching runtime"));
     assert!(prompt.contains("call the `call_capability` function with that capability"));
     assert!(prompt.contains("When a structured parse, validation, preview, inspection"));
-    assert!(normalized.contains(
-        "call that capability instead of substituting your own inference"
-    ));
+    assert!(normalized.contains("call that capability instead of substituting your own inference"));
     assert!(prompt.contains("A self-contained transformation whose"));
     assert!(prompt.contains("no runtime-owned validation, evidence, or effect is"));
     assert!(prompt.contains("A matching validation or guard capability owns the complete check"));
@@ -127,6 +125,19 @@ fn answer_verifier_distinguishes_listing_metadata_from_file_contents() {
     assert!(prompt.contains("does not prove current file contents"));
     assert!(prompt.contains("clearly generic or approximate type-level description"));
     assert!(prompt.contains("current keys, members, values, scripts, schemas"));
+}
+
+#[test]
+fn answer_verifier_does_not_invent_configurable_token_mappings() {
+    let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../prompts/layers/overlays/answer_verifier_prompt.md");
+    let prompt = std::fs::read_to_string(overlay).expect("read answer verifier prompt");
+
+    assert!(prompt.contains("Do not invent semantic mappings"));
+    assert!(prompt.contains("position in an `available_*` array"));
+    assert!(prompt.contains("successful runtime call with an allowed replacement token"));
+    assert!(prompt
+        .contains("does not excuse a candidate that contradicts an explicit observed mapping"));
 }
 
 #[test]
