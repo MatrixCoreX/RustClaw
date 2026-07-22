@@ -22,6 +22,9 @@ use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResul
 
 const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_protocol.md";
 const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
+const NATIVE_CALL_CAPABILITY_TOOL: &str = "call_capability";
+const NATIVE_RESPOND_TOOL: &str = "respond";
+const MAX_NATIVE_RESPONSE_ITEMS: usize = 64;
 
 fn planner_last_observation(loop_state: &LoopState) -> String {
     super::observed_output::latest_structured_capability_observation(loop_state)
@@ -485,23 +488,55 @@ fn native_planner_request(
             ModelMessage::text(ModelRole::System, system_prompt),
             ModelMessage::text(ModelRole::User, user_prompt),
         ],
-        tools: vec![ModelToolDefinition {
-            name: "call_capability".to_string(),
-            description: "Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "required": ["capability", "args"],
-                "properties": {
-                    "capability": capability_schema,
-                    "args": {
-                        "type": "object",
-                        "description": "Structured capability arguments."
-                    }
-                },
-                "additionalProperties": false
-            }),
-            strict: true,
-        }],
+        tools: vec![
+            ModelToolDefinition {
+                name: NATIVE_CALL_CAPABILITY_TOOL.to_string(),
+                description: "Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "required": ["capability", "args"],
+                    "properties": {
+                        "capability": capability_schema,
+                        "args": {
+                            "type": "object",
+                            "description": "Structured capability arguments."
+                        }
+                    },
+                    "additionalProperties": false
+                }),
+                strict: true,
+            },
+            ModelToolDefinition {
+                name: NATIVE_RESPOND_TOOL.to_string(),
+                description: "Submit the final user-visible response with a machine-verifiable response shape. For free_text, put the answer in content and use an empty items array with exact_item_count=0. For list, leave content empty and provide exactly the final list items plus their exact count.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "required": ["shape", "content", "items", "exact_item_count"],
+                    "properties": {
+                        "shape": {
+                            "type": "string",
+                            "enum": ["free_text", "list"]
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "free_text_content_or_empty_list_content"
+                        },
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": MAX_NATIVE_RESPONSE_ITEMS
+                        },
+                        "exact_item_count": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": MAX_NATIVE_RESPONSE_ITEMS
+                        }
+                    },
+                    "additionalProperties": false
+                }),
+                strict: true,
+            },
+        ],
         response_schema: None,
         stream: true,
         metadata,
@@ -509,14 +544,29 @@ fn native_planner_request(
 }
 
 fn native_contract_repair_signal(error_code: &str) -> String {
+    let respond_contract_error = error_code.starts_with("native_respond_")
+        || error_code == "native_plan_respond_tool_required";
+    let (tool_name, required_argument_fields, next_action) = if respond_contract_error {
+        (
+            NATIVE_RESPOND_TOOL,
+            vec!["shape", "content", "items", "exact_item_count"],
+            "retry_native_respond_call",
+        )
+    } else {
+        (
+            NATIVE_CALL_CAPABILITY_TOOL,
+            vec!["capability", "args"],
+            "retry_native_tool_call",
+        )
+    };
     json!({
         "protocol_observation": {
             "status": "error",
             "error_code": error_code,
-            "tool_name": "call_capability",
-            "required_argument_fields": ["capability", "args"],
+            "tool_name": tool_name,
+            "required_argument_fields": required_argument_fields,
             "capability_value_source": "RUNTIME_CAPABILITY_MAP",
-            "next_action": "retry_native_tool_call"
+            "next_action": next_action
         }
     })
     .to_string()
@@ -552,21 +602,31 @@ fn actions_from_native_turn(
         }) {
             return Err("native_plan_capability_not_in_runtime_catalog".to_string());
         }
+        if actions
+            .iter()
+            .any(|action| matches!(action, AgentAction::Respond { .. }))
+            && actions.len() != 1
+        {
+            return Err("native_respond_mixed_actions".to_string());
+        }
         return Ok(actions);
     }
     let content = turn.text.trim();
     if content.is_empty() {
         return Err("native_plan_empty".to_string());
     }
-    Ok(vec![AgentAction::Respond {
-        content: content.to_string(),
-    }])
+    Err("native_plan_respond_tool_required".to_string())
 }
 
 fn action_from_native_tool_call(call: &ModelToolCall) -> Result<AgentAction, String> {
-    if call.name != "call_capability" {
-        return Err("native_plan_unknown_tool".to_string());
+    match call.name.as_str() {
+        NATIVE_CALL_CAPABILITY_TOOL => action_from_native_capability_call(call),
+        NATIVE_RESPOND_TOOL => action_from_native_respond_call(call),
+        _ => Err("native_plan_unknown_tool".to_string()),
     }
+}
+
+fn action_from_native_capability_call(call: &ModelToolCall) -> Result<AgentAction, String> {
     let arguments = call
         .arguments
         .as_object()
@@ -586,6 +646,73 @@ fn action_from_native_tool_call(call: &ModelToolCall) -> Result<AgentAction, Str
         capability: capability.to_string(),
         args,
     })
+}
+
+fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, String> {
+    let arguments = call
+        .arguments
+        .as_object()
+        .ok_or_else(|| "native_respond_arguments_not_object".to_string())?;
+    let shape = arguments
+        .get("shape")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "native_respond_shape_missing".to_string())?;
+    let content = arguments
+        .get("content")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "native_respond_content_missing".to_string())?;
+    let items = arguments
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "native_respond_items_not_array".to_string())?;
+    let exact_item_count = arguments
+        .get("exact_item_count")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value <= MAX_NATIVE_RESPONSE_ITEMS)
+        .ok_or_else(|| "native_respond_exact_item_count_invalid".to_string())?;
+
+    match shape {
+        "free_text" => {
+            if content.trim().is_empty() {
+                return Err("native_respond_free_text_empty".to_string());
+            }
+            if !items.is_empty() || exact_item_count != 0 {
+                return Err("native_respond_free_text_contract_mismatch".to_string());
+            }
+            Ok(AgentAction::Respond {
+                content: content.trim().to_string(),
+            })
+        }
+        "list" => {
+            if !content.trim().is_empty() {
+                return Err("native_respond_list_content_not_empty".to_string());
+            }
+            if exact_item_count == 0 || items.len() != exact_item_count {
+                return Err("native_respond_list_count_mismatch".to_string());
+            }
+            let items = items
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(str::trim)
+                        .filter(|item| {
+                            !item.is_empty() && !item.contains('\r') && !item.contains('\n')
+                        })
+                        .map(ToString::to_string)
+                        .ok_or_else(|| "native_respond_list_item_invalid".to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let content = items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| format!("{}. {item}", index + 1))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Ok(AgentAction::Respond { content })
+        }
+        _ => Err("native_respond_shape_unsupported".to_string()),
+    }
 }
 
 fn log_plan_split(task: &ClaimedTask, loop_state: &LoopState, plan_result: &PlanResult) {
