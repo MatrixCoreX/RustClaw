@@ -158,11 +158,18 @@ fn native_leaf_contracts_project_registry_owned_semantics() {
 
     let contracts = planner_callable_leaf_contracts_for_task(&state, &task);
 
-    assert!(contracts.contains("config.validate(purpose=Parse structured configuration syntax"));
+    assert!(contracts.contains("config.validate(semantic_scope=leaf"));
+    assert!(contracts.contains("purpose=Parse structured configuration syntax"));
     assert!(contracts.contains("semantic_tags=syntax_validation|structured_parse"));
-    assert!(contracts.contains("config.guard_rustclaw_config(purpose=Run the authoritative"));
+    assert!(contracts.contains("config.guard_rustclaw_config(semantic_scope=leaf"));
+    assert!(contracts.contains("purpose=Run the authoritative RustClaw semantic safety"));
     assert!(contracts
         .contains("semantic_tags=rustclaw_config_safety|config_risk_scan|config_problem_check"));
+    assert!(contracts.contains("capability_group(tokens=doc_parse,semantic_scope=skill"));
+    assert!(contracts.contains("purpose=Parse supported local documents"));
+    assert!(contracts.contains("semantic_tags=document_parsing|document_summary"));
+    assert!(!contracts.contains("document.parse("));
+    assert!(!contracts.contains("omitted_leaf_contracts="));
     assert!(contracts.chars().count() <= NATIVE_LEAF_CONTRACT_CHAR_BUDGET);
 }
 
