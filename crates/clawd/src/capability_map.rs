@@ -6,6 +6,7 @@ use claw_core::skill_registry::{
 };
 
 const UNGROUPED_CAPABILITY_TOKEN: &str = "ungrouped";
+const NATIVE_LEAF_CONTRACT_CHAR_BUDGET: usize = 4096;
 
 fn registry_group_token(entry: &SkillRegistryEntry) -> Option<String> {
     entry
@@ -199,6 +200,74 @@ pub(crate) fn planner_callable_capability_names_for_task(
         names.retain(|name| allowed.contains(name));
     }
     names.into_iter().collect()
+}
+
+pub(crate) fn planner_callable_leaf_contracts_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> String {
+    let allowed = child_allowed_capabilities(task);
+    let mut contracts = BTreeMap::new();
+    if let Some(registry) = state.get_skills_registry() {
+        for skill in state.planner_available_skills_for_task(task) {
+            for mapping in registry.planner_capabilities(&skill) {
+                if allowed
+                    .as_ref()
+                    .is_some_and(|allowed| !allowed.contains(&mapping.name))
+                {
+                    continue;
+                }
+                let description = mapping
+                    .description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|description| !description.is_empty());
+                let semantic_tags = mapping
+                    .semantic_tags
+                    .iter()
+                    .map(|tag| tag.trim())
+                    .filter(|tag| !tag.is_empty())
+                    .take(8)
+                    .collect::<Vec<_>>();
+                if description.is_none() && semantic_tags.is_empty() {
+                    continue;
+                }
+                let mut attributes = Vec::new();
+                if let Some(description) = description {
+                    attributes.push(format!("purpose={}", compact_leaf_description(description)));
+                }
+                if !semantic_tags.is_empty() {
+                    attributes.push(format!("semantic_tags={}", semantic_tags.join("|")));
+                }
+                contracts
+                    .entry(mapping.name.clone())
+                    .or_insert_with(|| format!("{}({})", mapping.name, attributes.join(",")));
+            }
+        }
+    }
+
+    let mut selected = Vec::new();
+    let mut used_chars = 0usize;
+    let mut omitted = 0usize;
+    for contract in contracts.into_values() {
+        let separator_chars = usize::from(!selected.is_empty());
+        let contract_chars = contract.chars().count();
+        if used_chars + separator_chars + contract_chars > NATIVE_LEAF_CONTRACT_CHAR_BUDGET {
+            omitted += 1;
+            continue;
+        }
+        used_chars += separator_chars + contract_chars;
+        selected.push(contract);
+    }
+    if omitted > 0 {
+        let marker = format!("omitted_leaf_contracts={omitted}");
+        let separator_chars = usize::from(!selected.is_empty());
+        if used_chars + separator_chars + marker.chars().count() <= NATIVE_LEAF_CONTRACT_CHAR_BUDGET
+        {
+            selected.push(marker);
+        }
+    }
+    selected.join(";")
 }
 
 fn child_allowed_capabilities(task: &ClaimedTask) -> Option<BTreeSet<String>> {

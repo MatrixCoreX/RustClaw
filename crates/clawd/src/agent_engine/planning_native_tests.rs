@@ -310,6 +310,7 @@ fn native_request_separates_system_protocol_from_user_turn() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        "config.guard(purpose=authoritative validation,semantic_tags=config_safety)",
     );
 
     assert_eq!(request.messages.len(), 2);
@@ -338,6 +339,12 @@ fn native_request_separates_system_protocol_from_user_turn() {
         request.tools[0].input_schema["properties"]["capability"]["enum"],
         json!(["fs.read", "process.ps"])
     );
+    assert!(
+        request.tools[0].input_schema["properties"]["capability"]["description"]
+            .as_str()
+            .expect("capability description")
+            .contains("runtime_leaf_capability_contracts_v1=config.guard")
+    );
     assert_eq!(request.tools.len(), 2);
     assert_eq!(request.tools[1].name, "respond");
     assert_eq!(
@@ -353,6 +360,7 @@ fn native_contract_retry_scopes_required_tool_and_adds_machine_observation() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        "",
     );
     let signal = native_contract_repair_signal("native_plan_capability_missing");
     let repaired = native_contract_retry_request(&request, &signal);
@@ -385,6 +393,7 @@ fn native_response_contract_retry_targets_the_respond_schema() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        "",
     );
     let repaired = native_contract_retry_request(&request, &signal);
     let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
@@ -414,6 +423,7 @@ fn native_contract_repair_supports_two_bounded_protocol_transitions() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        "",
     );
 
     let capability_retry = native_contract_retry_request(&request, &capability_signal);

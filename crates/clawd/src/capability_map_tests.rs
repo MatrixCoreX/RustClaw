@@ -139,6 +139,34 @@ fn real_config_capability_hints_keep_leaf_semantics_distinct() {
 }
 
 #[test]
+fn native_leaf_contracts_project_registry_owned_semantics() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "native-leaf-contracts".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+
+    let contracts = planner_callable_leaf_contracts_for_task(&state, &task);
+
+    assert!(contracts.contains("config.validate(purpose=Parse structured configuration syntax"));
+    assert!(contracts.contains("semantic_tags=syntax_validation|structured_parse"));
+    assert!(contracts.contains("config.guard_rustclaw_config(purpose=Run the authoritative"));
+    assert!(contracts
+        .contains("semantic_tags=rustclaw_config_safety|config_risk_scan|config_problem_check"));
+    assert!(contracts.chars().count() <= NATIVE_LEAF_CONTRACT_CHAR_BUDGET);
+}
+
+#[test]
 fn permission_profile_hint_uses_registry_machine_fields() {
     let entry = registry_entry_from(
         r#"

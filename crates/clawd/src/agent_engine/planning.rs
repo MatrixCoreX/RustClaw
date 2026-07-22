@@ -71,6 +71,10 @@ impl<'a> PlannerToolLibrary<'a> {
     fn callable_capability_names(&self) -> Vec<String> {
         crate::capability_map::planner_callable_capability_names_for_task(self.state, self.task)
     }
+
+    fn callable_leaf_contracts(&self) -> String {
+        crate::capability_map::planner_callable_leaf_contracts_for_task(self.state, self.task)
+    }
 }
 
 pub(super) async fn plan_round_actions(
@@ -326,11 +330,13 @@ pub(super) async fn plan_round_actions(
         .as_ref()
         .map(crate::task_budget_contract::TaskBudgetSlice::provider_call_timeout_seconds);
     let callable_capability_names = planner_tool_library.callable_capability_names();
+    let callable_leaf_contracts = planner_tool_library.callable_leaf_contracts();
     let native_request = native_planner_request(
         &native_system_prompt,
         &native_user_prompt,
         provider_timeout_seconds,
         &callable_capability_names,
+        &callable_leaf_contracts,
     );
     if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback(
         state,
@@ -475,6 +481,7 @@ fn native_planner_request(
     user_prompt: &str,
     provider_timeout_seconds: Option<u64>,
     callable_capability_names: &[String],
+    callable_leaf_contracts: &str,
 ) -> ModelTurnRequest {
     let mut metadata = std::collections::BTreeMap::new();
     if let Some(timeout_seconds) = provider_timeout_seconds {
@@ -483,9 +490,14 @@ fn native_planner_request(
             Value::Number(timeout_seconds.into()),
         );
     }
+    let mut capability_description = "runtime_callable_capability_catalog_v1.token".to_string();
+    if !callable_leaf_contracts.is_empty() {
+        capability_description.push_str("; runtime_leaf_capability_contracts_v1=");
+        capability_description.push_str(callable_leaf_contracts);
+    }
     let mut capability_schema = json!({
         "type": "string",
-        "description": "runtime_callable_capability_catalog_v1.token"
+        "description": capability_description
     });
     if !callable_capability_names.is_empty() {
         capability_schema["enum"] = json!(callable_capability_names);
