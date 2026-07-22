@@ -183,6 +183,16 @@ fn parse_input_accepts_resume_and_pause_machine_actions() {
         Some("quota_exhausted")
     );
 
+    let retryable_failure = parse_input(&json!({
+        "action": "preview_retryable_failure_observation"
+    }))
+    .expect("retryable failure observation preview input");
+
+    assert_eq!(
+        retryable_failure.action,
+        "preview_retryable_failure_observation"
+    );
+
     let coding_repair = parse_input(&json!({
         "action": "preview_coding_repair"
     }))
@@ -344,6 +354,37 @@ fn provider_failure_preview_uses_shared_read_only_wait_contract() {
         extra["checkpoint"]["resume_entrypoint"],
         "next_planner_round"
     );
+}
+
+#[test]
+fn retryable_failure_observation_preview_exposes_bounded_machine_contract() {
+    let extra = retryable_failure_observation_preview_extra();
+
+    assert_eq!(extra["action"], "preview_retryable_failure_observation");
+    assert_eq!(extra["status"], "dry_run");
+    assert_eq!(extra["synthetic"], true);
+    assert_eq!(extra["would_mutate"], false);
+    assert_eq!(extra["observation"]["retryable"], true);
+    assert_eq!(extra["observation"]["error_code"], "tool_retryable_failure");
+    assert_eq!(extra["observation"]["recovery_action"], "replan");
+    assert_eq!(
+        extra["observation"]["forbidden_repeat_signature"],
+        "[REDACTED]"
+    );
+    assert_eq!(
+        extra["observation"]["bounded_repair_attempts"]["observed_attempt_count"],
+        1
+    );
+    assert_eq!(
+        extra["observation"]["bounded_repair_attempts"]["repair_attempt_count"],
+        0
+    );
+    assert_eq!(
+        extra["observation"]["bounded_repair_attempts"]["limit_source"],
+        "runtime_soft_budget"
+    );
+    assert!(extra["observation"]["bounded_repair_attempts"]["max_attempts"].is_null());
+    assert!(extra["observation"]["bounded_repair_attempts"]["remaining_attempts"].is_null());
 }
 
 #[test]

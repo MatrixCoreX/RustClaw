@@ -161,6 +161,50 @@ pub(super) fn provider_failure_preview_extra(policy: ProviderFailurePolicy) -> V
     })
 }
 
+pub(super) fn retryable_failure_observation_preview_extra() -> Value {
+    json!({
+        "schema_version": 1,
+        "action": "preview_retryable_failure_observation",
+        "status": "dry_run",
+        "message_key": "task_control.preview_retryable_failure_observation.dry_run",
+        "dry_run": true,
+        "synthetic": true,
+        "would_mutate": false,
+        "observation": {
+            "retryable": true,
+            "error_code": "tool_retryable_failure",
+            "recovery_action": "replan",
+            "forbidden_repeat_signature": "[REDACTED]",
+            "bounded_repair_attempts": {
+                "observed_attempt_count": 1,
+                "repair_attempt_count": 0,
+                "max_attempts": Value::Null,
+                "remaining_attempts": Value::Null,
+                "limit_source": "runtime_soft_budget",
+            },
+        },
+        "field_value": {
+            "action": "preview_retryable_failure_observation",
+            "status": "dry_run",
+            "message_key": "task_control.preview_retryable_failure_observation.dry_run",
+            "dry_run": true,
+            "synthetic": true,
+            "would_mutate": false,
+            "retryable": true,
+            "error_code": "tool_retryable_failure",
+            "recovery_action": "replan",
+            "forbidden_repeat_signature": "[REDACTED]",
+            "bounded_repair_attempts": {
+                "observed_attempt_count": 1,
+                "repair_attempt_count": 0,
+                "max_attempts": Value::Null,
+                "remaining_attempts": Value::Null,
+                "limit_source": "runtime_soft_budget",
+            },
+        },
+    })
+}
+
 pub(super) fn coding_repair_preview_extra() -> Value {
     json!({
         "schema_version": 1,

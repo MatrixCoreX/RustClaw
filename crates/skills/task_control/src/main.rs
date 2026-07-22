@@ -168,6 +168,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
         "preview_resume" | "resume_preview" => "preview_resume",
         "preview_provider_failure" => "preview_provider_failure",
+        "preview_retryable_failure_observation" => "preview_retryable_failure_observation",
         "preview_coding_repair" => "preview_coding_repair",
         "bind_session_alias" => "bind_session_alias",
         "resume" | "resume_task" | "continue_task" => "resume",
@@ -485,6 +486,10 @@ fn execute(
                     return Ok(SkillOutput::structured(extra.to_string(), extra));
                 };
                 let extra = provider_failure_preview_extra(failure_class.policy());
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
+            "preview_retryable_failure_observation" => {
+                let extra = retryable_failure_observation_preview_extra();
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "preview_coding_repair" => {
