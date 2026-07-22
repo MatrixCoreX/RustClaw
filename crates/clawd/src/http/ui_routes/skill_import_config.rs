@@ -42,21 +42,33 @@ fn write_workspace_and_mounted_file(
 
 fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()> {
     let active_path = active_runtime_config_path(state);
+    let persisted_path = std::env::var_os("RUSTCLAW_CONFIG_PERSIST_PATH")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                state.skill_rt.workspace_root.join(path)
+            }
+        });
+    write_runtime_config_to_paths(&active_path, persisted_path.as_deref(), raw)
+}
+
+fn write_runtime_config_to_paths(
+    active_path: &Path,
+    persisted_path: Option<&Path>,
+    raw: &str,
+) -> std::io::Result<()> {
     if let Some(parent) = active_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&active_path, raw)?;
-
-    let workspace_default = state.skill_rt.workspace_root.join("configs/config.toml");
-    if active_path == workspace_default {
-        let mounted_path = state
-            .skill_rt
-            .workspace_root
-            .join("docker/config/config.toml");
-        if let Some(parent) = mounted_path.parent() {
+    std::fs::write(active_path, raw)?;
+    if let Some(path) = persisted_path.filter(|path| *path != active_path) {
+        if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(mounted_path, raw)?;
+        std::fs::write(path, raw)?;
     }
     Ok(())
 }

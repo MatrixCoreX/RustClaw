@@ -16,6 +16,11 @@ ACTIVE_REGISTRY_FILE="$SCRIPT_DIR/configs/skills_registry.toml"
 ACTIVE_CONTRACT_MATRIX_FILE="$SCRIPT_DIR/configs/task_contract_matrix.toml"
 ACTIVE_CHANNELS_DIR="$SCRIPT_DIR/configs/channels"
 
+# UI/runtime config changes must survive container restarts through the mounted
+# config file. Host development does not set this path, so local mutations do
+# not rewrite the repository's independent Docker deployment template.
+export RUSTCLAW_CONFIG_PERSIST_PATH="${RUSTCLAW_CONFIG_PERSIST_PATH:-$MOUNTED_CONFIG_FILE}"
+
 sync_config_from_mount() {
   if [[ -f "$MOUNTED_CONFIG_FILE" ]]; then
     cp "$MOUNTED_CONFIG_FILE" "$ACTIVE_CONFIG_FILE"

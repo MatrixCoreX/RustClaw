@@ -8,7 +8,7 @@ use tower::ServiceExt;
 
 use super::{
     begin_skill_store_mutation, build_ui_router, imported_skill_machine_alias,
-    remove_skill_registry_block, render_skill_store_config,
+    remove_skill_registry_block, render_skill_store_config, write_runtime_config_to_paths,
 };
 use crate::{reload_skill_views, AppState};
 
@@ -154,6 +154,54 @@ fn skill_store_config_keeps_switch_and_uninstall_state_distinct() {
         parsed["skills"]["uninstalled_skills"][0].as_str(),
         Some("weather")
     );
+}
+
+#[test]
+fn runtime_config_write_does_not_overwrite_docker_template() {
+    let (_state, workspace) = isolated_skill_store_state();
+    let docker_config = workspace.join("docker/config/config.toml");
+    std::fs::create_dir_all(docker_config.parent().expect("docker config parent"))
+        .expect("create docker config directory");
+    std::fs::write(&docker_config, "# docker deployment template\n")
+        .expect("write docker config sentinel");
+
+    let active_config = workspace.join("configs/config.toml");
+    let updated = std::fs::read_to_string(&active_config)
+        .expect("read active config")
+        .replace("default_locale = \"zh-CN\"", "default_locale = \"en\"");
+    write_runtime_config_to_paths(&active_config, None, &updated)
+        .expect("write active runtime config");
+
+    assert_eq!(
+        std::fs::read_to_string(&active_config).expect("reread active config"),
+        updated
+    );
+    assert_eq!(
+        std::fs::read_to_string(&docker_config).expect("reread docker config"),
+        "# docker deployment template\n"
+    );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn runtime_config_write_updates_explicit_persistence_path() {
+    let (_state, workspace) = isolated_skill_store_state();
+    let active_config = workspace.join("configs/config.toml");
+    let persisted_config = workspace.join("mounted/config.toml");
+    let updated = "[ui]\ndefault_locale = \"en\"\n";
+
+    write_runtime_config_to_paths(&active_config, Some(&persisted_config), updated)
+        .expect("write active and persisted runtime config");
+
+    assert_eq!(
+        std::fs::read_to_string(active_config).expect("read active config"),
+        updated
+    );
+    assert_eq!(
+        std::fs::read_to_string(persisted_config).expect("read persisted config"),
+        updated
+    );
+    let _ = std::fs::remove_dir_all(workspace);
 }
 
 #[test]
