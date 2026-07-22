@@ -1507,6 +1507,18 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         let route_result = answer_contract.as_ref();
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
         if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
+            let mut verifier_replan_loop_state = pre_finalize_loop_state.clone();
+            if prepare_answer_verifier_evidence_replan(&mut verifier_replan_loop_state, &verifier) {
+                info!(
+                    task_id = %task.task_id,
+                    missing_evidence_fields = ?verifier.missing_evidence_fields,
+                    "answer_verifier_evidence_replan"
+                );
+                loop_state = verifier_replan_loop_state;
+                round = round.saturating_add(1);
+                skip_planner_rounds = false;
+                continue;
+            }
             if let Some(route) = route_result {
                 if try_bounded_answer_verifier_synthesis_retry(
                     state, task, user_text, route, &verifier, &mut reply,
