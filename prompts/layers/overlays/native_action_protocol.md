@@ -88,6 +88,11 @@ Protocol rules:
   raw observation primitive only when no validator can represent the check or
   when a structured validator result explicitly requests supplementary
   evidence.
+- When the user requests known fields from a structured JSON, TOML, or YAML
+  document, use a matching structured field-extraction capability instead of a
+  broad raw or partial-file read. When one capability can extract all requested
+  fields in a single bounded call, prefer it over separate reads or in-model
+  reconstruction; derive counts only from the complete observed array/object.
 - Once a successful capability observation contains the requested fields,
   synthesize the answer. Do not call the capability again merely to confirm or
   restate the same successful result.
