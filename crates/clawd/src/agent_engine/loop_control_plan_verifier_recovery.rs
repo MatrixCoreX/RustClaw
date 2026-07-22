@@ -22,21 +22,16 @@ fn issue_is_planner_repairable(kind: crate::verifier::VerifyIssueKind) -> bool {
 pub(in crate::agent_engine) fn plan_verifier_rejection_is_repairable(
     verify_result: &crate::verifier::VerifyResult,
 ) -> bool {
+    let mut blocking_issues = verify_result
+        .issues
+        .iter()
+        .filter(|issue| crate::verifier::issue_blocks_in_enforce(issue.kind))
+        .peekable();
     verify_result.mode == crate::verifier::VerifyMode::Enforce
         && !verify_result.approved
         && !verify_result.needs_confirmation
-        && !verify_result.issues.is_empty()
-        && !verify_result.issues.iter().any(|issue| {
-            matches!(
-                issue.kind,
-                crate::verifier::VerifyIssueKind::MissingRequiredArg
-                    | crate::verifier::VerifyIssueKind::BoundaryClarifyRequired
-            )
-        })
-        && verify_result
-            .issues
-            .iter()
-            .all(|issue| issue_is_planner_repairable(issue.kind))
+        && blocking_issues.peek().is_some()
+        && blocking_issues.all(|issue| issue_is_planner_repairable(issue.kind))
 }
 
 fn planner_repair_signal(
@@ -52,6 +47,7 @@ fn planner_repair_signal(
         "issues": verify_result
             .issues
             .iter()
+            .filter(|issue| crate::verifier::issue_blocks_in_enforce(issue.kind))
             .map(|issue| json!({
                 "step_id": issue.step_id,
                 "verify_issue_kind": issue.kind.as_str(),

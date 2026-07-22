@@ -680,7 +680,7 @@ fn verify_step_args(
     }
 }
 
-fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
+pub(crate) fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
     matches!(
         kind,
         VerifyIssueKind::SkillNotVisible
