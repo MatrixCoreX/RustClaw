@@ -175,6 +175,7 @@ Standard error codes used in helper-level failures or per-item failures:
 Rules:
 - No silent failure.
 - `open_extract` default behavior is partial success with per-item `error_code` + `error`.
+- If the readable body is below `min_content_chars` after a title was extracted, the partial-failure item preserves `title`, `text`, `content_excerpt`, and `final_url` alongside the error fields.
 - `fail_fast=true` makes `open_extract/search_extract` fail immediately on first page failure.
 
 ## Request/Response Examples (from interface)

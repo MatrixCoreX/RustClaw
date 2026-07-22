@@ -56,6 +56,6 @@ minimal_basic_skill_coverage|web_search_extract_readonly_en|covers:web_search_ex
 
 minimal_basic_skill_coverage|schedule_boundary_dry_run_zh|covers:schedule;requires_tool_call=true;dry_run,no_external_side_effect|如果我要明天上午 9 点提醒自己检查 RustClaw 服务，请只解析日程意图并说明需要的结构化字段，不要创建真实提醒任务。|expect=9
 
-minimal_basic_skill_coverage|extension_assess_gap_only_zh|covers:extension_manager,skill:extension_manager,requires_tool_call=true,dry_run,no_external_side_effect|评估“增加一个只读取本地 CSV 并输出统计摘要的技能”是否需要新 external skill；只做 assess_gap，不要创建文件、不要注册、不要安装依赖。
+minimal_basic_skill_coverage|extension_assess_gap_only_zh|covers:extension_manager,skill:extension_manager,requires_tool_call=true,no_external_side_effect|评估“增加一个只读取本地 CSV 并输出统计摘要的技能”是否需要新 external skill；只做 assess_gap，不要创建文件、不要注册、不要安装依赖。
 
 minimal_basic_skill_coverage|install_module_no_install_dry_run_zh|covers:install_module,package_manager;requires_tool_call=true;dry_run,no_external_side_effect|假设需要 jq 模块或命令，请只给出安装前检查和 dry-run 计划，不要实际安装任何包或模块；如果应该走系统包管理器而不是语言模块安装，也要说明结构化判断。|expect=jq
