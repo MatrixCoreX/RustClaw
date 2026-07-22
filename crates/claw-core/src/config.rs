@@ -1126,6 +1126,9 @@ pub struct SkillsConfig {
     pub skills_list: Vec<String>,
     #[serde(default)]
     pub skill_switches: HashMap<String, bool>,
+    /// 已从活动运行时移除、但仍可从 Skill Store 重新安装的技能。
+    #[serde(default)]
+    pub uninstalled_skills: Vec<String>,
     /// 技能注册表文件路径（相对 workspace 或绝对）。设则启用 registry 驱动发现/启用/别名/超时。
     #[serde(default)]
     pub registry_path: Option<String>,
@@ -1138,6 +1141,7 @@ impl Default for SkillsConfig {
             skill_max_concurrency: default_skill_max_concurrency(),
             skills_list: default_skills_list(),
             skill_switches: HashMap::new(),
+            uninstalled_skills: Vec::new(),
             registry_path: None,
         }
     }

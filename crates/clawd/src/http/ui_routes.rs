@@ -154,6 +154,9 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/skills/config",
             get(get_skills_config).post(update_skills_config),
         )
+        .route("/skills/store", get(get_skill_store_catalog))
+        .route("/skills/store/install", post(install_skill_store_item))
+        .route("/skills/store/remove", post(remove_skill_store_item))
         .route(
             "/telegram/config",
             get(get_telegram_config).post(update_telegram_config),
@@ -322,6 +325,7 @@ include!("ui_routes/workspace_update.rs");
 include!("ui_routes/health_skills_import.rs");
 include!("ui_routes/model_provider_config.rs");
 include!("ui_routes/skill_import_config.rs");
+include!("ui_routes/skill_store.rs");
 include!("ui_routes/llm_skill_config.rs");
 include!("ui_routes/messaging_login.rs");
 
@@ -336,3 +340,7 @@ mod slo_metrics_tests;
 #[cfg(test)]
 #[path = "ui_routes/teaching_trace_security_tests.rs"]
 mod teaching_trace_security_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/skill_store_tests.rs"]
+mod skill_store_tests;

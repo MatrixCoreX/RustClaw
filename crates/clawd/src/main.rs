@@ -598,6 +598,7 @@ async fn main() -> anyhow::Result<()> {
         config.skills.registry_path.as_deref(),
         &config.skills.skill_switches,
         &config.skills.skills_list,
+        &config.skills.uninstalled_skills,
     )
     .map_err(|e| {
         error!("startup: build_skill_views failed: {}", e);
