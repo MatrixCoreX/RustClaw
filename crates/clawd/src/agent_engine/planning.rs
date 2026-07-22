@@ -24,6 +24,7 @@ const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_
 const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
 const NATIVE_CALL_CAPABILITY_TOOL: &str = "call_capability";
 const NATIVE_RESPOND_TOOL: &str = "respond";
+const MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS: usize = 2;
 const MAX_NATIVE_RESPONSE_ITEMS: usize = 64;
 
 fn planner_last_observation(loop_state: &LoopState) -> String {
@@ -340,13 +341,21 @@ pub(super) async fn plan_round_actions(
     )
     .await?
     {
-        let (native_turn, planner_notes) =
+        let mut native_turn = native_turn;
+        let mut repair_reason_codes = Vec::new();
+        loop {
             match actions_from_native_turn(&native_turn, &callable_capability_names) {
-                Ok(_) => (native_turn, String::new()),
+                Ok(_) => break,
                 Err(error_code) => {
+                    if repair_reason_codes.len() >= MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS {
+                        return Err(error_code);
+                    }
                     warn!(
-                        "native_plan_contract_retry task_id={} round={} error_code={}",
-                        task.task_id, loop_state.round_no, error_code
+                        "native_plan_contract_retry task_id={} round={} attempt={} error_code={}",
+                        task.task_id,
+                        loop_state.round_no,
+                        repair_reason_codes.len() + 1,
+                        error_code
                     );
                     let repair_signal = native_contract_repair_signal(&error_code);
                     let repair_request =
@@ -354,7 +363,8 @@ pub(super) async fn plan_round_actions(
                     let repair_prompt = format!("{native_prompt}\n\n{repair_signal}");
                     let repair_source =
                         format!("{native_prompt_source}+inline:native_plan_contract_repair");
-                    let repaired_turn = llm_gateway::run_native_model_turn_with_fallback(
+                    repair_reason_codes.push(error_code);
+                    native_turn = llm_gateway::run_native_model_turn_with_fallback(
                         state,
                         task,
                         &repair_prompt,
@@ -363,13 +373,10 @@ pub(super) async fn plan_round_actions(
                     )
                     .await?
                     .ok_or_else(|| "native_plan_contract_repair_unavailable".to_string())?;
-                    actions_from_native_turn(&repaired_turn, &callable_capability_names)?;
-                    (
-                        repaired_turn,
-                        format!("native_contract_repair_reason_code={error_code}"),
-                    )
                 }
-            };
+            }
+        }
+        let planner_notes = native_contract_repair_notes(&repair_reason_codes);
         let plan_actions = normalize_planned_actions(
             state,
             actions_from_native_turn(&native_turn, &callable_capability_names)?,
@@ -571,6 +578,17 @@ fn native_contract_repair_signal(error_code: &str) -> String {
         }
     })
     .to_string()
+}
+
+fn native_contract_repair_notes(reason_codes: &[String]) -> String {
+    if reason_codes.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "native_contract_repair_reason_codes={}",
+            reason_codes.join(",")
+        )
+    }
 }
 
 fn native_contract_retry_request(
