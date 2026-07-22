@@ -590,6 +590,60 @@ pub(super) fn merge_alias_bindings(
     alias_bindings
 }
 
+pub(super) fn merge_alias_bindings_from_capability_results(
+    mut alias_bindings: Vec<SessionAliasBinding>,
+    results: &[claw_core::capability_result::CapabilityResultEnvelope],
+) -> Vec<SessionAliasBinding> {
+    let now_ts = crate::now_ts_u64();
+    for result in results {
+        if result.status != claw_core::capability_result::CapabilityResultStatus::Ok
+            || result.capability != "session.bind_alias"
+            || result.action.as_deref() != Some("bind_session_alias")
+        {
+            continue;
+        }
+        let Some(items) = result
+            .data
+            .pointer("/extra/session_alias_bindings")
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for item in items {
+            let Some(alias) = item
+                .get("alias")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && value.chars().count() <= 256)
+            else {
+                continue;
+            };
+            let Some(target) = item
+                .get("target")
+                .and_then(Value::as_str)
+                .filter(|value| value.chars().count() <= 4096)
+                .and_then(normalize_alias_target)
+            else {
+                continue;
+            };
+            let normalized_alias = normalized_alias_surface_for_match(alias);
+            alias_bindings.retain(|existing| {
+                normalized_alias_surface_for_match(&existing.alias) != normalized_alias
+            });
+            alias_bindings.push(SessionAliasBinding {
+                alias: alias.to_string(),
+                target,
+                updated_at_ts: now_ts,
+            });
+        }
+    }
+    if alias_bindings.len() > MAX_SESSION_ALIAS_BINDINGS {
+        let start = alias_bindings.len() - MAX_SESSION_ALIAS_BINDINGS;
+        alias_bindings = alias_bindings.split_off(start);
+    }
+    alias_bindings
+}
+
 pub(super) fn merge_alias_bindings_for_turn(
     prior_state: Option<&ConversationState>,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
