@@ -95,6 +95,27 @@ fn repairability_predicate_matches_bounded_replan_contract() {
 }
 
 #[test]
+fn informational_verifier_issue_does_not_block_argument_replan() {
+    let verify_result = verify_result(&[
+        crate::verifier::VerifyIssueKind::DefaultCreationTargetApplied,
+        crate::verifier::VerifyIssueKind::InvalidArgumentValue,
+    ]);
+
+    assert!(plan_verifier_rejection_is_repairable(&verify_result));
+    let signal = planner_repair_signal(&verify_result).expect("machine repair signal");
+    let issues = signal["issues"].as_array().expect("issue array");
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0]["verify_issue_kind"], "InvalidArgumentValue");
+}
+
+#[test]
+fn informational_verifier_issue_alone_does_not_request_replan() {
+    assert!(!plan_verifier_rejection_is_repairable(&verify_result(&[
+        crate::verifier::VerifyIssueKind::DefaultCreationTargetApplied,
+    ])));
+}
+
+#[test]
 fn permission_denial_never_enters_planner_repair() {
     let mut loop_state = LoopState::default();
     let outcome = recover_plan_verifier_rejection(
