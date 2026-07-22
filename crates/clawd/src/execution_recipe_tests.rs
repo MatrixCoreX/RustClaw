@@ -876,6 +876,27 @@ fn run_cmd_nginx_test_exit_zero_sentinel_is_validation_pass() {
 }
 
 #[test]
+fn run_cmd_exit_code_sentinel_preserves_wrapped_process_status() {
+    let state = test_state();
+    let args = json!({
+        "command":"python3 test_calc_core.py; echo \"---EXIT_CODE=$?\""
+    });
+    assert!(matches!(
+        assess_validation_output(
+            &state,
+            "run_cmd",
+            &args,
+            "F.\nFAILED (failures=1)\n---EXIT_CODE=1\n",
+        ),
+        ValidationObservation::Failed(_)
+    ));
+    assert_eq!(
+        assess_validation_output(&state, "run_cmd", &args, "..\nOK\n---EXIT_CODE=0\n",),
+        ValidationObservation::Passed
+    );
+}
+
+#[test]
 fn run_cmd_ss_without_rows_is_validation_failure() {
     let state = test_state();
     let observation = assess_validation_output(

@@ -275,6 +275,9 @@ async fn handle_skill_step_success(
                     )
                     .to_string(),
                 );
+            } else if validation_failure_requires_workspace_repair(loop_state, action_effect) {
+                loop_state.has_recoverable_failure_context = true;
+                stop_signal = Some("recoverable_failure_continue_round".to_string());
             }
         }
         crate::execution_recipe::ValidationObservation::Inconclusive => {
@@ -314,6 +317,9 @@ async fn handle_skill_step_success(
                         )
                         .to_string(),
                     );
+                } else if validation_failure_requires_workspace_repair(loop_state, action_effect) {
+                    loop_state.has_recoverable_failure_context = true;
+                    stop_signal = Some("recoverable_failure_continue_round".to_string());
                 }
             } else {
                 crate::execution_recipe::apply_action_effect_success(
@@ -480,6 +486,15 @@ async fn handle_skill_step_success(
         stop_signal,
         continue_in_round: false,
     })
+}
+
+fn validation_failure_requires_workspace_repair(
+    loop_state: &LoopState,
+    action_effect: crate::execution_recipe::ActionEffect,
+) -> bool {
+    action_effect.validates
+        && (loop_state.last_written_file_path.is_some()
+            || !loop_state.written_file_aliases.is_empty())
 }
 
 fn record_latest_validation_result(
