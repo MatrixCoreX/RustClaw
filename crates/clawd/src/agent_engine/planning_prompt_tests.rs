@@ -123,6 +123,17 @@ fn planner_overlays_select_subagents_through_capabilities_only() {
 }
 
 #[test]
+fn planner_tool_spec_prefers_domain_capabilities_over_raw_primitives() {
+    let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../prompts/layers/overlays/agent_tool_spec.md");
+    let prompt = std::fs::read_to_string(overlay).expect("read agent tool spec");
+
+    assert!(prompt.contains("description and semantic tags own the requested"));
+    assert!(prompt.contains("Use raw filesystem, HTTP, database, or shell primitives"));
+    assert!(prompt.contains("Do not replace a catalog-owned domain operation"));
+}
+
+#[test]
 fn answer_verifier_distinguishes_listing_metadata_from_file_contents() {
     let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../prompts/layers/overlays/answer_verifier_prompt.md");
