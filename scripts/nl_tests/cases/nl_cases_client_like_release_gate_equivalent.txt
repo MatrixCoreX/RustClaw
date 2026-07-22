@@ -325,7 +325,7 @@ chat_act|nl_cases_skill_matrix_current_20260403_skill_service_control_clawd_stat
 chat_act|nl_cases_skill_matrix_current_20260403_skill_task_control_list|skill:task_control,local,client_like,aggregate|看看当前任务队列里有没有任务，简短告诉我结果
 chat_act|nl_cases_skill_matrix_current_20260403_skill_config_guard_validate_main|any_skill:config_basic+config_edit,capability:config.guard_rustclaw_config,covers:config_guard,requires_tool_call=true,local_readonly,client_like,aggregate|检查 configs/config.toml 有没有明显配置问题，简短给我结论
 chat_act|nl_cases_skill_matrix_current_20260403_skill_doc_parse_readme|skill:doc_parse,local,client_like,aggregate|解析 README.md，提取前几段重点并简短总结
-chat_act|nl_cases_skill_matrix_current_20260403_skill_transform_json_table|skill:transform,local,client_like,aggregate|把这个 JSON 数组按 score 从高到低排序，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+chat_act|nl_cases_skill_matrix_current_20260403_skill_transform_json_table|skill:transform,direct_allowed,local,client_like,aggregate|把这个 JSON 数组按 score 从高到低排序，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
 chat_act|nl_cases_skill_matrix_current_20260403_skill_kb_ingest_then_report|skill:kb,local,side_effect,client_like,aggregate|把 README.md 导入一个名为 demo_docs_nl 的知识库，简短告诉我是否成功
 file|nl_cases_skill_matrix_current_20260403_skill_archive_basic_pack_skill_calls|skill:archive_basic,local,side_effect,client_like,aggregate|把 scripts/skill_calls 打成 zip，保存到 document/skill_calls_smoke.zip，然后把文件发给我
 chat_act|nl_cases_skill_matrix_current_20260403_skill_rss_fetch_latest_general|skill:rss_fetch,network,client_like,aggregate|抓取最新 3 条综合 RSS 新闻，简短列出来
