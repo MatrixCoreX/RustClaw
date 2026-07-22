@@ -205,6 +205,56 @@ pub(super) fn retryable_failure_observation_preview_extra() -> Value {
     })
 }
 
+pub(super) fn repair_observation_preview_extra(repair_kind: &str) -> Option<Value> {
+    let observation = match repair_kind {
+        "missing_required_argument" => json!({
+            "status": "validation_failed",
+            "repair_source": "verifier",
+            "repair_class": "loop_bounded_recovery",
+            "missing_fields": ["required_argument"],
+            "missing_evidence": ["required_argument"],
+            "issue_codes": ["verify_missing_required_arg", "missing_required_arg"],
+            "recovery_action": "replan",
+            "next_recovery_kind": "replan",
+            "needs_user_input": false,
+        }),
+        "bounded_repair_blocked" => json!({
+            "status": "waiting",
+            "repair_source": "runtime",
+            "repair_class": "loop_bounded_recovery",
+            "stop_reason_code": "repair_budget_exhausted",
+            "checkpoint_id": Value::Null,
+            "checkpoint_required": true,
+            "needs_user_input": false,
+            "evidence_refs": ["repair_signal", "attempt_ledger"],
+            "recovery_action": "wait_background",
+            "next_recovery_kind": "wait_background",
+        }),
+        _ => return None,
+    };
+    Some(json!({
+        "schema_version": 1,
+        "action": "preview_repair_observation",
+        "status": "dry_run",
+        "message_key": "task_control.preview_repair_observation.dry_run",
+        "dry_run": true,
+        "synthetic": true,
+        "would_mutate": false,
+        "repair_kind": repair_kind,
+        "observation": observation,
+        "field_value": {
+            "action": "preview_repair_observation",
+            "status": "dry_run",
+            "message_key": "task_control.preview_repair_observation.dry_run",
+            "dry_run": true,
+            "synthetic": true,
+            "would_mutate": false,
+            "repair_kind": repair_kind,
+            "observation": observation,
+        },
+    }))
+}
+
 pub(super) fn coding_repair_preview_extra() -> Value {
     json!({
         "schema_version": 1,

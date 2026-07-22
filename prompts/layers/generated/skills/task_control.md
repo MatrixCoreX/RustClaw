@@ -8,8 +8,8 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- Task lifecycle, structured session-alias binding, provider-failure, retryable-failure observation, and side-effect-free coding-repair previews.
-- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, bind a planner-selected alias to a concrete target for later turns, inspect provider-failure recovery policy, preview the structured observation supplied after a retryable tool failure, and preview a structured coding repair loop without side effects.
+- Task lifecycle, structured session-alias binding, provider-failure, retryable-failure and repair-envelope observation, and side-effect-free coding-repair previews.
+- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, bind a planner-selected alias to a concrete target for later turns, inspect provider-failure recovery policy, preview structured retryable/missing-field/blocked repair observations, and preview a structured coding repair loop without side effects.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Planner-facing selection should use structured capability/action fields from the registry. Do not add phrase-specific routing rules for any user language.
 - Task cancel/resume/pause dry-run or lifecycle-field preview requests must call the skill with `dry_run=true` and return observed machine fields. Do not answer those flows from static prose alone, even when the user has not supplied a concrete `task_id` or index.
@@ -27,6 +27,7 @@
 - `preview_resume` - Return the no-mutation resume entrypoint and renewable execution-lease contract for a stable `task_id`.
 - `preview_provider_failure` - Return the shared no-mutation provider failure, retry, waiting-state, and checkpoint policy for a canonical `failure_class`.
 - `preview_retryable_failure_observation` - Return a synthetic no-mutation machine contract for a retryable tool failure, including the stable error, recovery, repeat-prevention, and bounded-attempt fields consumed by the planner.
+- `preview_repair_observation` - Return a synthetic no-mutation repair envelope for either a missing required argument or a bounded-repair blocked/waiting state.
 - `preview_coding_repair` - Return a synthetic no-mutation coding-loop contract containing checkpoint, diff, failed verification, repair attempt, passing verification, and rewind references.
 - `bind_session_alias` - Return an exact structured `session_alias_bindings` update for a planner-selected `alias` and `target`; the runtime persists only this machine result and does not infer bindings from user-language phrases.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
@@ -36,10 +37,11 @@
 ## Parameter Contract (from interface)
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_retryable_failure_observation`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
+| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_retryable_failure_observation`, `preview_repair_observation`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
 | `alias` | required for `bind_session_alias` | string | - | Exact user-defined alias surface selected by the planner; maximum 256 characters. |
 | `target` | required for `bind_session_alias` | string | - | Concrete locator or stable target to retain for later turns; maximum 4096 characters. |
 | `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider failure token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. |
+| `repair_kind` | required for `preview_repair_observation` | string | - | One canonical repair shape: `missing_required_argument` or `bounded_repair_blocked`. |
 | `task_id` | required for `get`, `resume`, `pause` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
 | `checkpoint_id` | optional for `preview_resume` and `resume` | string | - | Restrict resume to a specific checkpoint id. |
@@ -64,6 +66,8 @@ Notes:
 - `preview_resume` / `resume` / `pause` with an invalid `task_id` shape -> structured `status=invalid_task_id`.
 - `preview_provider_failure` without `failure_class` -> structured `status=missing_failure_class`.
 - `preview_provider_failure` with a non-canonical token -> structured `status=unsupported_failure_class`.
+- `preview_repair_observation` without `repair_kind` -> structured `status=missing_repair_kind`.
+- `preview_repair_observation` with a non-canonical token -> structured `status=unsupported_repair_kind`.
 - `bind_session_alias` without `alias` or `target` -> `error_text=bind_session_alias_missing_alias|bind_session_alias_missing_target`.
 - `bind_session_alias` with an oversized value -> `error_text=bind_session_alias_value_too_long`.
 - Invalid index -> structured `clawd` API error propagated as `error_text`.

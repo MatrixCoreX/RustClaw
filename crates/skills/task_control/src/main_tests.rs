@@ -193,6 +193,18 @@ fn parse_input_accepts_resume_and_pause_machine_actions() {
         "preview_retryable_failure_observation"
     );
 
+    let repair_observation = parse_input(&json!({
+        "action": "preview_repair_observation",
+        "repair_kind": "missing_required_argument"
+    }))
+    .expect("repair observation preview input");
+
+    assert_eq!(repair_observation.action, "preview_repair_observation");
+    assert_eq!(
+        repair_observation.repair_kind.as_deref(),
+        Some("missing_required_argument")
+    );
+
     let coding_repair = parse_input(&json!({
         "action": "preview_coding_repair"
     }))
@@ -385,6 +397,36 @@ fn retryable_failure_observation_preview_exposes_bounded_machine_contract() {
     );
     assert!(extra["observation"]["bounded_repair_attempts"]["max_attempts"].is_null());
     assert!(extra["observation"]["bounded_repair_attempts"]["remaining_attempts"].is_null());
+}
+
+#[test]
+fn repair_observation_preview_exposes_missing_field_and_blocked_contracts() {
+    let missing = repair_observation_preview_extra("missing_required_argument")
+        .expect("missing-field preview");
+    assert_eq!(missing["action"], "preview_repair_observation");
+    assert_eq!(missing["status"], "dry_run");
+    assert_eq!(missing["would_mutate"], false);
+    assert_eq!(missing["observation"]["status"], "validation_failed");
+    assert_eq!(
+        missing["observation"]["missing_fields"][0],
+        "required_argument"
+    );
+    assert_eq!(missing["observation"]["recovery_action"], "replan");
+    assert_eq!(missing["observation"]["next_recovery_kind"], "replan");
+
+    let blocked =
+        repair_observation_preview_extra("bounded_repair_blocked").expect("blocked preview");
+    assert_eq!(blocked["observation"]["status"], "waiting");
+    assert_eq!(
+        blocked["observation"]["stop_reason_code"],
+        "repair_budget_exhausted"
+    );
+    assert!(blocked["observation"]["checkpoint_id"].is_null());
+    assert_eq!(blocked["observation"]["checkpoint_required"], true);
+    assert_eq!(blocked["observation"]["needs_user_input"], false);
+    assert_eq!(blocked["observation"]["evidence_refs"][0], "repair_signal");
+
+    assert!(repair_observation_preview_extra("unknown").is_none());
 }
 
 #[test]
