@@ -310,7 +310,7 @@ fn native_request_separates_system_protocol_from_user_turn() {
         "current turn",
         Some(90),
         &callable_capabilities(),
-        "config.guard(purpose=authoritative validation,semantic_tags=config_safety)",
+        &[],
     );
 
     assert_eq!(request.messages.len(), 2);
@@ -339,12 +339,6 @@ fn native_request_separates_system_protocol_from_user_turn() {
         request.tools[0].input_schema["properties"]["capability"]["enum"],
         json!(["fs.read", "process.ps"])
     );
-    assert!(
-        request.tools[0].input_schema["properties"]["capability"]["description"]
-            .as_str()
-            .expect("capability description")
-            .contains("runtime_leaf_capability_contracts_v1=config.guard")
-    );
     assert_eq!(request.tools.len(), 2);
     assert_eq!(request.tools[1].name, "respond");
     assert_eq!(
@@ -354,13 +348,99 @@ fn native_request_separates_system_protocol_from_user_turn() {
 }
 
 #[test]
+fn native_request_exposes_registry_groups_as_distinct_tools() {
+    let groups = vec![crate::capability_map::PlannerNativeCapabilityGroup {
+        tool_name: "call_doc_parse".to_string(),
+        description: "runtime_capability_group_v1; semantic_tags=document_summary".to_string(),
+        capability_names: vec!["doc_parse".to_string()],
+    }];
+    let callable = vec!["doc_parse".to_string(), "mcp.dynamic".to_string()];
+    let request = native_planner_request("protocol", "current turn", None, &callable, &groups);
+
+    assert_eq!(request.tools.len(), 3);
+    assert_eq!(request.tools[0].name, "call_capability");
+    assert_eq!(
+        request.tools[0].input_schema["properties"]["capability"]["enum"],
+        json!(["mcp.dynamic"])
+    );
+    assert_eq!(request.tools[1].name, "call_doc_parse");
+    assert!(request.tools[1].description.contains("document_summary"));
+    assert_eq!(
+        request.tools[1].input_schema["properties"]["capability"]["enum"],
+        json!(["doc_parse"])
+    );
+    assert_eq!(request.tools[2].name, "respond");
+
+    let registry_only_request = native_planner_request(
+        "protocol",
+        "current turn",
+        None,
+        &["doc_parse".to_string()],
+        &groups,
+    );
+    assert_eq!(registry_only_request.tools.len(), 2);
+    assert_eq!(registry_only_request.tools[0].name, "call_doc_parse");
+    assert_eq!(registry_only_request.tools[1].name, "respond");
+    assert!(registry_only_request
+        .tools
+        .iter()
+        .all(|tool| tool.name != "call_capability"));
+
+    let group_map = BTreeMap::from([(
+        "call_doc_parse".to_string(),
+        BTreeSet::from(["doc_parse".to_string()]),
+    )]);
+    let actions = actions_from_native_turn_with_groups(
+        &turn(
+            vec![ModelToolCall {
+                id: "group-call".to_string(),
+                name: "call_doc_parse".to_string(),
+                arguments: json!({"capability": "doc_parse", "args": {"path": "README.md"}}),
+            }],
+            "",
+        ),
+        &callable,
+        &group_map,
+    )
+    .expect("group action");
+    assert!(matches!(
+        &actions[0],
+        AgentAction::CallCapability { capability, .. } if capability == "doc_parse"
+    ));
+}
+
+#[test]
+fn native_group_rejects_capability_from_another_group() {
+    let callable = vec!["doc_parse".to_string(), "filesystem.read_text".to_string()];
+    let group_map = BTreeMap::from([(
+        "call_doc_parse".to_string(),
+        BTreeSet::from(["doc_parse".to_string()]),
+    )]);
+    let error = actions_from_native_turn_with_groups(
+        &turn(
+            vec![ModelToolCall {
+                id: "wrong-group-call".to_string(),
+                name: "call_doc_parse".to_string(),
+                arguments: json!({"capability": "filesystem.read_text", "args": {"path": "README.md"}}),
+            }],
+            "",
+        ),
+        &callable,
+        &group_map,
+    )
+    .expect_err("cross-group capability rejected");
+
+    assert_eq!(error, "native_plan_capability_not_in_selected_group");
+}
+
+#[test]
 fn native_contract_retry_scopes_required_tool_and_adds_machine_observation() {
     let request = native_planner_request(
         "protocol",
         "current turn",
         Some(90),
         &callable_capabilities(),
-        "",
+        &[],
     );
     let signal = native_contract_repair_signal("native_plan_capability_missing");
     let repaired = native_contract_retry_request(&request, &signal);
@@ -393,7 +473,7 @@ fn native_response_contract_retry_targets_the_respond_schema() {
         "current turn",
         Some(90),
         &callable_capabilities(),
-        "",
+        &[],
     );
     let repaired = native_contract_retry_request(&request, &signal);
     let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
@@ -423,7 +503,7 @@ fn native_contract_repair_supports_two_bounded_protocol_transitions() {
         "current turn",
         Some(90),
         &callable_capabilities(),
-        "",
+        &[],
     );
 
     let capability_retry = native_contract_retry_request(&request, &capability_signal);

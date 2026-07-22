@@ -11,6 +11,7 @@ use claw_core::model_turn::{
     ModelTurnResponse,
 };
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 use tracing::{info, warn};
 
 use super::{
@@ -72,8 +73,8 @@ impl<'a> PlannerToolLibrary<'a> {
         crate::capability_map::planner_callable_capability_names_for_task(self.state, self.task)
     }
 
-    fn callable_leaf_contracts(&self) -> String {
-        crate::capability_map::planner_callable_leaf_contracts_for_task(self.state, self.task)
+    fn native_capability_groups(&self) -> Vec<crate::capability_map::PlannerNativeCapabilityGroup> {
+        crate::capability_map::planner_native_capability_groups_for_task(self.state, self.task)
     }
 }
 
@@ -330,13 +331,26 @@ pub(super) async fn plan_round_actions(
         .as_ref()
         .map(crate::task_budget_contract::TaskBudgetSlice::provider_call_timeout_seconds);
     let callable_capability_names = planner_tool_library.callable_capability_names();
-    let callable_leaf_contracts = planner_tool_library.callable_leaf_contracts();
+    let native_capability_groups = planner_tool_library.native_capability_groups();
+    let native_capability_group_map = native_capability_groups
+        .iter()
+        .map(|group| {
+            (
+                group.tool_name.clone(),
+                group
+                    .capability_names
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let native_request = native_planner_request(
         &native_system_prompt,
         &native_user_prompt,
         provider_timeout_seconds,
         &callable_capability_names,
-        &callable_leaf_contracts,
+        &native_capability_groups,
     );
     if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback(
         state,
@@ -350,7 +364,11 @@ pub(super) async fn plan_round_actions(
         let mut native_turn = native_turn;
         let mut repair_reason_codes = Vec::new();
         loop {
-            match actions_from_native_turn(&native_turn, &callable_capability_names) {
+            match actions_from_native_turn_with_groups(
+                &native_turn,
+                &callable_capability_names,
+                &native_capability_group_map,
+            ) {
                 Ok(_) => break,
                 Err(error_code) => {
                     if repair_reason_codes.len() >= MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS {
@@ -385,7 +403,11 @@ pub(super) async fn plan_round_actions(
         let planner_notes = native_contract_repair_notes(&repair_reason_codes);
         let plan_actions = normalize_planned_actions(
             state,
-            actions_from_native_turn(&native_turn, &callable_capability_names)?,
+            actions_from_native_turn_with_groups(
+                &native_turn,
+                &callable_capability_names,
+                &native_capability_group_map,
+            )?,
         );
         let raw_plan_text =
             serde_json::to_string(&native_turn).map_err(|error| error.to_string())?;
@@ -481,7 +503,7 @@ fn native_planner_request(
     user_prompt: &str,
     provider_timeout_seconds: Option<u64>,
     callable_capability_names: &[String],
-    callable_leaf_contracts: &str,
+    native_capability_groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
 ) -> ModelTurnRequest {
     let mut metadata = std::collections::BTreeMap::new();
     if let Some(timeout_seconds) = provider_timeout_seconds {
@@ -490,76 +512,98 @@ fn native_planner_request(
             Value::Number(timeout_seconds.into()),
         );
     }
-    let mut capability_description = "runtime_callable_capability_catalog_v1.token".to_string();
-    if !callable_leaf_contracts.is_empty() {
-        capability_description.push_str("; runtime_leaf_capability_contracts_v1=");
-        capability_description.push_str(callable_leaf_contracts);
+    let grouped_capability_names = native_capability_groups
+        .iter()
+        .flat_map(|group| group.capability_names.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let ungrouped_capability_names = callable_capability_names
+        .iter()
+        .filter(|name| !grouped_capability_names.contains(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut tools = Vec::new();
+    if !ungrouped_capability_names.is_empty() {
+        tools.push(native_capability_tool_definition(
+            NATIVE_CALL_CAPABILITY_TOOL,
+            "schema:runtime_ungrouped_capability_catalog_v1",
+            &ungrouped_capability_names,
+        ));
     }
-    let mut capability_schema = json!({
-        "type": "string",
-        "description": capability_description
+    for group in native_capability_groups {
+        tools.push(native_capability_tool_definition(
+            &group.tool_name,
+            &group.description,
+            &group.capability_names,
+        ));
+    }
+    tools.push(ModelToolDefinition {
+        name: NATIVE_RESPOND_TOOL.to_string(),
+        description: "Submit the final user-visible response with a machine-verifiable response shape. For free_text, put the answer in content and use an empty items array with exact_item_count=0. For list, leave content empty and provide exactly the final list items plus their exact count.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "required": ["shape", "content", "items", "exact_item_count"],
+            "properties": {
+                "shape": {
+                    "type": "string",
+                    "enum": ["free_text", "list"]
+                },
+                "content": {
+                    "type": "string",
+                    "description": "free_text_content_or_empty_list_content"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": MAX_NATIVE_RESPONSE_ITEMS
+                },
+                "exact_item_count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": MAX_NATIVE_RESPONSE_ITEMS
+                }
+            },
+            "additionalProperties": false
+        }),
+        strict: true,
     });
-    if !callable_capability_names.is_empty() {
-        capability_schema["enum"] = json!(callable_capability_names);
-    }
     ModelTurnRequest {
         messages: vec![
             ModelMessage::text(ModelRole::System, system_prompt),
             ModelMessage::text(ModelRole::User, user_prompt),
         ],
-        tools: vec![
-            ModelToolDefinition {
-                name: NATIVE_CALL_CAPABILITY_TOOL.to_string(),
-                description: "Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "required": ["capability", "args"],
-                    "properties": {
-                        "capability": capability_schema,
-                        "args": {
-                            "type": "object",
-                            "description": "Structured capability arguments."
-                        }
-                    },
-                    "additionalProperties": false
-                }),
-                strict: true,
-            },
-            ModelToolDefinition {
-                name: NATIVE_RESPOND_TOOL.to_string(),
-                description: "Submit the final user-visible response with a machine-verifiable response shape. For free_text, put the answer in content and use an empty items array with exact_item_count=0. For list, leave content empty and provide exactly the final list items plus their exact count.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "required": ["shape", "content", "items", "exact_item_count"],
-                    "properties": {
-                        "shape": {
-                            "type": "string",
-                            "enum": ["free_text", "list"]
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "free_text_content_or_empty_list_content"
-                        },
-                        "items": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "maxItems": MAX_NATIVE_RESPONSE_ITEMS
-                        },
-                        "exact_item_count": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": MAX_NATIVE_RESPONSE_ITEMS
-                        }
-                    },
-                    "additionalProperties": false
-                }),
-                strict: true,
-            },
-        ],
+        tools,
         tool_choice: ModelToolChoice::Auto,
         response_schema: None,
         stream: true,
         metadata,
+    }
+}
+
+fn native_capability_tool_definition(
+    tool_name: &str,
+    description: &str,
+    capability_names: &[String],
+) -> ModelToolDefinition {
+    ModelToolDefinition {
+        name: tool_name.to_string(),
+        description: description.to_string(),
+        input_schema: json!({
+            "type": "object",
+            "required": ["capability", "args"],
+            "properties": {
+                "capability": {
+                    "type": "string",
+                    "description": "runtime_callable_capability_catalog_v1.token",
+                    "enum": capability_names
+                },
+                "args": {
+                    "type": "object",
+                    "description": "schema:structured_capability_arguments"
+                }
+            },
+            "additionalProperties": false
+        }),
+        strict: true,
     }
 }
 
@@ -617,7 +661,13 @@ fn native_contract_retry_request(
                 .map(str::to_string)
         });
     if let Some(repair_tool_name) = repair_tool_name {
-        request.tools.retain(|tool| tool.name == repair_tool_name);
+        if repair_tool_name == NATIVE_CALL_CAPABILITY_TOOL {
+            request
+                .tools
+                .retain(|tool| tool.name != NATIVE_RESPOND_TOOL);
+        } else {
+            request.tools.retain(|tool| tool.name == repair_tool_name);
+        }
     }
     request.tool_choice = ModelToolChoice::Required;
     request
@@ -626,15 +676,24 @@ fn native_contract_retry_request(
     request
 }
 
+#[cfg(test)]
 fn actions_from_native_turn(
     turn: &ModelTurnResponse,
     callable_capability_names: &[String],
+) -> Result<Vec<AgentAction>, String> {
+    actions_from_native_turn_with_groups(turn, callable_capability_names, &BTreeMap::new())
+}
+
+fn actions_from_native_turn_with_groups(
+    turn: &ModelTurnResponse,
+    callable_capability_names: &[String],
+    native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<Vec<AgentAction>, String> {
     if !turn.tool_calls.is_empty() {
         let actions = turn
             .tool_calls
             .iter()
-            .map(action_from_native_tool_call)
+            .map(|call| action_from_native_tool_call(call, native_capability_groups))
             .collect::<Result<Vec<_>, _>>()?;
         if actions.iter().any(|action| {
             matches!(
@@ -661,10 +720,27 @@ fn actions_from_native_turn(
     Err("native_plan_respond_tool_required".to_string())
 }
 
-fn action_from_native_tool_call(call: &ModelToolCall) -> Result<AgentAction, String> {
+fn action_from_native_tool_call(
+    call: &ModelToolCall,
+    native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<AgentAction, String> {
     match call.name.as_str() {
         NATIVE_CALL_CAPABILITY_TOOL => action_from_native_capability_call(call),
         NATIVE_RESPOND_TOOL => action_from_native_respond_call(call),
+        tool_name if native_capability_groups.contains_key(tool_name) => {
+            let action = action_from_native_capability_call(call)?;
+            let AgentAction::CallCapability { capability, .. } = &action else {
+                return Err("native_plan_group_action_invalid".to_string());
+            };
+            if native_capability_groups
+                .get(tool_name)
+                .is_some_and(|allowed| allowed.contains(capability))
+            {
+                Ok(action)
+            } else {
+                Err("native_plan_capability_not_in_selected_group".to_string())
+            }
+        }
         _ => Err("native_plan_unknown_tool".to_string()),
     }
 }
