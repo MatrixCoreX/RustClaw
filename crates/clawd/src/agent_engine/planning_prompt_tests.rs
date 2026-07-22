@@ -64,6 +64,10 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("A matching validation or guard capability owns the complete check"));
     assert!(prompt.contains("bounded raw reads that cover only part of the target"));
     assert!(prompt.contains("when a structured validator result explicitly requests supplementary"));
+    assert!(prompt.contains("known fields from a structured JSON, TOML, or YAML"));
+    assert!(prompt.contains("matching structured field-extraction capability"));
+    assert!(prompt.contains("extract all requested"));
+    assert!(prompt.contains("derive counts only from the complete observed array/object"));
     assert!(prompt.contains("Do not call the capability again merely to confirm or"));
     assert!(prompt.contains("restate the same successful result"));
     assert!(prompt.contains("Copy the complete capability name exactly"));
