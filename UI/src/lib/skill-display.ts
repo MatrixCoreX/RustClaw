@@ -26,6 +26,7 @@ const FALLBACK_BASE_SKILL_NAMES = [
   "schedule",
   "extension_manager",
   "kb",
+  "rss_fetch",
   "system_basic",
   "process_basic",
   "config_guard",

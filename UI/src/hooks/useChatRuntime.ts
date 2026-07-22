@@ -649,7 +649,10 @@ export function useChatRuntime({
       };
       const submitRes = await apiFetch(`/v1/tasks`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-RustClaw-Client": "ui",
+        },
         body: JSON.stringify(submitBody),
       });
       const submitData = (await submitRes.json()) as ApiResponse<SubmitTaskResponse>;

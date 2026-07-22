@@ -560,3 +560,7 @@ fn sanitize_response_headers(src: &reqwest::header::HeaderMap) -> HeaderMap {
     }
     out
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;
