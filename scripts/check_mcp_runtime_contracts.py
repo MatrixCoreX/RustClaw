@@ -72,7 +72,7 @@ REQUIRED_FILE_TOKENS = {
         "error_code",
     ),
     "crates/clawd/src/capability_map.rs": (
-        "state.mcp_planner_tools()",
+        ".mcp_planner_tools()",
         "build_capability_map_for_task",
     ),
     "crates/clawd/src/agent_engine/skill_execution_preflight.rs": (

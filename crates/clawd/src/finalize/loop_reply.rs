@@ -1427,14 +1427,9 @@ pub(crate) async fn finalize_loop_reply(
             loop_state.executed_step_results.len(),
         );
     }
-
-    // Renderers may append or replace messages after the initial priority pass.
-    // Normalize once more at the delivery boundary so repeated machine payloads
-    // cannot leak into API/UI message arrays.
     let (normalized_delivery, _, _) =
         crate::finalize::build_final_delivery_with_priority(&delivery_deduped, None);
     delivery_deduped = normalized_delivery;
-
     let final_text = final_answer_text_from_delivery(&delivery_deduped);
 
     if used_last_respond {

@@ -145,11 +145,7 @@ crates/clawd/src/agent_engine/observed_output_success.rs	skill(run_cmd): success
 crates/clawd/src/agent_engine/observed_output_transform.rs	referenced transform step should produce formatted output	.expect("referenced transform step should produce formatted output");
 crates/clawd/src/agent_engine/observed_output_transform.rs	| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |	"| name | score |\\n| --- | --- |\\n| beta | 12 |\\n| gamma | 9 |\\n| alpha | 7 |"
 crates/clawd/src/agent_engine/planning.rs	Last round output: (none)	// 写入这里。结果是 round N+1 的 loop planner 看到 "Last round output: (none)"，
-crates/clawd/src/agent_engine/planning.rs	Registry capability name from the supplied runtime capability map.	"description": "Registry capability name from the supplied runtime capability map."
-crates/clawd/src/agent_engine/planning.rs	Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.	description: "Select a runtime capability. The runtime resolves, verifies, authorizes, and executes the call.".to_string(),
-crates/clawd/src/agent_engine/planning.rs	Structured capability arguments.	"description": "Structured capability arguments."
 crates/clawd/src/agent_engine/planning.rs	runtime_capability_map_v2\n{capability_map}	Ok(format!("runtime_capability_map_v2\\n{capability_map}"))
-crates/clawd/src/agent_engine/planning.rs	{native_system_prompt}\n\n{native_user_prompt}	let native_prompt = format!("{native_system_prompt}\\n\\n{native_user_prompt}");
 crates/clawd/src/agent_engine/prepare_round.rs	needs_clarification: {needs_clarify}	format!("needs_clarification: {needs_clarify}"),
 crates/clawd/src/agent_engine/prepare_round.rs	needs_confirmation: {needs_confirmation}	format!("needs_confirmation: {needs_confirmation}"),
 crates/clawd/src/agent_engine/prepare_round.rs	verification_issue_kind: {first_issue_kind}	format!("verification_issue_kind: {first_issue_kind}"),
@@ -209,25 +205,13 @@ crates/clawd/src/bootstrap/prompts.rs	user_response_contract_validator (fallback
 crates/clawd/src/bootstrap/prompts.rs	我刚才编辑的文件是不是写崩了	///   把所有核心 prompt 再校验一次，便于运维感知"我刚才编辑的文件是不是写崩了"。
 crates/clawd/src/bootstrap/prompts.rs	磁盘有内容吗	/// 3. 复用 `validate_core_prompts` 跑一遍所有核心 prompt 的"磁盘有内容吗"。
 crates/clawd/src/bootstrap/prompts.rs	运行中事务隔离	///   旧任务继续用上一版判定是合理的"运行中事务隔离"行为。
-crates/clawd/src/capability_map.rs	- {}: {}. Visible skills: {}.	"- {}: {}. Visible skills: {}.",
-crates/clawd/src/capability_map.rs	Capability layers: tools are low-level reusable actions, skills are domain capabilities, workflows are multi-step playbooks.	"Capability layers: tools are low-level reusable actions, skills are domain capabilities, workflows are multi-step playbooks."
-crates/clawd/src/capability_map.rs	Current capability map (derived from the currently enabled skills):	"Current capability map (derived from the currently enabled skills):".to_string(),
 crates/clawd/src/capability_map.rs	Current runtime-available tool capabilities are unavailable; use chat only when no external retrieval or execution is needed.	"Current runtime-available tool capabilities are unavailable; use chat only when no external retrieval or execution is needed.".to_string(),
 crates/clawd/src/capability_map.rs	Do not plan or call capabilities marked `runtime_availability: unavailable`; choose another available capability or explain the dependency gap.	"Do not plan or call capabilities marked `runtime_availability: unavailable`; choose another available capability or explain the dependency gap.".to_string(),
 crates/clawd/src/capability_map.rs	Enabled but unavailable capabilities omitted from planning:	lines.push("Enabled but unavailable capabilities omitted from planning:".to_string());
 crates/clawd/src/capability_map.rs	Enabled but unavailable capabilities omitted from planning:	lines.push("Enabled but unavailable capabilities omitted from planning:".to_string());
-crates/clawd/src/capability_map.rs	If the user is asking for current data, real system state, latest external information, or observable results, prefer `act` over `chat`.	"If the user is asking for current data, real system state, latest external information, or observable results, prefer `act` over `chat`."
-crates/clawd/src/capability_map.rs	Use `chat` only for explanation, advice, rewriting, or discussion that does not require external retrieval or execution.	"Use `chat` only for explanation, advice, rewriting, or discussion that does not require external retrieval or execution."
-crates/clawd/src/capability_map.rs	Use this as routing guidance, not as a full tool schema.	"Use this as routing guidance, not as a full tool schema.".to_string(),
-crates/clawd/src/capability_map.rs	analyze images and perform image generation or editing	"analyze images and perform image generation or editing"
 crates/clawd/src/capability_map.rs	confirmation_exempt_when: {exemptions}	parts.push(format!("confirmation_exempt_when: {exemptions}"));
-crates/clawd/src/capability_map.rs	draft or send outbound social content	CapabilityDomain::Publishing => "draft or send outbound social content",
-crates/clawd/src/capability_map.rs	fetch RSS feeds, news, and web content from external sources	"fetch RSS feeds, news, and web content from external sources"
 crates/clawd/src/capability_map.rs	prefer over run_cmd when semantics match	parts.push("prefer over run_cmd when semantics match".to_string());
-crates/clawd/src/capability_map.rs	provide conversational explanation, rewriting, and smalltalk when external retrieval is not needed	"provide conversational explanation, rewriting, and smalltalk when external retrieval is not needed"
 crates/clawd/src/capability_map.rs	requires_confirmation: {requires_confirmation}	parts.push(format!("requires_confirmation: {requires_confirmation}"));
-crates/clawd/src/capability_map.rs	run shell commands and inspect local system, developer, package, archive, git, HTTP, and database information	"run shell commands and inspect local system, developer, package, archive, git, HTTP, and database information"
-crates/clawd/src/capability_map.rs	transcribe audio and synthesize spoken output	CapabilityDomain::AudioMedia => "transcribe audio and synthesize spoken output",
 crates/clawd/src/capability_map.rs	{"reason_code":"sandbox_diagnostics_encode_failed"}	"{\\"reason_code\\":\\"sandbox_diagnostics_encode_failed\\"}".to_string()
 crates/clawd/src/channel_send.rs	telegram bot token is empty	return Err("telegram bot token is empty".to_string());
 crates/clawd/src/channel_send.rs	token response missing tenant_access_token	.ok_or_else(|| "token response missing tenant_access_token".to_string())
@@ -611,7 +595,6 @@ crates/clawd/src/http/ui_routes/skill_import_config.rs	read copied SKILL.md fail
 crates/clawd/src/http/ui_routes/skill_import_config.rs	read copied SKILL.md failed: {err}	.map_err(|err| format!("read copied SKILL.md failed: {err}"));
 crates/clawd/src/http/ui_routes/skill_import_config.rs	read skill source body failed: {err}	.map_err(|err| format!("read skill source body failed: {err}"))?;
 crates/clawd/src/http/ui_routes/skill_import_config.rs	read skills registry failed: {err}	error: Some(format!("read skills registry failed: {err}")),
-crates/clawd/src/http/ui_routes/skill_import_config.rs	reload skill views failed: {err}	error: Some(format!("reload skill views failed: {err}")),
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write downloaded SKILL.md failed: {err}	.map_err(|err| format!("write downloaded SKILL.md failed: {err}"))?;
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write prompt file failed: {err}	error: Some(format!("write prompt file failed: {err}")),
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write skills registry failed: {err}	error: Some(format!("write skills registry failed: {err}")),
@@ -772,8 +755,6 @@ crates/clawd/src/providers/openai_compat.rs	parse response failed: {err}	format!
 crates/clawd/src/providers/openai_compat.rs	read response failed: {err}	ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
 crates/clawd/src/providers/openai_model_turn.rs	parse response failed: {err}	format!("parse response failed: {err}"),
 crates/clawd/src/providers/openai_model_turn.rs	read response failed: {err}	ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
-crates/clawd/src/providers/output.rs	create model io logs dir failed: {err}	warn!("create model io logs dir failed: {err}");
-crates/clawd/src/providers/output.rs	open model io log file failed: {err}	warn!("open model io log file failed: {err}");
 crates/clawd/src/providers/output.rs	read model io archives dir failed: {err}	warn!("read model io archives dir failed: {err}");
 crates/clawd/src/providers/output.rs	write model io log failed: {err}	warn!("write model io log failed: {err}");
 crates/clawd/src/providers/output.rs	按日归档 + 旧档过期	// 完成"按日归档 + 旧档过期"，append 侧保持 O(1)。
@@ -1016,7 +997,6 @@ crates/clawd/src/worker/mod.rs	Unsupported task kind: {other}	let err = format!(
 crates/clawd/src/worker/mod.rs	invalid payload_json for task {}: {error}	let error = anyhow!("invalid payload_json for task {}: {error}", task.task_id);
 crates/clawd/src/worker/mod.rs	worker_once: no queued tasks, idle tick	debug!("worker_once: no queued tasks, idle tick");
 crates/clawd/src/worker/mod.rs	{prefix}\n{job_id_label}: {job_id}	let status_block = format!("{prefix}\\n{job_id_label}: {job_id}");
-crates/clawd/src/worker/mod.rs	{text_trimmed}\n\n{status_block}	format!("{text_trimmed}\\n\\n{status_block}")
 crates/clawd/src/worker/run_skill_finalize.rs	run-skill:{}:async-job:{}	let checkpoint_id = format!("run-skill:{}:async-job:{}", task.task_id, job.job_id);
 crates/clawd/src/worker/run_skill_finalize.rs	run_skill:{skill_name}:async_job:{}	"run_skill:{skill_name}:async_job:{}",
 crates/clawd/src/worker/run_skill_mutation.rs	run-skill:{}:mutation-reconciliation	let checkpoint_id = format!("run-skill:{}:mutation-reconciliation", task.task_id);
@@ -1807,11 +1787,8 @@ crates/skills/log_analyze/src/main.rs	log directory contains no readable files: 
 crates/skills/log_analyze/src/main.rs	log path is neither file nor directory: {}	"log path is neither file nor directory: {}",
 crates/skills/log_analyze/src/main.rs	log path not found: {}	return Err(format!("log path not found: {}", path.display()));
 crates/skills/log_analyze/src/main.rs	read log dir entry failed: {err}	let entry = entry.map_err(|err| format!("read log dir entry failed: {err}"))?;
-crates/skills/log_analyze/src/main.rs	read log dir entry failed: {err}	let entry = entry.map_err(|err| format!("read log dir entry failed: {err}"))?;
-crates/skills/log_analyze/src/main.rs	read log dir failed: {err}	let entries = fs::read_dir(path).map_err(|err| format!("read log dir failed: {err}"))?;
 crates/skills/log_analyze/src/main.rs	read log dir failed: {err}	let entries = fs::read_dir(path).map_err(|err| format!("read log dir failed: {err}"))?;
 crates/skills/log_analyze/src/main.rs	read log failed: {err}	std::fs::read_to_string(resolved_path).map_err(|err| format!("read log failed: {err}"))?;
-crates/skills/log_analyze/src/main.rs	read log file metadata failed: {err}	.map_err(|err| format!("read log file metadata failed: {err}"))?;
 crates/skills/log_analyze/src/main.rs	read log file metadata failed: {err}	.map_err(|err| format!("read log file metadata failed: {err}"))?;
 crates/skills/map_merchant/src/main.rs	places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri	"places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri",
 crates/skills/music_generate/src/async_projection.rs	adapter_result must be object	return Err("adapter_result must be object".to_string());
@@ -1874,9 +1851,6 @@ crates/skills/photo_organize/src/i18n.rs	only photos with lenses {lenses}	"only 
 crates/skills/photo_organize/src/i18n.rs	resolve current_dir failed: {error}	"resolve current_dir failed: {error}".to_string(),
 crates/skills/photo_organize/src/i18n.rs	source_dir does not exist or is not accessible: {path} ({error})	"source_dir does not exist or is not accessible: {path} ({error})".to_string(),
 crates/skills/photo_organize/src/i18n.rs	source_dir is not a directory: {path}	"source_dir is not a directory: {path}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	{base}\n\n{non_exif_text}	format!("{base}\\n\\n{non_exif_text}")
-crates/skills/photo_organize/src/organize_flow.rs	{text}\n\n{non_exif_text}	format!("{text}\\n\\n{non_exif_text}")
-crates/skills/photo_organize/src/organize_flow.rs	{text}\n\n{non_exif_text}	format!("{text}\\n\\n{non_exif_text}")
 crates/skills/process_basic/src/main.rs	PID PPID %CPU %MEM COMM	let mut lines = vec!["PID PPID %CPU %MEM COMM".to_string()];
 crates/skills/process_basic/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/process_basic/src/main.rs	create service logs dir failed: {err}	eprintln!("create service logs dir failed: {err}");
@@ -1898,7 +1872,7 @@ crates/skills/rss_fetch/src/main.rs	Time: {time}.	"Time: {time}.".to_string(),
 crates/skills/rss_fetch/src/main.rs	Topic: {topic}.	"Topic: {topic}.",
 crates/skills/rss_fetch/src/main.rs	Topic: {topic}.	"Topic: {topic}.",
 crates/skills/rss_fetch/src/main.rs	Topic: {topic}.	"Topic: {topic}.".to_string(),
-crates/skills/rss_fetch/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
+crates/skills/rss_fetch/src/main.rs	args must be object	.ok_or_else(|| SkillFailure::invalid_input("args must be object"))?;
 crates/skills/rss_fetch/src/main.rs	build http client failed: {err}	.map_err(|err| format!("build http client failed: {err}"))?;
 crates/skills/rss_fetch/src/main.rs	feed_urls entries must be strings	.ok_or_else(|| "feed_urls entries must be strings".to_string())?
 crates/skills/rss_fetch/src/main.rs	fetch requires a non-empty url or feed_url	return Err("fetch requires a non-empty url or feed_url".to_string());
@@ -1908,7 +1882,7 @@ crates/skills/rss_fetch/src/main.rs	http request failed: {err}	.map_err(|err| fo
 crates/skills/rss_fetch/src/main.rs	no feed items available: all {} source(s) failed or returned no items	"no feed items available: all {} source(s) failed or returned no items",
 crates/skills/rss_fetch/src/main.rs	read response body failed: {err}	.map_err(|err| format!("read response body failed: {err}"))
 crates/skills/rss_fetch/src/main.rs	rss_fetch save_config failed: {}\n	.write_fmt(format_args!("rss_fetch save_config failed: {}\\n", e));
-crates/skills/rss_fetch/src/main.rs	unsupported action; use fetch|latest|news	_ => Err("unsupported action; use fetch|latest|news".to_string()),
+crates/skills/rss_fetch/src/main.rs	unsupported action; use fetch|latest|news	"unsupported action; use fetch|latest|news",
 crates/skills/rss_fetch/src/main.rs	url and feed_url must be strings	.ok_or_else(|| "url and feed_url must be strings".to_string())?
 crates/skills/rss_fetch/src/main.rs	{icon} {label} · {count} items	"{icon} {label} · {count} items",
 crates/skills/rss_fetch/src/main.rs	{icon} {label} · {count} items	"{icon} {label} · {count} items".to_string(),
@@ -1981,7 +1955,6 @@ crates/skills/system_basic/src/main.rs	name or pattern is required	.ok_or_else(|
 crates/skills/system_basic/src/main.rs	read_range requires a file, but target is a directory: {}	"read_range requires a file, but target is a directory: {}",
 crates/skills/system_basic/src/main.rs	system info encode failed: {err}	.map_err(|err| SkillError::invalid_data(format!("system info encode failed: {err}")))?;
 crates/skills/system_basic/src/main.rs	unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime	"unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime"
-crates/skills/system_basic/src/main.rs	unsupported runtime_status kind; use current_user|host_name|kernel_release|current_time|current_working_directory	"unsupported runtime_status kind; use current_user|host_name|kernel_release|current_time|current_working_directory",
 crates/skills/system_basic/src/main.rs	workspace_glance requires a directory: {}	"workspace_glance requires a directory: {}",
 crates/skills/system_basic/src/main.rs	{operation} failed for {path_text}: {err}	Self::new(kind, format!("{operation} failed for {path_text}: {err}")).with_extra(json!({
 crates/skills/system_basic/src/path_helpers.rs	file too large to compare content directly: {} bytes exceeds {}	"file too large to compare content directly: {} bytes exceeds {}",
@@ -2187,6 +2160,7 @@ crates/telegramd/src/telegram_formatting.rs	send text message with buttons faile
 crates/telegramd/src/telegram_formatting.rs	send_voice failed for {}: {}	warn!("send_voice failed for {}: {}", path, err);
 crates/webd/src/main.rs	GET,POST,PUT,PATCH,DELETE,OPTIONS	HeaderValue::from_static("GET,POST,PUT,PATCH,DELETE,OPTIONS"),
 crates/webd/src/main.rs	[webd].upstream is empty	anyhow::bail!("[webd].upstream is empty");
+crates/webd/src/main.rs	build long-running reqwest client failed	.context("build long-running reqwest client failed")?;
 crates/webd/src/main.rs	build reqwest client failed	.context("build reqwest client failed")?;
 crates/webd/src/main.rs	content-type, x-rustclaw-key	HeaderValue::from_static("content-type, x-rustclaw-key"),
 crates/webd/src/main.rs	invalid JSON from clawd	Json(json!({ "ok": false, "error": "invalid JSON from clawd", "raw": text })),
