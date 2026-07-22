@@ -9,6 +9,9 @@ const QUICK_INDEX_MAX_SCHEMA_FIELDS: usize = 8;
 const QUICK_INDEX_MAX_OPTIONAL_FIELDS: usize = 8;
 const QUICK_INDEX_MAX_ENUM_FIELDS: usize = 3;
 const QUICK_INDEX_MAX_ENUM_VALUES: usize = 8;
+const QUICK_INDEX_PURPOSE_CHAR_BUDGET: usize = 160;
+const QUICK_INDEX_COMPACT_PURPOSE_CHAR_BUDGET: usize = 96;
+const QUICK_INDEX_MAX_SEMANTIC_TAGS: usize = 8;
 
 fn skill_risk_level_token(risk_level: SkillRiskLevel) -> &'static str {
     match risk_level {
@@ -59,6 +62,16 @@ fn compact_declared_fields(values: &[String], limit: usize) -> String {
         kept.push(format!("+{}more", values.len() - kept.len()));
     }
     kept.join("|")
+}
+
+fn compact_capability_purpose(description: &str, char_budget: usize) -> String {
+    description
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(char_budget)
+        .collect()
 }
 
 fn schema_string_array(schema: &Value, key: &str) -> Vec<String> {
@@ -177,12 +190,10 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
                 }
             }
             if let Some(description) = capability.description.as_deref() {
-                let compact = description.split_whitespace().collect::<Vec<_>>().join(" ");
+                let compact =
+                    compact_capability_purpose(description, QUICK_INDEX_PURPOSE_CHAR_BUDGET);
                 if !compact.is_empty() {
-                    attrs.push(format!(
-                        "purpose={}",
-                        compact.chars().take(160).collect::<String>()
-                    ));
+                    attrs.push(format!("purpose={compact}"));
                 }
             }
             if !capability.semantic_tags.is_empty() {
@@ -191,7 +202,7 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
                     capability
                         .semantic_tags
                         .iter()
-                        .take(8)
+                        .take(QUICK_INDEX_MAX_SEMANTIC_TAGS)
                         .cloned()
                         .collect::<Vec<_>>()
                         .join("|")
@@ -293,6 +304,27 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
                 if !action.is_empty() {
                     attrs.push(format!("action={action}"));
                 }
+            }
+            if let Some(description) = capability.description.as_deref() {
+                let compact = compact_capability_purpose(
+                    description,
+                    QUICK_INDEX_COMPACT_PURPOSE_CHAR_BUDGET,
+                );
+                if !compact.is_empty() {
+                    attrs.push(format!("purpose={compact}"));
+                }
+            }
+            if !capability.semantic_tags.is_empty() {
+                attrs.push(format!(
+                    "semantic_tags={}",
+                    capability
+                        .semantic_tags
+                        .iter()
+                        .take(QUICK_INDEX_MAX_SEMANTIC_TAGS)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("|")
+                ));
             }
             if !capability.required.is_empty() {
                 attrs.push(format!("required={}", capability.required.join("|")));
