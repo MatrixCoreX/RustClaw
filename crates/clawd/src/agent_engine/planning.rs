@@ -7,7 +7,7 @@ use super::planning_prompt::{
 };
 use super::planning_repair::repair_plan_actions;
 use claw_core::model_turn::{
-    ModelMessage, ModelRole, ModelToolCall, ModelToolDefinition, ModelTurnRequest,
+    ModelMessage, ModelRole, ModelToolCall, ModelToolChoice, ModelToolDefinition, ModelTurnRequest,
     ModelTurnResponse,
 };
 use serde_json::{json, Value};
@@ -537,6 +537,7 @@ fn native_planner_request(
                 strict: true,
             },
         ],
+        tool_choice: ModelToolChoice::Auto,
         response_schema: None,
         stream: true,
         metadata,
@@ -577,6 +578,18 @@ fn native_contract_retry_request(
     repair_signal: &str,
 ) -> ModelTurnRequest {
     let mut request = request.clone();
+    let repair_tool_name = serde_json::from_str::<Value>(repair_signal)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/protocol_observation/tool_name")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    if let Some(repair_tool_name) = repair_tool_name {
+        request.tools.retain(|tool| tool.name == repair_tool_name);
+    }
+    request.tool_choice = ModelToolChoice::Required;
     request
         .messages
         .push(ModelMessage::text(ModelRole::User, repair_signal));

@@ -347,7 +347,7 @@ fn native_request_separates_system_protocol_from_user_turn() {
 }
 
 #[test]
-fn native_contract_retry_preserves_tool_schema_and_adds_machine_observation() {
+fn native_contract_retry_scopes_required_tool_and_adds_machine_observation() {
     let request = native_planner_request(
         "protocol",
         "current turn",
@@ -357,7 +357,9 @@ fn native_contract_retry_preserves_tool_schema_and_adds_machine_observation() {
     let signal = native_contract_repair_signal("native_plan_capability_missing");
     let repaired = native_contract_retry_request(&request, &signal);
 
-    assert_eq!(repaired.tools, request.tools);
+    assert_eq!(repaired.tools.len(), 1);
+    assert_eq!(repaired.tools[0].name, "call_capability");
+    assert_eq!(repaired.tool_choice, ModelToolChoice::Required);
     assert_eq!(repaired.metadata, request.metadata);
     assert_eq!(repaired.messages.len(), 3);
     let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
@@ -378,8 +380,18 @@ fn native_contract_retry_preserves_tool_schema_and_adds_machine_observation() {
 #[test]
 fn native_response_contract_retry_targets_the_respond_schema() {
     let signal = native_contract_repair_signal("native_respond_list_count_mismatch");
+    let request = native_planner_request(
+        "protocol",
+        "current turn",
+        Some(90),
+        &callable_capabilities(),
+    );
+    let repaired = native_contract_retry_request(&request, &signal);
     let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
 
+    assert_eq!(repaired.tools.len(), 1);
+    assert_eq!(repaired.tools[0].name, "respond");
+    assert_eq!(repaired.tool_choice, ModelToolChoice::Required);
     assert_eq!(observation["protocol_observation"]["tool_name"], "respond");
     assert_eq!(
         observation["protocol_observation"]["required_argument_fields"],

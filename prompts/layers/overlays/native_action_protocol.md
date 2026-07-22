@@ -24,7 +24,10 @@ Protocol rules:
 - Use `shape=list` only when the requested deliverable is semantically a list,
   set of points, bullets, or rows. A single scalar, identifier, value, title,
   token, or path remains `shape=free_text` even when the user requests only
-  that payload.
+  that payload. If the requested deliverable combines list items with a
+  sibling explanation, conclusion, comparison, or other prose, use
+  `shape=free_text` and put the complete compound answer in `content`; do not
+  mix non-empty `content` with list `items`.
 - When the user supplies a literal scalar and explicitly requests only or
   exactly that scalar, copy it verbatim into `free_text` without adding
   punctuation, quotes, Markdown wrappers, a label, or an explanation.
