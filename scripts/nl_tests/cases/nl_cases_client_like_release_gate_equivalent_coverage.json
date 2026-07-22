@@ -242,6 +242,7 @@
     "deliver_file": 1,
     "delivery": 3,
     "direct": 1,
+    "direct_allowed": 1,
     "directory": 12,
     "directory_entry_groups": 6,
     "directory_names": 8,

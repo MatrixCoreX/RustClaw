@@ -951,6 +951,7 @@ def expected_contract_from_tags(raw_tags: str) -> dict:
         "capabilities": [],
         "any_skills": [],
         "requires_tool_call": False,
+        "direct_allowed": False,
         "evidence_fields": [],
     }
     for token in split_tag_tokens(raw_tags):
@@ -964,6 +965,9 @@ def expected_contract_from_tags(raw_tags: str) -> dict:
             expected["skill"] = raw
             break
     for token in split_tag_tokens(raw_tags):
+        if token == "direct_allowed":
+            expected["direct_allowed"] = True
+            continue
         if token == "requires_tool_call=true":
             expected["requires_tool_call"] = True
             continue
@@ -1074,7 +1078,11 @@ def json_contains_key(value, key: str) -> bool:
         return json_contains_key(parsed, key)
     return False
 
-if expected["skill"] and not expected_name_observed(expected["skill"], executed_set):
+if (
+    expected["skill"]
+    and not expected_name_observed(expected["skill"], executed_set)
+    and not (expected["direct_allowed"] and not tool_steps)
+):
     actual = ",".join(dict.fromkeys(executed)) or "<none>"
     print(f"expected_skill_not_executed expected={expected['skill']} actual={actual}")
     raise SystemExit(1)

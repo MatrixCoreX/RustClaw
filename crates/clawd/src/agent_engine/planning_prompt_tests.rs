@@ -53,12 +53,16 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../prompts/layers/overlays/native_action_protocol.md");
     let prompt = std::fs::read_to_string(overlay).expect("read native action protocol");
+    let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    assert!(prompt
-        .contains("When the user requests a structured parse, validation, preview, inspection"));
-    assert!(prompt.contains("call that capability instead of substituting your own inference"));
-    assert!(prompt.contains("only when no runtime evidence or effect is"));
-    assert!(prompt.contains("needed, or after the required capability observations are available"));
+    assert!(prompt.contains("an authoritative structured operation owned by a matching runtime"));
+    assert!(prompt.contains("call the `call_capability` function with that capability"));
+    assert!(prompt.contains("When a structured parse, validation, preview, inspection"));
+    assert!(normalized.contains(
+        "call that capability instead of substituting your own inference"
+    ));
+    assert!(prompt.contains("A self-contained transformation whose"));
+    assert!(prompt.contains("no runtime-owned validation, evidence, or effect is"));
     assert!(prompt.contains("A matching validation or guard capability owns the complete check"));
     assert!(prompt.contains("bounded raw reads that cover only part of the target"));
     assert!(prompt.contains("when a structured validator result explicitly requests supplementary"));
