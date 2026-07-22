@@ -1,5 +1,7 @@
 use claw_core::config::{LlmProviderConfig, LlmProviderParams};
-use claw_core::model_turn::{ModelMessage, ModelRole, ModelToolDefinition, ModelTurnRequest};
+use claw_core::model_turn::{
+    ModelMessage, ModelRole, ModelToolChoice, ModelToolDefinition, ModelTurnRequest,
+};
 
 use super::*;
 
@@ -45,6 +47,7 @@ fn native_request() -> ModelTurnRequest {
             }),
             strict: true,
         }],
+        tool_choice: ModelToolChoice::Auto,
         response_schema: None,
         stream: false,
         metadata: BTreeMap::new(),
@@ -64,6 +67,17 @@ fn native_request_maps_messages_and_function_tools() {
         json!(["capability", "args"])
     );
     assert_eq!(body["parallel_tool_calls"], true);
+}
+
+#[test]
+fn native_request_maps_required_tool_choice() {
+    let mut request = native_request();
+    request.tool_choice = ModelToolChoice::Required;
+
+    let body = build_openai_request(&provider(), &request, &ChatRequestHints::default())
+        .expect("build request");
+
+    assert_eq!(body["tool_choice"], "required");
 }
 
 #[test]

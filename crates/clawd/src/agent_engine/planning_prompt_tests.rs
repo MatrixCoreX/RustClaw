@@ -73,6 +73,10 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("an unobserved project name"));
     assert!(prompt.contains("current repository"));
     assert!(prompt.contains("facts. Direct creative drafting"));
+    assert!(prompt.contains("combines list items with a"));
+    assert!(prompt.contains("sibling explanation, conclusion, comparison"));
+    assert!(prompt.contains("complete compound answer in `content`"));
+    assert!(prompt.contains("mix non-empty `content` with list `items`"));
     assert!(prompt.contains("preserve each"));
     assert!(prompt.contains("scalar, object, or array shape"));
     assert!(prompt.contains("agent.subagent"));

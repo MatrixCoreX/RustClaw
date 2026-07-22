@@ -61,11 +61,27 @@ pub struct ModelToolCall {
     pub arguments: Value,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelToolChoice {
+    #[default]
+    Auto,
+    Required,
+}
+
+impl ModelToolChoice {
+    fn is_auto(&self) -> bool {
+        matches!(self, Self::Auto)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelTurnRequest {
     pub messages: Vec<ModelMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ModelToolDefinition>,
+    #[serde(default, skip_serializing_if = "ModelToolChoice::is_auto")]
+    pub tool_choice: ModelToolChoice,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_schema: Option<Value>,
     #[serde(default)]
@@ -79,6 +95,7 @@ impl ModelTurnRequest {
         Self {
             messages: vec![ModelMessage::text(ModelRole::User, prompt)],
             tools: Vec::new(),
+            tool_choice: ModelToolChoice::Auto,
             response_schema: None,
             stream: false,
             metadata: BTreeMap::new(),

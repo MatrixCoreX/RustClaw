@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use claw_core::model_turn::{
-    ModelContentPart, ModelFinishReason, ModelMessage, ModelRole, ModelToolCall, ModelTurnEvent,
-    ModelTurnRequest, ModelTurnResponse,
+    ModelContentPart, ModelFinishReason, ModelMessage, ModelRole, ModelToolCall, ModelToolChoice,
+    ModelTurnEvent, ModelTurnRequest, ModelTurnResponse,
 };
 use futures_util::StreamExt;
 use serde_json::{json, Map, Value};
@@ -170,7 +170,14 @@ fn build_openai_request(
             })
             .collect::<Vec<_>>();
         body.insert("tools".to_string(), Value::Array(tools));
-        body.insert("tool_choice".to_string(), Value::String("auto".to_string()));
+        let tool_choice = match request.tool_choice {
+            ModelToolChoice::Auto => "auto",
+            ModelToolChoice::Required => "required",
+        };
+        body.insert(
+            "tool_choice".to_string(),
+            Value::String(tool_choice.to_string()),
+        );
         body.insert("parallel_tool_calls".to_string(), Value::Bool(true));
     }
     if let Some(schema) = request.response_schema.as_ref() {
