@@ -59,22 +59,6 @@ fn repeated_successful_action_is_allowed_for_active_recipe(
     action_effect_is_repeatable_for_active_recipe(loop_state.execution_recipe, effect)
 }
 
-fn repeated_successful_observe_or_validate_is_allowed(
-    state: &AppState,
-    loop_state: &LoopState,
-    action: &AgentAction,
-) -> bool {
-    if super::registry_dedup_scope_for_action(state, action)
-        != claw_core::skill_registry::RegistryDedupScope::Args
-    {
-        return false;
-    }
-    let Some(effect) = action_effect_for_repeat_guard(state, loop_state, action) else {
-        return false;
-    };
-    !effect.mutates && (effect.observes || effect.validates)
-}
-
 fn action_effect_for_repeat_guard(
     state: &AppState,
     loop_state: &LoopState,
@@ -160,17 +144,28 @@ fn check_repeat_action_guard(
         return Some("repeat_action_limit".to_string());
     }
     if let Some(success_count) = loop_state.successful_action_fingerprints.get(fingerprint) {
-        if repeated_successful_action_is_allowed_for_active_recipe(state, loop_state, action)
-            || repeated_successful_observe_or_validate_is_allowed(state, loop_state, action)
-        {
+        if repeated_successful_action_is_allowed_for_active_recipe(state, loop_state, action) {
             return None;
         }
+        let repeated_observation_ready = action_effect_for_repeat_guard(state, loop_state, action)
+            .is_some_and(|effect| !effect.mutates && (effect.observes || effect.validates));
+        let (reason_code, stop_signal) = if repeated_observation_ready {
+            (
+                "registry_idempotency_repeat_observation_ready",
+                "observed_output_ready",
+            )
+        } else {
+            (
+                "registry_idempotency_repeat_completed_action",
+                "repeat_completed_action",
+            )
+        };
         if let Some(attribution) = super::registry_idempotency_guard_attribution(
             state,
             policy,
             action,
             fingerprint,
-            "registry_idempotency_repeat_completed_action",
+            reason_code,
             Some(*success_count),
             None,
         ) {
@@ -187,7 +182,7 @@ fn check_repeat_action_guard(
                 crate::truncate_for_log(fingerprint)
             )
         );
-        return Some("repeat_completed_action".to_string());
+        return Some(stop_signal.to_string());
     }
     None
 }

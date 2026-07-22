@@ -1493,25 +1493,6 @@ pub(super) fn action_fingerprint_for_policy(
     action_fingerprint(state, policy_action)
 }
 
-pub(super) fn registry_dedup_scope_for_action(
-    state: &AppState,
-    action: &AgentAction,
-) -> claw_core::skill_registry::RegistryDedupScope {
-    let resolved_action = resolved_registry_action_for_policy(state, action);
-    let policy_action = resolved_action.as_ref().unwrap_or(action);
-    let Some((skill_name, args)) = action_skill_and_args(policy_action) else {
-        return claw_core::skill_registry::RegistryDedupScope::Args;
-    };
-    let normalized_skill = state
-        .resolve_canonical_skill_name(skill_name)
-        .to_ascii_lowercase();
-    let action_token = registry_action_token_from_args(args);
-    state
-        .get_skills_registry()
-        .map(|registry| registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref()))
-        .unwrap_or(claw_core::skill_registry::RegistryDedupScope::Args)
-}
-
 pub(super) fn registry_idempotency_guard_attribution(
     state: &AppState,
     policy: &AgentLoopGuardPolicy,

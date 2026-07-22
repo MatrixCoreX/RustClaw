@@ -607,6 +607,8 @@ pub(crate) fn answer_matches_observed_output_passthrough(
         .filter(|body| !body.is_empty())
         .any(|body| {
             answer == body
+                || super::strict_exact_tail_read_answer_from_output(body)
+                    .is_some_and(|observed| answer == observed.trim())
                 || normalized_observed_listing(body).is_some_and(|listing| {
                     let listing = listing.trim();
                     answer == listing

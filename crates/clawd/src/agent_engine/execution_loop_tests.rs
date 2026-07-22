@@ -502,7 +502,7 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
 }
 
 #[test]
-fn repeat_guard_allows_successful_observe_repeat_until_limit() {
+fn repeat_guard_blocks_identical_successful_observe_outside_active_recipe() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture("task-repeat-observe");
     let mut loop_state = super::LoopState::new();
@@ -510,8 +510,7 @@ fn repeat_guard_allows_successful_observe_repeat_until_limit() {
         skill: "git_basic".to_string(),
         args: serde_json::json!({"action": "status"}),
     };
-    let mut policy = test_policy(false);
-    policy.repeat_action_limit = 2;
+    let policy = test_policy(false);
     let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
     loop_state
         .successful_action_fingerprints
@@ -526,33 +525,9 @@ fn repeat_guard_allows_successful_observe_repeat_until_limit() {
             &action,
             &fingerprint,
             1,
-        ),
-        None
-    );
-    assert_eq!(
-        check_repeat_action_guard(
-            &state,
-            &task,
-            &mut loop_state,
-            &policy,
-            &action,
-            &fingerprint,
-            2,
-        ),
-        None
-    );
-    assert_eq!(
-        check_repeat_action_guard(
-            &state,
-            &task,
-            &mut loop_state,
-            &policy,
-            &action,
-            &fingerprint,
-            3,
         )
         .as_deref(),
-        Some("repeat_action_limit")
+        Some("observed_output_ready")
     );
 }
 
@@ -604,11 +579,15 @@ fn resource_dedup_blocks_same_resource_but_allows_distinct_resources() {
             1,
         )
         .as_deref(),
-        Some("repeat_completed_action")
+        Some("observed_output_ready")
     );
     assert_eq!(
         loop_state.rollout_attribution[0].dedup_scope.as_deref(),
         Some("resource")
+    );
+    assert_eq!(
+        loop_state.rollout_attribution[0].reason_code.as_deref(),
+        Some("registry_idempotency_repeat_observation_ready")
     );
 
     let missing_resource_a = crate::AgentAction::CallCapability {
