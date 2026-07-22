@@ -220,7 +220,13 @@ fn tools_defaults_are_least_privilege_coding_defaults() {
 
 #[test]
 fn default_workflow_knowledge_and_feed_skills_are_always_on_in_ui() {
-    for skill in ["schedule", "extension_manager", "kb", "rss_fetch"] {
+    for skill in [
+        "schedule",
+        "subagent",
+        "extension_manager",
+        "kb",
+        "rss_fetch",
+    ] {
         assert!(base_skill_names().contains(&skill));
         assert!(core_skills_always_enabled().contains(&skill));
     }

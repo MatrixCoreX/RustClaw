@@ -93,6 +93,7 @@ pub(super) fn record_subagent_step_execution(
     args: &Value,
     action_trace_kind: &str,
     stop_signal: Option<&str>,
+    fingerprint: &str,
 ) {
     let output =
         latest_subagent_runtime_observation_for_step(loop_state, global_step, step_in_round)
@@ -156,6 +157,22 @@ pub(super) fn record_subagent_step_execution(
     loop_state
         .executed_step_results
         .push(step_execution.clone());
+    let delegated_terminal_evidence = step_execution
+        .output
+        .as_deref()
+        .and_then(|output| serde_json::from_str::<Value>(output).ok())
+        .and_then(|output| {
+            output
+                .get("delegated_terminal_evidence")
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false);
+    if status == crate::executor::StepExecutionStatus::Ok && delegated_terminal_evidence {
+        *loop_state
+            .successful_action_fingerprints
+            .entry(fingerprint.to_string())
+            .or_insert(0) += 1;
+    }
     log_step_journal_summary(
         task,
         loop_state.round_no,

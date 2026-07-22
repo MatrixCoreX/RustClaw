@@ -1050,6 +1050,9 @@ def capability_family_names(name: str) -> set[str]:
         # RustClaw config guard is now exposed through config_edit.guard_config;
         # config_guard remains a compatibility label in older NL case tags.
         "config_guard": {"config_guard", "config_edit", "config_basic"},
+        # Native child delegation is traced by exact planner capability while
+        # source-controlled case tags retain the owning builtin skill token.
+        "subagent": {"subagent", "agent.subagent"},
     }
     return families.get(name, {name})
 

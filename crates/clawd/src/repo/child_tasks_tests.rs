@@ -373,3 +373,66 @@ fn scheduler_persists_and_serializes_overlapping_local_worktree_children() {
         "path_ownership_serialization"
     );
 }
+
+#[test]
+fn inline_child_starts_with_independent_running_claim_and_graph_node() {
+    let temp = TempDirGuard::new("inline_child_claim");
+    let db_path = temp.path.join("tasks.sqlite");
+    let state = file_backed_state_with_schema(&db_path);
+    let parent_task_id = "task-parent-inline";
+    insert_task(
+        &state,
+        parent_task_id,
+        "running",
+        &json!({"text": "parent"}),
+        &json!({}),
+    );
+    let spec = sample_child_spec(parent_task_id, "task-child-inline", true);
+    let parent = ChildTaskParentContext {
+        parent_task_id: parent_task_id.to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: Some("external-user".to_string()),
+        external_chat_id: Some("external-chat".to_string()),
+        execution_policy_stamp: Some(json!({
+            "schema_version": 1,
+            "execution_mode": "configured"
+        })),
+    };
+
+    let (claimed, payload) =
+        start_inline_child_task(&state, &parent, &spec).expect("start inline child");
+
+    assert_eq!(claimed.task_id, "task-child-inline");
+    assert_eq!(claimed.claim_attempt, 1);
+    assert_ne!(claimed.task_id, parent_task_id);
+    assert_eq!(payload["task_role"], "subagent_child");
+    assert_eq!(
+        payload[crate::task_execution_policy::POLICY_PAYLOAD_FIELD]["execution_mode"],
+        "configured"
+    );
+    let db = state.core.db.get().expect("get db");
+    let row: (String, Option<String>, i64, String) = db
+        .query_row(
+            "SELECT status, lease_owner, claim_attempt, payload_json
+             FROM tasks WHERE task_id = ?1",
+            rusqlite::params![claimed.task_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read child task");
+    assert_eq!(row.0, "running");
+    assert_eq!(row.1.as_deref(), Some(state.worker.worker_id.as_str()));
+    assert_eq!(row.2, 1);
+    let stored_payload: Value = serde_json::from_str(&row.3).expect("parse child payload");
+    assert_eq!(stored_payload["parent_task_id"], parent_task_id);
+    let readiness: String = db
+        .query_row(
+            "SELECT readiness FROM child_task_graph_nodes WHERE child_task_id = ?1",
+            rusqlite::params![claimed.task_id],
+            |row| row.get(0),
+        )
+        .expect("read child graph node");
+    assert_eq!(readiness, "running");
+}

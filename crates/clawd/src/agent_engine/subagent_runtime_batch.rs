@@ -170,6 +170,7 @@ fn record_subagent_batch_action_with_config(
             allowed_capability_count,
             child.options.budget.as_ref(),
             config,
+            "completed",
         );
         let child_result = json!({
             "schema_version": 1,

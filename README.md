@@ -149,7 +149,7 @@ flowchart TD
     Q -->|call_tool / call_skill| QA[Pre-tool hooks + adapter preflight]
     R --> QA
     QA -->|runtime async marker| AR[Allow async_start + strip internal marker]
-    QA -->|subagent tool| SS[Bounded child team<br/>read-only explorer or isolated worktree writer/tester]
+    QA -->|resolved agent.subagent capability| SS[Bounded child team<br/>read-only explorer or isolated worktree writer/tester]
     QA -->|call_tool| S[Tool executor<br/>configured platform sandbox for subprocesses]
     QA -->|call_skill| T[Skill dispatcher<br/>configured platform sandbox for runners]
     AR --> T
@@ -185,7 +185,7 @@ flowchart TD
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
 - `Task journal event`: executor observations are projected into stable `task_goal`, `context_budget`, `context_compaction`, `tool_started`, `tool_step`, `tool_finished`, optional `coding_checkpoint`, optional `coding_task_contract`, optional `coding_evidence`, and optional team lifecycle events with refs, counts, status tokens, verification tokens, timing, and failure attribution for CLI/UI progress views.
-- `subagent tool`: planner-authorized child work is explicit and persisted as an acyclic child-task graph. Trusted role definitions come from `agent_guard.toml`; the model selects a role token but cannot define permissions. The queue claims only ready nodes, serializes overlapping writer ownership, and permits disjoint isolated worktree writers to run concurrently. The parent reviews persisted ownership, conflicts, dirty-parent state, and precondition hashes before admitting or rejecting a patch. Children never publish externally, and only an explicitly admitted local-current-workspace role may write outside an isolated task worktree.
+- `agent.subagent` / `agent.subagent_batch` / `agent.subagent_persistent`: planner-authorized child work enters through the same native `call_capability` -> registry resolver -> verifier path as other runtime actions. The first capability runs one read-only inline child, the second runs a bounded read-only batch, and the third schedules explicitly high-risk resumable child work. Trusted role definitions and isolation/permission policy come from registry plus `agent_guard.toml`; planner-supplied policy fields are discarded. The queue claims only ready nodes, serializes overlapping writer ownership, and permits disjoint isolated worktree writers to run concurrently. The parent reviews persisted ownership, conflicts, dirty-parent state, and precondition hashes before admitting or rejecting a patch. Children never publish externally, and only an explicitly admitted local-current-workspace role may write outside an isolated task worktree.
 - `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
@@ -685,7 +685,7 @@ Subagent team orchestration flow:
 
 ```mermaid
 flowchart TD
-    A[Planner action<br/>subagent children + dependencies] --> B[Load trusted role definitions]
+    A[Planner call_capability<br/>single, batch, or persistent subagent] --> B[Registry resolve + verify<br/>then load trusted role definitions]
     B --> C[Validate role, scope, ownership,<br/>permission, budget, model/tool policy]
     C --> D[Persist parent graph + child tasks<br/>in one SQLite transaction]
     D --> E{Readiness reconciliation}

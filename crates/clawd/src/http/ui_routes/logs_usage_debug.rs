@@ -285,6 +285,8 @@ fn summarize_usage_task(
     let latest = latest_entry.cloned().unwrap_or(TaskDebugEntry {
         ts: None,
         task_id: Some(task_id.clone()),
+        parent_task_id: None,
+        child_task_id: None,
         call_id: None,
         vendor: None,
         provider: None,
@@ -764,6 +766,7 @@ async fn usage_record_detail(
 }
 
 fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Vec<TaskDebugEntry>> {
+    let trace_task_ids = task_debug_trace_task_ids(state, task_id)?;
     let path = state
         .skill_rt
         .workspace_root
@@ -786,11 +789,44 @@ fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Ve
         let Ok(entry) = serde_json::from_str::<TaskDebugEntry>(trimmed) else {
             continue;
         };
-        if entry.task_id.as_deref() == Some(task_id) {
+        if entry
+            .task_id
+            .as_deref()
+            .is_some_and(|entry_task_id| trace_task_ids.contains(entry_task_id))
+        {
             entries.push(entry);
         }
     }
     Ok(entries)
+}
+
+fn task_debug_trace_task_ids(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<std::collections::HashSet<String>> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let mut task_ids = std::collections::HashSet::from([task_id.to_string()]);
+    let Ok(mut stmt) = db.prepare(
+        "WITH RECURSIVE trace_tasks(task_id) AS (
+             SELECT ?1
+             UNION
+             SELECT node.child_task_id
+             FROM child_task_graph_nodes node
+             JOIN trace_tasks parent ON node.parent_task_id = parent.task_id
+         )
+         SELECT task_id FROM trace_tasks",
+    ) else {
+        return Ok(task_ids);
+    };
+    let rows = stmt.query_map(rusqlite::params![task_id], |row| row.get::<_, String>(0))?;
+    for row in rows {
+        task_ids.insert(row?);
+    }
+    Ok(task_ids)
 }
 
 fn numbered_task_debug_calls(entries: &[TaskDebugEntry]) -> Vec<TaskDebugCall> {
@@ -1163,7 +1199,7 @@ fn extract_memory_trace_for_debug(result_json: &Value) -> Option<Value> {
 mod logs_usage_debug_tests {
     use super::{
         build_task_debug_flow_summary, extract_memory_trace_for_debug, normalize_log_file_name,
-        numbered_task_debug_calls, TaskDebugEntry,
+        numbered_task_debug_calls, task_debug_trace_task_ids, TaskDebugEntry,
     };
     use serde_json::json;
 
@@ -1177,11 +1213,36 @@ mod logs_usage_debug_tests {
     }
 
     #[test]
+    fn teaching_trace_task_set_includes_nested_child_tasks() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let db = state.core.db.get().expect("db");
+        db.execute_batch(
+            "CREATE TABLE child_task_graph_nodes (
+                parent_task_id TEXT NOT NULL,
+                child_task_id TEXT PRIMARY KEY
+             );
+             INSERT INTO child_task_graph_nodes VALUES ('task-parent', 'task-child');
+             INSERT INTO child_task_graph_nodes VALUES ('task-child', 'task-grandchild');",
+        )
+        .expect("child graph fixture");
+        drop(db);
+
+        let ids = task_debug_trace_task_ids(&state, "task-parent").expect("trace task ids");
+
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains("task-parent"));
+        assert!(ids.contains("task-child"));
+        assert!(ids.contains("task-grandchild"));
+    }
+
+    #[test]
     fn numbered_task_debug_calls_preserve_llm_request_and_response_fields() {
         let entries = vec![
             TaskDebugEntry {
                 ts: Some(10),
                 task_id: Some("task-1".to_string()),
+                parent_task_id: None,
+                child_task_id: None,
                 call_id: Some("task-1:planner".to_string()),
                 vendor: Some("minimax".to_string()),
                 provider: Some("vendor-minimax".to_string()),
@@ -1207,6 +1268,8 @@ mod logs_usage_debug_tests {
             TaskDebugEntry {
                 ts: Some(11),
                 task_id: Some("task-1".to_string()),
+                parent_task_id: None,
+                child_task_id: None,
                 call_id: Some("task-1:planner".to_string()),
                 vendor: None,
                 provider: None,
@@ -1262,6 +1325,8 @@ mod logs_usage_debug_tests {
             TaskDebugEntry {
                 ts: Some(10),
                 task_id: Some("task-1".to_string()),
+                parent_task_id: None,
+                child_task_id: None,
                 call_id: Some("task-1:planner".to_string()),
                 vendor: None,
                 provider: None,
@@ -1287,6 +1352,8 @@ mod logs_usage_debug_tests {
             TaskDebugEntry {
                 ts: Some(11),
                 task_id: Some("task-1".to_string()),
+                parent_task_id: None,
+                child_task_id: None,
                 call_id: Some("task-1:repair".to_string()),
                 vendor: None,
                 provider: None,
@@ -1312,6 +1379,8 @@ mod logs_usage_debug_tests {
             TaskDebugEntry {
                 ts: Some(12),
                 task_id: Some("task-1".to_string()),
+                parent_task_id: None,
+                child_task_id: None,
                 call_id: Some("task-1:verifier".to_string()),
                 vendor: None,
                 provider: None,
@@ -1335,6 +1404,8 @@ mod logs_usage_debug_tests {
             TaskDebugEntry {
                 ts: Some(13),
                 task_id: Some("task-1".to_string()),
+                parent_task_id: None,
+                child_task_id: None,
                 call_id: Some("task-1:composer".to_string()),
                 vendor: None,
                 provider: None,

@@ -1,9 +1,9 @@
 use super::{
     answer_contract_for_reply, answer_verifier_retry_summary,
-    apply_structured_respond_clarify_to_loop_state, coding_workflow_ready_for_model_finalization,
-    commit_answer_verifier_retry_answer, forced_boundary_observation_clarify_intent,
-    initial_execution_recipe_spec, observe_only_round_should_continue,
-    post_write_content_evidence_recovery_policy,
+    apply_structured_respond_clarify_to_loop_state, child_loop_budget_limits,
+    coding_workflow_ready_for_model_finalization, commit_answer_verifier_retry_answer,
+    forced_boundary_observation_clarify_intent, initial_execution_recipe_spec,
+    observe_only_round_should_continue, post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
@@ -30,6 +30,35 @@ use crate::{
     OutputResponseShape,
 };
 use serde_json::json;
+
+#[test]
+fn child_loop_budget_comes_only_from_structured_child_contract() {
+    let limits = child_loop_budget_limits(
+        &json!({
+            "task_role": "subagent_child",
+            "child_task_contract": {
+                "budget": {
+                    "max_rounds": 7,
+                    "max_tool_calls": 11,
+                    "timeout_ms": 180000
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("child limits");
+    assert_eq!(limits.max_rounds, 7);
+    assert_eq!(limits.max_tool_calls, 11);
+    assert_eq!(limits.timeout_ms, 180000);
+    assert!(child_loop_budget_limits(
+        &json!({
+            "task_role": "ordinary",
+            "child_task_contract": {"budget": {"max_rounds": 1}}
+        })
+        .to_string()
+    )
+    .is_none());
+}
 
 #[test]
 fn success_marker_matching_requires_exact_line() {

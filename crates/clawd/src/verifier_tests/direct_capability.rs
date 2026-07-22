@@ -133,3 +133,162 @@ fn direct_canonical_capability_verifies_registry_mapping() {
         Some("tool:task_control")
     );
 }
+
+#[test]
+fn inline_subagent_capability_verifies_as_read_only_internal_tool() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "agent.subagent",
+        json!({
+            "role": "review",
+            "objective": "inspect_runtime_boundary",
+            "context_refs": ["AGENTS.md"],
+            "allowed_capabilities": ["filesystem.read_text_range"]
+        }),
+    );
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+    assert_eq!(result.approved_steps[0].action_type, "call_tool");
+    assert_eq!(result.approved_steps[0].skill, "subagent");
+    assert_eq!(
+        result.capability_resolutions[0]
+            .record
+            .canonical_capability_ref
+            .as_deref(),
+        Some("agent.subagent")
+    );
+}
+
+#[test]
+fn inline_subagent_capability_rejects_missing_context_evidence() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "agent.subagent",
+        json!({
+            "role": "review",
+            "objective": "inspect_runtime_boundary",
+            "context_refs": []
+        }),
+    );
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    assert!(result.issues.iter().any(|issue| {
+        issue.kind == VerifyIssueKind::MissingRequiredArg
+            && issue
+                .missing_fields
+                .iter()
+                .any(|field| field == "context_refs")
+    }));
+}
+
+#[test]
+fn batch_subagent_capability_verifies_structured_children() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "agent.subagent_batch",
+        json!({
+            "children": [
+                {"role": "review", "objective": "inspect_runtime_boundary"},
+                {"role": "test", "objective": "inspect_test_boundary"}
+            ]
+        }),
+    );
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+    assert_eq!(result.approved_steps[0].action_type, "call_tool");
+    assert_eq!(result.approved_steps[0].skill, "subagent");
+    assert_eq!(
+        result.approved_steps[0].args["action"],
+        "bounded_parallel_readonly"
+    );
+}
+
+#[test]
+fn batch_subagent_capability_rejects_child_without_objective() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "agent.subagent_batch",
+        json!({
+            "children": [{"role": "review", "task": "ambiguous_child_payload"}]
+        }),
+    );
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    assert!(result.issues.iter().any(|issue| {
+        matches!(issue.kind, VerifyIssueKind::InvalidArgumentValue)
+            || issue
+                .missing_fields
+                .iter()
+                .any(|field| field == "objective")
+    }));
+}

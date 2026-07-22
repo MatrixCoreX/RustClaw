@@ -19,6 +19,7 @@ pub(super) fn persistent_child_task_requested(args: &Value) -> bool {
     args.get("persistent_child_task")
         .and_then(Value::as_bool)
         .unwrap_or(false)
+        || machine_mode_field(args, "action").is_some_and(persistent_child_task_mode_token)
         || machine_mode_field(args, "execution_mode").is_some_and(persistent_child_task_mode_token)
         || machine_mode_field(args, "child_task_mode").is_some_and(persistent_child_task_mode_token)
         || machine_mode_field(args, "scheduler_mode").is_some_and(persistent_child_task_mode_token)

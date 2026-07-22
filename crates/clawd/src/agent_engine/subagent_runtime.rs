@@ -189,6 +189,26 @@ pub(super) fn record_subagent_action_with_config(
     let content_excerpt = context_evidence_combined_excerpt(&context_evidence);
     let content_paths = context_evidence_paths(&context_evidence);
     let content_excerpt_present = context_evidence_has_available_excerpt(&context_evidence);
+    let child_status = if content_excerpt_present {
+        "ready"
+    } else {
+        "needs_more_evidence"
+    };
+    let child_outcome_code = if content_excerpt_present {
+        "subagent_inline_readonly_ready"
+    } else {
+        "subagent_inline_readonly_needs_more_evidence"
+    };
+    let scheduler_status = if content_excerpt_present {
+        "ready_for_model"
+    } else {
+        "waiting_for_evidence"
+    };
+    let scheduler_reason_code = if content_excerpt_present {
+        "readonly_subagent_context_evidence_ready"
+    } else {
+        "readonly_subagent_context_evidence_required"
+    };
     let mut observation = json!({
         "schema_version": 1,
         "owner_layer": "subagent_runtime",
@@ -217,10 +237,11 @@ pub(super) fn record_subagent_action_with_config(
             allowed_capability_count,
             options.budget.as_ref(),
             config,
+            child_status,
         ),
         "scheduler": {
-            "status": "inline_completed",
-            "reason_code": "readonly_subagent_inline_execution",
+            "status": scheduler_status,
+            "reason_code": scheduler_reason_code,
             "lease_required": false,
             "checkpoint_required": false,
             "max_parallel_readonly": config.max_parallel_readonly,
@@ -229,15 +250,15 @@ pub(super) fn record_subagent_action_with_config(
         "merge_contract": {
             "strategy": "append_child_trace_summary",
             "parent_trace_event_type": "subagent",
-            "child_trace_merge_status": "merged",
-            "result_status": "completed",
+            "child_trace_merge_status": if content_excerpt_present { "pending" } else { "not_started" },
+            "result_status": child_status,
             "failure_isolated": true,
         },
         "child_run_summary": {
             "child_run_id": child_run_id.as_str(),
-            "status": "completed",
-            "result_status": "completed",
-            "trace_merge_status": "merged",
+            "status": child_status,
+            "result_status": child_status,
+            "trace_merge_status": if content_excerpt_present { "pending" } else { "not_started" },
             "role": role.token,
             "context_ref_count": context_ref_count,
             "allowed_capability_count": allowed_capability_count,
@@ -248,9 +269,9 @@ pub(super) fn record_subagent_action_with_config(
         },
         "child_result": {
             "schema_version": 1,
-            "status": "completed",
-            "result_status": "completed",
-            "outcome_code": "subagent_inline_readonly_completed",
+            "status": child_status,
+            "result_status": child_status,
+            "outcome_code": child_outcome_code,
             "role": role.token,
             "role_family": role.family,
             "context_ref_count": context_ref_count,
@@ -326,16 +347,20 @@ pub(super) fn record_subagent_action_from_args_with_config(
     args: &Value,
     config: &SubagentRuntimeConfig,
 ) -> Option<&'static str> {
-    if let Some(stop_signal) =
-        subagent_runtime_batch::record_subagent_batch_action_from_args_with_config(
-            loop_state,
-            global_step,
-            step_in_round,
-            args,
-            config,
-        )
-    {
-        return stop_signal;
+    let action = args.get("action").and_then(Value::as_str);
+    let is_explicit_single = action == Some("inline_readonly");
+    if !is_explicit_single {
+        if let Some(stop_signal) =
+            subagent_runtime_batch::record_subagent_batch_action_from_args_with_config(
+                loop_state,
+                global_step,
+                step_in_round,
+                args,
+                config,
+            )
+        {
+            return stop_signal;
+        }
     }
     let (role, objective, context_refs, options) = subagent_action_parts_from_args(args);
     record_subagent_action_with_config(
@@ -634,6 +659,7 @@ fn child_request_envelope(
     allowed_capability_count: usize,
     budget: Option<&Value>,
     config: &SubagentRuntimeConfig,
+    state: &str,
 ) -> Value {
     let budget_summary = subagent_budget_summary(budget, config);
     let timeout_policy = subagent_timeout_policy(&budget_summary);
@@ -643,7 +669,7 @@ fn child_request_envelope(
         "role": role.token,
         "role_metadata": role_metadata_summary(role, config),
         "runtime_config": config.trace_summary(),
-        "state": "completed",
+        "state": state,
         "execution_mode": "inline_readonly_child_run",
         "context_ref_count": context_ref_count,
         "allowed_capability_count": allowed_capability_count,

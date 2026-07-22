@@ -182,6 +182,14 @@ kind = "runner"
 planner_capabilities = [
   { name = "system.run_command", action = "run_cmd", effect = "external", once_per_task = true, dedup_scope = "action", idempotent = false },
 ]
+
+[[skills]]
+name = "subagent"
+enabled = true
+kind = "builtin"
+planner_capabilities = [
+  { name = "agent.subagent", action = "inline_readonly", effect = "observe", idempotent = true, dedup_scope = "args" },
+]
 "#
 }
 
@@ -1162,6 +1170,51 @@ fn registry_idempotency_guard_resolves_planner_capability_before_policy() {
         None,
     )
     .is_some());
+}
+
+#[test]
+fn inline_subagent_fingerprint_uses_structured_delegation_scope() {
+    let state = state_with_registry(registry_governance_fixture(), &["subagent"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let first = crate::AgentAction::CallCapability {
+        capability: "agent.subagent".to_string(),
+        args: serde_json::json!({
+            "role": "review",
+            "objective": "first wording",
+            "context_refs": ["src/lib.rs", "AGENTS.md"],
+            "allowed_capabilities": ["filesystem.read_text"],
+            "result_contract": {"fields": ["aligned", "conflicts"]}
+        }),
+    };
+    let equivalent = crate::AgentAction::CallCapability {
+        capability: "agent.subagent".to_string(),
+        args: serde_json::json!({
+            "role": "reviewer",
+            "objective": "different wording",
+            "context_refs": ["AGENTS.md", "src/lib.rs"],
+            "allowed_capabilities": ["filesystem.read_text", "filesystem.stat_path"],
+            "result_contract": {"fields": ["matched", "drift", "missing"]}
+        }),
+    };
+    let distinct = crate::AgentAction::CallCapability {
+        capability: "agent.subagent".to_string(),
+        args: serde_json::json!({
+            "role": "reviewer",
+            "objective": "different independent review",
+            "context_refs": ["AGENTS.md", "src/api.rs"],
+            "allowed_capabilities": ["filesystem.read_text"]
+        }),
+    };
+
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &first),
+        action_fingerprint_for_policy(&state, &policy, &equivalent)
+    );
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &first),
+        action_fingerprint_for_policy(&state, &policy, &distinct)
+    );
 }
 
 #[test]

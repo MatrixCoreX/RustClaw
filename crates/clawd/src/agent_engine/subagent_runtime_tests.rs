@@ -191,9 +191,9 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
     assert_eq!(observation["result_contract"]["kind"], "object");
     assert_eq!(
         observation["child_run_summary"]["trace_merge_status"],
-        "merged"
+        "not_started"
     );
-    assert_eq!(observation["child_request"]["state"], "completed");
+    assert_eq!(observation["child_request"]["state"], "needs_more_evidence");
     assert_eq!(
         observation["child_request"]["role_metadata"]["role_family"],
         "verifier"
@@ -210,10 +210,10 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
         observation["child_request"]["request_ref"],
         "subagent:4:3:test"
     );
-    assert_eq!(observation["scheduler"]["status"], "inline_completed");
+    assert_eq!(observation["scheduler"]["status"], "waiting_for_evidence");
     assert_eq!(
         observation["scheduler"]["reason_code"],
-        "readonly_subagent_inline_execution"
+        "readonly_subagent_context_evidence_required"
     );
     assert_eq!(observation["scheduler"]["lease_required"], false);
     assert_eq!(observation["scheduler"]["checkpoint_required"], false);
@@ -223,9 +223,9 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
     );
     assert_eq!(
         observation["merge_contract"]["child_trace_merge_status"],
-        "merged"
+        "not_started"
     );
-    assert_eq!(observation["child_result"]["status"], "completed");
+    assert_eq!(observation["child_result"]["status"], "needs_more_evidence");
     assert_eq!(observation["child_result"]["role_family"], "verifier");
     assert_eq!(
         observation["child_result"]["result_contract_required"],
@@ -233,7 +233,7 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
     );
     assert_eq!(
         observation["child_result"]["outcome_code"],
-        "subagent_inline_readonly_completed"
+        "subagent_inline_readonly_needs_more_evidence"
     );
     assert_eq!(observation["write_enabled"], false);
 }
@@ -303,6 +303,9 @@ fn subagent_action_projects_workspace_context_evidence() {
         "head_tail"
     );
     assert_eq!(observation["child_result"]["content_excerpt_present"], true);
+    assert_eq!(observation["child_request"]["state"], "ready");
+    assert_eq!(observation["scheduler"]["status"], "ready_for_model");
+    assert_eq!(observation["child_result"]["result_status"], "ready");
 }
 
 #[test]
@@ -618,12 +621,30 @@ fn subagent_model_child_result_merges_into_runtime_observation() {
     let observation = &loop_state.task_observations[0];
     assert_eq!(
         observation["execution_mode"],
-        "model_assisted_readonly_child_run"
+        "agent_loop_readonly_child_run"
     );
-    assert_eq!(observation["action"], "subagent_model_child");
+    assert_eq!(observation["action"], "subagent_agent_loop_child");
     assert_eq!(observation["model_assisted"], true);
+    assert_eq!(observation["agent_loop_assisted"], true);
+    assert_eq!(observation["status"], "completed");
+    assert_eq!(observation["delegated_terminal_evidence"], true);
     assert_eq!(observation["child_result"]["model_assisted"], true);
+    assert_eq!(observation["child_request"]["state"], "completed");
+    assert_eq!(observation["scheduler"]["status"], "inline_completed");
+    assert_eq!(
+        observation["merge_contract"]["child_trace_merge_status"],
+        "merged"
+    );
+    assert_eq!(
+        observation["child_run_summary"]["trace_merge_status"],
+        "merged"
+    );
+    assert_eq!(observation["child_result"]["status"], "completed");
     assert_eq!(observation["child_result"]["result_status"], "completed");
+    assert_eq!(
+        observation["child_result"]["outcome_code"],
+        "subagent_inline_readonly_completed"
+    );
     assert_eq!(
         observation["child_model_result"]["findings"][0]["code"],
         "boundary_consistent"
@@ -1166,4 +1187,62 @@ fn subagent_batch_expected_required_child_failure_dry_run_is_delivered() {
         observation["merge_contract"]["parent_result_status"],
         "completed_expected_failure"
     );
+}
+
+#[test]
+fn persistent_subagent_registry_action_selects_persistent_runtime() {
+    assert!(
+        super::subagent_runtime_persistent::persistent_child_task_requested(
+            &serde_json::json!({"action": "persistent_child_task"})
+        )
+    );
+    assert!(
+        !super::subagent_runtime_persistent::persistent_child_task_requested(
+            &serde_json::json!({"role": "review", "objective": "inspect"})
+        )
+    );
+}
+
+#[test]
+fn explicit_inline_registry_action_does_not_fall_into_batch_dispatch() {
+    let mut loop_state = LoopState::new();
+    let args = serde_json::json!({
+        "action": "inline_readonly",
+        "role": "review",
+        "objective": "inspect_runtime_boundary",
+        "children": [
+            {"role": "test", "objective": "must_not_replace_single_child"}
+        ]
+    });
+
+    let stop_signal = record_subagent_action_from_args(&mut loop_state, 1, 1, &args);
+
+    assert!(stop_signal.is_none());
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(observation["execution_mode"], "inline_readonly_child_run");
+    assert_eq!(observation["role"], "review");
+    assert_eq!(observation["objective_present"], true);
+    assert!(observation.get("aggregation").is_none());
+}
+
+#[test]
+fn explicit_batch_registry_action_uses_bounded_batch_dispatch() {
+    let mut loop_state = LoopState::new();
+    let args = serde_json::json!({
+        "action": "bounded_parallel_readonly",
+        "children": [
+            {"role": "review", "objective": "inspect_runtime_boundary"},
+            {"role": "test", "objective": "inspect_test_boundary"}
+        ]
+    });
+
+    let stop_signal = record_subagent_action_from_args(&mut loop_state, 1, 1, &args);
+
+    assert!(stop_signal.is_none());
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(
+        observation["execution_mode"],
+        "bounded_parallel_readonly_child_runs"
+    );
+    assert_eq!(observation["aggregation"]["child_count"], 2);
 }

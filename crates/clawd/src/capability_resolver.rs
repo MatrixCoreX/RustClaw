@@ -268,6 +268,7 @@ fn registry_mapping_for_capability<'a>(
 
 fn resolve_candidate_action(candidate: ResolverCandidate, args: Value) -> AgentAction {
     let mut resolved_args = args.as_object().cloned().unwrap_or_default();
+    strip_runtime_owned_policy_args(&mut resolved_args);
     if let Some(action) = candidate.action.as_deref() {
         resolved_args.insert(
             "action".to_string(),
@@ -279,6 +280,24 @@ fn resolve_candidate_action(candidate: ResolverCandidate, args: Value) -> AgentA
         candidate.skill,
         Value::Object(resolved_args),
     )
+}
+
+fn strip_runtime_owned_policy_args(args: &mut serde_json::Map<String, Value>) {
+    for field in [
+        "effect",
+        "risk_level",
+        "execution_mode",
+        "isolation_profile",
+        "network_access",
+        "filesystem_write",
+        "external_publish",
+        "credential_access",
+        "subprocess",
+        "package_install",
+        "privilege_escalation",
+    ] {
+        args.remove(field);
+    }
 }
 
 fn action_for_skill(

@@ -22,7 +22,7 @@ import {
 
 const CURRENT_REGISTRY_SKILLS = [
   "run_cmd", "read_file", "write_file", "workspace_patch", "list_dir", "make_dir", "remove_file", "fs_basic",
-  "code_index", "config_basic", "config_edit", "schedule", "x", "system_basic", "http_basic", "git_basic",
+  "code_index", "config_basic", "config_edit", "schedule", "subagent", "x", "system_basic", "http_basic", "git_basic",
   "install_module", "process_basic", "package_manager", "archive_basic", "db_basic", "docker_basic", "fs_search",
   "rss_fetch", "image_vision", "image_generate", "image_edit", "audio_transcribe", "audio_synthesize", "video_generate",
   "music_generate", "health_check", "log_analyze", "service_control", "task_control", "config_guard", "crypto", "stock",
@@ -41,6 +41,7 @@ test("uses fallback base skill names when backend data is empty", () => {
   assert.ok(fallback.includes("run_cmd"));
   assert.ok(fallback.includes("fs_basic"));
   assert.ok(fallback.includes("schedule"));
+  assert.ok(fallback.includes("subagent"));
   assert.ok(fallback.includes("extension_manager"));
   assert.ok(fallback.includes("kb"));
   assert.ok(fallback.includes("rss_fetch"));
@@ -73,11 +74,11 @@ test("keeps future video and music machine names in multimedia", () => {
 
 test("groups default workflow, knowledge, and feed skills as always-on base skills", () => {
   const groups = groupSkillNames(
-    ["schedule", "extension_manager", "kb", "rss_fetch", "crypto"],
+    ["schedule", "subagent", "extension_manager", "kb", "rss_fetch", "crypto"],
     new Set(baseSkillNamesWithFallback([])),
     new Set(),
   );
-  assert.deepEqual(groups.base, ["extension_manager", "kb", "rss_fetch", "schedule"]);
+  assert.deepEqual(groups.base, ["extension_manager", "kb", "rss_fetch", "schedule", "subagent"]);
   assert.deepEqual(groups.other, ["crypto"]);
 });
 

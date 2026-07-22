@@ -702,6 +702,67 @@ fn fs_basic_find_entries_without_criterion_degrades_to_directory_listing() {
 }
 
 #[test]
+fn fs_basic_find_entries_wildcard_only_degrades_to_directory_listing() {
+    let args = json!({
+        "action": "find_entries",
+        "root": "/home/guagua/rustclaw/plan",
+        "pattern": "*",
+        "target_kind": "file",
+        "max_results": 50
+    });
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "system_basic");
+    assert_eq!(
+        rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+        Some("inventory_dir")
+    );
+    assert_eq!(
+        rewrite.runtime_args.get("path").and_then(|v| v.as_str()),
+        Some("/home/guagua/rustclaw/plan")
+    );
+    assert_eq!(
+        rewrite
+            .runtime_args
+            .get("files_only")
+            .and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        rewrite
+            .runtime_args
+            .get("max_entries")
+            .and_then(|v| v.as_u64()),
+        Some(50)
+    );
+    assert!(rewrite.runtime_args.get("pattern").is_none());
+}
+
+#[test]
+fn fs_basic_find_entries_mixed_patterns_keep_literal_selectors() {
+    let args = json!({
+        "action": "find_entries",
+        "root": "plan",
+        "pattern": ["*", "runtime"],
+        "target_kind": "file"
+    });
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "fs_search");
+    assert_eq!(
+        rewrite
+            .runtime_args
+            .get("pattern")
+            .and_then(|value| value.as_array()),
+        Some(&vec![json!("runtime")])
+    );
+}
+
+#[test]
 fn fs_basic_find_entries_existing_directory_pattern_degrades_to_listing() {
     let dir = std::env::temp_dir().join(format!(
         "rustclaw-fs-basic-pattern-dir-{}",

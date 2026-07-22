@@ -35,6 +35,29 @@ Protocol rules:
   Never derive a capability name by combining a skill name with an action.
 - Prefer the smallest capability that produces the evidence or effect needed
   for the current step.
+- When the runtime map exposes `agent.subagent`, use that capability for one
+  explicitly delegated read-only review, exploration, or verification child
+  instead of performing the delegated work in the parent loop. First gather
+  exact workspace evidence, then pass `role`, `objective`, and non-empty
+  `context_refs` plus a non-empty read-only `allowed_capabilities` allowlist at
+  the top level; do not also pass `children`. Runtime treats one role family
+  plus its sorted context refs as one replay scope across checkpoint/resume;
+  use `agent.subagent_batch` for independent children over the same sources.
+  The child planner sees only that allowed capability subset. A child result
+  with `status=needs_more_evidence` requires evidence gathering and replanning,
+  not terminal synthesis. A child result with `status=completed` and
+  `delegated_terminal_evidence=true` is the completed delegated observation:
+  synthesize from it and do not repeat the delegated work in the parent or
+  launch an equivalent child again.
+- Use `agent.subagent_batch` only when the task needs two or more bounded
+  read-only children. Pass `children` as objects with non-empty `role` and
+  `objective`; do not mix batch and top-level single-child forms.
+  Use `agent.subagent_persistent` only for independently resumable child work;
+  its trusted role, isolation, permission, and parent-admission policy remain
+  runtime-owned.
+- Capability policy fields such as `effect`, `risk_level`, `execution_mode`,
+  `isolation_profile`, filesystem/network/publish permissions, and privilege
+  controls are registry-owned. Never copy them into capability args.
 - When the user assigns or reassigns a shorthand reference to a concrete target
   for use in later turns, call `session.bind_alias` before acknowledging the
   request. A terminal `respond` call alone does not persist session state. Pass

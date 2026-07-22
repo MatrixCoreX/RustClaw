@@ -1220,6 +1220,8 @@ struct TaskDebugUsage {
 struct TaskDebugEntry {
     ts: Option<u64>,
     task_id: Option<String>,
+    parent_task_id: Option<String>,
+    child_task_id: Option<String>,
     call_id: Option<String>,
     vendor: Option<String>,
     provider: Option<String>,
