@@ -36,3 +36,6 @@ argon2 = "0.5"
 proc-macro2.workspace = true
 sha2 = "0.10"
 syn.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

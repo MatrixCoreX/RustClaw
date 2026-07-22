@@ -14,6 +14,8 @@ import type {
   BrowserFileWithPath,
   ImportedSkillResponse,
   SkillListItem,
+  SkillStoreMutationResponse,
+  SkillStoreResponse,
   SkillsConfigResponse,
   SkillsResponse,
 } from "../types/api";
@@ -34,7 +36,11 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const [skillsConfigData, setSkillsConfigData] = useState<SkillsConfigResponse | null>(null);
   const [skillSwitchDraft, setSkillSwitchDraft] = useState<Record<string, boolean>>({});
   const [skillSwitchSaving, setSkillSwitchSaving] = useState(false);
-  const [skillUninstallingName, setSkillUninstallingName] = useState<string | null>(null);
+  const [skillStoreData, setSkillStoreData] = useState<SkillStoreResponse | null>(null);
+  const [skillStoreLoading, setSkillStoreLoading] = useState(false);
+  const [skillStoreError, setSkillStoreError] = useState<string | null>(null);
+  const [skillStoreMessage, setSkillStoreMessage] = useState<string | null>(null);
+  const [skillStoreActionName, setSkillStoreActionName] = useState<string | null>(null);
   const [skillSwitchSaveMessage, setSkillSwitchSaveMessage] = useState<string | null>(null);
   const [skillsSearchQuery, setSkillsSearchQuery] = useState("");
   const [skillImportSource, setSkillImportSource] = useState("");
@@ -80,6 +86,24 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       setSkillsConfigError(message);
     } finally {
       setSkillsConfigLoading(false);
+    }
+  };
+
+  const fetchSkillStore = async () => {
+    setSkillStoreLoading(true);
+    setSkillStoreError(null);
+    try {
+      const res = await apiFetch(`/v1/skills/store`);
+      const body = (await res.json()) as ApiResponse<SkillStoreResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `skill store fetch failed (${res.status})`);
+      }
+      setSkillStoreData(body.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setSkillStoreError(message);
+    } finally {
+      setSkillStoreLoading(false);
     }
   };
 
@@ -161,6 +185,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const filteredSkillsMultimedia = useMemo(() => filterSkillNamesBySearch(skillGroups.multimedia, normalizedSkillsSearchQuery), [skillGroups.multimedia, normalizedSkillsSearchQuery]);
   const filteredSkillsBase = useMemo(() => filterSkillNamesBySearch(skillGroups.base, normalizedSkillsSearchQuery), [skillGroups.base, normalizedSkillsSearchQuery]);
   const filteredSkillsOther = useMemo(() => filterSkillNamesBySearch(skillGroups.other, normalizedSkillsSearchQuery), [skillGroups.other, normalizedSkillsSearchQuery]);
+  const removableSkillNamesSet = useMemo(() => new Set(skillGroups.other), [skillGroups.other]);
 
   const skillItemsByName = useMemo(() => {
     const map = new Map<string, SkillListItem>();
@@ -270,13 +295,14 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       setRecentImportedSkillName(body.data.skill_name);
       setSkillImportMessage(
         t(
-          `已导入 ${body.data.display_name}。下一步：在下面找到高亮的 ${body.data.skill_name}，点“设为开启”，再点“保存开关”。`,
-          `${body.data.display_name} was imported. Next: find the highlighted ${body.data.skill_name} below, choose Enable, then click Save Switches.`,
+          `已导入并安装 ${body.data.display_name}，现在可以使用。`,
+          `${body.data.display_name} was imported, installed, and is ready to use.`,
         ),
       );
       setSkillsSearchQuery(body.data.skill_name);
       await fetchSkillsConfig();
       await fetchSkills();
+      await fetchSkillStore();
       scrollToSkillRow(body.data.skill_name);
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
@@ -320,13 +346,14 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       setRecentImportedSkillName(body.data.skill_name);
       setSkillImportMessage(
         t(
-          `已导入 ${body.data.display_name}。下一步：在下面找到高亮的 ${body.data.skill_name}，点“设为开启”，再点“保存开关”。`,
-          `${body.data.display_name} was imported. Next: find the highlighted ${body.data.skill_name} below, choose Enable, then click Save Switches.`,
+          `已导入并安装 ${body.data.display_name}，现在可以使用。`,
+          `${body.data.display_name} was imported, installed, and is ready to use.`,
         ),
       );
       setSkillsSearchQuery(body.data.skill_name);
       await fetchSkillsConfig();
       await fetchSkills();
+      await fetchSkillStore();
       scrollToSkillRow(body.data.skill_name);
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
@@ -339,52 +366,60 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     }
   };
 
-  const uninstallExternalSkill = async (skillName: string) => {
-    const confirmed = window.confirm(
-      t(
-        `卸载 ${skillName} 后，会删除它导入进来的文件和注册信息。确认继续吗？`,
-        `Uninstall ${skillName}? Its imported files and registration will be removed.`,
-      ),
-    );
-    if (!confirmed) return;
-    setSkillUninstallingName(skillName);
-    setSkillImportError(null);
-    setSkillImportMessage(null);
-    setSkillsConfigError(null);
+  const mutateSkillStoreItem = async (skillName: string, installed: boolean) => {
+    if (!installed) {
+      const confirmed = window.confirm(
+        t(
+          `从已安装技能中删除 ${skillName}？它仍会保留在 Skill Store，可以随时重新安装。`,
+          `Remove ${skillName} from installed skills? It will remain in Skill Store for reinstallation.`,
+        ),
+      );
+      if (!confirmed) return;
+    }
+    setSkillStoreActionName(skillName);
+    setSkillStoreError(null);
+    setSkillStoreMessage(null);
     try {
-      const res = await apiFetch(`/v1/skills/uninstall`, {
+      const action = installed ? "install" : "remove";
+      const res = await apiFetch(`/v1/skills/store/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skill_name: skillName }),
       });
-      const body = (await res.json()) as ApiResponse<{ skill_name: string }>;
+      const body = (await res.json()) as ApiResponse<SkillStoreMutationResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `skill uninstall failed (${res.status})`);
+        throw new Error(body.error || `skill store ${action} failed (${res.status})`);
       }
-      if (recentImportedSkillName === skillName) {
+      if (!installed && recentImportedSkillName === skillName) {
         setRecentImportedSkillName(null);
       }
-      if (skillImportPreview?.skill_name === skillName) {
+      if (!installed && skillImportPreview?.skill_name === skillName) {
         setSkillImportPreview(null);
       }
-      if (skillsSearchQuery.trim().toLowerCase() === skillName.toLowerCase()) {
+      if (!installed && skillsSearchQuery.trim().toLowerCase() === skillName.toLowerCase()) {
         setSkillsSearchQuery("");
       }
-      setSkillImportMessage(
-        t(
-          `${skillName} 已卸载，现在已经从技能列表里移除。`,
-          `${skillName} was uninstalled and removed from the skill list.`,
-        ),
+      setSkillStoreMessage(
+        installed
+          ? t(`${skillName} 已安装并开启。`, `${skillName} is installed and enabled.`)
+          : t(
+              `${skillName} 已从工具/技能页移除，可在 Skill Store 重新安装。`,
+              `${skillName} was removed from Tools/Skills and can be reinstalled from Skill Store.`,
+            ),
       );
       await fetchSkillsConfig();
       await fetchSkills();
+      await fetchSkillStore();
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
-      setSkillsConfigError(message);
+      setSkillStoreError(message);
     } finally {
-      setSkillUninstallingName(null);
+      setSkillStoreActionName(null);
     }
   };
+
+  const installSkillFromStore = (skillName: string) => mutateSkillStoreItem(skillName, true);
+  const removeSkillFromStore = (skillName: string) => mutateSkillStoreItem(skillName, false);
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
     if (isUiHiddenSkill(name)) return;
@@ -440,13 +475,20 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     lockedSkillNamesSet,
     toolSkillNamesSet,
     baseSkillNamesSet,
-    skillUninstallingName,
+    removableSkillNamesSet,
+    skillStoreData,
+    skillStoreLoading,
+    skillStoreError,
+    skillStoreMessage,
+    skillStoreActionName,
     fetchSkills,
     fetchSkillsConfig,
+    fetchSkillStore,
     saveSkillSwitches,
     importExternalSkill,
     uploadImportedSkillFiles,
-    uninstallExternalSkill,
+    installSkillFromStore,
+    removeSkillFromStore,
     toggleSkillEnabled,
     clearSkillsConfigError,
   };
