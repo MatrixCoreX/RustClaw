@@ -363,6 +363,7 @@ export interface SkillStoreItem {
   name: string;
   description?: string | null;
   group?: string | null;
+  catalog_section?: string | null;
   kind: string;
   source_kind: "bundled" | "third_party";
   source?: string | null;

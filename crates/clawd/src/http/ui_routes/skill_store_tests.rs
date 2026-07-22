@@ -87,6 +87,15 @@ fn store_item<'a>(payload: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("missing skill store item: {name}"))
 }
 
+fn store_item_names(payload: &Value) -> BTreeSet<&str> {
+    payload["data"]["items"]
+        .as_array()
+        .expect("skill store item array")
+        .iter()
+        .map(|item| item["name"].as_str().expect("skill store item name"))
+        .collect()
+}
+
 #[test]
 fn skill_store_config_keeps_switch_and_uninstall_state_distinct() {
     let raw = "[skills]\nskill_switches = { weather = true }\nskills_list = [\"weather\"]\n";
@@ -128,6 +137,19 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
         call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(store_item(&initial, "weather")["installed"], true);
+    assert_eq!(store_item(&initial, "weather")["catalog_section"], "other");
+    assert_eq!(
+        store_item_names(&initial),
+        BTreeSet::from([
+            "crypto",
+            "invest_copy",
+            "map_merchant",
+            "photo_organize",
+            "stock",
+            "weather",
+            "x"
+        ]),
+    );
 
     let (status, removed) = call_skill_store_api(
         router.clone(),

@@ -51,6 +51,18 @@ fn skill_store_item_is_locked(state: &AppState, skill_name: &str) -> bool {
             .is_some_and(|kind| kind == PlannerCapabilityKind::Tool)
 }
 
+fn skill_store_item_belongs_to_other_group(state: &AppState, skill_name: &str) -> bool {
+    let is_base_skill = claw_core::config::base_skill_names()
+        .iter()
+        .any(|name| state.resolve_canonical_skill_name(name) == skill_name);
+    let is_media_skill = skill_name.starts_with("image_")
+        || skill_name.starts_with("audio_")
+        || skill_name.starts_with("video_")
+        || skill_name.starts_with("music_");
+
+    !skill_store_item_is_locked(state, skill_name) && !is_base_skill && !is_media_skill
+}
+
 fn validate_skill_store_mutation(
     state: &AppState,
     raw_name: &str,
@@ -159,7 +171,7 @@ async fn get_skill_store_catalog(
     let items = names
         .into_iter()
         .filter(|name| !hide_skill_in_ui(&state, name))
-        .filter(|name| !skill_store_item_is_locked(&state, name))
+        .filter(|name| skill_store_item_belongs_to_other_group(&state, name))
         .filter_map(|name| {
             let entry = registry.get(&name)?;
             let installed = !uninstalled.contains(&name);
@@ -167,6 +179,7 @@ async fn get_skill_store_catalog(
                 "name": name,
                 "description": entry.description,
                 "group": entry.group,
+                "catalog_section": "other",
                 "kind": skill_kind_token(entry.kind),
                 "source_kind": if entry.kind == SkillKind::External { "third_party" } else { "bundled" },
                 "source": entry.external_source_url,

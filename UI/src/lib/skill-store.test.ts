@@ -9,6 +9,7 @@ const item = (name: string, installed: boolean, group: string): SkillStoreItem =
   installed,
   enabled: installed,
   group,
+  catalog_section: "other",
   kind: "builtin",
   source_kind: "bundled",
   skill: { name },
@@ -20,6 +21,16 @@ test("filters store items by machine name and registry group", () => {
   assert.deepEqual(filterSkillStoreItems(items, "PHOTO").map((entry) => entry.name), ["photo_organize"]);
   assert.deepEqual(filterSkillStoreItems(items, "information").map((entry) => entry.name), ["weather"]);
   assert.equal(filterSkillStoreItems(items, "missing").length, 0);
+});
+
+test("keeps only items assigned to the tools and skills other group", () => {
+  const items = [
+    item("weather", true, "information"),
+    { ...item("image_generate", true, "image"), catalog_section: "image" },
+    { ...item("schedule", true, "workflow"), catalog_section: "base" },
+  ];
+
+  assert.deepEqual(filterSkillStoreItems(items, "").map((entry) => entry.name), ["weather"]);
 });
 
 test("keeps removed skills distinct from disabled installed skills", () => {
