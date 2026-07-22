@@ -402,3 +402,40 @@ fn native_response_contract_retry_targets_the_respond_schema() {
         "retry_native_respond_call"
     );
 }
+
+#[test]
+fn native_contract_repair_supports_two_bounded_protocol_transitions() {
+    assert_eq!(MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS, 2);
+
+    let capability_signal = native_contract_repair_signal("native_plan_capability_missing");
+    let respond_signal = native_contract_repair_signal("native_plan_respond_tool_required");
+    let request = native_planner_request(
+        "protocol",
+        "current turn",
+        Some(90),
+        &callable_capabilities(),
+    );
+
+    let capability_retry = native_contract_retry_request(&request, &capability_signal);
+    let respond_retry = native_contract_retry_request(&request, &respond_signal);
+    assert_eq!(capability_retry.tools.len(), 1);
+    assert_eq!(capability_retry.tools[0].name, "call_capability");
+    assert_eq!(respond_retry.tools.len(), 1);
+    assert_eq!(respond_retry.tools[0].name, "respond");
+    assert_eq!(capability_retry.tool_choice, ModelToolChoice::Required);
+    assert_eq!(respond_retry.tool_choice, ModelToolChoice::Required);
+
+    let notes = native_contract_repair_notes(&[
+        "native_plan_capability_missing".to_string(),
+        "native_plan_respond_tool_required".to_string(),
+    ]);
+    assert_eq!(
+        notes,
+        "native_contract_repair_reason_codes=native_plan_capability_missing,native_plan_respond_tool_required"
+    );
+}
+
+#[test]
+fn native_contract_repair_notes_are_empty_without_a_retry() {
+    assert!(native_contract_repair_notes(&[]).is_empty());
+}
