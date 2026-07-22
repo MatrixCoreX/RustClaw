@@ -212,7 +212,7 @@ usage() {
 	echo "Usage: $0 [all|skill <skill-name>|crate <package-name>|dir]"
 	echo "  By default, builds remotely and copies release bins back to local target/release only."
 	echo "  Host platform: ${HOST_OS}/${HOST_ARCH}; cross target: ${TARGET}"
-	echo "  all            - build the whole workspace"
+	echo "  all            - build runtime packages, excluding on-demand Skill Store packages"
 	echo "  skill <name>   - build one skill, e.g. skill health_check"
 	echo "  crate <name>   - build one package, e.g. crate clawd"
 	echo "  dir            - upload/pull selected paths; requires environment variables:"
@@ -263,8 +263,8 @@ esac
 
 case "$MODE" in
 all)
-	echo "[$(date)] building full workspace release..."
-	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && cargo build --release --target ${TARGET}"
+	echo "[$(date)] building runtime release packages (Skill Store packages stay on demand)..."
+	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && SKIP_UI=1 bash ./build-all.sh no-ui --target ${TARGET}"
 	RELEASE_DIR="${LOCAL_RELEASE_DIR}"
 	mkdir -p "${RELEASE_DIR}"
 	if [[ -n "${CROSS_PULL_ALL_ARTIFACTS}" ]]; then

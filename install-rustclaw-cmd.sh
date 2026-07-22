@@ -774,7 +774,9 @@ need_release_build() {
     return
   fi
   local need
-  need="$(python3 - "$SCRIPT_DIR" "$force" "$INSTALL_TARGET" "$HOST_RUST_TARGET" <<'PY'
+  local on_demand_packages
+  on_demand_packages="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format packages)"
+  need="$(RUSTCLAW_ON_DEMAND_PACKAGES="$on_demand_packages" python3 - "$SCRIPT_DIR" "$force" "$INSTALL_TARGET" "$HOST_RUST_TARGET" <<'PY'
 import json
 import os
 import subprocess
@@ -823,9 +825,16 @@ except (subprocess.CalledProcessError, FileNotFoundError):
 
 meta = json.loads(metadata_raw)
 workspace_members = set(meta.get("workspace_members", []))
+on_demand_packages = {
+    value.strip()
+    for value in os.environ.get("RUSTCLAW_ON_DEMAND_PACKAGES", "").splitlines()
+    if value.strip()
+}
 bins = set()
 for pkg in meta.get("packages", []):
     if pkg.get("id") not in workspace_members:
+        continue
+    if pkg.get("name") in on_demand_packages:
         continue
     for target in pkg.get("targets", []):
         if "bin" in (target.get("kind", []) or []):
@@ -864,7 +873,8 @@ PY
   printf '%s\n' "$need"
 }
 
-# 仅构建 release：UI（若有）+ cargo build --workspace --release，不调用其他脚本
+# Build UI first, then delegate the Rust release package set to build-all.sh so
+# Skill Store on-demand packages stay excluded from proactive compilation.
 do_release_build() {
   [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
   ensure_cargo
@@ -882,13 +892,9 @@ do_release_build() {
     echo "Building UI assets..."
     (cd "$SCRIPT_DIR/UI" && npm run build)
   fi
-  echo "Building workspace (release, target=$INSTALL_TARGET, output=$BUILD_RELEASE_DIR)..."
+  echo "Building runtime packages (release, target=$INSTALL_TARGET, output=$BUILD_RELEASE_DIR)..."
   configure_cargo_build_jobs_for_small_host
-  if [[ "$INSTALL_TARGET" == "$HOST_RUST_TARGET" ]]; then
-    (cd "$SCRIPT_DIR" && cargo build --workspace --release)
-  else
-    (cd "$SCRIPT_DIR" && cargo build --workspace --release --target "$INSTALL_TARGET")
-  fi
+  (cd "$SCRIPT_DIR" && SKIP_UI=1 bash ./build-all.sh no-ui --target "$INSTALL_TARGET")
   if [[ ! -x "$BUILD_RELEASE_DIR/clawd" ]]; then
     echo "Build finished but $BUILD_RELEASE_DIR/clawd missing."
     exit 1

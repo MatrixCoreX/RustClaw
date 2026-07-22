@@ -326,7 +326,7 @@ if [[ "$DO_CLEAN" == "1" ]]; then
 	cargo clean
 fi
 
-echo "Building workspace with profile: $BUILD_PROFILE"
+echo "Building runtime workspace with profile: $BUILD_PROFILE"
 echo "Host platform: ${HOST_OS:-unknown}/${HOST_ARCH:-unknown}"
 echo "Primary target: $PRIMARY_TARGET"
 echo "Primary output: $(preferred_release_dir_for_target "$SCRIPT_DIR" "$PRIMARY_TARGET")"
@@ -350,21 +350,7 @@ while IFS=$'\t' read -r package bin; do
 		exit 1
 	}
 done < <(
-	python3 - <<'PY'
-import tomllib
-from pathlib import Path
-
-registry = tomllib.loads(Path("configs/skills_registry.toml").read_text(encoding="utf-8"))
-for skill in registry.get("skills", []):
-    if skill.get("install_mode") != "on_demand":
-        continue
-    runner = str(skill.get("runner_name") or skill.get("name") or "").strip().replace("_", "-")
-    if runner and not runner.endswith("-skill"):
-        runner += "-skill"
-    package = str(skill.get("install_package") or runner).strip()
-    if package and runner:
-        print(f"{package}\t{runner}")
-PY
+	python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format pairs
 )
 
 if [[ "${#ON_DEMAND_PACKAGES[@]}" -gt 0 ]]; then

@@ -141,7 +141,7 @@ usage() {
 Usage: $0 [options] [all|crate <package>|dir <repo-relative-dir>]
 
 Modes:
-  all             Cross-build the whole workspace locally and upload runtime files to Raspberry Pi
+  all             Cross-build runtime packages locally; exclude on-demand Skill Store packages
   crate <package> Cross-build one package locally and upload runtime files to Raspberry Pi
   dir <dir>       Upload a selected directory with common runtime/test dependencies
 
@@ -423,17 +423,27 @@ load_cargo_metadata() {
 
 workspace_bins_raw() {
 	load_cargo_metadata
-	RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" python3 - <<'PY'
+	local on_demand_packages
+	on_demand_packages="$(python3 "${SCRIPT_DIR}/scripts/skill_store_packages.py" --format packages)"
+	RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" \
+		RUSTCLAW_ON_DEMAND_PACKAGES="${on_demand_packages}" python3 - <<'PY'
 import json
 import os
 
 with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
     data = json.load(f)
 workspace_members = set(data.get("workspace_members", []))
+on_demand_packages = {
+    value.strip()
+    for value in os.environ.get("RUSTCLAW_ON_DEMAND_PACKAGES", "").splitlines()
+    if value.strip()
+}
 bins = set()
 
 for pkg in data.get("packages", []):
     if pkg.get("id") not in workspace_members:
+        continue
+    if pkg.get("name") in on_demand_packages:
         continue
     for target in pkg.get("targets", []):
         if "bin" in target.get("kind", []):
@@ -758,8 +768,8 @@ main() {
 		ensure_local_cross_dependencies
 		setup_cross_env
 		log_phase "3/6 Run build"
-		log "cross-building the whole workspace locally (${TARGET})..."
-		cargo build --workspace --release --target "${TARGET}"
+		log "cross-building runtime packages locally (${TARGET}); Skill Store packages stay on demand..."
+		SKIP_UI=1 bash "${SCRIPT_DIR}/build-all.sh" no-ui --target "${TARGET}"
 		bins_raw="$(workspace_bins_raw)"
 		array_from_string_lines binaries "${bins_raw}"
 		;;

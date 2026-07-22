@@ -39,9 +39,11 @@ else
   exit 1
 fi
 
-echo "[1/6] Pack only (no build); discover release binaries..."
+echo "[1/6] Pack only (no build); discover runtime release binaries..."
 WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
 export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
+RUSTCLAW_ON_DEMAND_PACKAGES="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format packages)"
+export RUSTCLAW_ON_DEMAND_PACKAGES
 
 REQUIRED_BINS_RAW="$(
   python3 - <<'PY'
@@ -53,10 +55,17 @@ if not raw:
     raise SystemExit(1)
 data = json.loads(raw)
 workspace_members = set(data.get("workspace_members", []))
+on_demand_packages = {
+    value.strip()
+    for value in os.environ.get("RUSTCLAW_ON_DEMAND_PACKAGES", "").splitlines()
+    if value.strip()
+}
 bins = set()
 
 for pkg in data.get("packages", []):
     if pkg.get("id") not in workspace_members:
+        continue
+    if pkg.get("name") in on_demand_packages:
         continue
     for target in pkg.get("targets", []):
         kinds = target.get("kind", [])
