@@ -18,7 +18,10 @@ pub(crate) use conversation_alias::{
     state_patch_is_alias_bindings_only,
 };
 
-use conversation_alias::{merge_alias_bindings_for_turn, turn_analysis_has_alias_only_state_patch};
+use conversation_alias::{
+    merge_alias_bindings_for_turn, merge_alias_bindings_from_capability_results,
+    turn_analysis_has_alias_only_state_patch,
+};
 
 #[cfg(test)]
 use conversation_alias::{
@@ -806,12 +809,15 @@ pub(crate) fn update_active_session_from_ask_outcome(
             active_followup_task_id,
             active_clarify_task_id,
             active_observed_facts_task_id,
-            alias_bindings: merge_alias_bindings_for_turn(
-                prior_state.as_ref(),
-                turn_analysis,
-                prompt,
-                route_result,
-                resolved_prompt_for_execution,
+            alias_bindings: merge_alias_bindings_from_capability_results(
+                merge_alias_bindings_for_turn(
+                    prior_state.as_ref(),
+                    turn_analysis,
+                    prompt,
+                    route_result,
+                    resolved_prompt_for_execution,
+                ),
+                &journal.capability_results,
             ),
             last_primary_task_prompt,
             last_primary_task_output,

@@ -192,6 +192,47 @@ fn parse_input_accepts_resume_and_pause_machine_actions() {
 }
 
 #[test]
+fn session_alias_action_requires_and_preserves_structured_values() {
+    let input = parse_input(&json!({
+        "action": "bind_session_alias",
+        "alias": "甲文件",
+        "target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    }))
+    .expect("session alias input");
+
+    assert_eq!(input.action, "bind_session_alias");
+    assert_eq!(input.alias.as_deref(), Some("甲文件"));
+    assert_eq!(
+        input.alias_target.as_deref(),
+        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+    );
+
+    assert_eq!(
+        parse_input(&json!({"action":"bind_session_alias", "target":"note.md"}))
+            .expect_err("alias required"),
+        "bind_session_alias_missing_alias"
+    );
+    assert_eq!(
+        parse_input(&json!({"action":"bind_session_alias", "alias":"note"}))
+            .expect_err("target required"),
+        "bind_session_alias_missing_target"
+    );
+}
+
+#[test]
+fn session_alias_extra_is_machine_state_evidence() {
+    let extra = session_alias_binding_extra("note file", "document/note.md");
+
+    assert_eq!(extra["action"], "bind_session_alias");
+    assert_eq!(extra["status"], "ok");
+    assert_eq!(extra["session_alias_bindings"][0]["alias"], "note file");
+    assert_eq!(
+        extra["session_alias_bindings"][0]["target"],
+        "document/note.md"
+    );
+}
+
+#[test]
 fn resume_and_pause_dry_run_extras_are_machine_contracts() {
     let cancel_extra = cancel_dry_run_extra("cancel_one", Some("task-1"));
     assert_eq!(cancel_extra["dry_run"], true);

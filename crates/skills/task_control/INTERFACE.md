@@ -2,8 +2,8 @@
 
 ## Capability Summary
 
-- Task lifecycle, provider-failure, and side-effect-free coding-repair previews.
-- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, inspect provider-failure recovery policy, and preview a structured coding repair loop without side effects.
+- Task lifecycle, structured session-alias binding, provider-failure, and side-effect-free coding-repair previews.
+- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, bind a planner-selected alias to a concrete target for later turns, inspect provider-failure recovery policy, and preview a structured coding repair loop without side effects.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Planner-facing selection should use structured capability/action fields from the registry. Do not add phrase-specific routing rules for any user language.
 - Task cancel/resume/pause dry-run or lifecycle-field preview requests must call the skill with `dry_run=true` and return observed machine fields. Do not answer those flows from static prose alone, even when the user has not supplied a concrete `task_id` or index.
@@ -19,6 +19,7 @@
 - `preview_resume` - Return the no-mutation resume entrypoint and renewable execution-lease contract for a stable `task_id`.
 - `preview_provider_failure` - Return the shared no-mutation provider failure, retry, waiting-state, and checkpoint policy for a canonical `failure_class`.
 - `preview_coding_repair` - Return a synthetic no-mutation coding-loop contract containing checkpoint, diff, failed verification, repair attempt, passing verification, and rewind references.
+- `bind_session_alias` - Return an exact structured `session_alias_bindings` update for a planner-selected `alias` and `target`; the runtime persists only this machine result and does not infer bindings from user-language phrases.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
 - `pause` - Delay an existing waiting/background checkpoint by stable `task_id`.
 - Cancellation dry-runs are executable observations, not static prose: use `cancel_all` with `dry_run=true` when no specific index is supplied, or `cancel_one` with both `index` and `dry_run=true` when the user supplied a numbered task.
@@ -27,7 +28,9 @@
 
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_coding_repair`, `resume`, `pause`. |
+| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
+| `alias` | required for `bind_session_alias` | string | - | Exact user-defined alias surface selected by the planner; maximum 256 characters. |
+| `target` | required for `bind_session_alias` | string | - | Concrete locator or stable target to retain for later turns; maximum 4096 characters. |
 | `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider failure token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. |
 | `task_id` | required for `get`, `resume`, `pause` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
@@ -57,6 +60,7 @@ Notes:
 - `preview_resume` always returns `status=dry_run`, `dry_run=true`, and `would_mutate=false`, plus `resume_entrypoint` and the renewable `lease` contract. It never calls the resume API.
 - `preview_provider_failure` always returns `status=dry_run` and `would_mutate=false`, plus `failure_class`, `provider_retryable`, `provider_blocker`, `retry_policy`, `retry_after_seconds`, `waiting_state`, and checkpoint recovery fields. It reads the same machine policy used by runtime provider handling and never calls a provider.
 - `preview_coding_repair` always returns `status=dry_run`, `synthetic=true`, `would_mutate=false`, and `would_execute_command=false`. Its structured fields model the fail -> repair -> pass lifecycle without claiming that a real repository, patch, command, or test was executed.
+- `bind_session_alias` returns `session_alias_bindings=[{"alias":...,"target":...}]` in `extra`. Conversation state consumes only a successful exact `session.bind_alias` / `bind_session_alias` capability result; `text` and `error_text` are never parsed for state updates.
 - `resume` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
 - `pause` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
 
@@ -70,10 +74,24 @@ Notes:
 - `preview_resume` / `resume` / `pause` with an invalid `task_id` shape -> structured `status=invalid_task_id`.
 - `preview_provider_failure` without `failure_class` -> structured `status=missing_failure_class`.
 - `preview_provider_failure` with a non-canonical token -> structured `status=unsupported_failure_class`.
+- `bind_session_alias` without `alias` or `target` -> `error_text=bind_session_alias_missing_alias|bind_session_alias_missing_target`.
+- `bind_session_alias` with an oversized value -> `error_text=bind_session_alias_value_too_long`.
 - Invalid index -> structured `clawd` API error propagated as `error_text`.
 - Missing/invalid auth for task APIs -> readable error text from `clawd` (for example unauthorized user or invalid user key).
 
 ## Request/Response Examples
+
+### bind_session_alias
+
+Request:
+```json
+{"request_id":"alias-1","args":{"action":"bind_session_alias","alias":"release note","target":"document/release.md"},"user_id":1,"chat_id":2}
+```
+
+Response text example:
+```json
+{"schema_version":1,"action":"bind_session_alias","status":"ok","message_key":"task_control.bind_session_alias.ok","session_alias_bindings":[{"alias":"release note","target":"document/release.md"}],"field_value":{"action":"bind_session_alias","status":"ok","alias":"release note","target":"document/release.md"}}
+```
 
 ### list
 

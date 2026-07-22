@@ -1316,6 +1316,61 @@ fn planner_execute_single_locator_does_not_create_prompt_alias_binding() {
 }
 
 #[test]
+fn successful_session_alias_capability_result_replaces_matching_binding() {
+    let prior = vec![SessionAliasBinding {
+        alias: "release note".to_string(),
+        target: "document/old.md".to_string(),
+        updated_at_ts: 1,
+    }];
+    let result = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "session.bind_alias",
+        Some("bind_session_alias".to_string()),
+        json!({
+            "output": {"ignored": true},
+            "extra": {
+                "session_alias_bindings": [{
+                    "alias": "release_note",
+                    "target": "document/release.md"
+                }]
+            }
+        }),
+    );
+
+    let merged = super::merge_alias_bindings_from_capability_results(prior, &[result]);
+
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].alias, "release_note");
+    assert_eq!(merged[0].target, "document/release.md");
+}
+
+#[test]
+fn session_alias_state_ignores_wrong_failed_and_text_only_results() {
+    let mut failed = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "session.bind_alias",
+        Some("bind_session_alias".to_string()),
+        json!({"extra":{"session_alias_bindings":[{"alias":"failed","target":"failed.md"}]}}),
+    );
+    failed.status = claw_core::capability_result::CapabilityResultStatus::Error;
+    let wrong_action = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "session.bind_alias",
+        Some("other_action".to_string()),
+        json!({"extra":{"session_alias_bindings":[{"alias":"wrong","target":"wrong.md"}]}}),
+    );
+    let text_only = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "session.bind_alias",
+        Some("bind_session_alias".to_string()),
+        json!({"output":"{\"session_alias_bindings\":[{\"alias\":\"text\",\"target\":\"text.md\"}]}"}),
+    );
+
+    let merged = super::merge_alias_bindings_from_capability_results(
+        Vec::new(),
+        &[failed, wrong_action, text_only],
+    );
+
+    assert!(merged.is_empty());
+}
+
+#[test]
 fn quoted_alias_with_single_locator_binds_without_memory_turn_analysis() {
     let route = output_contract_for_test();
     let merged = super::merge_alias_bindings_for_turn(

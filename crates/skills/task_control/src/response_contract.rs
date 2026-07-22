@@ -4,6 +4,25 @@ use claw_core::provider_failure_policy::ProviderFailurePolicy;
 
 use super::{ActiveTaskItem, SkillInput};
 
+pub(super) fn session_alias_binding_extra(alias: &str, target: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "action": "bind_session_alias",
+        "status": "ok",
+        "message_key": "task_control.bind_session_alias.ok",
+        "session_alias_bindings": [{
+            "alias": alias,
+            "target": target,
+        }],
+        "field_value": {
+            "action": "bind_session_alias",
+            "status": "ok",
+            "alias": alias,
+            "target": target,
+        },
+    })
+}
+
 pub(super) fn task_detail_input_status_extra(status: &str, task_id: Option<&str>) -> Value {
     json!({
         "schema_version": 1,

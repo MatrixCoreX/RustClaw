@@ -62,6 +62,8 @@ struct ActiveTaskItem {
 #[derive(Debug)]
 struct SkillInput {
     action: String,
+    alias: Option<String>,
+    alias_target: Option<String>,
     failure_class: Option<String>,
     index: Option<usize>,
     task_id: Option<String>,
@@ -167,6 +169,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         "preview_resume" | "resume_preview" => "preview_resume",
         "preview_provider_failure" => "preview_provider_failure",
         "preview_coding_repair" => "preview_coding_repair",
+        "bind_session_alias" => "bind_session_alias",
         "resume" | "resume_task" | "continue_task" => "resume",
         "pause" | "pause_task" | "delay_task" => "pause",
         _ => return Err("unsupported_action".to_string()),
@@ -176,6 +179,35 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .get("dry_run")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let alias = obj
+        .get("alias")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let alias_target = obj
+        .get("target")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    if action == "bind_session_alias" {
+        if alias.is_none() {
+            return Err("bind_session_alias_missing_alias".to_string());
+        }
+        if alias_target.is_none() {
+            return Err("bind_session_alias_missing_target".to_string());
+        }
+        if alias
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 256)
+            || alias_target
+                .as_ref()
+                .is_some_and(|value| value.chars().count() > 4096)
+        {
+            return Err("bind_session_alias_value_too_long".to_string());
+        }
+    }
     let failure_class = obj
         .get("failure_class")
         .and_then(Value::as_str)
@@ -228,6 +260,8 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
     if action == "get" && task_id.is_none() {
         return Ok(SkillInput {
             action,
+            alias,
+            alias_target,
             failure_class,
             index,
             task_id,
@@ -241,6 +275,8 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
     }
     Ok(SkillInput {
         action,
+        alias,
+        alias_target,
         failure_class,
         index,
         task_id,
@@ -269,6 +305,18 @@ fn execute(
             .build()
             .map_err(|e| format!("build http client failed: {e}"))?;
         match input.action.as_str() {
+            "bind_session_alias" => {
+                let alias = input
+                    .alias
+                    .as_deref()
+                    .ok_or("bind_session_alias_missing_alias")?;
+                let target = input
+                    .alias_target
+                    .as_deref()
+                    .ok_or("bind_session_alias_missing_target")?;
+                let extra = session_alias_binding_extra(alias, target);
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
             "list" => {
                 let tasks = fetch_active_tasks(
                     &client,
