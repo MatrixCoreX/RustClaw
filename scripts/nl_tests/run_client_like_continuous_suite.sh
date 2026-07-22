@@ -1215,11 +1215,16 @@ print_new_llm_trace() {
   [[ "${PRINT_LLM_TRACE:-1}" == "1" ]] || return 0
   [[ -n "${LLM_TRACE_STATE_FILE:-}" ]] || return 0
   echo "[TURN ${turn_number}] llm_trace task_id=${task_id}"
-  python3 "${NL_TEST_SCRIPT_DIR}/print_llm_raw_trace.py" \
-    --log "${ROOT_DIR}/logs/model_io.log" \
-    --task-id "$task_id" \
-    --state-file "$LLM_TRACE_STATE_FILE" \
+  local trace_args=(
+    --log "${ROOT_DIR}/logs/model_io.log"
+    --task-id "$task_id"
+    --state-file "$LLM_TRACE_STATE_FILE"
     --max-field-chars "${PRINT_LLM_TRACE_MAX_CHARS:-1200}"
+  )
+  if [[ -n "${CURRENT_LLM_TRACE_RESULT_FILE:-}" ]]; then
+    trace_args+=(--result-file "$CURRENT_LLM_TRACE_RESULT_FILE")
+  fi
+  python3 "${NL_TEST_SCRIPT_DIR}/print_llm_raw_trace.py" "${trace_args[@]}"
 }
 
 annotate_turn_harness_metrics() {
@@ -1354,7 +1359,9 @@ PY
     fi
   fi
   print_turn_metrics "$out_file" "$turn"
+  CURRENT_LLM_TRACE_RESULT_FILE="$out_file"
   print_new_llm_trace "$turn" "$task_id"
+  unset CURRENT_LLM_TRACE_RESULT_FILE
 
   if [[ "$status" != "succeeded" ]]; then
     echo "Turn ${turn} did not succeed: status=${status} error=${error}" >&2

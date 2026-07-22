@@ -25,6 +25,7 @@ class RunnerContract:
     init_marker: str
     require_max_chars: bool = False
     require_harness_wall_time: bool = False
+    require_result_file: bool = False
 
 
 RUNNERS = (
@@ -44,6 +45,7 @@ RUNNERS = (
         init_marker='init_llm_trace_offset "$LLM_TRACE_STATE_FILE"',
         require_max_chars=True,
         require_harness_wall_time=True,
+        require_result_file=True,
     ),
     RunnerContract(
         path="scripts/regression_long_tail_nl_flows.sh",
@@ -135,6 +137,11 @@ def check_runner(root: Path, contract: RunnerContract) -> list[str]:
             failures.append(
                 f"{contract.path}: continuous runner must pass --max-field-chars"
             )
+        if contract.require_result_file and "--result-file" not in print_body:
+            failures.append(
+                f"{contract.path}: continuous runner must verify trace completeness "
+                "against the task result"
+            )
 
     failures.extend(
         require_substrings(
@@ -188,6 +195,9 @@ def check_helper(root: Path) -> list[str]:
             "--init-state",
             "--max-field-chars",
             "active_task_id",
+            "logical_call_index",
+            "--result-file",
+            "missing_logical_call_indexes",
         ],
         "scripts/nl_tests/print_llm_raw_trace.py",
     )

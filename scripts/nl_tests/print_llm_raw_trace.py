@@ -150,6 +150,8 @@ def task_matches(row: dict[str, Any], task_id: str | None) -> bool:
 def read_new_rows(log_path: Path, offset: int) -> tuple[list[tuple[int, str]], int]:
     if not log_path.exists():
         return [], offset
+    if offset > log_path.stat().st_size:
+        offset = 0
     with log_path.open("rb") as fh:
         fh.seek(offset)
         chunk = fh.read()
@@ -190,6 +192,7 @@ def print_row(
     core_fields = {
         "task_id": row.get("task_id"),
         "call_id": row.get("call_id"),
+        "logical_call_index": row.get("logical_call_index"),
         "prompt_label": prompt_label,
         "stage": row.get("stage") or prompt_source or row.get("mode"),
         "logical_prompt_path": logical_prompt_path,
@@ -220,6 +223,42 @@ def init_state(log_path: Path, state_file: Path | None) -> int:
     return 0
 
 
+def expected_llm_calls(result_file: Path | None) -> int | None:
+    if result_file is None or not result_file.exists():
+        return None
+    try:
+        payload = json.loads(result_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    result = (payload.get("data") or {}).get("result_json") or {}
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(result, dict):
+        return None
+    metrics = (
+        ((result.get("task_journal") or {}).get("summary") or {}).get("task_metrics")
+        or {}
+    )
+    value = metrics.get("llm_calls_per_task")
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def missing_logical_call_indexes(
+    rows: list[dict[str, Any]], expected_count: int | None
+) -> list[int]:
+    if expected_count is None or expected_count <= 0:
+        return []
+    observed = {
+        int(row["logical_call_index"])
+        for row in rows
+        if isinstance(row.get("logical_call_index"), (int, float))
+    }
+    return [index for index in range(1, expected_count + 1) if index not in observed]
+
+
 def run_self_test() -> int:
     with tempfile.TemporaryDirectory() as raw_tmp:
         tmp = Path(raw_tmp)
@@ -228,6 +267,7 @@ def run_self_test() -> int:
         row = {
             "task_id": "task-1",
             "call_id": "task-1:planner",
+            "logical_call_index": 1,
             "prompt_source": "planner",
             "provider": "vendor-test",
             "vendor": "test",
@@ -270,11 +310,14 @@ def run_self_test() -> int:
         assert "[LLM#1]" in rendered, rendered
         assert "raw_fields=" in rendered, rendered
         assert "finish_reason=stop" in rendered, rendered
+        assert "logical_call_index=1" in rendered, rendered
         assert 'parsed_json_fields=["action"]' in rendered, rendered
         assert read_state(state_path)["next_index"] == 2
         assert read_state(state_path)["active_task_id"] == "task-1"
         assert next_index_for_task(read_state(state_path), "task-1") == 2
         assert next_index_for_task(read_state(state_path), "task-2") == 1
+        assert missing_logical_call_indexes([row], 1) == []
+        assert missing_logical_call_indexes([row], 2) == [2]
     print("SELF_TEST_OK")
     return 0
 
@@ -285,6 +328,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--log", type=Path)
     parser.add_argument("--task-id")
     parser.add_argument("--state-file", type=Path)
+    parser.add_argument("--result-file", type=Path)
     parser.add_argument("--init-state", action="store_true")
     parser.add_argument("--max-field-chars", type=int, default=DEFAULT_MAX_CHARS)
     parser.add_argument("--indent", default="  ")
@@ -305,6 +349,7 @@ def main(argv: list[str]) -> int:
     rows, new_offset = read_new_rows(args.log, state["offset"])
     next_index = next_index_for_task(state, args.task_id)
     printed = 0
+    task_rows: list[dict[str, Any]] = []
     for row_offset, raw_line in rows:
         line = raw_line.strip()
         if not line:
@@ -318,6 +363,7 @@ def main(argv: list[str]) -> int:
         print_row(row, next_index, args.log, row_offset, args.max_field_chars, args.indent)
         next_index += 1
         printed += 1
+        task_rows.append(row)
     active_task_id = args.task_id or state.get("active_task_id")
     write_state(args.state_file, new_offset, next_index, active_task_id)
     if printed:
@@ -326,6 +372,16 @@ def main(argv: list[str]) -> int:
             f"{args.indent}[LLM_TRACE] rows_printed={printed}{task_part} "
             f"next_llm_index={next_index} log_path={args.log}"
         )
+    expected_count = expected_llm_calls(args.result_file)
+    missing = missing_logical_call_indexes(task_rows, expected_count)
+    if missing:
+        print(
+            f"{args.indent}[LLM_TRACE_ERROR] task_id={args.task_id} "
+            f"expected_logical_calls={expected_count} missing_indexes={missing} "
+            f"log_path={args.log}",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 
