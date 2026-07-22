@@ -399,7 +399,8 @@ pub(crate) fn build_final_delivery_with_priority(
 ) -> (Vec<String>, String, bool) {
     let mut delivery_deduped: Vec<String> = Vec::new();
     for m in delivery_messages {
-        let t = normalize_user_visible_text(m).trim();
+        let sanitized = crate::visible_text::sanitize_user_visible_text(m);
+        let t = normalize_user_visible_text(&sanitized).trim();
         if t.is_empty() || looks_like_planner_artifact(t) {
             continue;
         }
@@ -409,7 +410,8 @@ pub(crate) fn build_final_delivery_with_priority(
         delivery_deduped.push(t.to_string());
     }
     let used_last_respond = if let Some(last_respond) = last_user_visible_respond {
-        let trimmed = normalize_user_visible_text(last_respond).trim();
+        let sanitized = crate::visible_text::sanitize_user_visible_text(last_respond);
+        let trimmed = normalize_user_visible_text(&sanitized).trim();
         if !trimmed.is_empty() && !looks_like_planner_artifact(trimmed) {
             delivery_deduped.retain(|x| x.trim() != trimmed);
             delivery_deduped.push(trimmed.to_string());
