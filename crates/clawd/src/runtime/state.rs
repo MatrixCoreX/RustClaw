@@ -478,6 +478,7 @@ pub(crate) fn build_skill_views(
     registry_path: Option<&str>,
     skill_switches: &HashMap<String, bool>,
     initial_skills_list: &[String],
+    uninstalled_skills: &[String],
 ) -> Result<SkillViews, String> {
     let registry: Option<Arc<SkillsRegistry>> = if let Some(p) = registry_path {
         let path = if Path::new(p).is_absolute() {
@@ -529,6 +530,19 @@ pub(crate) fn build_skill_views(
             enabled.insert(c);
         }
     }
+    let always_enabled = claw_core::config::core_skills_always_enabled()
+        .iter()
+        .map(|skill| crate::canonical_skill_name(skill).to_string())
+        .collect::<HashSet<_>>();
+    for skill in uninstalled_skills {
+        let canonical = registry
+            .as_ref()
+            .and_then(|registry| registry.resolve_canonical(skill).map(String::from))
+            .unwrap_or_else(|| crate::canonical_skill_name(skill).to_string());
+        if !always_enabled.contains(&canonical) {
+            enabled.remove(&canonical);
+        }
+    }
     let mut planner_visible: Vec<String> = enabled
         .iter()
         .filter(|skill| {
@@ -562,6 +576,7 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
         registry_path,
         &config.skills.skill_switches,
         &config.skills.skills_list,
+        &config.skills.uninstalled_skills,
     )?;
     let registry_entries = views
         .registry
@@ -839,6 +854,7 @@ impl AppState {
             config.skills.registry_path.as_deref(),
             &config.skills.skill_switches,
             &config.skills.skills_list,
+            &config.skills.uninstalled_skills,
         )
         .expect("build real skill views for fixture-replay test");
         let snapshot = SkillViewsSnapshot {
@@ -1636,3 +1652,7 @@ pub(crate) struct ClaimedTask {
     pub(crate) kind: String,
     pub(crate) payload_json: String,
 }
+
+#[cfg(test)]
+#[path = "state_skill_store_tests.rs"]
+mod skill_store_tests;

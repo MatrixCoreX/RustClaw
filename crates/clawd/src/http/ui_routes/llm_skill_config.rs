@@ -318,6 +318,7 @@ fn registry_tool_capability_names(state: &AppState) -> Vec<String> {
 fn compute_effective_enabled(
     baseline: &[String],
     switches: &BTreeMap<String, bool>,
+    uninstalled: &BTreeSet<String>,
     state: &AppState,
 ) -> Vec<String> {
     let mut set: BTreeMap<String, bool> = BTreeMap::new();
@@ -334,6 +335,14 @@ fn compute_effective_enabled(
             set.insert(state.resolve_canonical_skill_name(k), true);
         } else {
             set.remove(&state.resolve_canonical_skill_name(k));
+        }
+    }
+    for skill in uninstalled {
+        if !claw_core::config::core_skills_always_enabled()
+            .iter()
+            .any(|name| state.resolve_canonical_skill_name(name) == *skill)
+        {
+            set.remove(skill);
         }
     }
     set.into_keys().collect()
@@ -505,6 +514,7 @@ async fn get_skills_config(
     };
     let baseline = collect_skills_baseline(&parsed, &state);
     let switches = collect_skill_switches(&parsed, &state);
+    let uninstalled = collect_uninstalled_skills(&parsed, &state);
     let mut baseline_visible = baseline
         .iter()
         .filter(|s| !hide_skill_in_ui(&state, s))
@@ -529,9 +539,11 @@ async fn get_skills_config(
         for s in runtime_visible.iter() {
             set.insert(s.clone(), true);
         }
-        set.into_keys().collect::<Vec<_>>()
+        set.into_keys()
+            .filter(|name| !uninstalled.contains(name))
+            .collect::<Vec<_>>()
     };
-    let mut effective = compute_effective_enabled(&baseline, &switches, &state);
+    let mut effective = compute_effective_enabled(&baseline, &switches, &uninstalled, &state);
     effective.retain(|s| !hide_skill_in_ui(&state, s));
     let restart_required = skills_restart_required(&runtime_visible, &effective);
     let base_skill_names: Vec<String> = claw_core::config::base_skill_names()
@@ -563,6 +575,7 @@ async fn get_skills_config(
                 .into_iter()
                 .filter(|name| {
                     !hide_skill_in_ui(&state, name)
+                        && !uninstalled.contains(name)
                         && registry
                             .get(name)
                             .map(|entry| entry.kind == SkillKind::External)
@@ -583,6 +596,7 @@ async fn get_skills_config(
                 "config_path": "configs/config.toml",
                 "skills_list": baseline_visible,
                 "skill_switches": switches,
+                "uninstalled_skill_names": uninstalled,
                 "managed_skills": managed,
                 "base_skill_names": base_skill_names,
                 "core_skill_names": core_skill_names,
@@ -960,6 +974,7 @@ async fn update_skills_config(
         }
     };
     let baseline = collect_skills_baseline(&parsed, &state);
+    let uninstalled = collect_uninstalled_skills(&parsed, &state);
     let core_skills = claw_core::config::core_skills_always_enabled();
     let tool_skill_names = registry_tool_capability_names(&state)
         .into_iter()
@@ -986,7 +1001,7 @@ async fn update_skills_config(
             }),
         );
     }
-    let effective = compute_effective_enabled(&baseline, &switches, &state);
+    let effective = compute_effective_enabled(&baseline, &switches, &uninstalled, &state);
     let mut effective_visible = effective
         .iter()
         .filter(|s| !hide_skill_in_ui(&state, s))
@@ -1008,6 +1023,7 @@ async fn update_skills_config(
             data: Some(json!({
                 "config_path": "configs/config.toml",
                 "skill_switches": switches,
+                "uninstalled_skill_names": uninstalled,
                 "effective_enabled_skills_preview": effective,
                 "restart_required": restart_required
             })),
@@ -1168,7 +1184,7 @@ async fn uninstall_external_skill(
             );
         }
     };
-    let updated_runtime = remove_runtime_skill_switch(&runtime_raw, &state, &skill_name);
+    let updated_runtime = remove_runtime_skill_state(&runtime_raw, &state, &skill_name);
     if let Err(err) = write_runtime_config_file(&state, &updated_runtime) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,

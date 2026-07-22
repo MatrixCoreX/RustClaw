@@ -528,13 +528,21 @@ fn remove_managed_prompt_file(path: &Path) -> std::io::Result<bool> {
     Ok(false)
 }
 
-fn remove_runtime_skill_switch(raw: &str, state: &AppState, skill_name: &str) -> String {
+fn remove_runtime_skill_state(raw: &str, state: &AppState, skill_name: &str) -> String {
     let parsed = toml::from_str::<toml::Value>(raw)
         .unwrap_or_else(|_| toml::Value::Table(Default::default()));
     let mut switches = collect_skill_switches(&parsed, state);
     switches.remove(skill_name);
+    let mut uninstalled = collect_uninstalled_skills(&parsed, state);
+    uninstalled.remove(skill_name);
     let rendered = render_switches_inline_table(&switches);
-    upsert_skill_switches_line(raw, &rendered)
+    let updated = upsert_skill_switches_line(raw, &rendered);
+    upsert_section_key_line(
+        &updated,
+        "skills",
+        "uninstalled_skills",
+        &render_skill_name_array(&uninstalled),
+    )
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -653,7 +661,7 @@ fn finalize_imported_bundle(
         );
     }
 
-    let mut registry_raw = match read_skills_registry_file(state) {
+    let registry_raw = match read_skills_registry_file(state) {
         Ok(raw) => raw,
         Err(err) => {
             return (
@@ -666,6 +674,7 @@ fn finalize_imported_bundle(
             );
         }
     };
+    let (mut registry_raw, _) = remove_skill_registry_block(&registry_raw, &plan.canonical_name);
     if !registry_raw.ends_with('\n') && !registry_raw.is_empty() {
         registry_raw.push('\n');
     }
@@ -683,7 +692,7 @@ fn finalize_imported_bundle(
         );
     }
 
-    let reload = match reload_skill_views(state) {
+    let installation = match update_skill_store_installation(state, &plan.canonical_name, true) {
         Ok(result) => result,
         Err(err) => {
             return (
@@ -713,7 +722,9 @@ fn finalize_imported_bundle(
                 "require_py_modules": plan.require_py_modules,
                 "prompt_file": plan.registry_prompt_rel_path,
                 "source": plan.source_url,
-                "reload": reload
+                "reload": installation.get("reload").cloned(),
+                "installed": true,
+                "enabled": true
             })),
             error: None,
         }),
