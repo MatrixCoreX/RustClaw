@@ -41,7 +41,7 @@
 | `alias` | required for `bind_session_alias` | string | - | Exact user-defined alias surface selected by the planner; maximum 256 characters. |
 | `target` | required for `bind_session_alias` | string | - | Concrete locator or stable target to retain for later turns; maximum 4096 characters. |
 | `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider failure token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. |
-| `repair_kind` | required for `preview_repair_observation` | string | - | One canonical repair shape: `missing_required_argument` or `bounded_repair_blocked`. |
+| `repair_kind` | required for `preview_repair_observation` | string | - | One canonical repair shape: `missing_required_argument`, `bounded_repair_blocked`, or `provider_external_blocker`. |
 | `task_id` | required for `get`, `resume`, `pause` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
 | `checkpoint_id` | optional for `preview_resume` and `resume` | string | - | Restrict resume to a specific checkpoint id. |

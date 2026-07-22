@@ -426,6 +426,18 @@ fn repair_observation_preview_exposes_missing_field_and_blocked_contracts() {
     assert_eq!(blocked["observation"]["needs_user_input"], false);
     assert_eq!(blocked["observation"]["evidence_refs"][0], "repair_signal");
 
+    let provider = repair_observation_preview_extra("provider_external_blocker")
+        .expect("provider blocker preview");
+    assert_eq!(provider["observation"]["status"], "waiting");
+    assert_eq!(provider["observation"]["failure_class"], "external_blocker");
+    assert_eq!(provider["observation"]["provider_blocker"], true);
+    assert_eq!(provider["observation"]["code_failure"], false);
+    assert_eq!(provider["observation"]["route_failure"], false);
+    assert_eq!(
+        provider["observation"]["next_recovery_kind"],
+        "wait_background"
+    );
+
     assert!(repair_observation_preview_extra("unknown").is_none());
 }
 
