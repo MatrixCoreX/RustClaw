@@ -12,6 +12,30 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["retryable"], false);
 }
 
+#[test]
+fn unknown_category_returns_bounded_machine_replan_contract_without_state_change() {
+    let mut cfg = make_cfg_with_sources("general", vec!["https://example.com/feed".to_string()]);
+    let before = config_snapshot(&cfg).expect("config snapshot");
+    let failure = execute(
+        &mut cfg,
+        serde_json::json!({
+            "action": "latest",
+            "category": "not_configured",
+            "limit": 3
+        }),
+    )
+    .expect_err("unknown category must fail before network dispatch");
+
+    assert_eq!(failure.extra["error_kind"], "category_not_configured");
+    assert_eq!(failure.extra["retryable"], true);
+    assert_eq!(failure.extra["failure_phase"], "pre_dispatch");
+    assert_eq!(failure.extra["side_effect_applied"], false);
+    assert_eq!(failure.extra["recovery_action"], "replan_arguments");
+    assert_eq!(failure.extra["default_category"], "general");
+    assert_eq!(failure.extra["available_categories"], json!(["general"]));
+    assert!(!config_changed(Some(&before), &cfg));
+}
+
 fn make_cfg_with_sources(category: &str, sources: Vec<String>) -> RootConfig {
     let mut categories = HashMap::new();
     let mut cat = RssCategoryConfig::default();

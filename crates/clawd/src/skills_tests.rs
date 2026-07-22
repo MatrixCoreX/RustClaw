@@ -1985,3 +1985,6 @@ async fn run_cmd_does_not_inherit_undeclared_parent_secret() {
 
 #[path = "skills_tests/task_scoped_worktree.rs"]
 mod task_scoped_worktree;
+
+#[path = "skills_tests/generic_recovery.rs"]
+mod generic_recovery;

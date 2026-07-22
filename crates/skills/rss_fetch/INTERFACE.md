@@ -60,7 +60,7 @@ The schedule / `run_skill` persistence layer does **not** rewrite these; normali
 - `rss.deprecated.sources`: list of deprecated entries (url, category, reason, failure_count, last_error, deprecated_at). Only active sources are fetched; deprecated entries are kept for reference and can be restored manually later.
 
 ## Error Contract
-- Unknown or unconfigured `category` (no entry under `[rss.categories]` or no active sources) → readable `error_text` (e.g. `no configured feeds for category=...`).
+- Unknown or unconfigured `category` (no entry under `[rss.categories]` or no active sources) returns readable `error_text` plus machine fields in `extra`: `error_kind=category_not_configured`, `failure_phase=pre_dispatch`, `side_effect_applied=false`, `recovery_action=replan_arguments`, `invalid_argument=category`, `rejected_value`, `default_category`, and sorted `available_categories`. Runtime recovery must consume these fields, not parse `error_text`.
 - `action` unsupported (after alias normalization).
 - **`fetch_feed`** without a direct URL selector → error; use `latest`/`news` for category feeds.
 - **`fetch`** without `url`/`feed_url`/non-empty valid `feed_urls`, or with non-http(s) URLs → clear `error_text` (e.g. `fetch requires url, feed_url, or feed_urls`).
