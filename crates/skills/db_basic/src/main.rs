@@ -126,7 +126,10 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
         .unwrap_or("sqlite_query");
     let db_path = obj
         .get("db_path")
+        .or_else(|| obj.get("path"))
         .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .unwrap_or("data/rustclaw.db");
     let sql = match action {
         "schema_version" | "sqlite_schema_version" => "PRAGMA schema_version;".to_string(),

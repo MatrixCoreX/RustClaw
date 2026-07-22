@@ -26,6 +26,7 @@
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be `sqlite_query`, `sqlite_execute`, `schema_version`, `user_version`, or `list_tables`. |
 | all | `db_path` | no | string(path) | impl default | SQLite database file path. |
+| all | `path` | no | string(path) | - | Alias for `db_path`; `db_path` takes precedence when both are present. |
 | `sqlite_query`/`sqlite_execute` | `sql` | yes | string | - | SQL statement text. |
 | `sqlite_query` | `limit` | no | number | impl default | Row cap for query results. |
 | `sqlite_execute` | `confirm` | yes | boolean | - | Must be `true` for mutating execute. |
