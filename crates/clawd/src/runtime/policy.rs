@@ -168,11 +168,22 @@ impl ToolsPolicy {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn is_allowed(&self, token: &str, provider_type: Option<&str>) -> bool {
         self.is_any_allowed(&[token], provider_type)
     }
 
+    #[cfg(test)]
     pub(crate) fn is_any_allowed(&self, tokens: &[&str], provider_type: Option<&str>) -> bool {
+        self.is_any_allowed_for_execution(tokens, provider_type, false)
+    }
+
+    pub(crate) fn is_any_allowed_for_execution(
+        &self,
+        tokens: &[&str],
+        provider_type: Option<&str>,
+        bypass_default_profile: bool,
+    ) -> bool {
         if tokens.is_empty()
             || self
                 .deny
@@ -182,14 +193,13 @@ impl ToolsPolicy {
             return false;
         }
 
-        if !self.allow.is_empty() {
-            return self
-                .allow
+        let mut allowed = if self.allow.is_empty() {
+            bypass_default_profile || tokens.iter().any(|token| self.default_allowed(token))
+        } else {
+            self.allow
                 .iter()
-                .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token)));
-        }
-
-        let mut allowed = tokens.iter().any(|token| self.default_allowed(token));
+                .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token)))
+        };
 
         if !allowed {
             return false;
