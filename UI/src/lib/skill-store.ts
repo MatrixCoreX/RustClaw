@@ -45,6 +45,17 @@ export function resolveSkillStoreActionName(
   return localActionName || store?.active_operation?.skill_name || null;
 }
 
+export function removableSkillNames(
+  otherGroupNames: readonly string[],
+  externalSkillNames: ReadonlySet<string>,
+  lockedSkillNames: ReadonlySet<string>,
+): Set<string> {
+  const names = new Set(otherGroupNames);
+  externalSkillNames.forEach((name) => names.add(name));
+  lockedSkillNames.forEach((name) => names.delete(name));
+  return names;
+}
+
 export function skillStoreErrorMessage(errorCode: string | undefined, t: Translate): string {
   const message = errorCode ? SKILL_STORE_ERROR_MESSAGES[errorCode] : undefined;
   if (message) return t(message[0], message[1]);

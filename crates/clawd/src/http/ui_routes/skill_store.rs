@@ -62,6 +62,14 @@ fn skill_store_item_is_locked(state: &AppState, skill_name: &str) -> bool {
 }
 
 fn skill_store_item_belongs_to_other_group(state: &AppState, skill_name: &str) -> bool {
+    if state.get_skills_registry().is_some_and(|registry| {
+        registry
+            .get(skill_name)
+            .is_some_and(|entry| entry.kind == SkillKind::External)
+    })
+    {
+        return true;
+    }
     let is_base_skill = claw_core::config::base_skill_names()
         .iter()
         .any(|name| state.resolve_canonical_skill_name(name) == skill_name);

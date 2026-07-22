@@ -170,6 +170,15 @@ fn slugify_skill_name(input: &str) -> String {
     }
 }
 
+fn imported_skill_machine_alias(display_name: &str, canonical_name: &str) -> Option<String> {
+    let alias = display_name.trim().to_ascii_lowercase();
+    let is_machine_token = !alias.is_empty()
+        && alias.chars().all(|ch| {
+            ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | '.' | '-')
+        });
+    (is_machine_token && alias != canonical_name).then_some(alias)
+}
+
 fn parse_skill_frontmatter(skill_md: &str) -> ParsedSkillFrontmatter {
     let mut parsed = ParsedSkillFrontmatter::default();
     let mut lines = skill_md.lines();
@@ -306,11 +315,9 @@ fn detect_import_plan(
             .to_string()
     };
     let canonical_name = slugify_skill_name(&display_name);
-    let mut aliases = Vec::new();
-    let alias = display_name.trim().to_ascii_lowercase();
-    if !alias.is_empty() && alias != canonical_name {
-        aliases.push(alias);
-    }
+    let aliases = imported_skill_machine_alias(&display_name, &canonical_name)
+        .into_iter()
+        .collect();
 
     let mut require_bins = extract_required_bins(frontmatter.metadata.as_ref());
     let mut require_py_modules = Vec::new();

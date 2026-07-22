@@ -9,7 +9,7 @@ import {
   normalizeSkillSearchQuery,
   visibleSkillNames,
 } from "../lib/skill-display";
-import { resolveSkillStoreActionName, skillStoreErrorMessage } from "../lib/skill-store";
+import { removableSkillNames, resolveSkillStoreActionName, skillStoreErrorMessage } from "../lib/skill-store";
 import type {
   ApiResponse,
   BrowserFileWithPath,
@@ -213,7 +213,10 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const filteredSkillsMultimedia = useMemo(() => filterSkillNamesBySearch(skillGroups.multimedia, normalizedSkillsSearchQuery), [skillGroups.multimedia, normalizedSkillsSearchQuery]);
   const filteredSkillsBase = useMemo(() => filterSkillNamesBySearch(skillGroups.base, normalizedSkillsSearchQuery), [skillGroups.base, normalizedSkillsSearchQuery]);
   const filteredSkillsOther = useMemo(() => filterSkillNamesBySearch(skillGroups.other, normalizedSkillsSearchQuery), [skillGroups.other, normalizedSkillsSearchQuery]);
-  const removableSkillNamesSet = useMemo(() => new Set(skillGroups.other), [skillGroups.other]);
+  const removableSkillNamesSet = useMemo(
+    () => removableSkillNames(skillGroups.other, externalSkillNamesSet, lockedSkillNamesSet),
+    [externalSkillNamesSet, lockedSkillNamesSet, skillGroups.other],
+  );
 
   const skillItemsByName = useMemo(() => {
     const map = new Map<string, SkillListItem>();
