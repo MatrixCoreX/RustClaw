@@ -809,6 +809,19 @@ fn test_final_delivery_last_respond_same_as_delivery_no_duplicate() {
 }
 
 #[test]
+fn test_final_delivery_removes_duplicates_added_after_renderer_passes() {
+    let payload = r#"{"retryable":true,"error_code":"tool_retryable_failure"}"#;
+    let delivery = vec![payload.to_string(), payload.to_string()];
+
+    let (deduped, final_text, used) =
+        crate::finalize::build_final_delivery_with_priority(&delivery, None);
+
+    assert!(!used);
+    assert_eq!(deduped, vec![payload.to_string()]);
+    assert_eq!(final_text, payload);
+}
+
+#[test]
 fn test_final_delivery_no_last_respond_uses_delivery() {
     let delivery = vec!["only delivery".to_string()];
     let (deduped, final_text, used) =

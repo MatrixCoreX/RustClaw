@@ -33,7 +33,7 @@ codex_parity_runtime_smoke|subagent_optional_child_failure_en|covers:subagent,bo
 
 codex_parity_runtime_smoke|subagent_required_child_failure_zh|covers:subagent,bounded_parallel,required_child_failure,failure,no_write;requires_tool_call=true;local_readonly|只做结构化 dry-run：模拟一个 required=true 的只读子代理失败，父任务必须给出 subagent_required_child_failed 或 failed_required_child 机器状态，不能写文件、不能发布。|expect=subagent_required_child_failed
 
-codex_parity_runtime_smoke|hook_permission_boundary_dry_run_zh|covers:agent_hooks,pre_tool_use,permission_boundary;requires_tool_call=true;dry_run,no_external_side_effect|只检查当前 hook/permission 配置能否表达 PreToolUse 的 allow、deny、require_confirmation、background_wait 机器决策；不要修改配置文件；最后包含机器字段 stage=pre_tool_use。|expect=pre_tool_use
+codex_parity_runtime_smoke|hook_permission_boundary_dry_run_zh|covers:agent_hooks,pre_tool_use,permission_boundary;requires_tool_call=true;no_external_side_effect|只检查当前 hook/permission 配置能否表达 PreToolUse 的 allow、deny、require_confirmation、background_wait 机器决策；不要修改配置文件；最后包含机器字段 stage=pre_tool_use。|expect=pre_tool_use
 
 codex_parity_runtime_smoke|background_async_cmd_contract_zh|covers:async_start,checkpoint,run_cmd,poll_async_job;requires_tool_call=true;local_side_effect|以后台长任务模式启动一个安全本地命令：先 sleep 2 再输出 RUSTCLAW_ASYNC_SMOKE；如果任务进入 waiting/background，就返回 checkpoint_id、poll_ref 和 next_check_after；不要重复启动同一个副作用。|expect=checkpoint_id
 
@@ -47,7 +47,7 @@ codex_parity_runtime_smoke|agent_loop_control_trace_direct_answer_zh|covers:agen
 
 codex_parity_runtime_smoke|agent_loop_repair_envelope_dry_run_en|covers:agent_loop,recover,repair_envelope,control_trace,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|Dry run only: explain which machine fields a verifier missing-evidence recovery should pass through RepairEnvelope, and explicitly do not use skill text or error_text as protocol input.|expect=RepairEnvelope
 
-codex_parity_runtime_smoke|agent_loop_retryable_failure_observation_dry_run_en|covers:agent_loop,recover,repair_envelope,retryable_failure,structured_observation,bounded_repair,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|Dry run only: return the structured observation fields the planner should receive after a retryable tool failure. Include retryable=true, error_code, recovery_action, forbidden_repeat_signature, and bounded repair attempt counters; do not parse tool text or error_text.|expect=retryable
+codex_parity_runtime_smoke|agent_loop_retryable_failure_observation_dry_run_en|covers:agent_loop,recover,repair_envelope,retryable_failure,structured_observation,bounded_repair,dry_run,no_external_side_effect;requires_tool_call=true;capability:agent.preview_retryable_failure_observation;dry_run|Dry run only: return the structured observation fields the planner should receive after a retryable tool failure. Include retryable=true, error_code, recovery_action, forbidden_repeat_signature, and bounded repair attempt counters; do not parse tool text or error_text.|expect=retryable
 
 codex_parity_runtime_smoke|agent_loop_missing_field_repair_dry_run_zh|covers:agent_loop,recover,repair_envelope,missing_field,structured_observation,bounded_repair,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|只做 dry-run：说明 planner 在缺少必填参数时应该收到哪些机器字段，必须包含 missing_fields、missing_evidence、issue_codes、recovery_action 和 next_recovery_kind；不要写固定用户回复模板。|expect=missing_fields
 

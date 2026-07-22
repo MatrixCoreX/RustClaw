@@ -8,8 +8,8 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- Task lifecycle, structured session-alias binding, provider-failure, and side-effect-free coding-repair previews.
-- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, bind a planner-selected alias to a concrete target for later turns, inspect provider-failure recovery policy, and preview a structured coding repair loop without side effects.
+- Task lifecycle, structured session-alias binding, provider-failure, retryable-failure observation, and side-effect-free coding-repair previews.
+- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, bind a planner-selected alias to a concrete target for later turns, inspect provider-failure recovery policy, preview the structured observation supplied after a retryable tool failure, and preview a structured coding repair loop without side effects.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Planner-facing selection should use structured capability/action fields from the registry. Do not add phrase-specific routing rules for any user language.
 - Task cancel/resume/pause dry-run or lifecycle-field preview requests must call the skill with `dry_run=true` and return observed machine fields. Do not answer those flows from static prose alone, even when the user has not supplied a concrete `task_id` or index.
@@ -26,6 +26,7 @@
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 - `preview_resume` - Return the no-mutation resume entrypoint and renewable execution-lease contract for a stable `task_id`.
 - `preview_provider_failure` - Return the shared no-mutation provider failure, retry, waiting-state, and checkpoint policy for a canonical `failure_class`.
+- `preview_retryable_failure_observation` - Return a synthetic no-mutation machine contract for a retryable tool failure, including the stable error, recovery, repeat-prevention, and bounded-attempt fields consumed by the planner.
 - `preview_coding_repair` - Return a synthetic no-mutation coding-loop contract containing checkpoint, diff, failed verification, repair attempt, passing verification, and rewind references.
 - `bind_session_alias` - Return an exact structured `session_alias_bindings` update for a planner-selected `alias` and `target`; the runtime persists only this machine result and does not infer bindings from user-language phrases.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
@@ -35,7 +36,7 @@
 ## Parameter Contract (from interface)
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
+| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_retryable_failure_observation`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
 | `alias` | required for `bind_session_alias` | string | - | Exact user-defined alias surface selected by the planner; maximum 256 characters. |
 | `target` | required for `bind_session_alias` | string | - | Concrete locator or stable target to retain for later turns; maximum 4096 characters. |
 | `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider failure token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. |
@@ -201,11 +202,23 @@ Response text example:
 {"schema_version":1,"action":"preview_provider_failure","status":"dry_run","message_key":"task_control.preview_provider_failure.dry_run","dry_run":true,"would_mutate":false,"failure_class":"quota_exhausted","provider_retryable":false,"provider_blocker":true,"retry_policy":"background_wait","retry_after_seconds":10800,"waiting_state":"waiting","checkpoint":{"required":true,"recovery_action":"wait_background","resume_reason":"provider_blocker_wait_background","resume_entrypoint":"next_planner_round"}}
 ```
 
+### retryable failure observation preview
+
+Request:
+```json
+{"request_id":"r11","args":{"action":"preview_retryable_failure_observation"},"user_id":1,"chat_id":2}
+```
+
+Response text example:
+```json
+{"schema_version":1,"action":"preview_retryable_failure_observation","status":"dry_run","message_key":"task_control.preview_retryable_failure_observation.dry_run","dry_run":true,"synthetic":true,"would_mutate":false,"observation":{"retryable":true,"error_code":"tool_retryable_failure","recovery_action":"replan","forbidden_repeat_signature":"[REDACTED]","bounded_repair_attempts":{"observed_attempt_count":1,"repair_attempt_count":0,"max_attempts":null,"remaining_attempts":null,"limit_source":"runtime_soft_budget"}}}
+```
+
 ### coding repair preview
 
 Request:
 ```json
-{"request_id":"r11","args":{"action":"preview_coding_repair"},"user_id":1,"chat_id":2}
+{"request_id":"r12","args":{"action":"preview_coding_repair"},"user_id":1,"chat_id":2}
 ```
 
 Response text example:
