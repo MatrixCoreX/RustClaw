@@ -74,22 +74,59 @@ impl SkillStoreOperationError {
 
 type SkillStoreOperationResult<T> = Result<T, SkillStoreOperationError>;
 
-fn begin_skill_store_mutation(state: &AppState) -> SkillStoreOperationResult<OwnedSemaphorePermit> {
-    static GATES: OnceLock<Mutex<HashMap<PathBuf, Arc<Semaphore>>>> = OnceLock::new();
-    let gate = GATES
+#[derive(Debug, Clone)]
+struct SkillStoreActiveOperation {
+    skill_name: String,
+    action: &'static str,
+    started_ts: u64,
+}
+
+struct SkillStoreMutationSlot {
+    semaphore: Arc<Semaphore>,
+    active: Mutex<Option<SkillStoreActiveOperation>>,
+}
+
+struct SkillStoreMutationGuard {
+    _permit: OwnedSemaphorePermit,
+    slot: Arc<SkillStoreMutationSlot>,
+}
+
+impl Drop for SkillStoreMutationGuard {
+    fn drop(&mut self) {
+        let mut active = self
+            .slot
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *active = None;
+    }
+}
+
+fn skill_store_mutation_slot(state: &AppState) -> Arc<SkillStoreMutationSlot> {
+    static SLOTS: OnceLock<Mutex<HashMap<PathBuf, Arc<SkillStoreMutationSlot>>>> = OnceLock::new();
+    SLOTS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
-        .map_err(|error| {
-            SkillStoreOperationError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                SkillStoreErrorCode::OperationBusy,
-                error,
-            )
-        })?
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
         .entry(state.skill_rt.workspace_root.clone())
-        .or_insert_with(|| Arc::new(Semaphore::new(1)))
-        .clone();
-    gate
+        .or_insert_with(|| {
+            Arc::new(SkillStoreMutationSlot {
+                semaphore: Arc::new(Semaphore::new(1)),
+                active: Mutex::new(None),
+            })
+        })
+        .clone()
+}
+
+fn begin_skill_store_mutation(
+    state: &AppState,
+    skill_name: &str,
+    action: &'static str,
+) -> SkillStoreOperationResult<SkillStoreMutationGuard> {
+    let slot = skill_store_mutation_slot(state);
+    let permit = slot
+        .semaphore
+        .clone()
         .try_acquire_owned()
         .map_err(|error| {
             SkillStoreOperationError::new(
@@ -97,7 +134,33 @@ fn begin_skill_store_mutation(state: &AppState) -> SkillStoreOperationResult<Own
                 SkillStoreErrorCode::OperationBusy,
                 error,
             )
-        })
+        })?;
+    let operation = SkillStoreActiveOperation {
+        skill_name: skill_name.to_string(),
+        action,
+        started_ts: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0),
+    };
+    let mut active = slot
+        .active
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *active = Some(operation);
+    drop(active);
+    Ok(SkillStoreMutationGuard {
+        _permit: permit,
+        slot,
+    })
+}
+
+fn skill_store_active_operation(state: &AppState) -> Option<SkillStoreActiveOperation> {
+    skill_store_mutation_slot(state)
+        .active
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }
 
 fn skill_store_error_response(

@@ -381,6 +381,11 @@ export interface SkillStoreItem {
 export interface SkillStoreResponse {
   items: SkillStoreItem[];
   uninstalled_skill_names: string[];
+  active_operation?: {
+    skill_name: string;
+    action: "install" | "remove";
+    started_ts: number;
+  } | null;
 }
 
 export interface SkillStoreMutationResponse {
