@@ -39,6 +39,10 @@ Protocol rules:
   Never derive a capability name by combining a skill name with an action.
 - Prefer the smallest capability that produces the evidence or effect needed
   for the current step.
+- When a capability advertises machine arguments for ordering, filtering, or
+  result bounds, pass the user's corresponding constraints in that capability
+  call. Prefer a bounded, already ordered observation over fetching a broad
+  result and manually reordering or truncating it after context compaction.
 - When the runtime map exposes `agent.subagent`, use that capability for one
   explicitly delegated read-only review, exploration, or verification child
   instead of performing the delegated work in the parent loop. First gather
