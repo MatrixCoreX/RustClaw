@@ -1323,7 +1323,7 @@ fn successful_session_alias_capability_result_replaces_matching_binding() {
         updated_at_ts: 1,
     }];
     let result = claw_core::capability_result::CapabilityResultEnvelope::ok(
-        "session.bind_alias",
+        "task_control",
         Some("bind_session_alias".to_string()),
         json!({
             "output": {"ignored": true},
@@ -1346,18 +1346,18 @@ fn successful_session_alias_capability_result_replaces_matching_binding() {
 #[test]
 fn session_alias_state_ignores_wrong_failed_and_text_only_results() {
     let mut failed = claw_core::capability_result::CapabilityResultEnvelope::ok(
-        "session.bind_alias",
+        "task_control",
         Some("bind_session_alias".to_string()),
         json!({"extra":{"session_alias_bindings":[{"alias":"failed","target":"failed.md"}]}}),
     );
     failed.status = claw_core::capability_result::CapabilityResultStatus::Error;
     let wrong_action = claw_core::capability_result::CapabilityResultEnvelope::ok(
-        "session.bind_alias",
+        "task_control",
         Some("other_action".to_string()),
         json!({"extra":{"session_alias_bindings":[{"alias":"wrong","target":"wrong.md"}]}}),
     );
     let text_only = claw_core::capability_result::CapabilityResultEnvelope::ok(
-        "session.bind_alias",
+        "task_control",
         Some("bind_session_alias".to_string()),
         json!({"output":"{\"session_alias_bindings\":[{\"alias\":\"text\",\"target\":\"text.md\"}]}"}),
     );
@@ -1366,6 +1366,26 @@ fn session_alias_state_ignores_wrong_failed_and_text_only_results() {
         Vec::new(),
         &[failed, wrong_action, text_only],
     );
+
+    assert!(merged.is_empty());
+}
+
+#[test]
+fn session_alias_state_ignores_unresolved_planner_capability_envelope() {
+    let unresolved = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "session.bind_alias",
+        Some("bind_session_alias".to_string()),
+        json!({
+            "extra": {
+                "session_alias_bindings": [{
+                    "alias": "draft",
+                    "target": "document/draft.md"
+                }]
+            }
+        }),
+    );
+
+    let merged = super::merge_alias_bindings_from_capability_results(Vec::new(), &[unresolved]);
 
     assert!(merged.is_empty());
 }

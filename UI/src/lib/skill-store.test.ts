@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { filterSkillStoreItems, skillStoreInstallState } from "./skill-store.ts";
+import {
+  filterSkillStoreItems,
+  skillStoreErrorMessage,
+  skillStoreInstallState,
+} from "./skill-store.ts";
 import type { SkillStoreItem } from "../types/api.ts";
 
 const item = (name: string, installed: boolean, group: string): SkillStoreItem => ({
@@ -39,4 +43,13 @@ test("keeps removed skills distinct from disabled installed skills", () => {
 
   assert.equal(skillStoreInstallState(installedButDisabled), "installed");
   assert.equal(skillStoreInstallState(removed), "not_installed");
+});
+
+test("renders structured store errors in the selected UI language", () => {
+  const zh = (zhText: string) => zhText;
+  const en = (_zhText: string, enText: string) => enText;
+
+  assert.match(skillStoreErrorMessage("skill_store_build_failed", zh), /编译失败/);
+  assert.match(skillStoreErrorMessage("skill_store_build_failed", en), /build failed/i);
+  assert.match(skillStoreErrorMessage("future_error_code", en), /try again/i);
 });

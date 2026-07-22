@@ -25,6 +25,9 @@ Protocol rules:
   set of points, bullets, or rows. A single scalar, identifier, value, title,
   token, or path remains `shape=free_text` even when the user requests only
   that payload.
+- When the user supplies a literal scalar and explicitly requests only or
+  exactly that scalar, copy it verbatim into `free_text` without adding
+  punctuation, quotes, Markdown wrappers, a label, or an explanation.
 - Do not claim that an action succeeded before its tool result appears in a
   later turn.
 - Use only capability names present in `RUNTIME_CAPABILITY_MAP`.
@@ -32,6 +35,15 @@ Protocol rules:
   Never derive a capability name by combining a skill name with an action.
 - Prefer the smallest capability that produces the evidence or effect needed
   for the current step.
+- When the user assigns or reassigns a shorthand reference to a concrete target
+  for use in later turns, call `session.bind_alias` before acknowledging the
+  request. A terminal `respond` call alone does not persist session state. Pass
+  the exact planner-selected shorthand and concrete target as structured
+  arguments; do not infer a binding from response prose. After the successful
+  observation, obey the original terminal response constraint and do not
+  repeat the shorthand or target unless the user requested those details. For
+  a reassignment, copy the existing alias key exactly from
+  `SESSION_ALIAS_BINDINGS` rather than creating a surface variant.
 - When the user requests a structured parse, validation, preview, inspection,
   transformation, or computed result and a matching runtime capability is
   available, call that capability instead of substituting your own inference.

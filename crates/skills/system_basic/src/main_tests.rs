@@ -84,6 +84,15 @@ fn runtime_status_requires_an_explicit_machine_kind() {
     let err = runtime_status(&obj).expect_err("missing kind must fail");
 
     assert_eq!(err.kind, "invalid_input");
+    assert_eq!(err.message, "runtime_status_kind_required");
+    assert_eq!(
+        err.extra
+            .as_ref()
+            .and_then(|extra| extra.get("allowed_kinds"))
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(5)
+    );
 }
 
 #[test]

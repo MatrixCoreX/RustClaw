@@ -13,7 +13,7 @@
 # Format: suite|name|tags|prompt|expect=optional substring
 
 continuous|cn_memory_marker_set|cn,memory,state,group:continuous_stress_cn|本轮连续测试里，请记住编号 RC-CONT-CN-0428-A。只用一句中文确认。|expect=RC-CONT-CN-0428-A
-continuous|cn_memory_marker_recall|cn,memory,state,group:continuous_stress_cn|刚才让你记住的连续测试编号是什么？只回答编号。|expect=RC-CONT-CN-0428-A
+continuous|cn_memory_marker_recall|cn,memory,state,group:continuous_stress_cn,expect_exact_scalar|刚才让你记住的连续测试编号是什么？只回答编号。|expect=RC-CONT-CN-0428-A
 continuous|cn_split_task_start|cn,task_append,drafting,group:continuous_stress_cn,allow_clarify|帮我写个方案
 continuous|cn_split_task_audience|cn,task_append,drafting,group:continuous_stress_cn,allow_clarify|面向老板
 continuous|cn_split_task_constraints|cn,task_append,drafting,group:continuous_stress_cn|不要太技术，控制在 80 字内，只输出正文
@@ -25,17 +25,17 @@ continuous|cn_resume_previous_task|cn,task_resume,drafting,group:continuous_stre
 continuous|cn_new_task_interrupt_raw_pwd|cn,new_task,command,raw,group:continuous_stress_cn|先别管方案，请执行 pwd，只输出命令结果。|expect=/home/guagua/rustclaw
 continuous|cn_compound_no_connector_raw|cn,compound,command,raw,group:continuous_stress_cn|pwd whoami hostname 三个结果每个一行 不要总结
 continuous|cn_fixture_package_scalar|cn,file,scalar,group:continuous_stress_cn|读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。|expect=rustclaw-nl-fixture
-continuous|cn_alias_bind_service_notes|cn,alias,state,group:continuous_stress_cn|先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。
-continuous|cn_alias_read_service_title|cn,alias,file,scalar,group:continuous_stress_cn|读取甲文件的标题，只输出标题。|expect=Service Notes
-continuous|cn_alias_rebind_release|cn,alias,correction,state,group:continuous_stress_cn|不对，甲文件改成 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。只回复已更新。
-continuous|cn_alias_read_release_title|cn,alias,file,scalar,group:continuous_stress_cn|读取甲文件的标题，只输出标题。|expect=Release Checklist
+continuous|cn_alias_bind_service_notes|cn,alias,state,group:continuous_stress_cn,requires_tool_call=true,capability:session.bind_alias,expect_exact_scalar|先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。|expect=已记住
+continuous|cn_alias_read_service_title|cn,alias,file,scalar,group:continuous_stress_cn,requires_tool_call=true,expect_exact_scalar|读取甲文件的标题，只输出标题。|expect=Service Notes
+continuous|cn_alias_rebind_release|cn,alias,correction,state,group:continuous_stress_cn,requires_tool_call=true,capability:session.bind_alias,expect_exact_scalar|不对，甲文件改成 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。只回复已更新。|expect=已更新
+continuous|cn_alias_read_release_title|cn,alias,file,scalar,group:continuous_stress_cn,requires_tool_call=true,expect_exact_scalar|读取甲文件的标题，只输出标题。|expect=Release Checklist
 continuous|cn_ambiguous_delivery_should_clarify|cn,clarify,delivery,group:continuous_stress_cn|把那个最大的发给我。
 continuous|cn_stop_delivery_convert_to_clarify|cn,run_control,clarify,group:continuous_stress_cn|停一下，不要发文件，改为只告诉我你需要我确认哪个文件。
 continuous|cn_quality_feedback_rewrite|cn,feedback,drafting,group:continuous_stress_cn|刚才那句如果太生硬，就更口语化一点，只输出新版。
 continuous|cn_error_recovery_guidance|cn,error_report,recovery,group:continuous_stress_cn|如果刚才因为指代不清没法执行，只用一句话说明下一步需要我提供什么。
 
 continuous|en_memory_marker_set|en,memory,state,group:continuous_stress_en|For this continuous test, remember marker RC-CONT-EN-0428-B. Reply with one short confirmation.|expect=RC-CONT-EN-0428-B
-continuous|en_memory_marker_recall|en,memory,state,group:continuous_stress_en|What continuous test marker did I ask you to remember? Answer only the marker.|expect=RC-CONT-EN-0428-B
+continuous|en_memory_marker_recall|en,memory,state,group:continuous_stress_en,expect_exact_scalar|What continuous test marker did I ask you to remember? Answer only the marker.|expect=RC-CONT-EN-0428-B
 continuous|en_split_task_start|en,task_append,drafting,group:continuous_stress_en|Write a short release note for RustClaw.
 continuous|en_split_task_audience|en,task_append,drafting,group:continuous_stress_en|Make it for non-technical users.
 continuous|en_replace_goal_checklist|en,task_replace,drafting,group:continuous_stress_en|Actually switch it to a three-step checklist.
@@ -46,11 +46,11 @@ continuous|en_side_question_no_pollution|en,side_question,chat,group:continuous_
 continuous|en_resume_previous_task|en,task_resume,drafting,group:continuous_stress_en|Return to the checklist and output only three short bullets.
 continuous|en_new_task_raw_pwd|en,new_task,command,raw,group:continuous_stress_en|Run pwd and output only the raw result.|expect=/home/guagua/rustclaw
 continuous|en_compound_package_compare|en,compound,file,summary,group:continuous_stress_en|Read the name from scripts/nl_tests/fixtures/device_local/package.json. Read package.name from crates/clawd/Cargo.toml. Then answer in one line with the two names and whether they are the same or different.
-continuous|en_alias_bind_service_notes|en,alias,state,group:continuous_stress_en|Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.
-continuous|en_alias_read_service_title|en,alias,file,scalar,group:continuous_stress_en|Read the note file title and output only the title.|expect=Service Notes
-continuous|en_alias_rebind_release|en,alias,correction,state,group:continuous_stress_en|Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.
-continuous|en_alias_read_release_title|en,alias,file,scalar,group:continuous_stress_en|Read the note file title and output only the title.|expect=Release Checklist
-continuous|en_status_query_alias_basename|en,status_query,state,group:continuous_stress_en|What file does the note file refer to now? Output only the basename.|expect=release_checklist.md
+continuous|en_alias_bind_service_notes|en,alias,state,group:continuous_stress_en,requires_tool_call=true,capability:session.bind_alias,expect_exact_scalar|Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.|expect=confirmed
+continuous|en_alias_read_service_title|en,alias,file,scalar,group:continuous_stress_en,requires_tool_call=true,expect_exact_scalar|Read the note file title and output only the title.|expect=Service Notes
+continuous|en_alias_rebind_release|en,alias,correction,state,group:continuous_stress_en,requires_tool_call=true,capability:session.bind_alias,expect_exact_scalar|Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.|expect=updated
+continuous|en_alias_read_release_title|en,alias,file,scalar,group:continuous_stress_en,requires_tool_call=true,expect_exact_scalar|Read the note file title and output only the title.|expect=Release Checklist
+continuous|en_status_query_alias_basename|en,status_query,state,group:continuous_stress_en,expect_exact_scalar|What file does the note file refer to now? Output only the basename.|expect=release_checklist.md
 continuous|en_refusal_no_execution|en,approval,run_control,group:continuous_stress_en|Do not execute anything. Answer whether you are waiting for my approval in one short sentence.
 continuous|en_priority_order|en,priority,format,group:continuous_stress_en|For the next answer, give the conclusion first, then at most two details.
 continuous|en_final_context_summary|en,status_query,summary,group:continuous_stress_en|Summarize what this continuous test has covered so far in one short English sentence.
