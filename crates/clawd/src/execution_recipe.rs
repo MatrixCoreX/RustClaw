@@ -209,8 +209,21 @@ fn structured_success_marker_observation(args: &Value, output: &str) -> Validati
 fn merge_structured_validation_effect(
     normalized_skill: &str,
     args: &Value,
-    effect: ActionEffect,
+    mut effect: ActionEffect,
 ) -> ActionEffect {
+    let action = normalized_action_arg(args);
+    if normalized_skill == "run_cmd" && matches!(action.as_str(), "" | "run_cmd") {
+        let command_effect = args
+            .get("command")
+            .and_then(Value::as_str)
+            .map(run_cmd_action_effect)
+            .unwrap_or_default();
+        effect = ActionEffect {
+            observes: effect.observes || command_effect.observes,
+            mutates: effect.mutates || command_effect.mutates,
+            validates: effect.validates || command_effect.validates,
+        };
+    }
     let has_validation_expectation = structured_validation_declared(args)
         || structured_validation_success_marker(args).is_some()
         || (normalized_skill == "http_basic" && http_basic_has_validation_expectation(args));
@@ -1216,6 +1229,46 @@ fn output_is_exit_zero_sentinel(output: &str) -> bool {
         .starts_with("exit=0 command=")
 }
 
+fn explicit_exit_status_observation(output: &str) -> Option<ValidationObservation> {
+    output.lines().rev().find_map(|line| {
+        let (key, value) = line.trim().split_once('=')?;
+        if !key.eq_ignore_ascii_case("exit") {
+            return None;
+        }
+        let exit_code = value.trim().parse::<i32>().ok()?;
+        Some(if exit_code == 0 {
+            ValidationObservation::Passed
+        } else {
+            ValidationObservation::Failed(format!(
+                "validation_command_exit_nonzero:exit_code={exit_code}"
+            ))
+        })
+    })
+}
+
+pub(crate) fn run_cmd_successful_exit_is_validation(command: &str) -> bool {
+    if !run_cmd_looks_validation(command) || command_declares_validation_sentinel(command) {
+        return false;
+    }
+    let lower = command.trim().to_ascii_lowercase();
+    if contains_any(
+        &lower,
+        &[
+            "systemctl is-active",
+            "systemctl status",
+            " service status",
+            "service --status-all",
+            "nginx -t",
+            "sing-box check",
+        ],
+    ) {
+        return false;
+    }
+    !["curl", "wget", "nc", "ss", "lsof"]
+        .into_iter()
+        .any(|word| shell_contains_command_invocation(&lower, word))
+}
+
 fn assess_systemctl_is_active_validation(output: &str) -> ValidationObservation {
     match first_nonempty_line(output)
         .map(|line| line.to_ascii_lowercase())
@@ -1330,6 +1383,9 @@ fn assess_socket_listing_validation(output: &str) -> ValidationObservation {
 fn assess_run_cmd_validation(command: &str, output: &str) -> ValidationObservation {
     if !run_cmd_looks_validation(command) {
         return ValidationObservation::Inconclusive;
+    }
+    if let Some(observation) = explicit_exit_status_observation(output) {
+        return observation;
     }
     let command_lower = command.trim().to_ascii_lowercase();
     if command_lower.contains("systemctl is-active") {

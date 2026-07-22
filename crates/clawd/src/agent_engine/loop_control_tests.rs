@@ -1,13 +1,15 @@
 use super::{
     answer_contract_for_reply, answer_verifier_retry_summary,
-    apply_structured_respond_clarify_to_loop_state, commit_answer_verifier_retry_answer,
-    forced_boundary_observation_clarify_intent, initial_execution_recipe_spec,
-    observe_only_round_should_continue, post_write_content_evidence_recovery_policy,
+    apply_structured_respond_clarify_to_loop_state, coding_workflow_ready_for_model_finalization,
+    commit_answer_verifier_retry_answer, forced_boundary_observation_clarify_intent,
+    initial_execution_recipe_spec, observe_only_round_should_continue,
+    post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
-    record_agent_loop_decision_envelope_output_vars, retry_verifier_accepts_rewritten_answer,
-    round_model_finished, should_stop_for_observed_finalize,
+    record_agent_loop_decision_envelope_output_vars, retry_rewritten_answer_is_publishable,
+    retry_verifier_accepts_rewritten_answer, round_is_policy_terminal, round_model_finished,
+    select_round_task_budget_profile, should_stop_for_observed_finalize,
     structured_field_selector_observation_can_finalize,
     structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_structurally_satisfied, terminal_user_answer_stop_signal,
@@ -68,6 +70,108 @@ fn zero_action_observation_ready_round_is_not_model_finished() {
 }
 
 #[test]
+fn verifier_retry_cannot_publish_unobserved_local_code_status() {
+    assert!(!retry_rewritten_answer_is_publishable(
+        r#"{"changed_files":["test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"not_observed_in_trace"}"#,
+    ));
+    assert!(!retry_rewritten_answer_is_publishable(
+        r#"{"status":"not_observed_in_trace"}"#,
+    ));
+    assert!(retry_rewritten_answer_is_publishable(
+        "The trace notes that no unresolved machine status was returned.",
+    ));
+}
+
+#[test]
+fn later_verified_plan_budget_can_widen_but_not_narrow() {
+    use crate::task_budget_contract::TaskBudgetProfile;
+
+    assert_eq!(
+        select_round_task_budget_profile(None, TaskBudgetProfile::FastRead),
+        (TaskBudgetProfile::FastRead, true)
+    );
+    assert_eq!(
+        select_round_task_budget_profile(
+            Some(TaskBudgetProfile::FastRead),
+            TaskBudgetProfile::MultiStepWorkspace,
+        ),
+        (TaskBudgetProfile::MultiStepWorkspace, true)
+    );
+    assert_eq!(
+        select_round_task_budget_profile(
+            Some(TaskBudgetProfile::MultiStepWorkspace),
+            TaskBudgetProfile::FastRead,
+        ),
+        (TaskBudgetProfile::MultiStepWorkspace, false)
+    );
+}
+
+#[test]
+fn verified_coding_workflow_hands_off_to_model_finalization() {
+    let mut loop_state = LoopState::new();
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"src/lib.rs","resolved_path":"/workspace/src/lib.rs"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "run_cmd",
+        r#"{"extra":{"command":"cargo test -p demo"}}"#,
+    ));
+
+    assert!(coding_workflow_ready_for_model_finalization(&loop_state));
+}
+
+#[test]
+fn unverified_or_read_only_workflow_does_not_finalize() {
+    let mut unverified = LoopState::new();
+    unverified.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"src/lib.rs","resolved_path":"/workspace/src/lib.rs"}}"#,
+    ));
+    assert!(!coding_workflow_ready_for_model_finalization(&unverified));
+
+    let mut read_only = LoopState::new();
+    read_only.executed_step_results.push(ok_step(
+        "step_1",
+        "run_cmd",
+        r#"{"extra":{"command":"cargo test -p demo"}}"#,
+    ));
+    assert!(!coding_workflow_ready_for_model_finalization(&read_only));
+}
+
+#[test]
+fn latest_command_validation_closes_workflow_when_step_output_omits_command() {
+    let mut loop_state = LoopState::new();
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"src/lib.rs","resolved_path":"/workspace/src/lib.rs"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "run_cmd",
+        "test result without command metadata",
+    ));
+    loop_state.latest_validation_result = Some(serde_json::json!({
+        "status": "passed",
+        "verification_scope": "command",
+        "global_step": 2,
+    }));
+
+    assert!(coding_workflow_ready_for_model_finalization(&loop_state));
+
+    loop_state.latest_validation_result = Some(serde_json::json!({
+        "status": "failed",
+        "verification_scope": "command",
+        "global_step": 2,
+    }));
+    assert!(!coding_workflow_ready_for_model_finalization(&loop_state));
+}
+
+#[test]
 fn zero_action_terminal_round_is_model_finished() {
     let outcome = RoundOutcome {
         executed_actions: 0,
@@ -78,6 +182,24 @@ fn zero_action_terminal_round_is_model_finished() {
     };
 
     assert!(round_model_finished(Some(&outcome)));
+}
+
+#[test]
+fn repeated_completed_action_replans_until_the_repeat_limit() {
+    let replan = RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("repeat_completed_action".to_string()),
+        next_goal_hint: None,
+        no_progress: true,
+    };
+    assert!(!round_is_policy_terminal(Some(&replan)));
+
+    let exhausted = RoundOutcome {
+        stop_signal: Some("repeat_action_limit".to_string()),
+        ..replan
+    };
+    assert!(round_is_policy_terminal(Some(&exhausted)));
 }
 
 fn route_result(shape: OutputResponseShape) -> IntentOutputContract {

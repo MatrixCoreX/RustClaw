@@ -470,6 +470,49 @@ fn should_stop_for_observed_finalize(
         })
 }
 
+fn coding_workflow_ready_for_model_finalization(loop_state: &LoopState) -> bool {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "agent-loop-coding-finalization-probe",
+        "ask",
+        "",
+    );
+    for step in &loop_state.executed_step_results {
+        journal.push_step_result(step);
+    }
+    for observation in &loop_state.task_observations {
+        journal.push_task_observation(observation.clone());
+    }
+    let summary = journal.to_summary_json();
+    let Some(workflow) = summary.get("coding_workflow") else {
+        return false;
+    };
+    let has_changes = workflow
+        .get("changed_file_count")
+        .and_then(Value::as_u64)
+        .is_some_and(|count| count > 0);
+    let journal_verification_ready = workflow.get("verification_status").and_then(Value::as_str)
+        == Some("verified")
+        && workflow.get("next_step").and_then(Value::as_str) == Some("summarize")
+        && workflow
+            .pointer("/validation_gate/gate_status")
+            .and_then(Value::as_str)
+            == Some("satisfied")
+        && workflow
+            .pointer("/validation_gate/can_report_fully_verified")
+            .and_then(Value::as_bool)
+            == Some(true);
+    let latest_command_validation_ready =
+        loop_state
+            .latest_validation_result
+            .as_ref()
+            .is_some_and(|validation| {
+                validation.get("status").and_then(Value::as_str) == Some("passed")
+                    && validation.get("verification_scope").and_then(Value::as_str)
+                        == Some("command")
+            });
+    has_changes && (journal_verification_ready || latest_command_validation_ready)
+}
+
 fn loop_state_has_checkpoint_handoff(loop_state: &LoopState) -> bool {
     let Some(lifecycle) = loop_state.task_lifecycle.as_ref() else {
         return false;
@@ -686,6 +729,17 @@ fn budget_profile_for_prepared_round(
     crate::task_budget_contract::profile_for_verified_plan(facts)
 }
 
+fn select_round_task_budget_profile(
+    current_profile: Option<crate::task_budget_contract::TaskBudgetProfile>,
+    candidate_profile: crate::task_budget_contract::TaskBudgetProfile,
+) -> (crate::task_budget_contract::TaskBudgetProfile, bool) {
+    let Some(current_profile) = current_profile else {
+        return (candidate_profile, true);
+    };
+    let profile = current_profile.widen_with(candidate_profile);
+    (profile, profile != current_profile)
+}
+
 fn task_budget_lifecycle_state(loop_state: &LoopState) -> Option<&str> {
     loop_state
         .task_lifecycle
@@ -712,6 +766,12 @@ fn round_model_finished(outcome: Option<&RoundOutcome>) -> bool {
     outcome.is_some_and(|round| {
         !round_requests_continuation(round)
             && (round.executed_actions == 0 || round.stop_signal.is_some())
+    })
+}
+
+fn round_is_policy_terminal(outcome: Option<&RoundOutcome>) -> bool {
+    outcome.is_some_and(|round| {
+        round.had_error || round.stop_signal.as_deref() == Some("repeat_action_limit")
     })
 }
 
@@ -744,13 +804,7 @@ fn observe_task_budget(
         async_continuations: u64::from(lifecycle_state == Some("background")),
         stagnation_count: loop_state.consecutive_no_progress.min(u32::MAX as usize) as u32,
     };
-    let policy_terminal = outcome.is_some_and(|round| {
-        round.had_error
-            || matches!(
-                round.stop_signal.as_deref(),
-                Some("repeat_action_limit" | "repeat_completed_action")
-            )
-    });
+    let policy_terminal = round_is_policy_terminal(outcome);
     let model_finished = round_model_finished(outcome);
     let resumable = loop_state_has_recoverable_checkpoint_state(loop_state);
     let cumulative_elapsed_ms = loop_state.task_budget_slice_base_elapsed_ms.saturating_add(
@@ -873,28 +927,36 @@ async fn run_agent_round(
     }
     crate::task_event_transport::publish_loop_state_snapshot(state, task, user_text, loop_state);
     record_agent_loop_decision_envelope_output_vars(loop_state, &prepared_round.plan_result);
-    if !loop_state
+    let first_verified_plan_profile = !loop_state
         .output_vars
-        .contains_key("agent_loop.planner_budget_profile")
-    {
-        let guard_profile = AgentLoopGuardPolicy::budget_profile_for_context(
-            loop_state.execution_recipe,
-            prepared_round.effective_output_contract.as_ref(),
-        );
-        *policy = policy.adjusted_for_context(
-            loop_state.execution_recipe,
-            prepared_round.effective_output_contract.as_ref(),
-        );
-        let profile = budget_profile_for_prepared_round(state, loop_state, &prepared_round);
-        apply_task_budget_profile(loop_state, task_budget_policy, profile);
-        loop_state.output_vars.insert(
-            "agent_loop.planner_budget_profile".to_string(),
-            profile.as_str().to_string(),
-        );
+        .contains_key("agent_loop.planner_budget_profile");
+    let guard_profile = AgentLoopGuardPolicy::budget_profile_for_context(
+        loop_state.execution_recipe,
+        prepared_round.effective_output_contract.as_ref(),
+    );
+    let candidate_profile = budget_profile_for_prepared_round(state, loop_state, &prepared_round);
+    let current_profile = (!first_verified_plan_profile)
+        .then(|| {
+            loop_state
+                .task_budget_slice
+                .as_ref()
+                .map(|slice| slice.profile)
+        })
+        .flatten();
+    let (profile, profile_changed) =
+        select_round_task_budget_profile(current_profile, candidate_profile);
+    *policy = policy.adjusted_for_task_budget_profile(profile);
+    apply_task_budget_profile(loop_state, task_budget_policy, profile);
+    loop_state.output_vars.insert(
+        "agent_loop.planner_budget_profile".to_string(),
+        profile.as_str().to_string(),
+    );
+    if profile_changed {
         info!(
-            "loop_planner_budget_profile task_id={} profile={} max_steps={} soft_slice_ms={} stagnation_tolerance={}",
+            "loop_planner_budget_profile task_id={} profile={} candidate_profile={} max_steps={} soft_slice_ms={} stagnation_tolerance={}",
             task.task_id,
             profile.as_str(),
+            candidate_profile.as_str(),
             policy.max_steps,
             loop_state
                 .task_budget_slice
@@ -911,6 +973,7 @@ async fn run_agent_round(
             task_id = task.task_id,
             guard_profile = guard_profile.as_str(),
             task_budget_profile = profile.as_str(),
+            task_budget_candidate_profile = candidate_profile.as_str(),
             "loop_structured_budget_profile_selected"
         );
     }
@@ -1045,6 +1108,9 @@ async fn run_agent_round(
         if let Some(stop_signal) = terminal_user_answer_stop_signal(loop_state) {
             outcome.stop_signal = Some(stop_signal.to_string());
         }
+    }
+    if outcome.stop_signal.is_none() && coding_workflow_ready_for_model_finalization(loop_state) {
+        outcome.stop_signal = Some("verified_workflow_ready_for_synthesis".to_string());
     }
     if outcome.stop_signal.is_none()
         && should_stop_for_observed_finalize(agent_run_context, loop_state, &actions)

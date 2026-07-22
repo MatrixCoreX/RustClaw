@@ -527,7 +527,7 @@ fn repeat_guard_blocks_identical_successful_observe_outside_active_recipe() {
             1,
         )
         .as_deref(),
-        Some("observed_output_ready")
+        Some("structured_observation_already_ready")
     );
 }
 
@@ -579,7 +579,7 @@ fn resource_dedup_blocks_same_resource_but_allows_distinct_resources() {
             1,
         )
         .as_deref(),
-        Some("observed_output_ready")
+        Some("structured_observation_already_ready")
     );
     assert_eq!(
         loop_state.rollout_attribution[0].dedup_scope.as_deref(),

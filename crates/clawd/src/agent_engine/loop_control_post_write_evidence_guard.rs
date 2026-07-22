@@ -198,7 +198,7 @@ fn json_value_is_unresolved_publication(value: &Value) -> bool {
             let trimmed = text.trim();
             trimmed.is_empty()
                 || trimmed.contains("{{")
-                || matches!(trimmed, "<missing>" | "not_observed" | "null")
+                || string_is_unresolved_machine_token(trimmed)
         }
         Value::Array(items) => {
             items.is_empty() || items.iter().any(json_value_is_unresolved_publication)
@@ -207,6 +207,26 @@ fn json_value_is_unresolved_publication(value: &Value) -> bool {
             object.is_empty() || object.values().any(json_value_is_unresolved_publication)
         }
         Value::Bool(_) | Value::Number(_) => false,
+    }
+}
+
+fn string_is_unresolved_machine_token(text: &str) -> bool {
+    matches!(
+        text.trim().to_ascii_lowercase().as_str(),
+        "<missing>" | "not_observed" | "not_observed_in_trace" | "null"
+    )
+}
+
+pub(super) fn json_value_contains_unresolved_machine_token(value: &Value) -> bool {
+    match value {
+        Value::String(text) => string_is_unresolved_machine_token(text),
+        Value::Array(items) => items
+            .iter()
+            .any(json_value_contains_unresolved_machine_token),
+        Value::Object(object) => object
+            .values()
+            .any(json_value_contains_unresolved_machine_token),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
     }
 }
 

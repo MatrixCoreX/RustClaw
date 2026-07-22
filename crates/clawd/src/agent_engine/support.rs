@@ -210,6 +210,30 @@ impl AgentLoopGuardPolicy {
         output_contract: Option<&crate::IntentOutputContract>,
     ) -> Self {
         let profile = Self::budget_profile_for_context(recipe, output_contract);
+        self.adjusted_for_loop_budget_profile(profile)
+    }
+
+    pub(super) fn adjusted_for_task_budget_profile(
+        &self,
+        profile: crate::task_budget_contract::TaskBudgetProfile,
+    ) -> Self {
+        let profile = match profile {
+            crate::task_budget_contract::TaskBudgetProfile::General => LoopBudgetProfile::General,
+            crate::task_budget_contract::TaskBudgetProfile::FastRead => LoopBudgetProfile::FastRead,
+            crate::task_budget_contract::TaskBudgetProfile::GroundedSummary => {
+                LoopBudgetProfile::GroundedSummary
+            }
+            crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace => {
+                LoopBudgetProfile::MultiStepWorkspace
+            }
+            crate::task_budget_contract::TaskBudgetProfile::OpsClosedLoop => {
+                LoopBudgetProfile::OpsClosedLoop
+            }
+        };
+        self.adjusted_for_loop_budget_profile(profile)
+    }
+
+    fn adjusted_for_loop_budget_profile(&self, profile: LoopBudgetProfile) -> Self {
         let overrides = self.overrides_for_profile(profile);
         let mut policy = self.clone();
         if let Some(max_steps) = overrides.max_steps {

@@ -1644,6 +1644,23 @@ fn workspace_delivery_contract_selects_multi_step_budget() {
 }
 
 #[test]
+fn verified_plan_budget_profile_can_raise_guard_budget() {
+    let policy = base_policy()
+        .adjusted_for_task_budget_profile(crate::task_budget_contract::TaskBudgetProfile::FastRead);
+    assert_eq!(policy.max_steps, 16);
+
+    let policy = policy.adjusted_for_task_budget_profile(
+        crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
+    );
+    assert_eq!(policy.max_steps, 56);
+
+    let selected = crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace
+        .widen_with(crate::task_budget_contract::TaskBudgetProfile::FastRead);
+    let policy = policy.adjusted_for_task_budget_profile(selected);
+    assert_eq!(policy.max_steps, 56);
+}
+
+#[test]
 fn ops_closed_loop_runtime_applies_repair_override() {
     let policy = base_policy();
     let mut recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {

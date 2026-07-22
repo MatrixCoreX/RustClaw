@@ -223,6 +223,7 @@ async fn handle_skill_step_success(
             record_latest_validation_result(
                 loop_state,
                 normalized_skill,
+                action_args,
                 global_step,
                 step_in_round,
                 "passed",
@@ -239,6 +240,7 @@ async fn handle_skill_step_success(
             record_latest_validation_result(
                 loop_state,
                 normalized_skill,
+                action_args,
                 global_step,
                 step_in_round,
                 "failed",
@@ -279,6 +281,7 @@ async fn handle_skill_step_success(
             record_latest_validation_result(
                 loop_state,
                 normalized_skill,
+                action_args,
                 global_step,
                 step_in_round,
                 "inconclusive",
@@ -482,24 +485,64 @@ async fn handle_skill_step_success(
 fn record_latest_validation_result(
     loop_state: &mut LoopState,
     normalized_skill: &str,
+    args: &Value,
     global_step: usize,
     step_in_round: usize,
     status: &'static str,
     status_code: &'static str,
     action_effect: crate::execution_recipe::ActionEffect,
 ) {
-    if !loop_state.execution_recipe.is_active() || !action_effect.validates {
+    if !action_effect.validates {
         return;
     }
+    let verification_scope = args
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+        .map(|_| "command")
+        .unwrap_or("capability");
     loop_state.latest_validation_result = Some(json!({
         "schema_version": 1,
         "source": "agent_loop_step_validation",
         "status": status,
         "status_code": status_code,
+        "verification_scope": verification_scope,
         "skill": normalized_skill,
         "global_step": global_step,
         "step_in_round": step_in_round,
     }));
+}
+
+fn invalidate_latest_validation_after_mutation_attempt(
+    loop_state: &mut LoopState,
+    action_effect: crate::execution_recipe::ActionEffect,
+) {
+    if action_effect.mutates {
+        loop_state.latest_validation_result = None;
+    }
+}
+
+fn validation_observation_with_process_status(
+    normalized_skill: &str,
+    args: &Value,
+    process_succeeded: bool,
+    observation: crate::execution_recipe::ValidationObservation,
+) -> crate::execution_recipe::ValidationObservation {
+    if matches!(
+        observation,
+        crate::execution_recipe::ValidationObservation::Inconclusive
+    ) && process_succeeded
+        && normalized_skill == "run_cmd"
+        && args
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(crate::execution_recipe::run_cmd_successful_exit_is_validation)
+    {
+        crate::execution_recipe::ValidationObservation::Passed
+    } else {
+        observation
+    }
 }
 
 async fn handle_skill_step_failure(
@@ -1142,6 +1185,7 @@ pub(super) async fn execute_prepared_skill_action(
             async move { run_with_tool_budget_timeout(tool_timeout, execute).await }
         })
         .await;
+    invalidate_latest_validation_after_mutation_attempt(loop_state, raw_action_effect);
     let structured_validation = structured_validation
         .lock()
         .ok()
@@ -1174,12 +1218,18 @@ pub(super) async fn execute_prepared_skill_action(
         raw_action_effect,
     );
     let validation_observation = if raw_action_effect.validates {
-        crate::execution_recipe::assess_validation_output_with_structured(
+        let observation = crate::execution_recipe::assess_validation_output_with_structured(
             state,
             normalized_skill,
             classification_args,
             step_execution.output.as_deref().unwrap_or_default(),
             structured_validation.as_ref(),
+        );
+        validation_observation_with_process_status(
+            normalized_skill,
+            classification_args,
+            step_execution.is_ok(),
+            observation,
         )
     } else {
         crate::execution_recipe::ValidationObservation::Passed

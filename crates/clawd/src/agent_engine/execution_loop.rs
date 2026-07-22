@@ -152,7 +152,7 @@ fn check_repeat_action_guard(
         let (reason_code, stop_signal) = if repeated_observation_ready {
             (
                 "registry_idempotency_repeat_observation_ready",
-                "observed_output_ready",
+                "structured_observation_already_ready",
             )
         } else {
             (

@@ -290,6 +290,67 @@ planner_capabilities = [
 }
 
 #[test]
+fn registry_run_cmd_action_keeps_command_validation_signal() {
+    let state = test_state_with_registry(
+        r#"
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+side_effect = true
+planner_capabilities = [
+  { name = "system.run_command", action = "run_cmd", effect = "external", required = ["command"], idempotent = false },
+]
+"#,
+        &["run_cmd"],
+    );
+    let effect = classify_skill_action_effect(
+        &state,
+        "run_cmd",
+        &json!({
+            "action": "run_cmd",
+            "command": "python3 test_calc_core.py"
+        }),
+    );
+
+    assert!(effect.mutates, "broad registry safety effect must remain");
+    assert!(effect.observes);
+    assert!(effect.validates, "specific command validation must survive");
+}
+
+#[test]
+fn run_cmd_validation_uses_machine_exit_evidence() {
+    let state = test_state();
+    let command = "python3 test_calc_core.py";
+    let args = json!({"command": command});
+
+    assert!(super::run_cmd_successful_exit_is_validation(command));
+    assert_eq!(
+        assess_validation_output(&state, "run_cmd", &args, "Ran 5 tests\nOK\nEXIT=0\n"),
+        ValidationObservation::Passed
+    );
+    assert!(matches!(
+        assess_validation_output(&state, "run_cmd", &args, "EXIT=1\n"),
+        ValidationObservation::Failed(detail)
+            if detail == "validation_command_exit_nonzero:exit_code=1"
+    ));
+}
+
+#[test]
+fn successful_exit_fallback_excludes_specialized_operational_probes() {
+    assert!(!super::run_cmd_successful_exit_is_validation(
+        "curl -s https://example.com/health"
+    ));
+    assert!(!super::run_cmd_successful_exit_is_validation(
+        "systemctl status clawd"
+    ));
+    assert!(!super::run_cmd_successful_exit_is_validation(
+        "grep -q ready app.log && echo VALIDATION_PASSED || echo VALIDATION_FAILED"
+    ));
+}
+
+#[test]
 fn structured_validation_marks_custom_run_cmd_as_code_validation() {
     let state = test_state();
     let args = json!({

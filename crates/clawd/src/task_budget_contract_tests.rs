@@ -242,6 +242,22 @@ fn verified_machine_plan_facts_select_profiles_without_user_text() {
 }
 
 #[test]
+fn verified_plan_profiles_only_widen_after_the_initial_selection() {
+    assert_eq!(
+        TaskBudgetProfile::FastRead.widen_with(TaskBudgetProfile::MultiStepWorkspace),
+        TaskBudgetProfile::MultiStepWorkspace
+    );
+    assert_eq!(
+        TaskBudgetProfile::MultiStepWorkspace.widen_with(TaskBudgetProfile::FastRead),
+        TaskBudgetProfile::MultiStepWorkspace
+    );
+    assert_eq!(
+        TaskBudgetProfile::GroundedSummary.widen_with(TaskBudgetProfile::OpsClosedLoop),
+        TaskBudgetProfile::OpsClosedLoop
+    );
+}
+
+#[test]
 fn timeout_classes_are_bounded_by_soft_slice_and_administrator_ceiling() {
     let mut slice = TaskBudgetSlice::new_with_policy(
         TaskBudgetProfile::MultiStepWorkspace,

@@ -25,6 +25,24 @@ impl TaskBudgetProfile {
             Self::OpsClosedLoop => "ops_closed_loop",
         }
     }
+
+    pub(crate) fn widen_with(self, candidate: Self) -> Self {
+        if candidate.widening_rank() > self.widening_rank() {
+            candidate
+        } else {
+            self
+        }
+    }
+
+    fn widening_rank(self) -> u8 {
+        match self {
+            Self::FastRead => 0,
+            Self::General => 1,
+            Self::GroundedSummary => 2,
+            Self::MultiStepWorkspace => 3,
+            Self::OpsClosedLoop => 4,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
