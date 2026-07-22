@@ -230,6 +230,19 @@ pub(super) fn repair_observation_preview_extra(repair_kind: &str) -> Option<Valu
             "recovery_action": "wait_background",
             "next_recovery_kind": "wait_background",
         }),
+        "provider_external_blocker" => json!({
+            "status": "waiting",
+            "repair_source": "provider",
+            "repair_class": "loop_bounded_recovery",
+            "failure_class": "external_blocker",
+            "provider_blocker": true,
+            "code_failure": false,
+            "route_failure": false,
+            "needs_user_input": false,
+            "recovery_action": "wait_background",
+            "next_recovery_kind": "wait_background",
+            "evidence_refs": ["provider_status", "repair_signal"],
+        }),
         _ => return None,
     };
     Some(json!({
