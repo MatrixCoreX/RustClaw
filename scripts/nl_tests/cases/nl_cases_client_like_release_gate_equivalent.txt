@@ -2,7 +2,7 @@
 # Do not edit by hand; regenerate with scripts/nl_tests/build_release_gate_subset.py.
 # Selection uses suite/name/tags/source metadata only, not natural-language prompt matching.
 # source=scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt
-# selected_rows=285 coverage_categories=217 missing_categories=0
+# selected_rows=285 coverage_categories=219 missing_categories=0
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_release_gate_equivalent.txt --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet --exclude-case-tag x_api --exclude-case-tag post_tweet --exclude-case-tag publish_tweet
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -183,7 +183,6 @@ act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_docs_archive_names_zh
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_docs_archive_names_en_034|act,exact_path_list,file_names,listing,en,client_like,aggregate|Output only file names inside scripts/nl_tests/fixtures/device_local/docs/archive.
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_tmp_dir_names_zh_035|act,exact_path_list,directory_names,listing,zh,client_like,aggregate|列出 scripts/nl_tests/fixtures/device_local/tmp 下的直接子目录名。
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_tmp_dir_names_en_036|act,exact_path_list,directory_names,listing,en,client_like,aggregate|List direct directory names under scripts/nl_tests/fixtures/device_local/tmp.
-act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_tmp_groups_zh_037|act,exact_path_list,directory_entry_groups,listing,zh,client_like,aggregate|把 scripts/nl_tests/fixtures/device_local/tmp 顶层内容按文件和目录分组列出来。
 # source: scripts/nl_tests/cases/nl_cases_agent_loop_structured_field_read_focus_20260611.txt
 act|nl_cases_agent_loop_structured_field_read_focus_20260611_sfr_json_pkg_name_zh_001|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like,aggregate|读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。|expect=rustclaw-nl-fixture
 act|nl_cases_agent_loop_structured_field_read_focus_20260611_sfr_json_pkg_name_zh_002|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like,aggregate|去 scripts/nl_tests/fixtures/device_local/package.json 里把 name 的值拿出来，只给值。|expect=rustclaw-nl-fixture
@@ -277,7 +276,8 @@ codex_task_resume_release_smoke|nl_cases_codex_task_resume_release_smoke_2026062
 dynamic_guard|nl_cases_dynamic_guard_manual_explicit_path_readme_summary|path,file,summary,client_like,aggregate|帮我看一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md 开头，然后一句话说重点
 # source: scripts/nl_tests/cases/nl_cases_fs_config_basic_boundary_20260513.txt
 fs_config_basic|nl_cases_fs_config_basic_boundary_20260513_readme_exists_cn|tool:fs_basic,requires_tool_call=true,client_like,aggregate|检查当前仓库 README.md 是否存在，只用一行回答存在状态和路径
-fs_config_basic|nl_cases_fs_config_basic_boundary_20260513_find_registry_run_cmd_block_cn|tool:config_basic,requires_tool_call=true,client_like,aggregate|在 configs/skills_registry.toml 里找到 run_cmd 相关配置位置，并告诉我它的 planner_kind 是什么
+fs_config_basic|nl_cases_fs_config_basic_boundary_20260513_find_registry_run_cmd_block_cn|any_skill:config_basic+fs_basic,covers:config_basic,requires_tool_call=true,local_readonly,client_like,aggregate|在 configs/skills_registry.toml 里找到 run_cmd 相关配置位置，并告诉我它的 planner_kind 是什么
+fs_config_basic|nl_cases_fs_config_basic_boundary_20260513_cargo_workspace_version_cn|tool:config_basic,requires_tool_call=true,client_like,aggregate|读取 Cargo.toml 里 workspace.package.version 的值，只回答版本号
 # source: scripts/nl_tests/cases/nl_cases_llm_first_convergence_20260511.txt
 llm_first|nl_cases_llm_first_convergence_20260511_workspace_article_after_wrong_locator_cn|skill:system_basic,client_like,aggregate|帮我写一篇关于 RustClaw 的长文
 llm_first|nl_cases_llm_first_convergence_20260511_missing_then_bounded_fallback_cn|skill:fs_search,client_like,aggregate|读取 plan/definitely_missing_20260511.md；如果不存在，就在 plan 目录里搜索 execution_intent 相关的 md 文件，并只返回找到的路径
