@@ -30,6 +30,23 @@ pub(super) fn current_delivery_contains_all_requested_machine_units(
     })
 }
 
+pub(super) fn contains_requested_machine_field_label(
+    current: &str,
+    requested_summary: &str,
+) -> bool {
+    requested_machine_summary_pairs(requested_summary)
+        .iter()
+        .any(|(key, _)| {
+            current
+                .lines()
+                .any(|line| labeled_machine_field_value(line, key).is_some())
+        })
+}
+
+pub(super) fn contains_labeled_machine_scalar(current: &str) -> bool {
+    current.lines().find_map(labeled_markdown_scalar).is_some()
+}
+
 fn requested_machine_unit_matches_labeled_line(current: &str, requested_unit: &str) -> bool {
     let Some((requested_key, requested_value)) = requested_unit.split_once('=') else {
         return false;

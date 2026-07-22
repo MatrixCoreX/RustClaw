@@ -13,6 +13,7 @@ mod structured_contract_delivery;
 mod structured_scalar_delivery;
 
 use machine_unit_delivery::{
+    contains_labeled_machine_scalar, contains_requested_machine_field_label,
     current_delivery_contains_all_requested_machine_units,
     current_delivery_has_conflicting_values_for_requested_keys,
     current_delivery_has_values_for_requested_marker_summary, current_delivery_is_machine_kv_only,
@@ -28,6 +29,7 @@ use request_surfaces::requested_machine_kv_request_surfaces;
 use structured_contract_delivery::current_delivery_contains_full_structured_contract;
 
 use super::{
+    current_delivery_is_latest_publishable_synthesis, current_delivery_is_latest_terminal_respond,
     exact_observation_machine_field_delivery_satisfies_request, final_answer_text_from_delivery,
     log_deterministic_delivery_record,
 };
@@ -166,7 +168,12 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     else {
         return false;
     };
-    if current_delivery_already_publishes_single_names_array(agent_run_context, &current, &answer) {
+    if !strict_machine_field_contract_requested(agent_run_context)
+        && (current_delivery_is_latest_publishable_synthesis(loop_state, &current)
+            || current_delivery_is_latest_terminal_respond(loop_state, &current))
+        && !contains_requested_machine_field_label(&current, &answer)
+        && !contains_labeled_machine_scalar(&current)
+    {
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
@@ -961,46 +968,6 @@ fn marker_only_requested_summary(summary: &str) -> bool {
             .count()
             == 1
         && valid_machine_unit_key(summary)
-}
-
-fn current_delivery_already_publishes_single_names_array(
-    agent_run_context: Option<&AgentRunContext>,
-    current: &str,
-    summary: &str,
-) -> bool {
-    if strict_machine_field_contract_requested(agent_run_context) {
-        return false;
-    }
-    let units = machine_kv_units(summary);
-    let [unit] = units.as_slice() else {
-        return false;
-    };
-    let Some(("names", value)) = unit.split_once('=') else {
-        return false;
-    };
-    let Ok(names) = serde_json::from_str::<Vec<String>>(value) else {
-        return false;
-    };
-    !names.is_empty()
-        && names.iter().all(|name| {
-            current
-                .lines()
-                .map(normalized_listing_name)
-                .any(|line| line.is_some_and(|line| line == name))
-        })
-}
-
-fn normalized_listing_name(line: &str) -> Option<&str> {
-    let line = line.trim();
-    if line.is_empty() {
-        return None;
-    }
-    for prefix in ["- ", "* ", "+ "] {
-        if let Some(name) = line.strip_prefix(prefix).map(str::trim) {
-            return (!name.is_empty()).then_some(name);
-        }
-    }
-    Some(line)
 }
 
 fn latest_publishable_delivery_for_marker_only_summary(

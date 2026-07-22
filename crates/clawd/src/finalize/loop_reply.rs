@@ -200,8 +200,8 @@ mod control_envelope;
 mod delivery_backfill;
 use delivery_backfill::{
     backfill_delivery_from_last_outputs, current_delivery_is_latest_publishable_synthesis,
-    delivery_is_direct_read_observation, last_respond_matches_single_line_observation,
-    publishable_summary_has_multi_source_observation,
+    current_delivery_is_latest_terminal_respond, delivery_is_direct_read_observation,
+    last_respond_matches_single_line_observation, publishable_summary_has_multi_source_observation,
     replace_direct_observation_delivery_with_synthesis,
     replace_direct_read_observation_with_synthesis, replace_placeholder_delivery_with_synthesis,
     step_output_is_read_range, strict_exact_observation_output_exact_observation_answer,
