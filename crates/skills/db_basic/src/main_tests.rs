@@ -193,6 +193,37 @@ fn list_tables_action_runs_internal_catalog_query_without_sql_arg() {
 }
 
 #[test]
+fn path_alias_selects_requested_database_instead_of_default() {
+    let db_path = temp_db_path("path-alias");
+    execute(json!({
+        "action": "sqlite_execute",
+        "db_path": db_path,
+        "sql": "CREATE TABLE requested_db_table(id INTEGER)",
+        "confirm": true,
+    }))
+    .expect("setup requested database");
+
+    let (_text, extra) = execute(json!({
+        "action": "list_tables",
+        "path": db_path,
+    }))
+    .expect("path alias should select requested database");
+
+    assert_eq!(
+        extra.get("db_path").and_then(Value::as_str),
+        Some(db_path.as_str())
+    );
+    assert_eq!(
+        extra
+            .get("tables")
+            .and_then(Value::as_array)
+            .and_then(|tables| tables.first())
+            .and_then(Value::as_str),
+        Some("requested_db_table")
+    );
+}
+
+#[test]
 fn normalizes_table_valued_pragma_table_info_in_select_from_context() {
     let sql = "SELECT name FROM PRAGMA table_info('users')";
     assert_eq!(
