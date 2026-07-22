@@ -1697,6 +1697,7 @@ export default function App() {
               baseSkillNamesSet={baseSkillNamesSet}
               removableSkillNamesSet={removableSkillNamesSet}
               skillStoreActionName={skillStoreActionName}
+              skillStoreData={skillStoreData}
               onFetchSkillsConfig={fetchSkillsConfig}
               onSaveSkillSwitches={() => saveSkillSwitches(restartSystem)}
               onSkillsSearchQueryChange={setSkillsSearchQuery}

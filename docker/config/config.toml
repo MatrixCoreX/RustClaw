@@ -333,7 +333,8 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = { browser_web = true, doc_parse = true, extension_manager = true, kb = true, map_merchant = true, music_generate = true, photo_organize = true, schedule = true, stock = true, task_control = true, transform = true, video_generate = true, weather = true, web_search_extract = true }
+skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, map_merchant = false, music_generate = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
+uninstalled_skills = ["crypto", "invest_copy", "map_merchant", "photo_organize", "stock", "weather", "x"]
 skill_max_concurrency = 1
 skill_timeout_seconds = 86400
 # 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):
@@ -357,7 +358,6 @@ skills_list = [
     "remove_file",
     "workspace_patch",
     "schedule",
-    "x",
     "system_basic",
     "http_basic",
     "git_basic",
@@ -381,10 +381,6 @@ skills_list = [
     "service_control",
     "task_control",
     "config_guard",
-    "map_merchant",
-    "crypto",
-    "stock",
-    "weather",
     "doc_parse",
     "transform",
     "web_search_extract",

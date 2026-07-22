@@ -35,6 +35,7 @@ import {
 import { skillDescription, skillRiskLabel, skillRuntimeIssue, type UiLanguage } from "../lib/skill-display";
 import { filterSkillStoreItems } from "../lib/skill-store";
 import type { SkillStoreItem, SkillStoreResponse } from "../types/api";
+import { SkillRemovalDialog } from "./SkillRemovalDialog";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -84,7 +85,7 @@ export interface SkillStoreCatalogProps {
   actionName: string | null;
   onRefresh: () => unknown | Promise<unknown>;
   onInstall: (name: string) => unknown | Promise<unknown>;
-  onRemove: (name: string) => unknown | Promise<unknown>;
+  onRemove: (name: string, preserveConfig: boolean) => unknown | Promise<unknown>;
 }
 
 export function SkillStoreCatalog({
@@ -100,10 +101,18 @@ export function SkillStoreCatalog({
   onRemove,
 }: SkillStoreCatalogProps) {
   const [query, setQuery] = useState("");
+  const [pendingRemoval, setPendingRemoval] = useState<SkillStoreItem | null>(null);
   const items = useMemo(() => {
     return filterSkillStoreItems(data?.items ?? [], query);
   }, [data?.items, query]);
   const mutationRunning = actionName !== null;
+
+  const confirmRemoval = async (preserveConfig: boolean) => {
+    if (!pendingRemoval) return;
+    const name = pendingRemoval.name;
+    setPendingRemoval(null);
+    await onRemove(name, preserveConfig);
+  };
 
   const renderItem = (item: SkillStoreItem) => {
     const Icon = skillStoreIcon(item.name);
@@ -150,7 +159,7 @@ export function SkillStoreCatalog({
           {item.installed ? (
             <button
               type="button"
-              onClick={() => void onRemove(item.name)}
+              onClick={() => setPendingRemoval(item)}
               disabled={mutationRunning}
               className="inline-flex w-full items-center justify-center gap-2 rounded border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -165,7 +174,7 @@ export function SkillStoreCatalog({
               className="theme-accent-btn w-full justify-center px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
             >
               {actionRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {t("重新安装", "Reinstall")}
+              {t("安装", "Install")}
             </button>
           )}
         </div>
@@ -209,6 +218,15 @@ export function SkillStoreCatalog({
         <p className="mt-4 border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-white/50 rounded-lg">
           {t("没有找到匹配的技能。", "No matching skills found.")}
         </p>
+      ) : null}
+      {pendingRemoval ? (
+        <SkillRemovalDialog
+          skillName={pendingRemoval.name}
+          existingConfigFiles={pendingRemoval.existing_config_files}
+          t={t}
+          onCancel={() => setPendingRemoval(null)}
+          onConfirm={confirmRemoval}
+        />
       ) : null}
     </div>
   );

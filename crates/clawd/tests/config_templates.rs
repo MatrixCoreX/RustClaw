@@ -613,6 +613,117 @@ fn registry_entries_have_group_and_tools_have_platform_metadata() {
     }
 }
 
+#[test]
+fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
+    let root = workspace_root();
+    let expected = claw_core::config::skill_store_optional_skill_names()
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let workspace = parse_toml(&root.join("Cargo.toml"));
+    let package_names = workspace["workspace"]["members"]
+        .as_array()
+        .expect("workspace members")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .filter_map(|member| {
+            let manifest = root.join(member).join("Cargo.toml");
+            manifest
+                .is_file()
+                .then(|| {
+                    parse_toml(&manifest)["package"]["name"]
+                        .as_str()
+                        .map(str::to_string)
+                })
+                .flatten()
+        })
+        .collect::<BTreeSet<_>>();
+
+    for registry_path in [
+        root.join("configs/skills_registry.toml"),
+        root.join("docker/config/skills_registry.toml"),
+    ] {
+        let registry = SkillsRegistry::load_from_path(&registry_path).expect("load registry");
+        let actual = registry
+            .all_names()
+            .into_iter()
+            .filter(|name| {
+                registry
+                    .get(name)
+                    .and_then(|entry| entry.install_mode.as_deref())
+                    == Some("on_demand")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            actual.iter().map(String::as_str).collect::<BTreeSet<_>>(),
+            expected,
+            "{}: on-demand Skill Store set drifted",
+            registry_path.display()
+        );
+        for name in &actual {
+            let entry = registry.get(name).expect("on-demand entry");
+            let package = entry
+                .install_package
+                .as_deref()
+                .expect("on-demand skill install_package");
+            assert!(
+                package_names.contains(package),
+                "{}: `{name}` install package `{package}` is not a workspace package",
+                registry_path.display()
+            );
+            assert!(
+                !entry.config_files.is_empty()
+                    && entry.config_files.iter().all(|path| {
+                        let path = Path::new(path);
+                        !path.is_absolute()
+                            && path.starts_with("configs")
+                            && path
+                                .components()
+                                .all(|part| matches!(part, std::path::Component::Normal(_)))
+                    }),
+                "{}: `{name}` must declare safe configs/ paths",
+                registry_path.display()
+            );
+        }
+    }
+
+    for config_path in [
+        root.join("configs/config.toml"),
+        root.join("docker/config/config.toml"),
+    ] {
+        let config = parse_toml(&config_path);
+        let skills = config["skills"].as_table().expect("skills table");
+        let uninstalled = skills["uninstalled_skills"]
+            .as_array()
+            .expect("uninstalled skill list")
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(uninstalled, expected, "{}", config_path.display());
+        let baseline = skills["skills_list"]
+            .as_array()
+            .expect("skills list")
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .collect::<BTreeSet<_>>();
+        for name in &expected {
+            assert_eq!(
+                skills["skill_switches"]
+                    .get(*name)
+                    .and_then(toml::Value::as_bool),
+                Some(false),
+                "{}: `{name}` must default disabled",
+                config_path.display()
+            );
+            assert!(
+                !baseline.contains(name),
+                "{}: `{name}` must not be in the proactive baseline",
+                config_path.display()
+            );
+        }
+    }
+}
+
 /// planner-first 收敛：已移除的技能不应再通过 registry 重新暴露。
 #[test]
 fn removed_skill_stubs_are_absent_from_registries() {

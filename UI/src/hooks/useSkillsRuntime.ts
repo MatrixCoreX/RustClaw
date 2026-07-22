@@ -366,16 +366,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     }
   };
 
-  const mutateSkillStoreItem = async (skillName: string, installed: boolean) => {
-    if (!installed) {
-      const confirmed = window.confirm(
-        t(
-          `从已安装技能中删除 ${skillName}？它仍会保留在 Skill Store，可以随时重新安装。`,
-          `Remove ${skillName} from installed skills? It will remain in Skill Store for reinstallation.`,
-        ),
-      );
-      if (!confirmed) return;
-    }
+  const mutateSkillStoreItem = async (skillName: string, installed: boolean, preserveConfig = true) => {
     setSkillStoreActionName(skillName);
     setSkillStoreError(null);
     setSkillStoreMessage(null);
@@ -384,7 +375,10 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       const res = await apiFetch(`/v1/skills/store/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skill_name: skillName }),
+        body: JSON.stringify({
+          skill_name: skillName,
+          ...(installed ? {} : { preserve_config: preserveConfig }),
+        }),
       });
       const body = (await res.json()) as ApiResponse<SkillStoreMutationResponse>;
       if (!res.ok || !body.ok || !body.data) {
@@ -401,11 +395,24 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       }
       setSkillStoreMessage(
         installed
-          ? t(`${skillName} 已安装并开启。`, `${skillName} is installed and enabled.`)
-          : t(
-              `${skillName} 已从工具/技能页移除，可在 Skill Store 重新安装。`,
-              `${skillName} was removed from Tools/Skills and can be reinstalled from Skill Store.`,
-            ),
+          ? body.data.reused_config_files?.length
+            ? t(
+                `${skillName} 已编译、安装并开启，原有配置已继续使用。`,
+                `${skillName} was compiled, installed, and enabled with its existing configuration.`,
+              )
+            : t(
+                `${skillName} 已编译、安装并开启。`,
+                `${skillName} was compiled, installed, and enabled.`,
+              )
+          : body.data.config_preserved
+            ? t(
+                `${skillName} 已删除，配置文件已保留，可在重新安装时继续使用。`,
+                `${skillName} was removed. Its configuration was preserved for reinstallation.`,
+              )
+            : t(
+                `${skillName} 及其独立配置已删除，仍可从 Skill Store 重新安装。`,
+                `${skillName} and its dedicated configuration were removed. It remains available in Skill Store.`,
+              ),
       );
       await fetchSkillsConfig();
       await fetchSkills();
@@ -419,7 +426,8 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   };
 
   const installSkillFromStore = (skillName: string) => mutateSkillStoreItem(skillName, true);
-  const removeSkillFromStore = (skillName: string) => mutateSkillStoreItem(skillName, false);
+  const removeSkillFromStore = (skillName: string, preserveConfig = true) =>
+    mutateSkillStoreItem(skillName, false, preserveConfig);
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
     if (isUiHiddenSkill(name)) return;

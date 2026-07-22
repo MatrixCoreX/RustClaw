@@ -336,10 +336,42 @@ if [[ "${#TARGETS_TO_BUILD[@]}" -gt 1 ]]; then
 	echo "Extra targets: ${TARGETS_TO_BUILD[*]:1}"
 fi
 
-# Ensure runtime binaries exist for deployment/start scripts.
-# Auto-discover all workspace bin targets to avoid missing newly added skills.
+# Ensure runtime binaries exist for deployment/start scripts. Skill Store
+# entries marked `install_mode = "on_demand"` stay in the workspace for normal
+# development and tests, but release builds must not compile them proactively.
 WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
 export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
+
+ON_DEMAND_PACKAGES=()
+while IFS=$'\t' read -r package bin; do
+	[[ -n "$package" ]] && ON_DEMAND_PACKAGES+=("$package")
+	[[ -n "$bin" ]] || {
+		echo "On-demand skill package is missing a runner binary: $package"
+		exit 1
+	}
+done < <(
+	python3 - <<'PY'
+import tomllib
+from pathlib import Path
+
+registry = tomllib.loads(Path("configs/skills_registry.toml").read_text(encoding="utf-8"))
+for skill in registry.get("skills", []):
+    if skill.get("install_mode") != "on_demand":
+        continue
+    runner = str(skill.get("runner_name") or skill.get("name") or "").strip().replace("_", "-")
+    if runner and not runner.endswith("-skill"):
+        runner += "-skill"
+    package = str(skill.get("install_package") or runner).strip()
+    if package and runner:
+        print(f"{package}\t{runner}")
+PY
+)
+
+if [[ "${#ON_DEMAND_PACKAGES[@]}" -gt 0 ]]; then
+	echo "Skill Store packages excluded from proactive build: ${ON_DEMAND_PACKAGES[*]}"
+fi
+RUSTCLAW_ON_DEMAND_PACKAGES="$(printf '%s\n' "${ON_DEMAND_PACKAGES[@]:-}")"
+export RUSTCLAW_ON_DEMAND_PACKAGES
 
 REQUIRED_BINS=()
 while IFS= read -r bin; do
@@ -355,10 +387,17 @@ if not raw:
     raise SystemExit(1)
 data = json.loads(raw)
 workspace_members = set(data.get("workspace_members", []))
+on_demand_packages = {
+    value.strip()
+    for value in os.environ.get("RUSTCLAW_ON_DEMAND_PACKAGES", "").splitlines()
+    if value.strip()
+}
 bins = set()
 
 for pkg in data.get("packages", []):
     if pkg.get("id") not in workspace_members:
+        continue
+    if pkg.get("name") in on_demand_packages:
         continue
     for target in pkg.get("targets", []):
         kinds = target.get("kind", [])
@@ -382,10 +421,14 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
 		rustup target add "$target" >/dev/null 2>&1 || true
 	fi
 	echo "Building target: $target"
+	CARGO_WORKSPACE_ARGS=(--workspace --release)
+	for package in "${ON_DEMAND_PACKAGES[@]:-}"; do
+		[[ -n "$package" ]] && CARGO_WORKSPACE_ARGS+=(--exclude "$package")
+	done
 	if [[ "$target" == "$HOST_TARGET" ]]; then
-		cargo build --workspace --release
+		cargo build "${CARGO_WORKSPACE_ARGS[@]}"
 	else
-		cargo build --workspace --release --target "$target"
+		cargo build "${CARGO_WORKSPACE_ARGS[@]}" --target "$target"
 	fi
 	OUT_DIR="$(preferred_release_dir_for_target "$SCRIPT_DIR" "$target")"
 	MISSING=0
@@ -397,7 +440,7 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
 	done
 	if [[ "$MISSING" == "1" ]]; then
 		echo "Build finished, but required binaries are missing for target=$target profile=$BUILD_PROFILE."
-		echo "Try: cargo build --workspace --release --target $target"
+		echo "Try: cargo build ${CARGO_WORKSPACE_ARGS[*]} --target $target"
 		exit 1
 	fi
 done

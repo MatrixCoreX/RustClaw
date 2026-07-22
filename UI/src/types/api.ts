@@ -369,6 +369,9 @@ export interface SkillStoreItem {
   source?: string | null;
   installed: boolean;
   enabled: boolean;
+  install_mode?: string | null;
+  config_files?: string[];
+  existing_config_files?: string[];
   skill: SkillListItem;
 }
 
@@ -381,6 +384,12 @@ export interface SkillStoreMutationResponse {
   skill_name: string;
   installed: boolean;
   enabled: boolean;
+  compiled?: boolean;
+  binary_path?: string | null;
+  binary_removed?: boolean;
+  config_preserved?: boolean;
+  reused_config_files?: string[];
+  deleted_config_files?: string[];
 }
 
 export interface MemoryCounts {
