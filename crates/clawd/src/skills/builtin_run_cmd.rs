@@ -734,6 +734,7 @@ pub(super) async fn start_async_command(
     let stdout_path = job_dir.join("stdout");
     let stderr_path = job_dir.join("stderr");
     let exit_code_path = job_dir.join("exit_code");
+    let exit_code_temp_path = job_dir.join("exit_code.tmp");
     let started_path = job_dir.join("started_at");
     let finished_path = job_dir.join("finished_at");
     let run_script_path = job_dir.join("run.sh");
@@ -778,11 +779,13 @@ else
   printf '%s\n' 'portable_timeout_backend_unavailable' > {}
   code=125
   printf '%s\n' "$code" > {}
+  mv -f {} {}
   printf '%s\n' "$(date +%s)" > {}
   exit "$code"
 fi
 code=$?
 printf '%s\n' "$code" > {}
+mv -f {} {}
 printf '%s\n' "$(date +%s)" > {}
 "#,
         shell_single_quote(&started_path.display().to_string()),
@@ -799,8 +802,12 @@ printf '%s\n' "$(date +%s)" > {}
         shell_single_quote(&stdout_path.display().to_string()),
         shell_single_quote(&stderr_path.display().to_string()),
         shell_single_quote(&stderr_path.display().to_string()),
+        shell_single_quote(&exit_code_temp_path.display().to_string()),
+        shell_single_quote(&exit_code_temp_path.display().to_string()),
         shell_single_quote(&exit_code_path.display().to_string()),
         shell_single_quote(&finished_path.display().to_string()),
+        shell_single_quote(&exit_code_temp_path.display().to_string()),
+        shell_single_quote(&exit_code_temp_path.display().to_string()),
         shell_single_quote(&exit_code_path.display().to_string()),
         shell_single_quote(&finished_path.display().to_string()),
     );
