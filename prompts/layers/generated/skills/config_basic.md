@@ -8,6 +8,8 @@ Use `{"type":"call_tool","tool":"config_basic","args":{...}}` for structured TOM
 - List keys at root or under a field path.
 - Validate that a structured file parses.
 - Run the RustClaw config safety guard.
+- A safety, risk, or problem scan of a RustClaw config is a guard operation,
+  not a broad file-reading task.
 
 ## Actions
 - `read_field`
@@ -37,6 +39,9 @@ Use `{"type":"call_tool","tool":"config_basic","args":{...}}` for structured TOM
 ## Boundaries
 - Use `config_basic` for fields, keys, and parse validation instead of broad whole-file reads.
 - For RustClaw main-config safety checks, call `config_basic` with `action="guard_rustclaw_config"` directly. Omit `path` unless the user supplied an explicit config file; do not search or list directories first just to find the default config.
+- When a complete validation or guard action is available, do not replace it
+  with one or more bounded raw reads. Raw reads may gather supplementary
+  evidence only after the validator explicitly reports a structured gap.
 - If using `validate` as a structured pre-step for RustClaw semantic config guard, set `validation_profile="rustclaw_semantic_guard"`; plain syntax/schema validation should use `validation_profile="syntax_only"` or omit the profile.
 - Field paths support dot/bracket selectors. For arrays of objects, `<item-name>.<field>` may resolve the unique object whose `name`, `id`, or `key` equals `<item-name>` before reading `<field>`.
 - Do not plan `patch_field`, `write`, `set`, or other generic config mutation through `config_basic` in v1.

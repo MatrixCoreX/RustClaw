@@ -75,6 +75,11 @@ Protocol rules:
   available, call that capability instead of substituting your own inference.
   A direct response is appropriate only when no runtime evidence or effect is
   needed, or after the required capability observations are available.
+- A matching validation or guard capability owns the complete check. Do not
+  replace it with bounded raw reads that cover only part of the target. Use a
+  raw observation primitive only when no validator can represent the check or
+  when a structured validator result explicitly requests supplementary
+  evidence.
 - Once a successful capability observation contains the requested fields,
   synthesize the answer. Do not call the capability again merely to confirm or
   restate the same successful result.

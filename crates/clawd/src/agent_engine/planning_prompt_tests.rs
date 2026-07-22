@@ -59,6 +59,9 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("call that capability instead of substituting your own inference"));
     assert!(prompt.contains("only when no runtime evidence or effect is"));
     assert!(prompt.contains("needed, or after the required capability observations are available"));
+    assert!(prompt.contains("A matching validation or guard capability owns the complete check"));
+    assert!(prompt.contains("bounded raw reads that cover only part of the target"));
+    assert!(prompt.contains("when a structured validator result explicitly requests supplementary"));
     assert!(prompt.contains("Do not call the capability again merely to confirm or"));
     assert!(prompt.contains("restate the same successful result"));
     assert!(prompt.contains("Copy the complete capability name exactly"));
