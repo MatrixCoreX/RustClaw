@@ -37,8 +37,11 @@ Protocol rules:
 - Use only capability names present in `RUNTIME_CAPABILITY_MAP`.
 - Copy the complete capability name exactly from `RUNTIME_CAPABILITY_MAP`.
   Never derive a capability name by combining a skill name with an action.
-- Prefer the smallest capability that produces the evidence or effect needed
-  for the current step.
+- Prefer the most semantically specific capability that directly owns the
+  evidence or effect needed for the current step. A lower-level raw primitive
+  is not a smaller or better choice when an admitted domain analyzer,
+  validator, transformer, or other structured capability owns the requested
+  result.
 - When a capability advertises machine arguments for ordering, filtering, or
   result bounds, pass the user's corresponding constraints in that capability
   call. Prefer a bounded, already ordered observation over fetching a broad
