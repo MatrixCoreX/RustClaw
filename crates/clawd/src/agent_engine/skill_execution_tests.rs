@@ -7,11 +7,13 @@ use super::{
     admitted_extra_field_exists, build_auto_sudo_retry_args,
     contains_unresolved_runtime_template_arg, evidence_policy_action_policy_error,
     handle_preflight_argument_failure, handle_skill_step_failure, handle_skill_step_success,
-    merge_isolation_artifact_refs, preflight_failure_metadata, preflight_permission_decision,
+    invalidate_latest_validation_after_mutation_attempt, merge_isolation_artifact_refs,
+    preflight_failure_metadata, preflight_permission_decision, record_latest_validation_result,
     record_subagent_step_execution, skill_extra_requests_user_input,
     structured_extra_evidence_output, structured_observation_path_argument_error,
     try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
-    validate_skill_output_contract, AgentLoopGuardPolicy, LoopState,
+    validate_skill_output_contract, validation_observation_with_process_status,
+    AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -22,6 +24,9 @@ use crate::{
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
 use rusqlite::params;
+
+#[path = "skill_execution_scope_tests.rs"]
+mod scope_tests;
 
 pub(super) fn test_state() -> AppState {
     let db_pool = crate::db_init::test_pool();
@@ -1797,6 +1802,69 @@ async fn successful_validation_step_records_machine_result_for_closeout() {
     );
 }
 
+#[test]
+fn validation_result_is_recipe_independent_and_command_scoped() {
+    let mut loop_state = LoopState::new();
+
+    record_latest_validation_result(
+        &mut loop_state,
+        "run_cmd",
+        &serde_json::json!({"command": "cargo test -p clawd"}),
+        4,
+        1,
+        "passed",
+        "validation_passed",
+        crate::execution_recipe::ActionEffect::validate(),
+    );
+
+    let validation = loop_state
+        .latest_validation_result
+        .as_ref()
+        .expect("validation result outside an execution recipe");
+    assert_eq!(
+        validation
+            .get("verification_scope")
+            .and_then(serde_json::Value::as_str),
+        Some("command")
+    );
+    assert_eq!(
+        validation.get("status").and_then(serde_json::Value::as_str),
+        Some("passed")
+    );
+
+    invalidate_latest_validation_after_mutation_attempt(
+        &mut loop_state,
+        crate::execution_recipe::ActionEffect::mutate(),
+    );
+    assert!(loop_state.latest_validation_result.is_none());
+}
+
+#[test]
+fn successful_test_process_resolves_inconclusive_text_observation() {
+    let args = serde_json::json!({"command": "python3 test_calc_core.py"});
+    let observation = validation_observation_with_process_status(
+        "run_cmd",
+        &args,
+        true,
+        crate::execution_recipe::ValidationObservation::Inconclusive,
+    );
+    assert_eq!(
+        observation,
+        crate::execution_recipe::ValidationObservation::Passed
+    );
+
+    let failed_process = validation_observation_with_process_status(
+        "run_cmd",
+        &args,
+        false,
+        crate::execution_recipe::ValidationObservation::Inconclusive,
+    );
+    assert_eq!(
+        failed_process,
+        crate::execution_recipe::ValidationObservation::Inconclusive
+    );
+}
+
 #[tokio::test]
 async fn run_cmd_validation_failed_marker_advances_recipe_repair_without_success_fingerprint() {
     let state = test_state();
@@ -1865,88 +1933,4 @@ async fn run_cmd_validation_failed_marker_advances_recipe_repair_without_success
         .subtask_results
         .iter()
         .any(|line| line.contains("subtask#2 skill(run_cmd): success")));
-}
-
-#[tokio::test]
-async fn successful_external_workspace_step_records_scope_progress() {
-    let state = test_state();
-    let task = test_task();
-    let mut loop_state = LoopState::new();
-    loop_state.round_no = 1;
-    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
-        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
-        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::ExternalWorkspace,
-        phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
-        inspect_first: true,
-        validation_required: false,
-        max_repairs: 2,
-        saw_inspect: true,
-        ..Default::default()
-    };
-
-    handle_skill_step_success(
-        &state,
-        &task,
-        &mut loop_state,
-        "skill:read_file:{\"path\":\"/opt/other-project/main.rs\"}",
-        &ok_step("step_3", "read_file", "fn main() {}\n"),
-        3,
-        1,
-        "read_file",
-        "skill",
-        "",
-        &serde_json::json!({ "path": "/opt/other-project/main.rs" }),
-        "fn main() {}\n",
-        crate::execution_recipe::ActionEffect::observe(),
-        crate::execution_recipe::ValidationObservation::Passed,
-        None,
-        None,
-        Some("/opt/other-project/main.rs"),
-    )
-    .await
-    .expect("skill step outcome");
-
-    assert!(loop_state.execution_recipe.saw_external_target);
-}
-
-#[tokio::test]
-async fn successful_greenfield_creation_step_records_scope_progress() {
-    let state = test_state();
-    let task = test_task();
-    let mut loop_state = LoopState::new();
-    loop_state.round_no = 1;
-    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
-        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
-        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::Greenfield,
-        phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
-        inspect_first: true,
-        validation_required: true,
-        max_repairs: 2,
-        saw_inspect: true,
-        ..Default::default()
-    };
-
-    handle_skill_step_success(
-        &state,
-        &task,
-        &mut loop_state,
-        "skill:write_file:{\"path\":\"tools/demo/main.rs\"}",
-        &ok_step("step_4", "write_file", "ok"),
-        4,
-        1,
-        "write_file",
-        "skill",
-        "",
-        &serde_json::json!({ "path": "tools/demo/main.rs", "content": "fn main() {}\n" }),
-        "ok",
-        crate::execution_recipe::ActionEffect::mutate(),
-        crate::execution_recipe::ValidationObservation::Passed,
-        None,
-        None,
-        None,
-    )
-    .await
-    .expect("skill step outcome");
-
-    assert!(loop_state.execution_recipe.saw_greenfield_creation);
 }

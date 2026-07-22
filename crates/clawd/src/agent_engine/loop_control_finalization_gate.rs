@@ -142,6 +142,12 @@ pub(super) fn retry_rewritten_answer_is_publishable(retried_answer: &str) -> boo
     if local_code_json_answer_has_unresolved_publication(retried_answer) {
         return false;
     }
+    if serde_json::from_str::<Value>(retried_answer.trim())
+        .ok()
+        .is_some_and(|value| json_value_contains_unresolved_machine_token(&value))
+    {
+        return false;
+    }
     true
 }
 
