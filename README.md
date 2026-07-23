@@ -1119,6 +1119,12 @@ Current channel config files:
 # Clean then rebuild
 ./build-all.sh clean
 
+# Check Rust, Clang/libclang, protoc, Node.js, and npm updates without upgrading installed tools
+./build-all.sh --check-toolchains
+
+# Update installed build toolchains first, validate minimum versions, then build
+./build-all.sh --update-toolchains
+
 # Set the primary target
 ./build-all.sh --target aarch64-unknown-linux-gnu
 
@@ -1134,6 +1140,8 @@ Current channel config files:
 
 Current `build-all.sh` behavior:
 
+- validates minimum compiler/tool versions on every build; normal builds only install missing prerequisites and do not update an existing host toolchain
+- supports opt-in update discovery with `--check-toolchains` and opt-in pre-build upgrades with `--update-toolchains` through rustup plus the host package manager (`brew`, `apt`, `dnf`, `yum`, `zypper`, `pacman`, or `apk`)
 - runs `scripts/sync_skill_docs.py` before the build starts
 - always builds `release`, auto-discovers workspace binaries, and verifies that the expected outputs exist
 - calls `build-ui-nginx.sh` when `UI/` exists and you did not pass `no-ui`, which means the default "build UI + deploy to nginx" path

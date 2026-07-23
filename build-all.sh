@@ -189,13 +189,6 @@ ensure_bindgen_toolchain() {
 	echo "bindgen toolchain ready (LIBCLANG_PATH=${LIBCLANG_PATH:-auto})."
 }
 
-if [[ -f "$HOME/.cargo/env" ]]; then
-	. "$HOME/.cargo/env"
-fi
-ensure_cargo
-ensure_protoc
-ensure_bindgen_toolchain
-
 # ----- Ensure npm is installed (only needed when UI exists) -----
 # zh: 仅在需要构建 UI 时检查 npm。
 ensure_npm() {
@@ -228,32 +221,15 @@ ensure_npm() {
 	echo "Node.js/npm ready."
 }
 
-echo "Syncing skill docs (INTERFACE.md + prompts/layers/generated/skills/*.md)..."
-python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
-
 BUILD_PROFILE="release"
 DO_CLEAN=0
 REQUESTED_TARGET="host"
 EXTRA_TARGETS=()
+TOOLCHAIN_MODE="${RUSTCLAW_TOOLCHAIN_MODE:-ensure}"
 
 # Release-only build; keep compatibility with legacy `release` arguments.
 # Use SKIP_UI=1 or `no-ui` to skip the UI build.
 SKIP_UI="${SKIP_UI:-0}"
-for arg in "$@"; do
-	case "$arg" in
-	release)
-		;;
-	clean)
-		DO_CLEAN=1
-		;;
-	no-ui)
-		SKIP_UI=1
-		;;
-	*)
-		:
-		;;
-	esac
-done
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -276,20 +252,71 @@ while [[ $# -gt 0 ]]; do
 		EXTRA_TARGETS+=("${2:?Missing argument for --extra-target}")
 		shift 2
 		;;
+	--check-toolchains)
+		TOOLCHAIN_MODE="check"
+		shift
+		;;
+	--update-toolchains)
+		TOOLCHAIN_MODE="update"
+		shift
+		;;
 	-h|--help)
-		echo "Usage: ./build-all.sh [release] [clean] [no-ui] [--target host|<triple>] [--extra-target <triple>]"
+		echo "Usage: ./build-all.sh [release] [clean] [no-ui] [--target host|<triple>] [--extra-target <triple>] [--check-toolchains|--update-toolchains]"
 		echo "  host build: output to target/release"
 		echo "  cross build: output to target/<triple>/release"
+		echo "  --check-toolchains: inspect available compiler/tool updates without upgrading installed tools"
+		echo "  --update-toolchains: update installed Rust, Clang, protoc, Node.js, and npm before building"
 		exit 0
 		;;
 	*)
-		echo "Usage: ./build-all.sh [release] [clean] [no-ui] [--target host|<triple>] [--extra-target <triple>]"
+		echo "Usage: ./build-all.sh [release] [clean] [no-ui] [--target host|<triple>] [--extra-target <triple>] [--check-toolchains|--update-toolchains]"
 		echo "  host build: output to target/release"
 		echo "  cross build: output to target/<triple>/release"
 		exit 1
 		;;
 	esac
 done
+
+case "$TOOLCHAIN_MODE" in
+	ensure|check|update)
+		;;
+	*)
+		echo "Unsupported RUSTCLAW_TOOLCHAIN_MODE: $TOOLCHAIN_MODE (expected ensure, check, or update)."
+		exit 1
+		;;
+esac
+
+if [[ -f "$HOME/.cargo/env" ]]; then
+	. "$HOME/.cargo/env"
+fi
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/build_toolchain_manager.sh"
+
+INCLUDE_UI_TOOLCHAIN=0
+if [[ -d "$SCRIPT_DIR/UI" ]] && [[ "$SKIP_UI" != "1" ]]; then
+	INCLUDE_UI_TOOLCHAIN=1
+fi
+
+if [[ "$TOOLCHAIN_MODE" == "update" ]]; then
+	rustclaw_update_rust
+	rustclaw_update_package_toolchains "$INCLUDE_UI_TOOLCHAIN"
+fi
+
+ensure_cargo
+ensure_protoc
+ensure_bindgen_toolchain
+if [[ "$INCLUDE_UI_TOOLCHAIN" == "1" ]]; then
+	ensure_npm
+fi
+
+if [[ "$TOOLCHAIN_MODE" == "check" ]]; then
+	rustclaw_check_toolchain_updates "$INCLUDE_UI_TOOLCHAIN"
+fi
+rustclaw_report_build_toolchains
+rustclaw_validate_build_toolchains "$INCLUDE_UI_TOOLCHAIN"
+
+echo "Syncing skill docs (INTERFACE.md + prompts/layers/generated/skills/*.md)..."
+python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
 
 PRIMARY_TARGET="$(resolve_requested_target "$REQUESTED_TARGET")"
 HOST_OS="$(detect_host_os || true)"
