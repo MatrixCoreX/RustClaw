@@ -6,6 +6,7 @@ fn input_for_test() -> SearchInput {
         action: "search".to_string(),
         query: "rust async tutorial".to_string(),
         top_k: 3,
+        cursor: 0,
         lang: None,
         time_range: None,
         domains_allow: Vec::new(),
@@ -154,7 +155,8 @@ fn parse_input_projects_site_operator_to_domain_filter() {
             "action": "search_extract",
             "query": "site:docs.rs tokio task"
         }
-    }));
+    }))
+    .expect("parse site query");
 
     assert_eq!(input.domains_allow, vec!["docs.rs"]);
 }
@@ -211,4 +213,210 @@ fn parse_docs_rs_results_extracts_release_rows() {
     assert_eq!(items[0].url, "https://docs.rs/tokio/latest/tokio/task/");
     assert_eq!(items[0].source, "docs.rs");
     assert_eq!(items[0].snippet.as_deref(), Some("Task tools for Tokio"));
+}
+
+#[test]
+fn strict_input_rejects_wrong_types_and_out_of_range_pages() {
+    let wrong_query = parse_input(&json!({
+        "request_id": "bad-query",
+        "args": {"action": "search", "query": 42}
+    }))
+    .expect_err("query type must be checked");
+    assert_eq!(wrong_query.code, "INVALID_INPUT");
+
+    let excessive_limit = parse_input(&json!({
+        "request_id": "bad-limit",
+        "args": {"action": "search", "query": "rust", "top_k": 21}
+    }))
+    .expect_err("limit must not be silently clamped");
+    assert_eq!(excessive_limit.code, "INVALID_INPUT");
+
+    let excessive_cursor = parse_input(&json!({
+        "request_id": "bad-cursor",
+        "args": {"action": "search", "query": "rust", "cursor": 101}
+    }))
+    .expect_err("cursor must remain bounded");
+    assert_eq!(excessive_cursor.code, "INVALID_INPUT");
+}
+
+#[test]
+fn error_response_uses_outer_skill_error_contract() {
+    let response = error_response(
+        "request-7",
+        &SearchError::new("INVALID_ACTION", "unsupported action"),
+    );
+
+    assert_eq!(
+        response.get("request_id").and_then(Value::as_str),
+        Some("request-7")
+    );
+    assert_eq!(
+        response.get("status").and_then(Value::as_str),
+        Some("error")
+    );
+    assert_eq!(
+        response
+            .pointer("/extra/error_code")
+            .and_then(Value::as_str),
+        Some("INVALID_ACTION")
+    );
+    assert_eq!(
+        response
+            .pointer("/extra/retryable")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+}
+
+#[test]
+fn candidate_pages_are_bounded_ranked_and_snapshot_identified() {
+    let input = SearchInput {
+        top_k: 1,
+        cursor: 1,
+        ..input_for_test()
+    };
+    let items = vec![
+        SearchItem {
+            title: "One".to_string(),
+            url: "https://one.example/".to_string(),
+            snippet: None,
+            source: "one.example".to_string(),
+            rank: 1,
+        },
+        SearchItem {
+            title: "Two".to_string(),
+            url: "https://two.example/".to_string(),
+            snippet: Some("second".to_string()),
+            source: "two.example".to_string(),
+            rank: 2,
+        },
+        SearchItem {
+            title: "Three".to_string(),
+            url: "https://three.example/".to_string(),
+            snippet: None,
+            source: "three.example".to_string(),
+            rank: 3,
+        },
+    ];
+
+    let payload = build_search_payload(&input, "fixture", items);
+
+    assert_eq!(
+        payload.pointer("/items/0/title").and_then(Value::as_str),
+        Some("Two")
+    );
+    assert_eq!(
+        payload.pointer("/items/0/rank").and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        payload.pointer("/page/next_cursor").and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        payload
+            .pointer("/page/previous_cursor")
+            .and_then(Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(
+        payload.pointer("/page/stability").and_then(Value::as_str),
+        Some("backend_best_effort")
+    );
+    assert!(payload
+        .get("snapshot_id")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.starts_with("sha256:")));
+}
+
+#[test]
+fn candidate_urls_reject_non_http_credentials_and_private_targets() {
+    for blocked in [
+        "ftp://example.com/file",
+        "https://user:secret@example.com/",
+        "http://127.0.0.1/private",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://service.local/",
+        "http://service.internal/",
+    ] {
+        assert_eq!(normalize_url(blocked), None, "{blocked} must be rejected");
+    }
+    assert_eq!(
+        normalize_url("https://EXAMPLE.com:443/path?utm_source=test&x=1#fragment").as_deref(),
+        Some("https://example.com/path?x=1")
+    );
+}
+
+#[test]
+fn candidate_metadata_is_bounded_before_model_exposure() {
+    let input = input_for_test();
+    let mut items = vec![SearchItem {
+        title: "t".repeat(MAX_TITLE_CHARS + 20),
+        url: "https://example.com/item".to_string(),
+        snippet: Some("s".repeat(MAX_SNIPPET_CHARS + 20)),
+        source: String::new(),
+        rank: 1,
+    }];
+
+    normalize_and_filter(&mut items, &input);
+
+    assert_eq!(items[0].title.chars().count(), MAX_TITLE_CHARS);
+    assert_eq!(
+        items[0]
+            .snippet
+            .as_deref()
+            .expect("snippet")
+            .chars()
+            .count(),
+        MAX_SNIPPET_CHARS
+    );
+}
+
+#[test]
+fn backend_body_limit_fails_without_returning_partial_content() {
+    let mut exact = std::io::Cursor::new(vec![b'x'; MAX_BACKEND_RESPONSE_BYTES]);
+    assert_eq!(
+        read_bounded_backend_body(&mut exact, Some(MAX_BACKEND_RESPONSE_BYTES))
+            .expect("exact body limit")
+            .len(),
+        MAX_BACKEND_RESPONSE_BYTES
+    );
+
+    let mut oversized = std::io::Cursor::new(vec![b'x'; MAX_BACKEND_RESPONSE_BYTES + 1]);
+    let error = read_bounded_backend_body(&mut oversized, None)
+        .expect_err("oversized body must fail loudly");
+    assert!(error.to_string().contains("byte limit"));
+}
+
+#[test]
+fn response_extra_marks_search_metadata_as_untrusted() {
+    let payload = build_search_payload(
+        &input_for_test(),
+        "fixture",
+        vec![SearchItem {
+            title: "Candidate".to_string(),
+            url: "https://example.com/".to_string(),
+            snippet: Some("metadata".to_string()),
+            source: "example.com".to_string(),
+            rank: 1,
+        }],
+    );
+    let extra = build_response_extra(&input_for_test(), &payload);
+
+    assert_eq!(
+        extra
+            .pointer("/trust/classification")
+            .and_then(Value::as_str),
+        Some("untrusted_search_metadata")
+    );
+    assert_eq!(
+        extra
+            .pointer("/trust/instructions_executable")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        extra.pointer("/source_refs/0/kind").and_then(Value::as_str),
+        Some("search_candidate")
+    );
 }
