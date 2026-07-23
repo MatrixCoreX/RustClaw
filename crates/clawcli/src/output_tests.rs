@@ -19,6 +19,27 @@ fn task_status_lines_show_next_action_without_raw_json() {
                 "reason_code": "agent_loop_soft_budget",
                 "resume_due": false
             },
+            "task_budget_slice": {
+                "profile": "multi_step_workspace",
+                "soft_slice_ms": 900000,
+                "continuation_index": 2,
+                "cumulative_model_turns": 7,
+                "cumulative_tool_calls": 15,
+                "cumulative_elapsed_ms": 901000,
+                "cumulative_input_tokens": 12000,
+                "cumulative_output_tokens": 2400,
+                "cumulative_cost_usd_nanos": 42000000,
+                "last_decision": "checkpoint_requeue",
+                "hard_ceilings": {
+                    "model_turns": 256,
+                    "tool_calls": 512,
+                    "total_tokens": 100000000,
+                    "cost_usd_nanos": 100000000000_u64,
+                    "elapsed_ms": 86400000,
+                    "continuations": 64,
+                    "non_resumable_tool_runtime_ms": 3600000
+                }
+            },
             "result_json": {
                 "task_journal": {
                     "trace": {
@@ -51,6 +72,17 @@ fn task_status_lines_show_next_action_without_raw_json() {
     assert!(lines.contains(&"execution_state: background".to_string()));
     assert!(lines.contains(&"lifecycle_state: background".to_string()));
     assert!(lines.contains(&"next_action: resume_checkpoint".to_string()));
+    assert!(lines.iter().any(|line| {
+        line.starts_with("task_budget: ")
+            && line.contains("profile=multi_step_workspace")
+            && line.contains("soft_slice_ms=900000")
+            && line.contains("model_turns=7")
+            && line.contains("input_tokens=12000")
+            && line.contains("cost_usd_nanos=42000000")
+            && line.contains("hard_model_turns=256")
+            && line.contains("hard_tool_calls=512")
+            && line.contains("hard_non_resumable_tool_runtime_ms=3600000")
+    }));
     assert!(lines
         .iter()
         .any(|line| line.starts_with("lifecycle: ") && line.contains("checkpoint_id=ckpt-cli")));
@@ -58,6 +90,43 @@ fn task_status_lines_show_next_action_without_raw_json() {
     assert!(lines.contains(&"event: type=checkpoint_created checkpoint_id=ckpt-cli".to_string()));
     assert!(!lines.iter().any(|line| line.contains("task_journal")));
     assert!(!lines.iter().any(|line| line.contains('{')));
+}
+
+#[test]
+fn task_status_lines_fall_back_to_latest_budget_event() {
+    let task = TaskStatusView {
+        task_id: "task-cli-budget-event".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({"execution_state": "running"}),
+        result_text: None,
+        error_text: None,
+        events: vec![TaskEventLine {
+            event_type: "budget_decision".to_string(),
+            line: "type=budget_decision".to_string(),
+            fields: std::collections::BTreeMap::from([
+                ("decision".to_string(), "continue".to_string()),
+                ("continuation_index".to_string(), "1".to_string()),
+                ("cumulative_model_turns".to_string(), "8".to_string()),
+                ("cumulative_tool_calls".to_string(), "12".to_string()),
+                ("hard_model_turns".to_string(), "256".to_string()),
+                ("hard_tool_calls".to_string(), "512".to_string()),
+                (
+                    "next_resumable_action".to_string(),
+                    "resume_checkpoint".to_string(),
+                ),
+            ]),
+        }],
+    };
+
+    let lines = task_status_lines(&task, false, &EventFilters::default());
+    assert!(lines.iter().any(|line| {
+        line.starts_with("task_budget: ")
+            && line.contains("last_decision=continue")
+            && line.contains("continuation_index=1")
+            && line.contains("model_turns=8")
+            && line.contains("hard_tool_calls=512")
+            && line.contains("next_resumable_action=resume_checkpoint")
+    }));
 }
 
 #[test]

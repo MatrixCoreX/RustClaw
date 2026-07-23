@@ -814,6 +814,67 @@ fn round_is_policy_terminal(outcome: Option<&RoundOutcome>) -> bool {
     })
 }
 
+fn round_action_budget_metrics(state: &AppState, loop_state: &LoopState) -> (usize, usize) {
+    let Some(plan) = loop_state
+        .round_traces
+        .last()
+        .and_then(|round| round.plan_result.as_ref())
+    else {
+        return (0, 0);
+    };
+    let planned_action_count = plan
+        .steps
+        .iter()
+        .filter(|step| step.action_type != "think")
+        .count();
+    let independent_read_count = plan
+        .steps
+        .iter()
+        .filter(|step| step.depends_on.is_empty())
+        .filter_map(crate::PlanStep::to_agent_action)
+        .filter(|action| {
+            matches!(
+                action,
+                AgentAction::CallCapability { .. }
+                    | AgentAction::CallTool { .. }
+                    | AgentAction::CallSkill { .. }
+            ) && !verified_action_effect(state, action).mutates
+        })
+        .count();
+    (
+        planned_action_count,
+        usize::from(independent_read_count > 1) * independent_read_count,
+    )
+}
+
+fn budget_replan_cause<'a>(
+    decision: crate::task_budget_contract::BudgetDecision,
+    outcome: Option<&'a RoundOutcome>,
+) -> Option<&'a str> {
+    if decision != crate::task_budget_contract::BudgetDecision::Continue {
+        return None;
+    }
+    Some(
+        outcome
+            .and_then(|round| round.stop_signal.as_deref())
+            .unwrap_or("round_observation"),
+    )
+}
+
+fn next_resumable_budget_action(
+    decision: crate::task_budget_contract::BudgetDecision,
+    lifecycle_state: Option<&str>,
+) -> Option<&'static str> {
+    use crate::task_budget_contract::BudgetDecision;
+    match decision {
+        BudgetDecision::CheckpointRequeue => Some("resume_checkpoint"),
+        BudgetDecision::Waiting if lifecycle_state == Some("background") => Some("poll_async_job"),
+        BudgetDecision::Waiting => Some("resume_when_ready"),
+        BudgetDecision::NeedsUser => Some("await_user_input"),
+        BudgetDecision::Continue | BudgetDecision::Finish | BudgetDecision::Terminal => None,
+    }
+}
+
 fn observe_task_budget(
     state: &AppState,
     task: &ClaimedTask,
@@ -831,7 +892,7 @@ fn observe_task_budget(
         .count() as u64;
     let artifact_count = loop_state.written_file_aliases.len() as u64
         + u64::from(loop_state.last_written_file_path.is_some());
-    let lifecycle_state = task_budget_lifecycle_state(loop_state);
+    let lifecycle_state = task_budget_lifecycle_state(loop_state).map(str::to_string);
     let provider_waiting = outcome.is_some_and(|round| {
         round.stop_signal.as_deref() == Some("recoverable_failure_continue_round")
     }) && recoverable_provider_blocker_resume_reason(loop_state).is_some();
@@ -840,7 +901,7 @@ fn observe_task_budget(
         artifact_count,
         completed_plan_nodes: successful_steps,
         verified_state_transitions: loop_state.successful_action_fingerprints.len() as u64,
-        async_continuations: u64::from(lifecycle_state == Some("background")),
+        async_continuations: u64::from(lifecycle_state.as_deref() == Some("background")),
         stagnation_count: loop_state.consecutive_no_progress.min(u32::MAX as usize) as u32,
     };
     let policy_terminal = round_is_policy_terminal(outcome);
@@ -867,14 +928,19 @@ fn observe_task_budget(
         cumulative_elapsed_ms,
         progress,
         model_finished,
-        needs_user: loop_state.pending_user_input_required || lifecycle_state == Some("needs_user"),
-        waiting: provider_waiting || matches!(lifecycle_state, Some("waiting" | "background")),
+        needs_user: loop_state.pending_user_input_required
+            || lifecycle_state.as_deref() == Some("needs_user"),
+        waiting: provider_waiting
+            || matches!(lifecycle_state.as_deref(), Some("waiting" | "background")),
         cancelled: false,
         policy_terminal,
         stagnation_exhausted: loop_state.consecutive_no_progress >= stagnation_tolerance as usize,
         resumable,
         soft_slice_exhausted,
     };
+    let (planned_action_count, independently_batchable_count) = outcome
+        .map(|_| round_action_budget_metrics(state, loop_state))
+        .unwrap_or_default();
     let Some(slice) = loop_state.task_budget_slice.as_mut() else {
         return crate::task_budget_contract::BudgetDecision::Terminal;
     };
@@ -898,6 +964,19 @@ fn observe_task_budget(
         "observed_progress": slice.progress.observed_progress(),
         "soft_slice_exhausted": soft_slice_exhausted,
         "resumable": resumable,
+        "planned_action_count": planned_action_count,
+        "independently_batchable_count": independently_batchable_count,
+        "executed_action_count": outcome.map_or(0, |round| round.executed_actions),
+        "round_stop_signal": outcome.and_then(|round| round.stop_signal.as_deref()),
+        "replan_cause": budget_replan_cause(decision, outcome),
+        "next_resumable_action": next_resumable_budget_action(decision, lifecycle_state.as_deref()),
+        "hard_model_turns": slice.hard_ceilings.model_turns,
+        "hard_tool_calls": slice.hard_ceilings.tool_calls,
+        "hard_total_tokens": slice.hard_ceilings.total_tokens,
+        "hard_cost_usd_nanos": slice.hard_ceilings.cost_usd_nanos,
+        "hard_elapsed_ms": slice.hard_ceilings.elapsed_ms,
+        "hard_continuations": slice.hard_ceilings.continuations,
+        "hard_non_resumable_tool_runtime_ms": slice.hard_ceilings.non_resumable_tool_runtime_ms,
     });
     if let Err(err) = crate::task_event_transport::publish_claimed_event(
         state,
