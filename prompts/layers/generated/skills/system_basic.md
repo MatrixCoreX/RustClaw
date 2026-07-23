@@ -56,6 +56,7 @@
 | `inventory_dir` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`. |
 | `inventory_dir` | `ext_filter` | no | string/string[] | - | File extension filter such as `md` or `[\"md\",\"txt\"]`. |
 | `inventory_dir` | `max_entries` | no | integer | `200` | Output cap, clamped to `1..1000`. |
+| `inventory_dir` | `cursor` | no | integer | `0` | Stable sorted-entry offset for the next bounded page. Responses expose `page.next_cursor`, `page.has_more`, full `matched_counts`, and a directory `snapshot_hash`. |
 | `count_inventory` | `path` | no | string(path) | `.` | Target directory inside workspace. |
 | `count_inventory` | `recursive` | no | bool | `false` | Recurse into subdirectories when true. |
 | `count_inventory` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
@@ -98,6 +99,9 @@
 | `read_range` | `n` | no | integer | `20` | Number of lines for `head`/`tail`, or fallback window for `range`. |
 | `read_range` | `start_line` | no | integer | `1` | Range start for `mode=range`. |
 | `read_range` | `end_line` | no | integer | auto | Range end for `mode=range`; derived from `n` when omitted. |
+| `read_range` | `max_bytes` | no | integer | `65536` | Maximum UTF-8 bytes returned in `excerpt`, clamped to `256..1048576`; continuation metadata is returned in `page`. |
+| `read_range` | `max_line_chars` | no | integer | `800` | Per-line character preview cap, clamped to `80..4000`. |
+| `read_range` | `raw` | no | bool | `false` | Disable the safety compaction applied to recognized internal model-I/O log records. |
 | `read_range` | `field_selector` | no | string | - | Use machine token `title` to project the first markdown/document heading into `field_value`. Prefer the virtual `fs_basic.read_text_range` contract for new plans. |
 | `compare_paths` | `left_path` | yes | string(path) | - | First path to compare. |
 | `compare_paths` | `right_path` | yes | string(path) | - | Second path to compare. |
@@ -118,6 +122,7 @@
 - `extract_field` / `extract_fields` return explicit parse errors for unsupported/invalid JSON, TOML, or YAML.
 - `dir_compare` requires both target paths to be directories and reports summary diffs instead of a full recursive listing.
 - `read_range` and `compare_paths` return explicit read/metadata errors for missing or unreadable target paths.
+- `read_range` accepts UTF-8 and UTF-8 with BOM. Binary/NUL or invalid UTF-8 input returns `error_kind=unsupported_encoding` plus `error_code=unsupported_text_encoding`; files beyond the bounded scan limit return `error_kind=file_too_large` plus `requires_artifact_read=true`.
 - `tree_summary` intentionally truncates deep/wide trees and reports truncation metadata instead of dumping the full directory. Success output includes `summary_rows` mirrored as `results` and `candidates`; each directory row carries machine fields such as `path`, `name`, `file_count`, `dir_count`, `child_count`, `omitted_children`, and `truncated`.
 - Runtime data collection should degrade gracefully where possible (for example, missing `/proc` fields produce fallback values instead of fabricated data).
 - Successful responses that already use JSON text are also mirrored into the optional `extra` field for machine-readable consumers.
@@ -129,7 +134,8 @@
 - `runtime_status` success `extra` fields:
   - `action`, `kind`, `value`, `field_value`, and `command_output`; evidence roles `field_value` and `command_output`.
 - `inventory_dir` success `extra` fields:
-  - `action`, `path`, `resolved_path`, `names`, `entries`, `counts`, `size_summary`, and truncation/cap metadata; evidence roles `path`, `entries`, `results`, `field_value`, and `count`.
+  - `action`, `path`, `resolved_path`, `names`, `entries`, page-local `counts`, full `matched_counts`, `page`, `total_entries`, `returned_entries`, `truncated`, `snapshot_hash`, `size_summary`, and truncation/cap metadata; evidence roles `path`, `entries`, `results`, `field_value`, and `count`.
+  - Symlinks are returned as `kind=symlink` with `is_symlink=true`; recursive filesystem discovery does not traverse directory symlinks.
   - `size_summary` is language-neutral machine evidence with `matched_file_count`, `total_file_size_bytes`, `largest_file`, and `smallest_file`; use it for size comparisons instead of inferring from natural-language listing text.
 - `count_inventory` success `extra` fields:
   - `action`, `path`, `resolved_path`, `counts`, filters, and recursion flags; evidence roles `path` and `count`.
@@ -146,7 +152,7 @@
 - `find_path` success `extra` fields:
   - `action`, `root`, `count`, and `results`; evidence roles `path`, `results`, and `count`.
 - `read_range` success `extra` fields:
-  - `action`, `path`, `start_line`, `end_line`, `total_lines`, `line_count` (stable alias of total file lines), `excerpt`, optional `first_line` when the observed slice includes line 1, optional `field_selector`, optional `field_value` / `value_text` for selector projections; evidence roles `path`, `field_value`, and `count`.
+  - `action`, `path`, `resolved_path`, `start_line`, `end_line`, `total_lines`, `line_count` (stable alias of total file lines), `returned_line_count`, `excerpt`, `excerpt_bytes`, `encoding`, `binary`, `size_bytes`, `sha256`, `content_hash`, `truncated`, `page`, and `line_safety`; optional `first_line` appears when the observed slice includes line 1, and selector projections remain optional; evidence roles `path`, `field_value`, and `count`.
 - `compare_paths` success `extra` fields:
   - `left` and `right` structured path fact objects with `exists`, `kind`, `size`, and modified time fields.
   - `comparison` structured comparison fields such as `same_path`, `same_kind`, `same_name`, `same_size`, `size_delta_bytes`, `left_newer`, and `same_content`.

@@ -1100,11 +1100,89 @@ fn read_range_uses_range_mode_when_line_bounds_are_present() {
     assert_eq!(value.get("end_line").and_then(Value::as_u64), Some(8));
     assert_eq!(value.get("total_lines").and_then(Value::as_u64), Some(10));
     assert_eq!(value.get("line_count").and_then(Value::as_u64), Some(10));
+    assert_eq!(value.get("encoding").and_then(Value::as_str), Some("utf-8"));
+    assert_eq!(value.get("binary").and_then(Value::as_bool), Some(false));
+    assert_eq!(value.get("size_bytes").and_then(Value::as_u64), Some(21));
+    assert!(value
+        .get("content_hash")
+        .and_then(Value::as_str)
+        .is_some_and(|hash| hash.starts_with("sha256:") && hash.len() == 71));
+    assert_eq!(
+        value
+            .pointer("/page/next_start_line")
+            .and_then(Value::as_u64),
+        Some(9)
+    );
     assert_eq!(value.get("first_line").and_then(Value::as_str), Some("1"));
     assert!(value
         .get("excerpt")
         .and_then(Value::as_str)
         .is_some_and(|excerpt| excerpt.contains("8|8") && !excerpt.contains("9|9")));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn read_range_enforces_output_byte_budget_with_resume_line() {
+    let root = temp_root("read_range_max_bytes");
+    let target = root.join("large.txt");
+    let content = (1..=20)
+        .map(|line| format!("line-{line:02}-{}", "x".repeat(40)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&target, content).expect("write text");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+    obj.insert("mode".to_string(), json!("head"));
+    obj.insert("n".to_string(), json!(20));
+    obj.insert("max_bytes".to_string(), json!(256));
+
+    let value: Value =
+        serde_json::from_str(&read_range(&root, &obj, true).expect("read range")).expect("json");
+    assert!(value["excerpt"].as_str().expect("excerpt").len() <= 256);
+    assert_eq!(value["max_bytes"], 256);
+    assert_eq!(value["truncated"], true);
+    assert_eq!(value["line_safety"]["excerpt_truncated"], true);
+    assert!(value["page"]["next_start_line"].as_u64().is_some());
+    assert!(value["returned_line_count"]
+        .as_u64()
+        .is_some_and(|count| count < 20));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn read_range_reports_binary_input_as_structured_machine_error() {
+    let root = temp_root("read_range_binary");
+    let target = root.join("binary.dat");
+    std::fs::write(&target, [0xff, 0x00, 0x10, 0x80]).expect("write binary");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+
+    let err = read_range(&root, &obj, true).expect_err("binary must fail");
+    assert_eq!(err.kind, "unsupported_encoding");
+    let extra = err.extra.expect("structured error");
+    assert_eq!(extra["error_code"], "unsupported_text_encoding");
+    assert_eq!(extra["binary"], true);
+    assert_eq!(extra["detected_encoding"], "binary_or_unsupported");
+    assert_eq!(extra["detection"], "nul_byte");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn read_range_reports_oversized_input_without_allocating_it() {
+    let root = temp_root("read_range_scan_limit");
+    let target = root.join("oversized.txt");
+    let file = std::fs::File::create(&target).expect("create sparse file");
+    file.set_len(MAX_READ_RANGE_SCAN_BYTES + 1)
+        .expect("extend sparse file");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+
+    let err = read_range(&root, &obj, true).expect_err("oversized must fail");
+    assert_eq!(err.kind, "file_too_large");
+    let extra = err.extra.expect("structured error");
+    assert_eq!(extra["error_code"], "read_range_scan_limit_exceeded");
+    assert_eq!(extra["requires_artifact_read"], true);
+    assert_eq!(extra["max_scan_bytes"], MAX_READ_RANGE_SCAN_BYTES);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1381,6 +1459,25 @@ fn inventory_dir_accepts_limit_alias_for_max_entries() {
     );
     assert_eq!(
         value
+            .pointer("/matched_counts/total")
+            .and_then(Value::as_u64),
+        Some(3)
+    );
+    assert_eq!(
+        value.pointer("/page/next_cursor").and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        value.pointer("/page/has_more").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(value.get("truncated").and_then(Value::as_bool), Some(true));
+    assert!(value
+        .get("snapshot_hash")
+        .and_then(Value::as_str)
+        .is_some_and(|hash| hash.starts_with("sha256:") && hash.len() == 71));
+    assert_eq!(
+        value
             .pointer("/names_by_kind/files")
             .and_then(Value::as_array)
             .map(Vec::len),
@@ -1394,6 +1491,70 @@ fn inventory_dir_accepts_limit_alias_for_max_entries() {
         Some(0)
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn inventory_dir_returns_stable_cursor_pages_and_full_counts() {
+    let root = temp_root("inventory_cursor");
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        std::fs::write(root.join(name), name).expect("write file");
+    }
+    let mut first_args = Map::new();
+    first_args.insert("path".to_string(), json!("."));
+    first_args.insert("names_only".to_string(), json!(true));
+    first_args.insert("max_entries".to_string(), json!(2));
+    let first: Value =
+        serde_json::from_str(&inventory_dir(&root, &first_args, true).expect("first page"))
+            .expect("first json");
+
+    let mut second_args = first_args.clone();
+    second_args.insert("cursor".to_string(), json!(2));
+    let second: Value =
+        serde_json::from_str(&inventory_dir(&root, &second_args, true).expect("second page"))
+            .expect("second json");
+
+    assert_eq!(first["names"], json!(["a.txt", "b.txt"]));
+    assert_eq!(second["names"], json!(["c.txt"]));
+    assert_eq!(second["page"]["cursor"], 2);
+    assert_eq!(second["page"]["previous_cursor"], 0);
+    assert_eq!(second["page"]["has_more"], false);
+    assert!(second["page"]["next_cursor"].is_null());
+    assert_eq!(second["matched_counts"]["total"], 3);
+    assert_eq!(first["snapshot_hash"], second["snapshot_hash"]);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn inventory_and_walk_do_not_follow_directory_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_root("inventory_symlink");
+    let outside = temp_root("inventory_symlink_outside");
+    std::fs::write(outside.join("secret.txt"), "outside").expect("write outside");
+    symlink(&outside, root.join("external")).expect("create symlink");
+
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!("."));
+    let value: Value = serde_json::from_str(&inventory_dir(&root, &obj, true).expect("inventory"))
+        .expect("inventory json");
+    let external = value["entries"]
+        .as_array()
+        .and_then(|entries| entries.iter().find(|entry| entry["name"] == "external"))
+        .expect("symlink entry");
+    assert_eq!(external["kind"], "symlink");
+    assert_eq!(external["is_symlink"], true);
+
+    let mut visited = Vec::new();
+    walk_collect(&root, &mut |path| {
+        visited.push(path.to_path_buf());
+        false
+    })
+    .expect("walk");
+    assert!(visited.iter().any(|path| path.ends_with("external")));
+    assert!(!visited.iter().any(|path| path.ends_with("secret.txt")));
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(outside);
 }
 
 #[test]

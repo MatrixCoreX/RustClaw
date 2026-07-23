@@ -13,5 +13,6 @@ anyhow.workspace = true
 chrono = "0.4.44"
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 toml.workspace = true
 serde_yaml = "0.9"
