@@ -1229,6 +1229,7 @@ The main API still comes from `clawd`, but the current script flow prefers expos
 - `clawd` serves the internal API
 - `webd` acts as the browser-facing bridge / reverse-proxy layer
 - nginx serves `UI/dist` and proxies `/v1` and `/webd` to `webd`
+- The `AI Learning` navigation page reads this bundled README, organizes top-level topics into pages, and renders Mermaid flows with zoom and full-screen controls; switching the UI language selects the matching README.
 
 In the current defaults, `clawd` commonly listens on `0.0.0.0:8787` and `webd` commonly listens on `0.0.0.0:8788`; the deploy scripts derive the nginx upstream from `configs/channels/webd.toml`.
 

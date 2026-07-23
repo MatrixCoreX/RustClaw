@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import {
+  BookOpenCheck,
   Brain,
   Database,
   FileText,
@@ -369,6 +370,11 @@ export function useConsoleProjections({
         id: "chat" as const,
         label: t("对话Agent", "Chat"),
         icon: <MessageCircle className="h-4 w-4" />,
+      },
+      {
+        id: "ai_learning" as const,
+        label: t("AI 学习", "AI Learning"),
+        icon: <BookOpenCheck className="h-4 w-4" />,
       },
       {
         id: "nni" as const,
