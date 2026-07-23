@@ -561,6 +561,21 @@ nginx_ui_config_matches() {
   return 0
 }
 
+nginx_ui_config_is_tls_managed() {
+  local conf_path="$1"
+  [[ -f "$conf_path" ]] || return 1
+  grep -Eq '^[[:space:]]*(listen[[:space:]]+.*443|ssl_certificate(_key)?[[:space:]])' "$conf_path"
+}
+
+ensure_deployed_ui_readable() {
+  local ui_root="$1"
+  if [[ -w "$ui_root" ]]; then
+    chmod -R a+rX "$ui_root"
+  else
+    sudo chmod -R a+rX "$ui_root"
+  fi
+}
+
 ensure_nginx() {
   if nginx_available; then
     return 0
@@ -782,12 +797,16 @@ if [[ -n "$DO_DEPLOY" ]]; then
     sudo cp -R "$DIST_DIR/." "$NGINX_ROOT/"
     echo "Copied UI to $NGINX_ROOT (sudo)."
   fi
+  ensure_deployed_ui_readable "$NGINX_ROOT"
   PROXY_UPSTREAM="$(resolve_webd_proxy_upstream)"
   NGINX_MAIN_CONF="$(nginx_main_conf_path)"
   ensure_nginx_site_include "$NGINX_MAIN_CONF" "$NGINX_CONF_DIR"
   NGINX_CONFIG_CHANGED=0
   if nginx_ui_config_matches "$NGINX_CONF" "$NGINX_ROOT" "$PROXY_UPSTREAM"; then
     echo "Nginx config already up-to-date, skip configure: $NGINX_CONF"
+  elif nginx_ui_config_is_tls_managed "$NGINX_CONF"; then
+    echo "Preserving existing TLS-enabled nginx config: $NGINX_CONF"
+    echo "Verify its UI root and proxy upstream manually if the deployment path changed."
   elif path_writable_or_creatable "$NGINX_CONF_DIR"; then
     mkdir -p "$NGINX_CONF_DIR"
     write_nginx_config "$NGINX_CONF" "$NGINX_ROOT" "$PROXY_UPSTREAM" > "$NGINX_CONF"
