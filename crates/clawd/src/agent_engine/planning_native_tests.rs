@@ -289,6 +289,51 @@ fn native_respond_materializes_exact_structured_object_fields() {
 }
 
 #[test]
+fn native_respond_canonicalizes_only_equivalent_redundant_object_payloads() {
+    let actions = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "shape": "object",
+                "content": "{\"value\":\"minimax\",\"field_path\":\"llm.selected_vendor\"}",
+                "fields": [
+                    {"name": "field_path", "value_json": "\"llm.selected_vendor\""},
+                    {"name": "value", "value_json": "\"minimax\""}
+                ],
+                "exact_field_count": 2
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect("equivalent redundant object response");
+    let AgentAction::Respond { content } = &actions[0] else {
+        panic!("expected terminal response");
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(content).expect("materialized object"),
+        json!({"field_path": "llm.selected_vendor", "value": "minimax"})
+    );
+
+    let contradictory = turn(
+        vec![respond_call(json!({
+            "shape": "object",
+            "content": "{\"field_path\":\"llm.selected_vendor\",\"value\":\"other\"}",
+            "fields": [
+                {"name": "field_path", "value_json": "\"llm.selected_vendor\""},
+                {"name": "value", "value_json": "\"minimax\""}
+            ],
+            "exact_field_count": 2
+        }))],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn(&contradictory, &callable_capabilities())
+            .expect_err("contradictory redundant object rejected"),
+        "native_respond_object_non_field_payload"
+    );
+}
+
+#[test]
 fn native_respond_rejects_invalid_or_duplicate_object_fields() {
     let invalid_json = turn(
         vec![respond_call(json!({

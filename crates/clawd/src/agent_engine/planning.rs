@@ -979,30 +979,46 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
         .get("shape")
         .and_then(Value::as_str)
         .ok_or_else(|| "native_respond_shape_missing".to_string())?;
-    let content = arguments
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "native_respond_content_missing".to_string())?;
-    let items = arguments
-        .get("items")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "native_respond_items_not_array".to_string())?;
-    let exact_item_count = arguments
-        .get("exact_item_count")
-        .and_then(Value::as_u64)
-        .and_then(|value| usize::try_from(value).ok())
-        .filter(|value| *value <= MAX_NATIVE_RESPONSE_ITEMS)
-        .ok_or_else(|| "native_respond_exact_item_count_invalid".to_string())?;
-    let fields = arguments
-        .get("fields")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "native_respond_fields_not_array".to_string())?;
-    let exact_field_count = arguments
-        .get("exact_field_count")
-        .and_then(Value::as_u64)
-        .and_then(|value| usize::try_from(value).ok())
-        .filter(|value| *value <= MAX_NATIVE_RESPONSE_FIELDS)
-        .ok_or_else(|| "native_respond_exact_field_count_invalid".to_string())?;
+    let content = match arguments.get("content") {
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| "native_respond_content_missing".to_string())?,
+        None => "",
+    };
+    let items = match arguments.get("items") {
+        Some(value) => value
+            .as_array()
+            .map(Vec::as_slice)
+            .ok_or_else(|| "native_respond_items_not_array".to_string())?,
+        None => &[],
+    };
+    let exact_item_count = match arguments.get("exact_item_count") {
+        Some(value) => Some(
+            value
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value <= MAX_NATIVE_RESPONSE_ITEMS)
+                .ok_or_else(|| "native_respond_exact_item_count_invalid".to_string())?,
+        ),
+        None => None,
+    };
+    let fields = match arguments.get("fields") {
+        Some(value) => value
+            .as_array()
+            .map(Vec::as_slice)
+            .ok_or_else(|| "native_respond_fields_not_array".to_string())?,
+        None => &[],
+    };
+    let exact_field_count = match arguments.get("exact_field_count") {
+        Some(value) => Some(
+            value
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value <= MAX_NATIVE_RESPONSE_FIELDS)
+                .ok_or_else(|| "native_respond_exact_field_count_invalid".to_string())?,
+        ),
+        None => None,
+    };
 
     match shape {
         "free_text" => {
@@ -1010,9 +1026,9 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
                 return Err("native_respond_free_text_empty".to_string());
             }
             if !items.is_empty()
-                || exact_item_count != 0
+                || exact_item_count.unwrap_or(0) != 0
                 || !fields.is_empty()
-                || exact_field_count != 0
+                || exact_field_count.unwrap_or(0) != 0
             {
                 return Err("native_respond_free_text_contract_mismatch".to_string());
             }
@@ -1021,10 +1037,12 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
             })
         }
         "list" => {
+            let exact_item_count = exact_item_count
+                .ok_or_else(|| "native_respond_exact_item_count_invalid".to_string())?;
             if !content.trim().is_empty() {
                 return Err("native_respond_list_content_not_empty".to_string());
             }
-            if !fields.is_empty() || exact_field_count != 0 {
+            if !fields.is_empty() || exact_field_count.unwrap_or(0) != 0 {
                 return Err("native_respond_list_fields_not_empty".to_string());
             }
             if exact_item_count == 0 || items.len() != exact_item_count {
@@ -1051,7 +1069,9 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
             Ok(AgentAction::Respond { content })
         }
         "object" => {
-            if !content.trim().is_empty() || !items.is_empty() || exact_item_count != 0 {
+            let exact_field_count = exact_field_count
+                .ok_or_else(|| "native_respond_exact_field_count_invalid".to_string())?;
+            if !items.is_empty() || exact_item_count.unwrap_or(0) != 0 {
                 return Err("native_respond_object_non_field_payload".to_string());
             }
             if exact_field_count == 0 || fields.len() != exact_field_count {
@@ -1084,7 +1104,15 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
                     return Err("native_respond_object_field_duplicate".to_string());
                 }
             }
-            let content = serde_json::to_string(&Value::Object(object))
+            let object = Value::Object(object);
+            if !content.trim().is_empty() {
+                let redundant_content: Value = serde_json::from_str(content.trim())
+                    .map_err(|_| "native_respond_object_non_field_payload".to_string())?;
+                if redundant_content != object {
+                    return Err("native_respond_object_non_field_payload".to_string());
+                }
+            }
+            let content = serde_json::to_string(&object)
                 .map_err(|_| "native_respond_object_serialize_failed".to_string())?;
             Ok(AgentAction::Respond { content })
         }
