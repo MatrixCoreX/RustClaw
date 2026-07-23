@@ -1,4 +1,15 @@
-import { Children, isValidElement, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Children,
+  isValidElement,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import {
   BookOpenCheck,
   ChevronLeft,
@@ -30,10 +41,19 @@ function currentMermaidTheme(): "dark" | "neutral" {
 function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
   const diagramId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const panOriginRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
   const [theme, setTheme] = useState<"dark" | "neutral">(() => currentMermaidTheme());
   const [zoom, setZoom] = useState(1);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
 
   useEffect(() => {
     const observer = new MutationObserver(() => setTheme(currentMermaidTheme()));
@@ -74,6 +94,67 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [expanded]);
 
+  const resetView = () => {
+    setZoom(1);
+    viewportRef.current?.scrollTo({ left: 0, top: 0 });
+  };
+
+  const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    if (
+      event.button !== 0
+      || !viewport
+      || (
+        viewport.scrollWidth <= viewport.clientWidth
+        && viewport.scrollHeight <= viewport.clientHeight
+      )
+    ) {
+      return;
+    }
+    panOriginRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+    };
+    viewport.setPointerCapture(event.pointerId);
+    setIsPanning(true);
+    event.preventDefault();
+  };
+
+  const movePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    const origin = panOriginRef.current;
+    if (!viewport || !origin || origin.pointerId !== event.pointerId) return;
+    viewport.scrollLeft = origin.scrollLeft - (event.clientX - origin.clientX);
+    viewport.scrollTop = origin.scrollTop - (event.clientY - origin.clientY);
+    event.preventDefault();
+  };
+
+  const endPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    const origin = panOriginRef.current;
+    if (!origin || origin.pointerId !== event.pointerId) return;
+    if (viewport?.hasPointerCapture(event.pointerId)) {
+      viewport.releasePointerCapture(event.pointerId);
+    }
+    panOriginRef.current = null;
+    setIsPanning(false);
+  };
+
+  const panWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const direction = {
+      ArrowLeft: [-80, 0],
+      ArrowRight: [80, 0],
+      ArrowUp: [0, -80],
+      ArrowDown: [0, 80],
+    }[event.key];
+    if (!direction || !viewportRef.current) return;
+    viewportRef.current.scrollBy({ left: direction[0], top: direction[1], behavior: "smooth" });
+    event.preventDefault();
+  };
+
   return (
     <figure
       className={
@@ -102,7 +183,7 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
             className="theme-topbar-nav-btn !min-h-8 !px-2"
             title={t("恢复大小", "Reset zoom")}
             aria-label={t("恢复流程图大小", "Reset diagram zoom")}
-            onClick={() => setZoom(1)}
+            onClick={resetView}
           >
             <RotateCcw className="h-4 w-4" />
           </button>
@@ -129,7 +210,21 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
           </button>
         </div>
       </figcaption>
-      <div className={`theme-scrollbar overflow-auto p-4 sm:p-6 ${expanded ? "min-h-0 flex-1" : "max-h-[70vh]"}`}>
+      <div
+        ref={viewportRef}
+        className={`theme-scrollbar overflow-auto p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-orange-400/60 sm:p-6 ${
+          isPanning ? "cursor-grabbing select-none" : "cursor-grab"
+        } ${expanded ? "min-h-0 flex-1" : "max-h-[70vh]"}`}
+        style={{ touchAction: zoom > 1 || expanded ? "none" : "pan-y" }}
+        role="region"
+        tabIndex={0}
+        aria-label={t("可缩放和拖动的流程图", "Zoomable and pannable flow diagram")}
+        onPointerDown={beginPan}
+        onPointerMove={movePan}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
+        onKeyDown={panWithKeyboard}
+      >
         {error ? (
           <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-4">
             <p className="text-sm text-amber-100">{t("流程图暂时无法渲染，下面保留原始 Mermaid 定义。", "The diagram could not be rendered. Its Mermaid source is preserved below.")}</p>
