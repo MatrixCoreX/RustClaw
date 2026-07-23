@@ -15,9 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOL_OVERLAY = ROOT / "prompts/layers/overlays/agent_tool_spec.md"
 REGISTRY = ROOT / "configs/skills_registry.toml"
 
-MAX_GLOBAL_TOOL_OVERLAY_BYTES = 68_369
+# The bounded active-working-set protocol added 584 bytes after the original
+# baseline. Track C will ratchet this down as domain contracts leave the global
+# overlay; until then, fail any further growth.
+MAX_GLOBAL_TOOL_OVERLAY_BYTES = 68_953
 MAX_EAGER_NATIVE_GROUPS = 7
-MAX_EAGER_PLANNER_CAPABILITIES = 95
+MAX_EAGER_PLANNER_CAPABILITIES = 71
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,6 +36,7 @@ def registry_surface(path: Path) -> tuple[int, int]:
     capabilities = 0
     for skill in parsed.get("skills", []):
         planner_capabilities = skill.get("planner_capabilities", [])
+        planner_capability_aliases = skill.get("planner_capability_aliases", {})
         if (
             skill.get("enabled", True)
             and skill.get("planner_visible", True)
@@ -40,7 +44,10 @@ def registry_surface(path: Path) -> tuple[int, int]:
             and planner_capabilities
         ):
             groups += 1
-            capabilities += len(planner_capabilities)
+            capabilities += sum(
+                capability.get("name") not in planner_capability_aliases
+                for capability in planner_capabilities
+            )
     return groups, capabilities
 
 
@@ -90,7 +97,11 @@ def run_self_test() -> int:
 name = "visible"
 enabled = true
 planner_eager_load = true
-planner_capabilities = [{ name = "demo.inspect" }]
+planner_capabilities = [
+  { name = "demo.inspect" },
+  { name = "demo.inspect_legacy" },
+]
+planner_capability_aliases = { "demo.inspect_legacy" = "demo.inspect" }
 
 [[skills]]
 name = "hidden"
@@ -104,11 +115,11 @@ planner_capabilities = [{ name = "demo.hidden" }]
         measured = inventory(overlay, registry)
         assert measured == SurfaceMetrics(len(b"generic protocol\n"), 1, 1)
         assert not findings_for(measured)
-        oversized = SurfaceMetrics(MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1, 8, 96)
+        oversized = SurfaceMetrics(MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1, 8, 72)
         assert findings_for(oversized) == [
             f"global_tool_overlay_bytes_grew:{MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1}>{MAX_GLOBAL_TOOL_OVERLAY_BYTES}",
             "eager_native_groups_grew:8>7",
-            "eager_planner_capabilities_grew:96>95",
+            "eager_planner_capabilities_grew:72>71",
         ]
     print("MODEL_INPUT_SURFACE_SELF_TEST ok")
     return 0
