@@ -677,6 +677,8 @@ UI 相关说明：
 - `build-ui-nginx.sh --deploy-if-configured` 只更新机器上已存在的 RustClaw nginx 站点，本地更新不会因此写系统配置
 - `deploy-ui-nginx.sh` 更偏向“部署已有 `UI/dist`”，可选 `--build`
 - `install-rustclaw-cmd.sh` 默认走本地无 nginx 安装；云服务器使用 `--deploy-ui-nginx`
+- 管理员打开首页时会自动检查源码版本和当前平台可用的 GitHub Release，并显示运行版本与最新 Release 标签
+- 只有真实构建或部署任务才显示进度；完整编译、仅 UI、仅 clawd 成功完成后会自动刷新一次页面
 - 浏览器 UI 里有独立的 `NNI` 导航分类，对应后端 `/v1/nni/device/*`；没有签名芯片的设备会返回 `signature_chip_present=false`，并在 UI 上显示明确的缺失签名芯片状态
 - 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串
 - `webd` 可以作为 `clawd` 前面的反向代理和登录会话桥接层

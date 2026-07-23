@@ -1068,3 +1068,36 @@ async fn workspace_update_refresh_clears_resolved_failure_when_upstream_matches(
 
     std::fs::remove_dir_all(root).expect("remove test repository");
 }
+
+#[test]
+fn workspace_update_release_selector_requires_matching_platform_asset() {
+    let releases = vec![
+        json!({
+            "tag_name": "ubuntu-x86_64-20260724-2",
+            "draft": true,
+            "assets": [{"name": "RustClaw-ubuntu-x86_64-20260724-2.tar.gz"}]
+        }),
+        json!({
+            "tag_name": "pi-aarch64-20260724-2",
+            "assets": [{"name": "RustClaw-pi-aarch64-20260724-2.tar.gz"}]
+        }),
+        json!({
+            "tag_name": "ubuntu-x86_64-20260724-1",
+            "assets": [{"name": "RustClaw-ubuntu-x86_64-20260724-1.tar.gz"}]
+        }),
+    ];
+    assert_eq!(
+        select_latest_compatible_release_tag(
+            &releases,
+            "ubuntu-x86_64-",
+            "RustClaw-ubuntu-x86_64-"
+        )
+        .as_deref(),
+        Some("ubuntu-x86_64-20260724-1")
+    );
+    assert_eq!(
+        select_latest_compatible_release_tag(&releases, "pi-aarch64-", "RustClaw-pi-aarch64-")
+            .as_deref(),
+        Some("pi-aarch64-20260724-2")
+    );
+}

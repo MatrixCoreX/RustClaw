@@ -14,6 +14,7 @@ export interface WorkspaceUpdateView {
   hasRemoteDiff: boolean;
   knownUpToDate: boolean;
   displayStatus?: string;
+  progressVisible: boolean;
   progressPercent: number;
   progressActive: boolean;
   progressLabel: string;
@@ -231,9 +232,7 @@ function numberArg(args: Record<string, unknown>, key: string): number | null {
 
 function workspaceUpdateProgressPercent(status: WorkspaceUpdateStatus | null | undefined, running: boolean): number {
   if (!status) return 0;
-  if (status.status === "up_to_date") return 100;
   if (status.status === "succeeded") return 100;
-  if (status.status === "failed" || status.status === "canceled") return 100;
   if (status.status === "restarting" || status.step === "restart_scheduled") return 100;
   const stepProgress: Record<string, number> = {
     idle: 0,
@@ -260,7 +259,7 @@ function workspaceUpdateProgressLabel(status: WorkspaceUpdateStatus | null | und
     return copy(lang, "编译中，实际耗时取决于设备性能。", "Building; duration depends on device performance.");
   }
   if (running && status?.step === "building_ui") {
-    return copy(lang, "UI 编译中，完成后会部署到 nginx。", "Building the UI; it will deploy to nginx when finished.");
+    return copy(lang, "UI 编译中，完成后会发布到当前部署环境。", "Building the UI; it will be published to the current deployment when finished.");
   }
   if (running && status?.step === "building_clawd") {
     return copy(lang, "clawd 编译中，完成后会安排 clawd 重启。", "Building clawd; clawd will restart when finished.");
@@ -387,6 +386,7 @@ export function buildWorkspaceUpdateView(status: WorkspaceUpdateStatus | null | 
     status?.old_commit === status?.remote_commit &&
     (status?.status === "idle" || status?.status === "up_to_date");
   const displayStatus = knownUpToDate ? "up_to_date" : status?.status;
+  const progressVisible = running || Boolean(status?.started_ts);
   const progressPercent = workspaceUpdateProgressPercent(status, running);
   return {
     restarting,
@@ -394,10 +394,20 @@ export function buildWorkspaceUpdateView(status: WorkspaceUpdateStatus | null | 
     hasRemoteDiff,
     knownUpToDate,
     displayStatus,
+    progressVisible,
     progressPercent,
     progressActive: running && progressPercent > 0 && progressPercent < 100,
     progressLabel: workspaceUpdateProgressLabel(status, running, lang),
     logPreview: workspaceUpdateLogPreview(status, lang),
     notice: workspaceUpdateNotice(status, displayStatus, restarting, lang),
   };
+}
+
+export function shouldReloadAfterWorkspaceBuild(
+  wasActive: boolean,
+  mode: WorkspaceUpdateStatus["mode"] | undefined,
+  status: WorkspaceUpdateStatus["status"] | undefined,
+): boolean {
+  if (!wasActive || mode === "release_deploy") return false;
+  return status === "succeeded" || status === "idle" || status === "up_to_date";
 }

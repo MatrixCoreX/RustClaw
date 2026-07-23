@@ -247,6 +247,8 @@ export interface WorkspaceUpdateStatus {
   old_commit?: string | null;
   new_commit?: string | null;
   remote_commit?: string | null;
+  current_version?: string | null;
+  latest_release_tag?: string | null;
   exit_code?: number | null;
   stdout_tail: string;
   stderr_tail: string;
