@@ -314,7 +314,7 @@ done
 
 if [[ -d "$SCRIPT_DIR/UI" ]] && [[ "$SKIP_UI" != "1" ]]; then
 	echo "Building and deploying UI assets to nginx..."
-	NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=512}" bash "$SCRIPT_DIR/build-ui-nginx.sh"
+	bash "$SCRIPT_DIR/build-ui-nginx.sh"
 elif [[ "$SKIP_UI" == "1" ]]; then
 	echo "Skipping UI build (SKIP_UI=1 or no-ui)."
 else

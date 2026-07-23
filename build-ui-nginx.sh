@@ -102,6 +102,45 @@ ensure_ui_deps() {
   ui_dependency_fingerprint > "$DEPS_STAMP_FILE"
 }
 
+ui_node_options() {
+  local heap_mb="${RUSTCLAW_UI_NODE_MAX_OLD_SPACE_MB:-1536}"
+  if [[ ! "$heap_mb" =~ ^[0-9]+$ ]] || (( heap_mb < 512 )); then
+    echo "Error: RUSTCLAW_UI_NODE_MAX_OLD_SPACE_MB must be an integer of at least 512." >&2
+    return 1
+  fi
+
+  local -a retained=()
+  local -a existing_options=()
+  read -r -a existing_options <<< "${NODE_OPTIONS:-}"
+  local skip_next=0
+  local token
+  for token in "${existing_options[@]}"; do
+    if (( skip_next == 1 )); then
+      skip_next=0
+      continue
+    fi
+    case "$token" in
+      --max-old-space-size|--max_old_space_size)
+        skip_next=1
+        ;;
+      --max-old-space-size=*|--max_old_space_size=*)
+        ;;
+      *)
+        retained+=("$token")
+        ;;
+    esac
+  done
+  retained+=("--max-old-space-size=${heap_mb}")
+  printf '%s\n' "${retained[*]}"
+}
+
+run_ui_build() {
+  local node_options
+  node_options="$(ui_node_options)"
+  echo "UI Node options: $node_options"
+  (cd "$UI_DIR" && NODE_OPTIONS="$node_options" npm run build)
+}
+
 path_writable_or_creatable() {
   local target="$1"
   if [[ -e "$target" ]]; then
@@ -714,11 +753,11 @@ if [[ -n "$DO_BUILD" ]]; then
       echo "UI already built for current version, skip build."
     else
       echo "Building UI (output=$DIST_DIR)..."
-      (cd "$UI_DIR" && npm run build)
+      run_ui_build
     fi
   else
     echo "Building UI (output=$DIST_DIR)..."
-    (cd "$UI_DIR" && npm run build)
+    run_ui_build
   fi
   if [[ ! -d "$DIST_DIR" ]] || [[ ! -f "$DIST_DIR/index.html" ]]; then
     echo "Error: UI build failed (dist missing or no index.html)."
