@@ -691,7 +691,7 @@ async fn run_workspace_update_ui_only_job(
     reset_workspace_update_build_logs(&shared);
     match run_workspace_update_command_streaming(
         "bash",
-        &["./build-ui-nginx.sh"],
+        &["./build-ui-nginx.sh", "--deploy-if-configured"],
         &workspace_root,
         shared.clone(),
         control.clone(),

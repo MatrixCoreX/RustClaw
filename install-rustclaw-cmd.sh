@@ -15,7 +15,7 @@ HOST_OS="$(detect_host_os || printf '%s' "unknown")"
 HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
 REQUESTED_TARGET="host"
 HOST_RUST_TARGET="$(host_rust_target 2>/dev/null || true)"
-# 默认部署 UI 到 nginx：配置 nginx、复制 UI、重启 nginx；--no-deploy-ui 可跳过
+# 本地安装默认不配置 nginx；云服务器可显式传 --deploy-ui-nginx。
 DEPLOY_UI_NGINX=""
 # --pi-app：配置 Pi App 桌面快捷方式 + 开机自启（小屏）
 CONFIGURE_PI_APP=0
@@ -34,7 +34,6 @@ default_nginx_root() {
   printf '%s\n' "/var/www/html/rustclaw"
 }
 
-DEPLOY_UI_NGINX="$(default_nginx_root)"
 NGINX_SITE_LINK=""
 
 nginx_conf_path() {
@@ -168,11 +167,12 @@ Options:
   --user           Install to ~/.local/bin (no sudo)
   --dir <path>     Install to custom directory
   --deploy-ui-nginx [path]   Deploy UI to path (default: auto-detect per OS), configure nginx, reload nginx
-  --no-deploy-ui   Skip nginx config and UI deploy (launcher only)
+  --no-deploy-ui   Compatibility no-op; local/default installs already skip nginx
   --pi-app         Configure Pi App on Raspberry Pi only: desktop shortcut + autostart on login
   -h, --help       Show this help
 
-Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Default path is auto-detected per OS. Use --no-deploy-ui to skip UI/nginx.
+Default: install the launcher without nginx. Local UI assets are served directly by clawd when started with --with-ui.
+Cloud/server deployments may opt in with --deploy-ui-nginx [path].
 No build unless --build/--force-build; host builds use target/release/clawd, explicit cross targets use target/<target>/release/clawd, then fall back to release-bin/clawd.
 Use --build or --force-build when building from source.
 Build summary:

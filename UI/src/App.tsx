@@ -50,6 +50,11 @@ import { useChannelConfigRuntime } from "./hooks/useChannelConfigRuntime";
 import { useAuthKeysRuntime } from "./hooks/useAuthKeysRuntime";
 import { useServiceActionsRuntime } from "./hooks/useServiceActionsRuntime";
 import { useWhatsappWebRuntime } from "./hooks/useWhatsappWebRuntime";
+import {
+  defaultClawdBaseUrl,
+  preferredClawdBaseUrl,
+  preferredWebdBaseUrl,
+} from "./lib/service-origins";
 import { useWechatRuntime } from "./hooks/useWechatRuntime";
 import { useFeishuBindRuntime } from "./hooks/useFeishuBindRuntime";
 import { useChatRuntime } from "./hooks/useChatRuntime";
@@ -82,28 +87,9 @@ const STORAGE_KEYS = {
 
 /** 根据当前页面地址推断 clawd API 的默认 baseUrl；获取不到主机名时用 127.0.0.1 */
 function getDefaultClawdBaseUrl(): string {
-  if (typeof window === "undefined" || !window.location) return "http://127.0.0.1:8787";
-  const loc = window.location;
-  let hostname = (loc.hostname && loc.hostname.trim()) || "";
-  if (!hostname && loc.host) {
-    hostname = loc.host.split(":")[0]?.trim() || "";
-  }
-  const protocol = loc.protocol && loc.protocol !== "file:" ? loc.protocol : "http:";
-  if (hostname) return `${protocol}//${hostname}:8787`;
-  return "http://127.0.0.1:8787";
-}
-
-/** 根据当前页面地址推断 webd 默认地址；获取不到主机名时用 127.0.0.1 */
-function getDefaultWebdBaseUrl(): string {
-  if (typeof window === "undefined" || !window.location) return "http://127.0.0.1:8788";
-  const loc = window.location;
-  let hostname = (loc.hostname && loc.hostname.trim()) || "";
-  if (!hostname && loc.host) {
-    hostname = loc.host.split(":")[0]?.trim() || "";
-  }
-  const protocol = loc.protocol && loc.protocol !== "file:" ? loc.protocol : "http:";
-  if (hostname) return `${protocol}//${hostname}:8788`;
-  return "http://127.0.0.1:8788";
+  return defaultClawdBaseUrl(
+    typeof window === "undefined" ? undefined : window.location,
+  );
 }
 
 function readNumber(key: string, fallback: number): number {
@@ -120,8 +106,7 @@ export default function App() {
   });
   const [baseUrl, setBaseUrl] = useState(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.baseUrl);
-    if (saved != null && saved.trim() !== "") return saved.trim();
-    return getDefaultClawdBaseUrl();
+    return preferredClawdBaseUrl(saved, window.location);
   });
   const apiBase = baseUrl || getDefaultClawdBaseUrl();
   const [uiKey, setUiKey] = useState(() => window.localStorage.getItem(STORAGE_KEYS.userKey)?.trim() ?? "");
@@ -133,8 +118,7 @@ export default function App() {
   const [loginTab, setLoginTab] = useState<"key" | "webd">("webd");
   const [webdBaseUrlDraft, setWebdBaseUrlDraft] = useState(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.webdBaseUrl);
-    if (saved != null && saved.trim() !== "") return saved.trim();
-    return getDefaultWebdBaseUrl();
+    return preferredWebdBaseUrl(saved, window.location);
   });
   const [webdUsername, setWebdUsername] = useState("");
   const [webdPassword, setWebdPassword] = useState("");

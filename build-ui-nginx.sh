@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 编译 UI（npm run build 默认输出目录）并复制到 nginx 目录。
-# 参数：--build 仅编译；--deploy / --copy 仅复制；默认先编译再复制。
+# 编译 UI（npm run build 默认输出目录），并可显式复制到 nginx 目录。
+# 参数：默认仅编译；--deploy / --copy 显式复制；--deploy-if-configured 仅更新已有站点。
 # 可选：--path /path/to/nginx/root 指定 nginx 站点根。
 
 set -euo pipefail
@@ -34,6 +34,7 @@ NGINX_SITE_LINK=""
 
 DO_BUILD=""
 DO_DEPLOY=""
+DEPLOY_IF_CONFIGURED=""
 NGINX_ROOT="$NGINX_ROOT_DEFAULT"
 
 ui_deps_healthy() {
@@ -156,20 +157,23 @@ path_writable_or_creatable() {
 }
 
 usage() {
-  echo "Usage: $0 [--build] [--deploy|--copy] [--path DIR]"
+  echo "Usage: $0 [--build] [--deploy|--copy|--deploy-if-configured] [--path DIR]"
   echo "  --build         Only build UI (npm run build, output: UI/dist)."
   echo "  --deploy        Only copy UI/dist and refresh nginx config."
   echo "  --copy          Same as --deploy."
+  echo "  --deploy-if-configured"
+  echo "                  Build UI, then update nginx only when a RustClaw nginx site already exists."
   echo "  --path DIR      Nginx site root (default: $NGINX_ROOT_DEFAULT)."
-  echo "  (no args)       Build, copy to nginx root, and configure reverse proxy (default)."
+  echo "  (no args)       Build UI only. Local deployment does not require nginx."
   echo "  host platform   Auto-detected as ${HOST_OS}/${HOST_ARCH} ${HOST_TARGET:+($HOST_TARGET)}."
   echo "  UI output       Always written to UI/dist."
   echo ""
   echo "Examples:"
-  echo "  $0                    # build + copy to default nginx root"
+  echo "  $0                    # local/default: build UI only"
   echo "  $0 --build            # only build"
   echo "  $0 --deploy           # only copy existing UI/dist"
-  echo "  $0 --path /srv/http/rustclaw   # build + copy to custom path"
+  echo "  $0 --build --deploy   # cloud/server: build + deploy nginx"
+  echo "  $0 --deploy --path /srv/http/rustclaw   # deploy to custom path"
 }
 
 hash_file() {
@@ -737,8 +741,14 @@ while [[ $# -gt 0 ]]; do
       DO_DEPLOY=1
       shift
       ;;
+    --deploy-if-configured)
+      DO_BUILD=1
+      DEPLOY_IF_CONFIGURED=1
+      shift
+      ;;
     --path)
       NGINX_ROOT="${2:?Missing argument for --path}"
+      DO_DEPLOY=1
       shift 2
       ;;
     -h|--help)
@@ -753,10 +763,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# 未指定任何一项时，默认两项都做
+# 未指定任何一项时仅构建。Nginx 是云服务器的显式部署选项。
 if [[ -z "$DO_BUILD" && -z "$DO_DEPLOY" ]]; then
   DO_BUILD=1
-  DO_DEPLOY=1
+fi
+
+if [[ -n "$DEPLOY_IF_CONFIGURED" ]]; then
+  if [[ -f "$NGINX_CONF" || ( -n "$NGINX_SITE_LINK" && -e "$NGINX_SITE_LINK" ) ]]; then
+    DO_DEPLOY=1
+    echo "Existing RustClaw nginx site detected; UI assets will be deployed after the build."
+  else
+    echo "No existing RustClaw nginx site detected; keeping local build-only mode."
+  fi
 fi
 
 if [[ -n "$DO_BUILD" ]]; then

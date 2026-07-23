@@ -391,21 +391,22 @@ python3 --version
 推荐方式：
 
 ```bash
-# 仅安装启动器，不部署 nginx/UI
-bash install-rustclaw-cmd.sh --user --no-deploy-ui
+# 本地安装：只安装启动器，不配置 nginx
+bash install-rustclaw-cmd.sh --user
 
 # 从源码构建后再安装
-bash install-rustclaw-cmd.sh --build --user --no-deploy-ui
-
-# 安装启动器，并按脚本默认行为把 UI 部署到 nginx
 bash install-rustclaw-cmd.sh --build --user
+
+# 仅云服务器：显式把 UI 部署到 nginx
+bash install-rustclaw-cmd.sh --build --user --deploy-ui-nginx
 ```
 
 说明：
 
 - `install-rustclaw-cmd.sh` 会安装 `rustclaw` 启动器
 - 如果仓库里已经构建出 `clawcli`，安装脚本也会一并安装它
-- 默认情况下，安装脚本会部署 `UI/dist` 到 nginx、写入 nginx 配置并尝试重载 nginx；如果只想装命令，不想碰 UI/nginx，请显式传 `--no-deploy-ui`
+- 本地默认安装不会安装、配置或重载 nginx；使用 `--with-ui` 启动时由 `clawd` 直接托管 `UI/dist`
+- 云服务器需要 nginx 时显式传 `--deploy-ui-nginx [path]`；`--no-deploy-ui` 仅保留为兼容空操作
 - 支持 `--target <triple>`、`--dir <path>`、`--deploy-ui-nginx [path]`、`--pi-app`；其中 `--pi-app` 只会在树莓派上配置小屏桌面程序和登录自启动，普通电脑会自动跳过
 - 如果未传 `--build`，脚本会优先复用现有二进制；找不到时才提示你构建或同步 `release-bin`
 
@@ -471,7 +472,7 @@ rustclaw -status
 
 - 开始前先执行 `scripts/sync_skill_docs.py`
 - 默认构建 `release`，并自动发现工作区里的二进制目标后校验产物是否齐全
-- 若存在 `UI/` 且未传 `no-ui`，会调用 `build-ui-nginx.sh`，也就是走“构建 UI + 部署到 nginx”的默认流程
+- 若存在 `UI/` 且未传 `no-ui`，会调用 `build-ui-nginx.sh`；该脚本默认只构建 `UI/dist`，除非显式要求部署，否则不会修改 nginx
 - `--target host` 输出到 `target/release`，交叉编译输出到 `target/<triple>/release`
 - `cross-build-pi.sh` 会先准备 Raspberry Pi 目标的 linker / `cc` / bindgen 参数，再调用现有构建流程；默认跳过 UI 构建，避免交叉编译时被前端构建阻塞
 
@@ -498,7 +499,7 @@ rustclaw -start release all --with-ui
 - `start-all.sh` 当前按 `configs/channels/*.toml` 里的 `enabled` 开关决定启动哪些服务
 - 如果传了 `telegram | whatsapp_web | both | whatsapp_cloud | all`，脚本会把 Telegram / WhatsApp 相关通道的 `enabled` 值写回配置文件
 - 这里的 `all` 是启动器里的快捷通道组合，不等于强制打开 `webd`、`wechat`、`feishu`、`lark` 等所有通道；这些仍以各自配置文件里的 `enabled` 为准
-- `--with-ui` 不会自动帮你开发模式起前端，而是要求 `UI/dist` 已存在且没有过期；缺失时会提示你先执行 `cd UI && npm install && npm run build`
+- `--with-ui` 要求 `UI/dist` 已存在且没有过期，并由 `clawd` 在 API 监听地址直接提供页面，通常可打开 `http://127.0.0.1:8787/`；不需要 nginx
 - `start-all.sh` 不再在启动阶段自动执行 `sync_skill_docs.py`
 
 脚本方式依然可用：
@@ -559,11 +560,12 @@ rustclaw -key disable rk-xxxx
 
 ## UI、API 与 `webd`
 
-主 API 仍由 `clawd` 提供；而脚本当前默认更推荐的对外方式是：
+主 API 仍由 `clawd` 提供；部署方式按环境拆分：
 
-- `clawd` 提供内部 API
-- `webd` 作为浏览器访问层/反向代理桥接
-- nginx 托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`
+- 本地机器：`clawd` 同时提供 `UI/dist` 和 `/v1`，不需要 nginx
+- 云服务器：可由 nginx 托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`
+- `webd` 在启用时提供密码登录和会话桥接；本地直连 UI 可以使用 RustClaw key
+- 通过域名打开 UI 时，登录页默认沿用当前 origin，不再附加 `:8787` 或 `:8788`；只有本地直连时才推导服务端口
 - 导航栏中的 `AI 学习` 页面直接读取随 UI 打包的 README，按一级主题分页，并把 Mermaid 流程图渲染为可缩放、可全屏查看的图形；切换 UI 语言时会选择对应语言的 README。
 
 在默认配置里，`configs/config.toml` 中的 `clawd` 监听通常是 `0.0.0.0:8787`，`webd` 默认监听常见为 `0.0.0.0:8788`；部署脚本会从 `configs/channels/webd.toml` 推导反代上游地址。
@@ -671,9 +673,10 @@ UI 相关说明：
 
 - 源码位于 `UI/`
 - 构建产物位于 `UI/dist`
-- `build-ui-nginx.sh` 默认会执行“构建 UI + 复制到 nginx + 校验/写入 nginx 配置”
+- `build-ui-nginx.sh` 默认只构建 `UI/dist`；只有显式传 `--deploy` 才会配置 nginx
+- `build-ui-nginx.sh --deploy-if-configured` 只更新机器上已存在的 RustClaw nginx 站点，本地更新不会因此写系统配置
 - `deploy-ui-nginx.sh` 更偏向“部署已有 `UI/dist`”，可选 `--build`
-- `install-rustclaw-cmd.sh` 默认也会执行 UI/nginx 部署，除非传 `--no-deploy-ui`
+- `install-rustclaw-cmd.sh` 默认走本地无 nginx 安装；云服务器使用 `--deploy-ui-nginx`
 - 浏览器 UI 里有独立的 `NNI` 导航分类，对应后端 `/v1/nni/device/*`；没有签名芯片的设备会返回 `signature_chip_present=false`，并在 UI 上显示明确的缺失签名芯片状态
 - 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串
 - `webd` 可以作为 `clawd` 前面的反向代理和登录会话桥接层
@@ -773,7 +776,7 @@ Pi App 也包含后端和浏览器 UI 使用的 NNI 设备签名 helper。`pi_ap
 
 - 如果你是源码开发者，`build-all.sh` 是最贴近当前仓库脚本行为的统一构建入口
 - 如果你是部署或体验使用者，`install-rustclaw-cmd.sh` 是更直接的入口，因为它会同时处理启动器安装和可选的 UI/nginx 部署
-- 如果你只想更新 UI 静态站点，优先看 `build-ui-nginx.sh` 和 `deploy-ui-nginx.sh`
+- 如果只想重建本地 UI，使用 `build-ui-nginx.sh`；只有 nginx 托管的服务器才使用 `deploy-ui-nginx.sh`
 - 如果你在做技能接入，记得显式执行 `python3 scripts/sync_skill_docs.py`，不要依赖启动脚本帮你同步
 - 各类回归和辅助脚本主要集中在 `scripts/`
 - 如果要跑本地 `ops_closed_loop` 闭环回归，执行 `bash scripts/regression_ops_closed_loop.sh`

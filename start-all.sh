@@ -717,7 +717,7 @@ build_ui_if_needed() {
 
 choose_ui_mode
 if [[ "$ENABLE_UI" == "1" ]]; then
-	echo "Web UI startup enabled via --with-ui; continuing with release startup." # zh: 已通过 --with-ui 启用 Web UI，继续执行 release 启动。
+	echo "Web UI enabled via --with-ui; clawd will serve UI/dist directly without nginx." # zh: --with-ui 会由 clawd 直接托管 UI/dist，不依赖 nginx。
 else
 	echo "Web UI prompt skipped; continuing with release startup." # zh: 跳过 Web UI 交互，继续执行 release 启动。
 fi
@@ -999,6 +999,23 @@ start_wechatd
 start_feishud
 start_larkd
 echo "Startup finished (profile: $PROFILE)." # zh: 启动完成（profile: $PROFILE）。
+if [[ "$ENABLE_UI" == "1" ]]; then
+	UI_LISTEN="$(
+		python3 - <<'PY'
+import tomllib
+from pathlib import Path
+
+cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
+listen = str((cfg.get("server", {}) or {}).get("listen", "127.0.0.1:8787")).strip()
+if listen.startswith("0.0.0.0:"):
+    listen = "127.0.0.1:" + listen.rsplit(":", 1)[1]
+elif listen.startswith("[::]:"):
+    listen = "127.0.0.1:" + listen.rsplit(":", 1)[1]
+print(listen or "127.0.0.1:8787")
+PY
+	)"
+	echo "Local UI: http://$UI_LISTEN/"
+fi
 echo "Next: configure LLM provider/model, API keys, and communication channels in the UI." # zh: 下一步：请在 UI 中配置大模型厂商/模型、API Key、通信端等设置。
 echo "You can also edit config files directly under: $SCRIPT_DIR/configs/" # zh: 也可以直接修改配置目录：$SCRIPT_DIR/configs/
 echo "Common files: configs/config.toml and configs/channels/*.toml" # zh: 常用配置文件：configs/config.toml 和 configs/channels/*.toml

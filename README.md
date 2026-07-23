@@ -452,21 +452,22 @@ python3 --version
 Recommended path:
 
 ```bash
-# Install launcher only, skip nginx/UI deployment
-bash install-rustclaw-cmd.sh --user --no-deploy-ui
+# Local install: install the launcher without nginx
+bash install-rustclaw-cmd.sh --user
 
 # Build from source first, then install
-bash install-rustclaw-cmd.sh --build --user --no-deploy-ui
-
-# Build, install launcher, and deploy UI to nginx using script defaults
 bash install-rustclaw-cmd.sh --build --user
+
+# Cloud/server only: explicitly deploy the UI through nginx
+bash install-rustclaw-cmd.sh --build --user --deploy-ui-nginx
 ```
 
 Notes:
 
 - `install-rustclaw-cmd.sh` installs the `rustclaw` launcher
 - if `clawcli` was built, it is installed too
-- by default the installer deploys `UI/dist` to nginx, writes nginx config, and reloads nginx when needed; pass `--no-deploy-ui` if you only want the launcher
+- local/default installation does not install, configure, or reload nginx; `clawd` serves `UI/dist` directly when started with `--with-ui`
+- cloud/server deployments opt in to nginx with `--deploy-ui-nginx [path]`; `--no-deploy-ui` remains a compatibility no-op
 - it also supports `--target <triple>`, `--dir <path>`, `--deploy-ui-nginx [path]`, and `--pi-app`; `--pi-app` only configures the small-screen desktop app on Raspberry Pi and is skipped on regular computers
 - without `--build`, the script prefers existing binaries and only asks you to build/sync `release-bin` when they are missing
 
@@ -540,7 +541,7 @@ Current `build-all.sh` behavior:
 - supports opt-in update discovery with `--check-toolchains` and opt-in pre-build upgrades with `--update-toolchains` through rustup plus the host package manager (`brew`, `apt`, `dnf`, `yum`, `zypper`, `pacman`, or `apk`)
 - runs `scripts/sync_skill_docs.py` before the build starts
 - always builds `release`, auto-discovers workspace binaries, and verifies that the expected outputs exist
-- calls `build-ui-nginx.sh` when `UI/` exists and you did not pass `no-ui`, which means the default "build UI + deploy to nginx" path
+- calls `build-ui-nginx.sh` when `UI/` exists and you did not pass `no-ui`; the script now builds `UI/dist` only and never changes nginx unless deployment is explicitly requested
 - writes host outputs to `target/release` and cross-target outputs to `target/<triple>/release`
 - `cross-build-pi.sh` prepares the Raspberry Pi linker / `cc` / bindgen environment before calling the existing build flow; it skips UI builds by default unless you pass `--with-ui`
 
@@ -567,7 +568,7 @@ Current startup behavior:
 - `start-all.sh` starts services based on the `enabled` flags in `configs/channels/*.toml`
 - when you pass `telegram | whatsapp_web | both | whatsapp_cloud | all`, the script writes the related Telegram / WhatsApp channel `enabled` values back into config files
 - `all` here is a launcher preset, not "force-enable every daemon"; channels such as `webd`, `wechat`, `feishu`, and `lark` still follow their own config files
-- `--with-ui` does not launch a frontend dev server; it requires a valid `UI/dist` build and stops with a hint if the assets are missing or stale
+- `--with-ui` requires a valid `UI/dist` build and lets `clawd` serve it directly on the configured API listener, normally `http://127.0.0.1:8787/`; it does not require nginx
 - `start-all.sh` no longer runs `sync_skill_docs.py` during startup
 
 Equivalent script-based flow is still available:
@@ -628,11 +629,12 @@ rustclaw -key disable rk-xxxx
 
 ## UI, API, and `webd`
 
-The main API still comes from `clawd`, but the current script flow prefers exposing the stack like this:
+The main API still comes from `clawd`. Deployment is split by environment:
 
-- `clawd` serves the internal API
-- `webd` acts as the browser-facing bridge / reverse-proxy layer
-- nginx serves `UI/dist` and proxies `/v1` and `/webd` to `webd`
+- local workstation: `clawd` serves both `UI/dist` and `/v1` directly, without nginx
+- cloud/server: nginx may serve `UI/dist` and proxy `/v1` and `/webd` to `webd`
+- `webd` provides password-login/session bridging when enabled; direct local UI can use a RustClaw key
+- when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
 - The `AI Learning` navigation page reads this bundled README, organizes top-level topics into pages, and renders Mermaid flows with zoom and full-screen controls; switching the UI language selects the matching README.
 
 In the current defaults, `clawd` commonly listens on `0.0.0.0:8787` and `webd` commonly listens on `0.0.0.0:8788`; the deploy scripts derive the nginx upstream from `configs/channels/webd.toml`.
@@ -705,9 +707,10 @@ UI notes:
 
 - source lives in `UI/`
 - built assets live in `UI/dist`
-- `build-ui-nginx.sh` is the main "build UI + copy to nginx + refresh nginx config" path
+- `build-ui-nginx.sh` builds `UI/dist` by default; pass `--deploy` only for an explicit nginx deployment
+- `build-ui-nginx.sh --deploy-if-configured` updates nginx only when a RustClaw nginx site already exists, which keeps local updates free of system configuration
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
-- `install-rustclaw-cmd.sh` also deploys UI/nginx by default unless you pass `--no-deploy-ui`
+- `install-rustclaw-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment
 - the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
 - `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, configuration retention, and third-party import flows
 - service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings
@@ -823,7 +826,7 @@ The Pi App also carries the NNI device-signing helper used by the backend and br
 
 - `build-all.sh` is the most accurate repo-level build entry if you are building from source
 - `install-rustclaw-cmd.sh` is the most convenient operator-facing entry because it can handle both launcher installation and optional UI/nginx deployment
-- if you only want to refresh the static UI site, use `build-ui-nginx.sh` or `deploy-ui-nginx.sh`
+- if you only want to rebuild the local UI, use `build-ui-nginx.sh`; use `deploy-ui-nginx.sh` only for an nginx-hosted server
 - if you are integrating skills, run `python3 scripts/sync_skill_docs.py` explicitly; startup scripts no longer sync skill docs for you
 - many helper and regression scripts live in `scripts/`
 - for the local `ops_closed_loop` regression stack, run `bash scripts/regression_ops_closed_loop.sh`

@@ -147,8 +147,8 @@ export function SignInPage({
                 <>
                   <p className="text-xs leading-relaxed text-white/55">
                     {t(
-                      "可填写 webd 地址端口（例如 http://127.0.0.1:8788）；留空则默认走当前页面地址（常见于 nginx 反代）。",
-                      "You can enter a webd URL/port (for example http://127.0.0.1:8788); if left empty, current page origin is used (common with nginx reverse proxy).",
+                      "域名部署默认使用当前页面地址，不需要填写端口；只有本地直连时才需要填写 webd 地址（例如 http://127.0.0.1:8788）。",
+                      "Domain deployments use the current page address without an extra port. Enter a webd URL only for direct local access (for example http://127.0.0.1:8788).",
                     )}
                   </p>
                   <label className="block space-y-2">
