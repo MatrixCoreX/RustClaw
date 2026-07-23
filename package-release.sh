@@ -166,8 +166,7 @@ rm -f "$STAGE_PROJECT_DIR/configs/config.release.sanitized.toml"
 echo "[5.2/6] Verify required config directories in package..."
 for required_dir in \
   "$STAGE_PROJECT_DIR/configs/channels" \
-  "$STAGE_PROJECT_DIR/configs/i18n" \
-  "$STAGE_PROJECT_DIR/configs/command_intent"; do
+  "$STAGE_PROJECT_DIR/configs/i18n"; do
   if [[ ! -d "$required_dir" ]]; then
     echo "Missing required config directory in package: $required_dir"
     exit 1
