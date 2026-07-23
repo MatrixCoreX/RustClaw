@@ -303,6 +303,127 @@ def main() -> int:
         )
         assert composite_fields_row["assertion"] == "pass"
 
+        redacted_object_subset = write_result(
+            root,
+            "redacted-object-subset.json",
+            result_with_steps(
+                [
+                    {
+                        **capability_step(dry_run=False),
+                        "observed_evidence": {
+                            "items": [
+                                {
+                                    "field": "extra.async_contract",
+                                    "kind": "object",
+                                    "keys": [
+                                        "cancel_token",
+                                        "poll_adapter",
+                                        "provider",
+                                        "status",
+                                    ],
+                                    "key_count": 4,
+                                },
+                                {
+                                    "field": "extra.async_contract.cancel_token",
+                                    "kind": "string",
+                                    "redacted": True,
+                                },
+                                {
+                                    "field": "extra.async_contract.poll_adapter",
+                                    "kind": "object",
+                                    "keys": ["kind"],
+                                    "key_count": 1,
+                                },
+                                {
+                                    "field": "extra.async_contract.poll_adapter.kind",
+                                    "kind": "string",
+                                    "excerpt": "media_job_poll",
+                                },
+                                {
+                                    "field": "extra.async_contract.status",
+                                    "kind": "string",
+                                    "excerpt": "accepted",
+                                },
+                            ]
+                        },
+                    }
+                ],
+                text=(
+                    'async_contract={"poll_adapter":{"kind":"media_job_poll"},'
+                    '"status":"accepted"}'
+                ),
+            ),
+        )
+        redacted_object_subset_row = row_for(
+            redacted_object_subset,
+            "final_observed_field:async_contract",
+            expect="",
+        )
+        assert redacted_object_subset_row["assertion"] == "pass"
+
+        invented_object_field = write_result(
+            root,
+            "invented-object-field.json",
+            result_with_steps(
+                [
+                    {
+                        **capability_step(dry_run=False),
+                        "observed_evidence": {
+                            "items": [
+                                {
+                                    "field": "extra.async_contract",
+                                    "kind": "object",
+                                    "keys": ["status"],
+                                    "key_count": 1,
+                                }
+                            ]
+                        },
+                    }
+                ],
+                text='async_contract={"invented":true}',
+            ),
+        )
+        invented_object_field_row = row_for(
+            invented_object_field,
+            "final_observed_field:async_contract",
+            expect="",
+        )
+        assert invented_object_field_row["assertion"] == "fail"
+
+        mismatched_object_value = write_result(
+            root,
+            "mismatched-object-value.json",
+            result_with_steps(
+                [
+                    {
+                        **capability_step(dry_run=False),
+                        "observed_evidence": {
+                            "items": [
+                                {
+                                    "field": "extra.async_contract",
+                                    "kind": "object",
+                                    "keys": ["status"],
+                                    "key_count": 1,
+                                },
+                                {
+                                    "field": "extra.async_contract.status",
+                                    "kind": "string",
+                                    "excerpt": "accepted",
+                                },
+                            ]
+                        },
+                    }
+                ],
+                text='async_contract={"status":"completed"}',
+            ),
+        )
+        mismatched_object_value_row = row_for(
+            mismatched_object_value,
+            "final_observed_field:async_contract",
+            expect="",
+        )
+        assert mismatched_object_value_row["assertion"] == "fail"
+
         yaml_composite_fields = write_result(
             root,
             "yaml-composite-fields.json",

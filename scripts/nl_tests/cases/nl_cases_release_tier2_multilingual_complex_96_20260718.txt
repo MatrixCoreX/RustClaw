@@ -3,7 +3,8 @@
 # All provider/media/background actions are previews or dry-runs. X API actions are excluded.
 # Format: suite|name|tags|prompt|expect=<substring or semicolon-separated contains: assertions>
 # `final_field:<token>` tags require a top-level final JSON or machine key in user-visible text.
-# `final_observed_field:<token>` also requires its value to match structured task evidence.
+# `final_observed_field:<token>` requires a safe projection of structured task evidence:
+# returned keys must be observed, comparable values must match, and sensitive keys may be omitted.
 
 release_tier2_96|t2_01_direct_reasoning_zh|equiv:t2_01,covers:chat,direct_answer,no_tool,zh;requires_tool_call=false|不使用工具。只用一个数字回答：19 加 23 等于多少？|expect=42
 release_tier2_96|t2_02_missing_locator_zh|equiv:t2_02,covers:clarify,missing_slot,no_tool,zh;allow_clarify;requires_tool_call=false|读取“那个文件”的第一行，但不要猜文件名，也不要调用工具；缺少目标时返回澄清。

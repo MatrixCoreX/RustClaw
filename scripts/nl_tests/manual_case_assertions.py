@@ -235,14 +235,111 @@ def observed_machine_field_matches(
             if observed_leaf not in accepted_fields:
                 continue
             if item.get("kind") == "object" and isinstance(actual_value, dict):
-                keys = item.get("keys")
-                if isinstance(keys, list) and all(key in actual_value for key in keys):
+                observed_field = str(item.get("field") or "")
+                if composite_observed_value_matches(
+                    items,
+                    observed_field,
+                    actual_value,
+                ):
                     return True
             if item.get("kind") == "array" and isinstance(actual_value, list):
                 count = item.get("count")
                 if isinstance(count, int) and not isinstance(count, bool) and count == len(actual_value):
                     return True
     return False
+
+
+def composite_observed_value_matches(
+    items: list[Any],
+    observed_field: str,
+    actual_value: Any,
+) -> bool:
+    exact_items = [
+        item
+        for item in items
+        if isinstance(item, dict) and str(item.get("field") or "") == observed_field
+    ]
+    if isinstance(actual_value, dict):
+        if not actual_value:
+            return False
+        object_items = [item for item in exact_items if item.get("kind") == "object"]
+        if not object_items:
+            return False
+        if not any(
+            isinstance(item.get("keys"), list)
+            and set(actual_value).issubset(set(item["keys"]))
+            for item in object_items
+        ):
+            return False
+        return all(
+            composite_observed_descendant_matches(
+                items,
+                f"{observed_field}.{key}",
+                value,
+            )
+            for key, value in actual_value.items()
+        )
+    if isinstance(actual_value, list):
+        array_items = [item for item in exact_items if item.get("kind") == "array"]
+        return any(
+            isinstance(item.get("count"), int)
+            and not isinstance(item.get("count"), bool)
+            and item["count"] == len(actual_value)
+            for item in array_items
+        )
+    return False
+
+
+def composite_observed_descendant_matches(
+    items: list[Any],
+    observed_field: str,
+    actual_value: Any,
+) -> bool:
+    exact_items = [
+        item
+        for item in items
+        if isinstance(item, dict) and str(item.get("field") or "") == observed_field
+    ]
+    if isinstance(actual_value, dict):
+        object_items = [item for item in exact_items if item.get("kind") == "object"]
+        if object_items and not any(
+            isinstance(item.get("keys"), list)
+            and set(actual_value).issubset(set(item["keys"]))
+            for item in object_items
+        ):
+            return False
+        return all(
+            composite_observed_descendant_matches(
+                items,
+                f"{observed_field}.{key}",
+                value,
+            )
+            for key, value in actual_value.items()
+        )
+    if isinstance(actual_value, list):
+        array_items = [item for item in exact_items if item.get("kind") == "array"]
+        if array_items and not any(
+            isinstance(item.get("count"), int)
+            and not isinstance(item.get("count"), bool)
+            and item["count"] == len(actual_value)
+            for item in array_items
+        ):
+            return False
+        return all(
+            composite_observed_descendant_matches(
+                items,
+                f"{observed_field}[{index}]",
+                value,
+            )
+            for index, value in enumerate(actual_value)
+        )
+    excerpts = [
+        value_to_compare_text(item.get("excerpt", _MISSING))
+        for item in exact_items
+        if item.get("excerpt", _MISSING) is not _MISSING
+    ]
+    excerpts = [excerpt for excerpt in excerpts if excerpt is not None]
+    return not excerpts or value_to_compare_text(actual_value) in excerpts
 
 
 def observed_machine_field_values(
