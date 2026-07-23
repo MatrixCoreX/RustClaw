@@ -887,6 +887,9 @@ pub(crate) fn classify_skill_action_effect(
     args: &Value,
 ) -> ActionEffect {
     let normalized_skill = state.resolve_canonical_skill_name(skill_name);
+    if crate::agent_engine::planner_internal_tool_is_observe_only(&normalized_skill) {
+        return ActionEffect::observe();
+    }
     if let Some(tool) = state.mcp_tool(&normalized_skill) {
         return match tool.policy.effect.as_str() {
             "observe" => ActionEffect::observe(),

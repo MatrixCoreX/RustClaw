@@ -18,6 +18,13 @@ fn checkpoint_for_stage(stage: AgentCheckpointStage) -> crate::task_lifecycle::T
     source.last_publishable_synthesis_output = Some("synthesized-result".to_string());
     source.last_capability_synthesis_output = Some("capability-result".to_string());
     source.loaded_capability_skills.insert("crypto".to_string());
+    source
+        .loaded_mcp_capabilities
+        .insert("mcp.fixture.lookup".to_string());
+    source.active_capability_scopes = vec![
+        "registry.crypto".to_string(),
+        "mcp_capability.mcp.fixture.lookup".to_string(),
+    ];
 
     crate::task_lifecycle::TaskCheckpoint {
         schema_version: 1,
@@ -101,6 +108,17 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
             std::collections::BTreeSet::from(["crypto".to_string()])
         );
         assert_eq!(
+            restored.loaded_mcp_capabilities,
+            std::collections::BTreeSet::from(["mcp.fixture.lookup".to_string()])
+        );
+        assert_eq!(
+            restored.active_capability_scopes,
+            vec![
+                "registry.crypto".to_string(),
+                "mcp_capability.mcp.fixture.lookup".to_string(),
+            ]
+        );
+        assert_eq!(
             restored
                 .successful_action_fingerprints
                 .get("mutation:fingerprint"),
@@ -140,7 +158,7 @@ fn restart_snapshot_is_bounded_and_ignores_unknown_stage_tokens() {
     assert_eq!(
         restored.loaded_capability_skills,
         std::collections::BTreeSet::from([
-            "crypto".to_string(),
+            "extra_group".to_string(),
             "kb".to_string(),
             "rss_fetch".to_string(),
             "weather".to_string(),

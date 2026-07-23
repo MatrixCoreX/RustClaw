@@ -63,14 +63,22 @@ impl<'a> PlannerToolLibrary<'a> {
         build_planner_skill_context(self.state, self.task, loop_state)
     }
 
-    fn tool_spec(&self) -> Result<String, String> {
-        let capability_map =
-            crate::capability_map::build_compact_capability_map_for_task(self.state, self.task);
+    fn tool_spec(&self, loop_state: &LoopState) -> Result<String, String> {
+        let capability_map = crate::capability_map::build_scoped_compact_capability_map_for_task(
+            self.state,
+            self.task,
+            &loop_state.loaded_capability_skills,
+            &loop_state.loaded_mcp_capabilities,
+        );
         Ok(format!("runtime_capability_map_v2\n{capability_map}"))
     }
 
-    fn callable_capability_names(&self) -> Vec<String> {
-        crate::capability_map::planner_callable_capability_names_for_task(self.state, self.task)
+    fn callable_capability_names(&self, loop_state: &LoopState) -> Vec<String> {
+        crate::capability_map::planner_callable_capability_names_for_task_with_mcp(
+            self.state,
+            self.task,
+            &loop_state.loaded_mcp_capabilities,
+        )
     }
 
     fn all_native_capability_groups(
@@ -125,7 +133,7 @@ pub(super) async fn plan_round_actions(
     let planner_tool_library = PlannerToolLibrary::new(state, task);
     let skill_context = planner_tool_library.skill_context(loop_state);
     let skill_playbooks = &skill_context.text;
-    let tool_spec_template = planner_tool_library.tool_spec()?;
+    let tool_spec_template = planner_tool_library.tool_spec(loop_state)?;
     let turn_analysis =
         build_turn_analysis_prompt_block(turn_analysis_for_prompt, boundary_envelope_for_prompt);
     let request_language_hint =
@@ -351,7 +359,7 @@ pub(super) async fn plan_round_actions(
         .task_budget_slice
         .as_ref()
         .map(crate::task_budget_contract::TaskBudgetSlice::provider_call_timeout_seconds);
-    let callable_capability_names = planner_tool_library.callable_capability_names();
+    let callable_capability_names = planner_tool_library.callable_capability_names(loop_state);
     let all_native_capability_groups = planner_tool_library.all_native_capability_groups();
     let native_capability_groups =
         planner_tool_library.disclosed_native_capability_groups(loop_state);
@@ -664,7 +672,7 @@ fn native_planner_request(
 fn native_capability_loader_tool_definition(group_names: &[String]) -> ModelToolDefinition {
     ModelToolDefinition {
         name: super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
-        description: "Load one or two exact registry capability groups for the next planner turn. Use only group tokens advertised in this schema. This tool changes planner context only and performs no external action.".to_string(),
+        description: "runtime_capability_scope_loader_v2; effect=observe; selection=exact_group_token; active_set=bounded_lru; next_action=replan".to_string(),
         input_schema: json!({
             "type": "object",
             "required": ["groups"],

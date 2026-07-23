@@ -82,7 +82,17 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
     let case = "ordinary_mcp_agent_loop";
     let user_request =
         "Look up agent-loop-token with the available fixture tool and report the result.";
-    let planner_response = json!({
+    let discovery_response = json!({
+        "steps": [
+            {
+                "type": "call_capability",
+                "capability": "mcp.catalog.search",
+                "args": {"query": "fixture lookup", "limit": 1}
+            }
+        ]
+    })
+    .to_string();
+    let execution_response = json!({
         "steps": [
             {
                 "type": "call_capability",
@@ -104,8 +114,9 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
     })
     .to_string();
     let responses = vec![
-        recorded_call(1, "single_plan_execution_prompt", &planner_response),
-        recorded_call(2, "observed_answer_fallback_prompt", &finalizer_response),
+        recorded_call(1, "single_plan_execution_prompt", &discovery_response),
+        recorded_call(2, "loop_incremental_plan_prompt", &execution_response),
+        recorded_call(3, "observed_answer_fallback_prompt", &finalizer_response),
     ];
     install_sequence_fixture(&fixture_root.path, case, &responses);
     eprintln!("NL CASE: {user_request}");
@@ -187,7 +198,7 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         "reply={}",
         reply.text
     );
-    assert_eq!(state.task_llm_call_count(&task_id), 2);
+    assert_eq!(state.task_llm_call_count(&task_id), 3);
     let journal = reply.task_journal.as_ref().expect("task journal");
     assert!(journal.task_observations.iter().any(|observation| {
         observation.get("stage").and_then(Value::as_str) == Some("pre_compact")
@@ -216,6 +227,10 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         .find(|observation| {
             observation.get("observation_kind").and_then(Value::as_str)
                 == Some("capability_resolution")
+                && observation
+                    .get("requested_capability")
+                    .and_then(Value::as_str)
+                    == Some("mcp.fixture.lookup")
         })
         .expect("verified capability resolution observation");
     assert_eq!(
@@ -231,11 +246,26 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         "tool:mcp.fixture.lookup"
     );
     assert_eq!(capability_resolution["resolution_stage"], "verify");
+    assert!(journal.task_observations.iter().any(|observation| {
+        observation.get("observation_kind").and_then(Value::as_str)
+            == Some("capability_scope_update")
+            && observation.get("source").and_then(Value::as_str) == Some("mcp_catalog_search")
+            && observation
+                .get("loaded_capabilities")
+                .and_then(Value::as_array)
+                .is_some_and(|capabilities| {
+                    capabilities
+                        .iter()
+                        .any(|capability| capability.as_str() == Some("mcp.fixture.lookup"))
+                })
+    }));
     let mcp_observation = journal
         .task_observations
         .iter()
         .find(|observation| {
             observation.get("owner_layer").and_then(Value::as_str) == Some("mcp_runtime")
+                && observation.get("capability").and_then(Value::as_str)
+                    == Some("mcp.fixture.lookup")
         })
         .expect("MCP task observation");
     assert_eq!(mcp_observation["capability"], "mcp.fixture.lookup");
@@ -284,7 +314,10 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
     let budget_decision = replay
         .events
         .iter()
-        .find(|event| event["event_type"] == "budget_decision")
+        .find(|event| {
+            event["event_type"] == "budget_decision"
+                && event["payload"]["planned_action_count"] == 2
+        })
         .expect("loop budget decision event");
     assert_eq!(budget_decision["payload"]["planned_action_count"], 2);
     assert_eq!(budget_decision["payload"]["executed_action_count"], 2);
@@ -305,7 +338,7 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
             |row| row.get(0),
         )
         .expect("MCP audit count");
-    assert_eq!(audit_count, 1);
+    assert_eq!(audit_count, 2);
 
     runtime.stop().await;
 }

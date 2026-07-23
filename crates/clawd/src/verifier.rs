@@ -1092,7 +1092,7 @@ pub(crate) fn verify_plan(
         } else if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
             let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
             if !visible_skills.contains(&normalized_skill)
-                && !planner_internal_tool_is_visible(&normalized_skill)
+                && !crate::agent_engine::planner_internal_tool_is_visible(&normalized_skill)
                 && state.mcp_tool(&normalized_skill).is_none()
             {
                 issues.push(VerifyIssue {
@@ -1114,6 +1114,7 @@ pub(crate) fn verify_plan(
             }
             if output_contract_requires_policy(input.output_contract)
                 && !output_contract_policy_missing
+                && !crate::agent_engine::planner_internal_tool_is_visible(&normalized_skill)
                 && crate::evidence_policy::ActionRef::from_skill_args(&normalized_skill, &step.args)
                     .is_none()
             {
@@ -1364,10 +1365,6 @@ pub(crate) fn preview_command_permission_decision(
     sudo_allowed: bool,
 ) -> Value {
     permission::preview_command_permission_decision_json(state, command, cwd, sudo_allowed)
-}
-
-fn planner_internal_tool_is_visible(normalized_skill: &str) -> bool {
-    matches!(normalized_skill, "subagent")
 }
 
 #[cfg(test)]

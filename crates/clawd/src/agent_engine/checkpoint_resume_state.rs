@@ -73,6 +73,12 @@ pub(crate) fn build_checkpoint_resume_state(
             .iter()
             .cloned()
             .collect::<Vec<_>>(),
+        "loaded_mcp_capabilities": loop_state
+            .loaded_mcp_capabilities
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        "active_capability_scopes": loop_state.active_capability_scopes,
         "last_output": loop_state
             .last_output
             .as_deref()
@@ -115,11 +121,11 @@ pub(crate) fn restore_checkpoint_resume_state(
         "agent_loop.resume_stage".to_string(),
         stage.as_str().to_string(),
     );
-    loop_state.loaded_capability_skills.extend(
-        bounded_string_array(resume_state, "loaded_capability_skills")
-            .into_iter()
-            .filter(|token| super::capability_discovery::is_capability_group_token(token))
-            .take(super::capability_discovery::MAX_LOADED_GROUPS_PER_TASK),
+    super::capability_discovery::restore_capability_scope_state(
+        loop_state,
+        bounded_string_array(resume_state, "active_capability_scopes"),
+        bounded_string_array(resume_state, "loaded_capability_skills"),
+        bounded_string_array(resume_state, "loaded_mcp_capabilities"),
     );
 
     if let Some(last_output) = bounded_string_field(resume_state, "last_output") {
