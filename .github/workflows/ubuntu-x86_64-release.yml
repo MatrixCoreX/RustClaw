@@ -115,6 +115,11 @@ jobs:
           set -euo pipefail
           ./build-all.sh no-ui
 
+      - name: Setup packaging Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
       - name: Package runtime
         shell: bash
         run: |
