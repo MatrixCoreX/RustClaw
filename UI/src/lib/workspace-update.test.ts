@@ -9,6 +9,7 @@ import {
   formatWorkspaceUpdateStatus,
   formatWorkspaceUpdateStep,
   formatWorkspaceUpdateTime,
+  shouldReloadAfterWorkspaceBuild,
 } from "./workspace-update.ts";
 
 function status(overrides: Partial<WorkspaceUpdateStatus>): WorkspaceUpdateStatus {
@@ -36,6 +37,7 @@ test("formats workspace update steps and statuses", () => {
 test("builds running workspace update view", () => {
   const view = buildWorkspaceUpdateView(status({ status: "running", step: "building_workspace" }), "en");
   assert.equal(view.running, true);
+  assert.equal(view.progressVisible, true);
   assert.equal(view.restarting, false);
   assert.equal(view.progressPercent, 82);
   assert.equal(view.progressActive, true);
@@ -131,6 +133,38 @@ test("recognizes remote up-to-date status", () => {
   assert.equal(view.knownUpToDate, true);
   assert.equal(view.displayStatus, "up_to_date");
   assert.equal(view.notice?.tone, "success");
+  assert.equal(view.progressVisible, false);
+  assert.equal(view.progressPercent, 0);
+});
+
+test("keeps progress hidden for version checks and visible for completed builds", () => {
+  const checked = buildWorkspaceUpdateView(
+    status({ status: "up_to_date", step: "already_latest" }),
+    "en",
+  );
+  assert.equal(checked.progressVisible, false);
+
+  const completed = buildWorkspaceUpdateView(
+    status({
+      status: "succeeded",
+      step: "ui_build_succeeded",
+      mode: "ui_only",
+      started_ts: 1,
+      finished_ts: 2,
+    }),
+    "en",
+  );
+  assert.equal(completed.progressVisible, true);
+  assert.equal(completed.progressPercent, 100);
+});
+
+test("reloads once after compile modes complete but not after release deployment", () => {
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "ui_only", "succeeded"), true);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "full", "up_to_date"), true);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "clawd_only", "idle"), true);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "release_deploy", "up_to_date"), false);
+  assert.equal(shouldReloadAfterWorkspaceBuild(false, "ui_only", "succeeded"), false);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "ui_only", "failed"), false);
 });
 
 test("formats log preview and timestamps", () => {

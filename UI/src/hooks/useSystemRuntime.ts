@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import { sleep } from "../lib/display-format";
-import { formatWorkspaceUpdateApiError } from "../lib/workspace-update";
+import {
+  formatWorkspaceUpdateApiError,
+  shouldReloadAfterWorkspaceBuild,
+} from "../lib/workspace-update";
 import type {
   ApiResponse,
+  ConsolePage,
   HealthResponse,
   PiAppStatusResponse,
   WorkspaceUpdateMode,
@@ -19,6 +23,7 @@ export interface UseSystemRuntimeParams {
   apiBase: string;
   uiAuthReady: boolean;
   isAdminIdentity: boolean;
+  currentPage: ConsolePage;
   fetchHealth: (options?: { silent?: boolean }) => Promise<void>;
   setHealth: (health: HealthResponse) => void;
   setError: (message: string | null) => void;
@@ -36,6 +41,7 @@ export function useSystemRuntime({
   apiBase,
   uiAuthReady,
   isAdminIdentity,
+  currentPage,
   fetchHealth,
   setHealth,
   setError,
@@ -47,6 +53,9 @@ export function useSystemRuntime({
   fetchSkills,
 }: UseSystemRuntimeParams) {
   const workspaceUpdateSilentFailuresRef = useRef(0);
+  const workspaceUpdateWasActiveRef = useRef(false);
+  const workspaceUpdateActiveModeRef = useRef<WorkspaceUpdateMode | string | undefined>(undefined);
+  const workspaceUpdateReloadScheduledRef = useRef(false);
   const [systemRestarting, setSystemRestarting] = useState(false);
   const [systemRestartMessage, setSystemRestartMessage] = useState<string | null>(null);
   const [piAppStatus, setPiAppStatus] = useState<PiAppStatusResponse | null>(null);
@@ -281,11 +290,33 @@ export function useSystemRuntime({
   };
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity) return;
+    if (!uiAuthReady || !isAdminIdentity || currentPage !== "dashboard") return;
     void fetchWorkspaceUpdateStatus(true);
     void fetchPiAppStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, isAdminIdentity]);
+  }, [apiBase, uiAuthReady, isAdminIdentity, currentPage]);
+
+  useEffect(() => {
+    const status = workspaceUpdateStatus?.status;
+    if (status === "running" || status === "restarting") {
+      workspaceUpdateWasActiveRef.current = true;
+      workspaceUpdateActiveModeRef.current = workspaceUpdateStatus?.mode;
+      return;
+    }
+    if (
+      workspaceUpdateReloadScheduledRef.current ||
+      !shouldReloadAfterWorkspaceBuild(
+        workspaceUpdateWasActiveRef.current,
+        workspaceUpdateActiveModeRef.current,
+        status,
+      )
+    ) {
+      return;
+    }
+    workspaceUpdateWasActiveRef.current = false;
+    workspaceUpdateReloadScheduledRef.current = true;
+    window.setTimeout(() => window.location.reload(), 600);
+  }, [workspaceUpdateStatus?.mode, workspaceUpdateStatus?.status]);
 
   useEffect(() => {
     if (!uiAuthReady || !isAdminIdentity) return;

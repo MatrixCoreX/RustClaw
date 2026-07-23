@@ -115,6 +115,10 @@ async fn refresh_workspace_update_versions(
     if matches!(snapshot.status.as_str(), "running" | "restarting") {
         return snapshot;
     }
+    let release_check_due = snapshot
+        .latest_release_checked_ts
+        .map(|checked| current_unix_ts().saturating_sub(checked) >= 300)
+        .unwrap_or(true);
 
     let local_commit =
         run_workspace_update_command("git", &["rev-parse", "--short", "HEAD"], workspace_root, 10)
@@ -123,10 +127,20 @@ async fn refresh_workspace_update_versions(
             .filter(|out| out.exit_code == Some(0))
             .and_then(|out| first_output_line(&out.stdout_tail));
 
-    let fetch_output =
-        run_workspace_update_command("git", &["fetch", "--quiet"], workspace_root, 30)
-            .await
-            .ok();
+    let (fetch_output, latest_release_tag) = tokio::join!(
+        async {
+            run_workspace_update_command("git", &["fetch", "--quiet"], workspace_root, 30)
+                .await
+                .ok()
+        },
+        async {
+            if release_check_due {
+                fetch_latest_release_tag().await
+            } else {
+                None
+            }
+        }
+    );
 
     let remote_commit = run_workspace_update_command(
         "git",
@@ -148,6 +162,12 @@ async fn refresh_workspace_update_versions(
     }
     if let Some(remote_commit) = remote_commit.clone() {
         guard.remote_commit = Some(remote_commit);
+    }
+    if let Some(latest_release_tag) = latest_release_tag {
+        guard.latest_release_tag = Some(latest_release_tag);
+    }
+    if release_check_due {
+        guard.latest_release_checked_ts = Some(current_unix_ts());
     }
     match (local_commit.as_deref(), remote_commit.as_deref()) {
         (Some(local), Some(remote)) if local == remote => {
@@ -175,6 +195,71 @@ async fn refresh_workspace_update_versions(
         }
     }
     guard.clone()
+}
+
+fn release_platform_prefixes() -> Option<(&'static str, &'static str)> {
+    match std::env::consts::ARCH {
+        "aarch64" => Some(("pi-aarch64-", "RustClaw-pi-aarch64-")),
+        "x86_64" => Some(("ubuntu-x86_64-", "RustClaw-ubuntu-x86_64-")),
+        _ => None,
+    }
+}
+
+fn select_latest_compatible_release_tag(
+    releases: &[Value],
+    release_prefix: &str,
+    asset_prefix: &str,
+) -> Option<String> {
+    releases.iter().find_map(|release| {
+        if release.get("draft").and_then(Value::as_bool) == Some(true)
+            || release.get("prerelease").and_then(Value::as_bool) == Some(true)
+        {
+            return None;
+        }
+        let tag = release.get("tag_name")?.as_str()?.trim();
+        if !tag.starts_with(release_prefix) {
+            return None;
+        }
+        let expected_archive = format!("RustClaw-{tag}.tar.gz");
+        let has_compatible_archive = release
+            .get("assets")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|asset| asset.get("name").and_then(Value::as_str))
+            .any(|name| {
+                name.ends_with(".tar.gz")
+                    && (name.starts_with(asset_prefix) || name == expected_archive)
+            });
+        has_compatible_archive.then(|| tag.to_string())
+    })
+}
+
+async fn fetch_latest_release_tag() -> Option<String> {
+    let (release_prefix, asset_prefix) = release_platform_prefixes()?;
+    let repo = std::env::var("RUSTCLAW_RELEASE_REPO")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "MatrixCoreX/RustClaw".to_string());
+    let url = format!(
+        "https://api.github.com/repos/{}/releases?per_page=20",
+        repo.trim()
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .ok()?;
+    let response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header(reqwest::header::USER_AGENT, "RustClaw-version-check")
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?;
+    let releases = response.json::<Vec<Value>>().await.ok()?;
+    select_latest_compatible_release_tag(&releases, release_prefix, asset_prefix)
 }
 
 async fn start_workspace_update(

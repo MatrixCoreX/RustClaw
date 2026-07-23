@@ -711,6 +711,8 @@ UI notes:
 - `build-ui-nginx.sh --deploy-if-configured` updates nginx only when a RustClaw nginx site already exists, which keeps local updates free of system configuration
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-rustclaw-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment
+- the dashboard checks source and compatible GitHub Release versions when an admin opens it; it shows the running package version and latest platform-specific Release tag
+- build progress is only shown for a real build/deploy session, and source/UI/clawd compilation modes refresh the page once after successful completion
 - the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
 - `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, configuration retention, and third-party import flows
 - service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings

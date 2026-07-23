@@ -891,6 +891,7 @@ export default function App() {
     apiBase,
     uiAuthReady,
     isAdminIdentity,
+    currentPage,
     fetchHealth,
     setHealth,
     setError,
@@ -1288,6 +1289,7 @@ export default function App() {
   const workspaceUpdateRunning = workspaceUpdateView.running;
   const workspaceUpdateHasRemoteDiff = workspaceUpdateView.hasRemoteDiff;
   const workspaceUpdateDisplayStatus = workspaceUpdateView.displayStatus;
+  const workspaceUpdateProgressVisible = workspaceUpdateView.progressVisible;
   const workspaceUpdateProgressPercent = workspaceUpdateView.progressPercent;
   const workspaceUpdateProgressActive = workspaceUpdateView.progressActive;
   const workspaceUpdateProgressLabel = workspaceUpdateView.progressLabel;
@@ -1377,6 +1379,7 @@ export default function App() {
               workspaceUpdateMessage={workspaceUpdateMessage}
               workspaceUpdateRestarting={workspaceUpdateRestarting}
               workspaceUpdateDisplayStatus={workspaceUpdateDisplayStatus}
+              workspaceUpdateProgressVisible={workspaceUpdateProgressVisible}
               workspaceUpdateProgressPercent={workspaceUpdateProgressPercent}
               workspaceUpdateProgressActive={workspaceUpdateProgressActive}
               workspaceUpdateProgressLabel={workspaceUpdateProgressLabel}

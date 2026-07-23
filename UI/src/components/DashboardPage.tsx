@@ -43,6 +43,7 @@ export interface DashboardPageProps {
   workspaceUpdateMessage: string | null;
   workspaceUpdateRestarting: boolean;
   workspaceUpdateDisplayStatus: string | undefined;
+  workspaceUpdateProgressVisible: boolean;
   workspaceUpdateProgressPercent: number;
   workspaceUpdateProgressActive: boolean;
   workspaceUpdateProgressLabel: string;
@@ -83,6 +84,7 @@ export function DashboardPage({
   workspaceUpdateMessage,
   workspaceUpdateRestarting,
   workspaceUpdateDisplayStatus,
+  workspaceUpdateProgressVisible,
   workspaceUpdateProgressPercent,
   workspaceUpdateProgressActive,
   workspaceUpdateProgressLabel,
@@ -238,6 +240,20 @@ export function DashboardPage({
                       "Downloads the prebuilt package for this system and architecture, preserves local configuration and data, then updates and restarts without compiling locally.",
                     )}
                   </p>
+                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
+                      <p className="text-white/45">{t("当前版本", "Current version")}</p>
+                      <p className="mt-1 font-mono text-white/85">
+                        {workspaceUpdateStatus?.current_version || "--"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
+                      <p className="text-white/45">{t("最新 Release", "Latest Release")}</p>
+                      <p className="mt-1 break-all font-mono text-white/85">
+                        {workspaceUpdateStatus?.latest_release_tag || "--"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
               <button
@@ -393,29 +409,31 @@ export function DashboardPage({
           </p>
         ) : null}
 
-        <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-medium text-white/85">{t("编译进度", "Build Progress")}</p>
-            <span className="font-mono text-xs text-white/55">{workspaceUpdateProgressPercent}%</span>
+        {workspaceUpdateProgressVisible ? (
+          <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-white/85">{t("编译进度", "Build Progress")}</p>
+              <span className="font-mono text-xs text-white/55">{workspaceUpdateProgressPercent}%</span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+              <div
+                className={`workspace-build-progress-bar h-full rounded-full transition-all duration-500 ${
+                  workspaceUpdateProgressActive ? "workspace-build-progress-bar-active" : ""
+                } ${
+                  workspaceUpdateDisplayStatus === "failed"
+                    ? "bg-red-300"
+                    : workspaceUpdateDisplayStatus === "canceled"
+                      ? "bg-amber-300"
+                      : workspaceUpdateDisplayStatus === "up_to_date" || workspaceUpdateRestarting
+                        ? "bg-emerald-300"
+                        : "bg-sky-300"
+                }`}
+                style={{ width: `${workspaceUpdateProgressPercent}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs leading-5 text-white/50">{workspaceUpdateProgressLabel}</p>
           </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-            <div
-              className={`workspace-build-progress-bar h-full rounded-full transition-all duration-500 ${
-                workspaceUpdateProgressActive ? "workspace-build-progress-bar-active" : ""
-              } ${
-                workspaceUpdateDisplayStatus === "failed"
-                  ? "bg-red-300"
-                  : workspaceUpdateDisplayStatus === "canceled"
-                    ? "bg-amber-300"
-                    : workspaceUpdateDisplayStatus === "up_to_date" || workspaceUpdateRestarting
-                      ? "bg-emerald-300"
-                      : "bg-sky-300"
-              }`}
-              style={{ width: `${workspaceUpdateProgressPercent}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs leading-5 text-white/50">{workspaceUpdateProgressLabel}</p>
-        </div>
+        ) : null}
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
