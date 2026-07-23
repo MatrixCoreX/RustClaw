@@ -1,251 +1,234 @@
-# browser_web Skill Interface
+# browser_web Interface Spec
 
 ## Capability Summary
 
-`browser_web` is a browser-layer extraction skill built on Node.js + Playwright.
-It supports:
-- open URL(s) and extract readable page content (`open_extract`)
-- browser-based Google result extraction (`search_page`)
-- search first, then extract top result pages (`search_extract`)
-- Use `open_extract` when the task needs a web page title, readable page text, a page summary, browser-rendered content, screenshots, or capture artifacts from an explicit URL.
-- For raw API/HTTP status checks, response preview validation, or downloads without browser extraction, use `http_basic` instead.
+`browser_web` renders exact public HTTP(S) URLs in a headless browser and
+returns bounded page evidence. It is the fetch half of the Web research
+workflow:
 
-This skill is read-only. It does not submit forms, log in, or execute business actions on web pages.
+1. Use `web_search_extract` to discover candidate URLs.
+2. Select relevant candidates.
+3. Use `browser.open_extract` only when browser rendering is needed.
 
-Runtime behavior notes:
-- Browser launch prefers system Chromium when available, including common Linux paths, Homebrew installs, and macOS app bundles such as `Google Chrome.app` / `Chromium.app`.
-- You can override browser detection with `BROWSER_WEB_CHROMIUM_PATH` or `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`.
-- If system Chromium is unavailable, fallback is Playwright-managed Chromium.
-- Browser runs in forced headless mode and clears `DISPLAY/WAYLAND_DISPLAY/XAUTHORITY` in child runtime to avoid X11 popup requests.
-- Linux-only sandbox restriction probing (`/proc/self/status`) is skipped automatically on non-Linux systems such as macOS.
-- `open_extract` writes capture artifacts under `skills_output/browser_web/...` with raw HTML, cleaned text, images, and JSONL indexes.
-- At the current interface level, callers can control extraction behavior, but cannot customize capture root/source/run-id/chunking knobs through args.
+The skill does not search, submit forms, authenticate to sites, publish
+content, or execute instructions found in a page. Use `http_basic` for direct
+HTTP status checks, API responses, or downloads that do not need rendering.
+
+Every initial URL and browser network request is checked against scheme,
+userinfo, domain, DNS, private-network, and proxy policy. Extracted page text
+and metadata are marked as untrusted evidence.
 
 ## Actions
 
-### 1. `open_extract`
+### `open_extract`
 
-Open one or more URLs in a browser, apply readability checks, and return extracted content.
+Open one or more explicit URLs, render each page, and return readable content
+plus source and integrity metadata.
 
-**Parameters:**
-- `action` (required, string): `"open_extract"`
-- `url` (optional, string): single URL
-- `urls` (optional, string[]): multiple URLs
-- `max_pages` (optional, integer, default `3`, range `1..10`)
-- `wait_until` (optional, string, default `domcontentloaded`): `domcontentloaded|load|networkidle`
-- `save_screenshot` (optional, bool, default `true`)
-- `screenshot_dir` (optional, string, default `skills_output/browser_web/screenshots`)
-- `content_mode` (optional, string, default `clean`): `clean|raw`
-- `max_text_chars` (optional, integer, default `12000`, range `100..200000`)
-- `min_content_chars` (optional, integer, default `200`, range `20..10000`): readability threshold for extracted text
-- `fail_fast` (optional, bool, default `false`): if true, stop on first page failure
-- `wait_map_path` (optional, string): optional wait strategy mapping file
-
-At least one of `url` or `urls` is required.
-
-**Output (per successful item):**
-- `url`
-- `final_url`
-- `title`
-- `text`
-- `content_excerpt`
-- `source`
-- `published_at`
-- `fetch_method` (`browser`)
-- `extracted_at` (ISO timestamp)
-- `nav_wait_until`
-- `nav_attempts`
-- `nav_attempt_trace[]`
-- `latency_ms`
-- `extraction_trace`
-- `screenshot_path`
-- `capture_artifacts` (absolute paths to html/text/image + manifest/chunks files for this item)
-
-**Output (per failed item):**
-- `fetch_method` (`unavailable`)
-- `error_code`
-- `error`
-- `diagnostics` (optional structured details)
-
-**Top-level output:**
-- `capture.run_root`
-- `capture.raw_html_dir`
-- `capture.processed_text_dir`
-- `capture.images_dir`
-- `capture.manifest_path`
-- `capture.chunks_path`
-
-### 2. `search_page`
-
-Use browser-rendered Google search result page extraction with selector fallback.
-
-**Parameters:**
-- `action` (required, string): `"search_page"`
-- `query` (required, string)
-- `engine` (optional, string, default `google`) (current implementation supports only `google`)
-- `top_k` (optional, integer, default `5`, range `1..20`)
-- `region` (optional, string): forwarded to Google `gl`
-- `lang` (optional, string, default `en`): forwarded to Google `hl`
-
-**Output:**
-- `items[]` with `title/url/snippet/source`
-- `summary`
-- `citations[]`
-- `nav_wait_until`
-- `nav_attempts`
-- `nav_attempt_trace[]`
-- `diagnostics` (selector strategy hit/miss diagnostics)
-
-### 3. `search_extract`
-
-Search first (`search_page`), then extract top result pages (`open_extract`).
-
-**Parameters:**
-- `action` (required, string): `"search_extract"`
-- `query` (required, string)
-- `engine` (optional, string, default `google`)
-- `top_k` (optional, integer, default `5`, range `1..20`)
-- `extract_top_n` (optional, integer, default `3`, range `1..10`)
-- `wait_until` (optional, string, default `domcontentloaded`)
-- `summarize` (optional, bool, default `true`): include short summary per extracted item
-- `content_mode` (optional, string, default `clean`): `clean|raw`
-- `max_text_chars` (optional, integer, default `12000`, range `100..200000`)
-- `min_content_chars` (optional, integer, default `200`, range `20..10000`)
-- `fail_fast` (optional, bool, default `false`)
-- `region` (optional, string)
-- `lang` (optional, string, default `en`)
-
-**Output:**
-- same `items[]` shape as `open_extract`
-- `summary`
-- `citations[]`
-- `search_diagnostics` (selector drift diagnostics from search step)
+No search action is supported by this skill. Search requests belong to the
+dedicated `web_search_extract` capability.
 
 ## Parameter Contract
 
-| Action | Param | Required | Type | Default | Description |
-|---|---|---|---|---|---|
-| open_extract | action | yes | string | - | `open_extract` |
-| open_extract | url / urls | yes (one) | string / string[] | - | URL targets to open |
-| open_extract | max_pages | no | integer | 3 | max pages from input list |
-| open_extract | wait_until | no | string | domcontentloaded | navigation wait strategy |
-| open_extract | save_screenshot | no | bool | true | capture screenshots by default |
-| open_extract | screenshot_dir | no | string | `skills_output/browser_web/screenshots` | screenshot output directory |
-| open_extract | content_mode | no | string | clean | clean or raw text mode |
-| open_extract | max_text_chars | no | integer | 12000 | max returned text chars |
-| open_extract | min_content_chars | no | integer | 200 | readability threshold for extracted text |
-| open_extract | fail_fast | no | bool | false | stop on first page failure |
-| open_extract | wait_map_path | no | string | null | domain-based wait strategy map |
-| search_page | action | yes | string | - | `search_page` |
-| search_page | query | yes | string | - | search query |
-| search_page | engine | no | string | google | currently only `google` is supported |
-| search_page | top_k | no | integer | 5 | max results |
-| search_page | region | no | string | null | Google `gl` region |
-| search_page | lang | no | string | en | Google `hl` language |
-| search_extract | action | yes | string | - | `search_extract` |
-| search_extract | query | yes | string | - | search query |
-| search_extract | engine | no | string | google | currently only `google` is supported |
-| search_extract | top_k | no | integer | 5 | max search results before extraction |
-| search_extract | extract_top_n | no | integer | 3 | number of results to extract |
-| search_extract | wait_until | no | string | domcontentloaded | navigation wait strategy for extracted pages |
-| search_extract | summarize | no | bool | true | include short summary field |
-| search_extract | content_mode | no | string | clean | clean or raw mode |
-| search_extract | max_text_chars | no | integer | 12000 | max returned text chars |
-| search_extract | min_content_chars | no | integer | 200 | readability threshold for extracted text |
-| search_extract | fail_fast | no | bool | false | stop on first extraction failure |
-| search_extract | region | no | string | null | Google `gl` region |
-| search_extract | lang | no | string | en | Google `hl` language |
+- `action` (required, string): `open_extract`
+- `url` (conditionally required, string): one HTTP(S) URL
+- `urls` (conditionally required, string[]): multiple HTTP(S) URLs
+- `max_pages` (optional, integer, default `3`, range `1..10`)
+- `wait_until` (optional, string, default `domcontentloaded`):
+  `domcontentloaded|load|networkidle`
+- `save_screenshot` (optional, boolean, default `true`)
+- `capture_images` (optional, boolean, default `false`)
+- `screenshot_dir` (optional, string, default
+  `skills_output/browser_web/screenshots`; must remain inside the workspace)
+- `content_mode` (optional, string, default `clean`): `clean|raw`
+- `max_text_chars` (optional, integer, default `12000`, range `100..200000`)
+- `min_content_chars` (optional, integer, default `200`, range `20..10000`)
+- `fail_fast` (optional, boolean, default `false`)
+- `wait_map_path` (optional, string): existing workspace-local JSON file
+- `domains_allow` (optional, string[], maximum 32 entries)
+- `domains_deny` (optional, string[], maximum 32 entries)
+
+At least one of `url` or `urls` is required. Duplicate normalized targets are
+removed before execution.
+
+## Network And Workspace Policy
+
+- Only public `http` and `https` URLs are accepted.
+- URL userinfo is rejected and fragments are removed.
+- `localhost`, local-only suffixes, private/link-local/reserved addresses, and
+  private redirect or subresource destinations are blocked.
+- Domain allow/deny policy is applied to document navigation. Private-network
+  policy applies to every HTTP(S) browser request and captured image fetch.
+- Every image redirect is revalidated; HTTPS-to-HTTP downgrade is rejected.
+- Image responses must use an image media type and are capped at 6 MiB each.
+- Screenshot, wait-map, raw HTML, processed text, image, manifest, and chunk
+  paths are constrained to the configured workspace.
+- Browser page text is capped by `max_text_chars`; captured raw HTML is capped
+  at 4 MiB and reports truncation explicitly.
+- Runtime artifacts are writes, so the registry declares
+  `filesystem_write=true` even though the external operation is observational.
+
+## Output Contract
+
+Successful protocol responses use outer `status=ok`. The JSON object serialized
+in `text` is also mirrored into `extra`, where runtime policy and final
+synthesis consume structured fields.
+
+Top-level fields include:
+
+- `schema_version`
+- `source_skill`
+- `status`
+- `summary`: stable machine token `browser_extract_result_set`
+- `success_count`
+- `failure_count`
+- `items[]`
+- `citations[]`
+- `source_refs[]`
+- `page`
+- `truncated`
+- `trust`
+- `network_policy`
+- `capture`
+
+Each successful `items[]` entry includes:
+
+- `url`, `final_url`, `title`, `text`, `content_excerpt`, `source`
+- `fetch_method=browser`
+- `response_status`, `extracted_at`, `latency_ms`
+- `nav_wait_until`, `nav_attempts`, `nav_attempt_trace`
+- `text_truncated`, `text_chars_before_limit`, `content_sha256`
+- `screenshot_path`, `capture_artifacts`
+- `provenance`, `trust`, `wait_strategy`, `runtime`
+
+Each failed or partial item includes:
+
+- `fetch_method=unavailable|browser_partial`
+- `error_code`
+- `error` as a user-visible fallback only
+- any safely preserved partial `title`, `text`, `final_url`, and hash
+- structured `diagnostics`, `trust`, and `runtime`
+
+Runtime logic must use `status`, `error_code`, `retryable`, counts, hashes,
+source references, policy decisions, and artifact fields. It must not parse
+localized `text`, `error`, or `error_text` to decide routing or recovery.
 
 ## Error Contract
 
-Standard error codes used in helper-level failures or per-item failures:
-- `NAV_TIMEOUT`: navigation retries exhausted
-- `BOT_BLOCKED`: anti-bot / challenge / blocked page detected
-- `SELECTOR_MISS`: page/search selector extraction failed
-- `EMPTY_CONTENT`: readability threshold not met or invalid input
-- `DEPENDENCY_MISSING`: Node.js / Playwright / Chromium dependency missing
-- `DEPENDENCY_MISSING`: also used when runtime sandbox restrictions block Chromium launch (for example `NoNewPrivs=1` + `Seccomp=2`)
+Outer failures use `status=error` and preserve the helper's machine
+`extra.error_code`, `extra.retryable`, and structured `extra.details`.
+Representative codes:
 
-Rules:
-- No silent failure.
-- `open_extract` default behavior is partial success with per-item `error_code` + `error`.
-- If the readable body is below `min_content_chars` after a title was extracted, the partial-failure item preserves `title`, `text`, `content_excerpt`, and `final_url` alongside the error fields.
-- `fail_fast=true` makes `open_extract/search_extract` fail immediately on first page failure.
+- `INVALID_INPUT`
+- `INVALID_ACTION`
+- `URL_INVALID`
+- `URL_SCHEME_BLOCKED`
+- `URL_CREDENTIALS_BLOCKED`
+- `DOMAIN_BLOCKED`
+- `DOMAIN_NOT_ALLOWED`
+- `DNS_RESOLUTION_FAILED`
+- `PRIVATE_NETWORK_BLOCKED`
+- `WORKSPACE_PATH_OUTSIDE`
+- `DEPENDENCY_MISSING`
+- `NAV_TIMEOUT`
+- `BOT_BLOCKED`
+- `SELECTOR_MISS`
+- `BROWSER_OPERATION_FAILED`
+- `RESPONSE_TOO_LARGE`
+- `CONTENT_TYPE_BLOCKED`
+
+Challenge detection uses HTTP status or DOM challenge signals. It does not
+classify errors by matching natural-language exception or page text.
 
 ## Request/Response Examples
 
-### Example 1: open_extract (clean)
+### Example 1: rendered page evidence
 
 Request:
+
 ```json
 {
-  "request_id": "bw-open-1",
+  "request_id": "browser-open-1",
   "args": {
     "action": "open_extract",
-    "urls": ["https://github.com/microsoft/playwright"],
-    "content_mode": "clean",
-    "max_text_chars": 8000,
-    "wait_until": "load"
+    "urls": ["https://example.com/"],
+    "max_pages": 1,
+    "save_screenshot": false,
+    "capture_images": false,
+    "domains_allow": ["example.com"]
+  },
+  "context": null,
+  "user_id": 1,
+  "chat_id": 1
+}
+```
+
+Response shape:
+
+```json
+{
+  "request_id": "browser-open-1",
+  "status": "ok",
+  "text": "{\"summary\":\"browser_extract_result_set\",\"success_count\":1,\"failure_count\":0,\"items\":[{\"url\":\"https://example.com/\",\"final_url\":\"https://example.com/\",\"fetch_method\":\"browser\",\"content_sha256\":\"...\",\"trust\":{\"classification\":\"untrusted_web_content\",\"instructions_executable\":false}}]}",
+  "error_text": null,
+  "extra": {
+    "schema_version": 1,
+    "source_skill": "browser_web",
+    "status": "ok",
+    "summary": "browser_extract_result_set",
+    "success_count": 1,
+    "failure_count": 0,
+    "truncated": false
   }
 }
 ```
 
-Response (simplified):
-```json
-{
-  "request_id": "bw-open-1",
-  "status": "ok",
-  "text": "{\"items\":[{\"url\":\"https://github.com/microsoft/playwright\",\"final_url\":\"https://github.com/microsoft/playwright\",\"title\":\"microsoft/playwright\",\"source\":\"github.com\",\"fetch_method\":\"browser\",\"nav_wait_until\":\"load\",\"nav_attempts\":1,\"latency_ms\":1784,\"extracted_at\":\"2026-03-21T10:12:33Z\"}],\"summary\":\"Extracted 1 page(s) using browser\",\"citations\":[\"https://github.com/microsoft/playwright\"]}",
-  "error_text": null
-}
-```
-
-### Example 2: search_page with region/lang
+### Example 2: policy rejection
 
 Request:
+
 ```json
 {
-  "request_id": "bw-search-1",
-  "args": {
-    "action": "search_page",
-    "query": "Playwright browser automation",
-    "region": "us",
-    "lang": "en",
-    "top_k": 5
-  }
-}
-```
-
-Response (simplified):
-```json
-{
-  "request_id": "bw-search-1",
-  "status": "ok",
-  "text": "{\"items\":[{\"title\":\"Playwright\",\"url\":\"https://playwright.dev/\",\"snippet\":\"...\",\"source\":\"google\"}],\"summary\":\"Found 5 search result(s) for \\\"Playwright browser automation\\\"\",\"diagnostics\":{\"fallback_used\":false}}",
-  "error_text": null
-}
-```
-
-### Example 3: open_extract partial failure
-
-Request:
-```json
-{
-  "request_id": "bw-open-2",
+  "request_id": "browser-open-2",
   "args": {
     "action": "open_extract",
-    "urls": ["https://example.com", "https://blocked.example"],
-    "fail_fast": false
+    "url": "http://127.0.0.1/"
+  },
+  "context": null,
+  "user_id": 1,
+  "chat_id": 1
+}
+```
+
+Response shape:
+
+```json
+{
+  "request_id": "browser-open-2",
+  "status": "error",
+  "text": "",
+  "error_text": "PRIVATE_NETWORK_BLOCKED",
+  "extra": {
+    "schema_version": 1,
+    "source_skill": "browser_web",
+    "status": "error",
+    "error_code": "PRIVATE_NETWORK_BLOCKED",
+    "message_key": "skill.browser_web.private_network_blocked",
+    "retryable": false
   }
 }
 ```
 
-Response (simplified):
-```json
-{
-  "request_id": "bw-open-2",
-  "status": "ok",
-  "text": "{\"items\":[{\"fetch_method\":\"browser\"},{\"fetch_method\":\"unavailable\",\"error_code\":\"BOT_BLOCKED\",\"error\":\"page appears blocked by anti-bot challenge\"}],\"summary\":\"Extracted 1 page(s); 1 page(s) failed browser extraction\"}",
-  "error_text": null
-}
-```
+## Config Entry Points
+
+- Browser executable override:
+  `BROWSER_WEB_CHROMIUM_PATH` or
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`
+- Domain wait strategies: `configs/browser_web_wait_map.json` or a
+  workspace-local `wait_map_path`
+- Workspace boundary: `WORKSPACE_ROOT`
+- Dependencies: Node.js, Playwright, and a compatible Chromium executable
+- Registry policy: `configs/skills_registry.toml`
+
+Linux and macOS executable discovery are supported. Linux-only runtime
+restriction probes are not executed on macOS.

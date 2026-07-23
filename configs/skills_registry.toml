@@ -1386,11 +1386,11 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "news/web"
-aliases = ["browser_fetch", "page_extract", "browser_search"]
+aliases = ["browser_fetch", "page_extract"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/browser_web.md"
 output_kind = "text"
-description = "Open and extract explicit web pages through a headless browser, including page title, readable text, page summaries, content excerpts, citations, screenshots, and capture artifacts."
+description = "Open exact public URLs through a policy-guarded headless browser and return bounded untrusted page evidence, citations, screenshots, and capture artifacts."
 semantic_tags = ["browser.open_extract", "browser.open_url", "webpage.title", "webpage.readable_text", "webpage.summary", "browser_page_extract", "url_content_summary"]
 capabilities = ["net", "fs.write"]
 risk_level = "low"
@@ -1401,12 +1401,10 @@ required_bins = ["node"]
 optional_bins = ["chromium", "google-chrome", "playwright"]
 platform_notes = ["Uses Node.js helper and headless Chromium; Linux sandbox probing is skipped on macOS."]
 planner_capabilities = [
-  { name = "browser.open_extract", action = "open_extract", effect = "observe", required = ["url|urls"], optional = ["max_pages", "wait_until", "save_screenshot", "content_mode", "max_text_chars", "min_content_chars"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "browser_job_poll" },
-  { name = "browser.search_page", action = "search_page", effect = "observe", required = ["query"], optional = ["max_results"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "browser_job_poll" },
-  { name = "browser.search_extract", action = "search_extract", effect = "observe", required = ["query"], optional = ["max_results", "max_pages", "content_mode", "max_text_chars"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "browser_job_poll" },
+  { name = "browser.open_extract", action = "open_extract", effect = "observe", required = ["url|urls"], optional = ["max_pages", "wait_until", "save_screenshot", "capture_images", "screenshot_dir", "content_mode", "max_text_chars", "min_content_chars", "fail_fast", "wait_map_path", "domains_allow", "domains_deny"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "browser_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = true, external_publish = false, credential_access = false },
 ]
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["open_extract", "search_page", "search_extract"] }, url = { type = "string" }, urls = { type = "array", items = { type = "string" } }, query = { type = "string" }, max_pages = { type = "integer" }, max_results = { type = "integer" }, wait_until = { type = "string" }, save_screenshot = { type = "boolean" }, screenshot_dir = { type = "string" }, content_mode = { type = "string" }, max_text_chars = { type = "integer" }, min_content_chars = { type = "integer" }, fail_fast = { type = "boolean" }, wait_map_path = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["open_extract"] }, url = { type = "string" }, urls = { type = "array", items = { type = "string" } }, max_pages = { type = "integer", minimum = 1, maximum = 10 }, wait_until = { type = "string", enum = ["domcontentloaded", "load", "networkidle"] }, save_screenshot = { type = "boolean" }, capture_images = { type = "boolean" }, screenshot_dir = { type = "string" }, content_mode = { type = "string", enum = ["clean", "raw"] }, max_text_chars = { type = "integer", minimum = 100, maximum = 200000 }, min_content_chars = { type = "integer", minimum = 20, maximum = 10000 }, fail_fast = { type = "boolean" }, wait_map_path = { type = "string" }, domains_allow = { type = "array", items = { type = "string" } }, domains_deny = { type = "array", items = { type = "string" } } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 [[skills]]
 name = "photo_organize"
 enabled = true

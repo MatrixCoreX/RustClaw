@@ -69,17 +69,6 @@ function summarizeOpenExtract(outcome) {
     };
 }
 
-function summarizeSearch(outcome) {
-    if (!outcome.ok) {
-        return { ok: false, total: 0 };
-    }
-    const items = outcome.result.items || [];
-    return {
-        ok: true,
-        total: items.length,
-    };
-}
-
 async function main() {
     const content = await fs.readFile(CASES, 'utf8');
     const cases = JSON.parse(content);
@@ -97,27 +86,8 @@ async function main() {
     const openOutcome = await runHelper(openPayload);
     const openStats = summarizeOpenExtract(openOutcome);
 
-    const searchStats = [];
-    for (const q of cases.search_queries || []) {
-        const payload = {
-            action: 'searchPage',
-            query: q.query,
-            engine: 'google',
-            topK: 5,
-            region: q.region || null,
-            lang: q.lang || 'en',
-        };
-        const outcome = await runHelper(payload);
-        searchStats.push({
-            query: q.query,
-            ...summarizeSearch(outcome),
-            error: outcome.ok ? null : outcome.error,
-        });
-    }
-
     const successRate = openStats.total > 0 ? openStats.success / openStats.total : 0;
-    const allSearchNonEmpty = searchStats.every((s) => s.ok && s.total > 0);
-    const pass = openStats.ok && successRate >= 0.6 && allSearchNonEmpty;
+    const pass = openStats.ok && successRate >= 0.6;
 
     const report = {
         pass,
@@ -126,7 +96,6 @@ async function main() {
             ...openStats,
             success_rate: successRate,
         },
-        search_page: searchStats,
     };
 
     console.log(JSON.stringify(report, null, 2));
