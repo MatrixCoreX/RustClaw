@@ -34,4 +34,4 @@ Archive 同时上传为 workflow artifact 和 GitHub Release asset。
 
 更新包提供二进制、脚本、prompt、migration 和 `UI/dist`，不得用包内默认值覆盖线上 secret 或 channel 设置。
 
-Admin Release 更新路径验证 checksum、保留 runtime 目录、替换预编译文件并重启 `clawd`。主机已有 RustClaw nginx site 时，只复制包内 `UI/dist`，不重新构建；没有 nginx site 的本地安装不会被配置 nginx。
+Admin Release 更新路径验证 checksum、保留 runtime 目录，并通过原子替换逐个更新预编译二进制，避免覆盖正在运行的 `clawd` 时出现 `Text file busy`，随后重启 `clawd`。主机已有 RustClaw nginx site 时，只复制包内 `UI/dist`，不重新构建；没有 nginx site 的本地安装不会被配置 nginx。
