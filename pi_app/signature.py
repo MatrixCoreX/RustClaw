@@ -98,18 +98,22 @@ _maybe_reexec_with_runtime_env(_CRYPTOAUTHLIB_ROOT)
 _bootstrap_python_package(_CRYPTOAUTHLIB_ROOT)
 _bootstrap_runtime_env(_CRYPTOAUTHLIB_ROOT)
 
-from cryptoauthlib import (
-    ATCADeviceType,
-    ATCAIfaceCfg,
-    ATCAIfaceType,
-    Status,
-    atcab_get_pubkey,
-    atcab_init,
-    atcab_release,
-    atcab_sign,
-    get_cryptoauthlib,
-    load_cryptoauthlib,
-)
+_CRYPTOAUTHLIB_IMPORT_ERROR = None
+try:
+    from cryptoauthlib import (
+        ATCADeviceType,
+        ATCAIfaceCfg,
+        ATCAIfaceType,
+        Status,
+        atcab_get_pubkey,
+        atcab_init,
+        atcab_release,
+        atcab_sign,
+        get_cryptoauthlib,
+        load_cryptoauthlib,
+    )
+except Exception as exc:
+    _CRYPTOAUTHLIB_IMPORT_ERROR = exc
 
 
 def hexs(data):
@@ -171,6 +175,8 @@ def _configure_tng_ctypes():
 
 
 def build_config():
+    if _CRYPTOAUTHLIB_IMPORT_ERROR is not None:
+        raise RuntimeError(f"cryptoauthlib unavailable: {_CRYPTOAUTHLIB_IMPORT_ERROR}")
     lib_path = _load_library()
     cfg = ATCAIfaceCfg()
     cfg.iface_type = int(ATCAIfaceType.ATCA_I2C_IFACE)
@@ -318,9 +324,11 @@ def sign_challenge(cfg, lib_path, challenge):
 def main():
     action = (sys.argv[1] if len(sys.argv) > 1 else "pubkey").strip().lower()
     action_arg = sys.argv[2] if len(sys.argv) > 2 else None
-    cfg, lib_path = build_config()
+    cfg = None
+    lib_path = None
     initialized = False
     try:
+        cfg, lib_path = build_config()
         status = atcab_init(cfg)
         if status != Status.ATCA_SUCCESS:
             raise RuntimeError(
@@ -351,7 +359,12 @@ def main():
         print(json.dumps({"ok": True, "action": action, **payload}))
         return 0
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}))
+        error_code = (
+            "cryptoauthlib_unavailable"
+            if _CRYPTOAUTHLIB_IMPORT_ERROR is not None
+            else "signature_chip_unavailable"
+        )
+        print(json.dumps({"ok": False, "error_code": error_code, "error": str(exc)}))
         return 1
     finally:
         if initialized:

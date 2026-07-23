@@ -455,6 +455,12 @@ pub struct WebdConfig {
     /// 会话有效期（秒）。
     #[serde(default = "default_webd_session_ttl_seconds")]
     pub session_ttl_seconds: u64,
+    /// 同一客户端 IP 与用户名组合连续登录失败多少次后临时锁定。
+    #[serde(default = "default_webd_login_failure_limit")]
+    pub login_failure_limit: u32,
+    /// 登录失败达到阈值后的锁定秒数。
+    #[serde(default = "default_webd_login_lockout_seconds")]
+    pub login_lockout_seconds: u64,
 }
 
 impl Default for WebdConfig {
@@ -469,6 +475,8 @@ impl Default for WebdConfig {
             max_incoming_body_bytes: default_webd_max_incoming_body_bytes(),
             session_cookie_name: default_webd_session_cookie_name(),
             session_ttl_seconds: default_webd_session_ttl_seconds(),
+            login_failure_limit: default_webd_login_failure_limit(),
+            login_lockout_seconds: default_webd_login_lockout_seconds(),
         }
     }
 }
@@ -479,6 +487,14 @@ fn default_webd_session_cookie_name() -> String {
 
 fn default_webd_session_ttl_seconds() -> u64 {
     86400
+}
+
+fn default_webd_login_failure_limit() -> u32 {
+    6
+}
+
+fn default_webd_login_lockout_seconds() -> u64 {
+    15 * 60
 }
 
 fn default_webd_max_incoming_body_bytes() -> usize {

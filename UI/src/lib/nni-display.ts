@@ -91,14 +91,14 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
     case "nni.device_status.signature_chip_missing":
       return copy(
         lang,
-        "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
-        "No device signature chip was detected. RustClaw can still run, but NNI device signing is unavailable.",
+        "未检测到 MatrixAI 设备签名芯片。此设备仍可使用 RustClaw 的其他功能。",
+        "No MatrixAI device signature chip was detected. This device can still use other RustClaw features.",
       );
     case "nni.device_status.signature_chip_missing.next_step":
       return copy(
         lang,
-        "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
-        "If this device has no signature chip, ignore signing actions here; if it should have one, check I2C wiring, address, and cryptoauthlib.",
+        "参与网络原生智能需要购买并使用带设备签名芯片的 MatrixAI 硬件设备。",
+        "Participation in Network Native Intelligence requires a MatrixAI hardware device with a device signature chip.",
       );
     case "nni.device_action.completed":
       return copy(lang, "NNI 设备签名操作完成。", "NNI device signing action completed.");

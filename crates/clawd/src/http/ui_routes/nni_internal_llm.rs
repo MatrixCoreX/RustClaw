@@ -295,7 +295,7 @@ async fn nni_device_status(
                     "helper_available": true,
                     "signature_chip_present": false,
                     "exit_code": output.exit_code,
-                    "error_present": !reason.trim().is_empty(),
+                    "diagnostic": reason,
                 }),
             );
             (
@@ -311,7 +311,6 @@ async fn nni_device_status(
                         "next_step_key": "nni.device_status.signature_chip_missing.next_step",
                         "helper_path": script_path.to_string_lossy(),
                         "supported_actions": supported_actions,
-                        "error": reason,
                         "exit_code": output.exit_code,
                     })),
                     error: None,
@@ -326,7 +325,7 @@ async fn nni_device_status(
                     "status": "signature_chip_missing",
                     "helper_available": true,
                     "signature_chip_present": false,
-                    "error": err,
+                    "diagnostic": err,
                 }),
             );
             (
@@ -342,7 +341,6 @@ async fn nni_device_status(
                         "next_step_key": "nni.device_status.signature_chip_missing.next_step",
                         "helper_path": script_path.to_string_lossy(),
                         "supported_actions": supported_actions,
-                        "error": err,
                     })),
                     error: None,
                 }),
@@ -449,7 +447,7 @@ async fn nni_device_action(
                     "status": "signature_chip_missing",
                     "signature_chip_present": false,
                     "exit_code": output.exit_code,
-                    "error_present": !reason.trim().is_empty(),
+                    "diagnostic": reason,
                 }),
             );
             (
@@ -463,7 +461,7 @@ async fn nni_device_action(
                         "message_key": "nni.device_action.signature_chip_missing",
                         "exit_code": output.exit_code,
                     })),
-                    error: Some(reason),
+                    error: Some("nni_signature_chip_missing".to_string()),
                 }),
             )
         }
@@ -475,7 +473,7 @@ async fn nni_device_action(
                     "action": action,
                     "status": "signature_chip_missing",
                     "signature_chip_present": false,
-                    "error": err,
+                    "diagnostic": err,
                 }),
             );
             (
@@ -488,7 +486,7 @@ async fn nni_device_action(
                         "status": "signature_chip_missing",
                         "message_key": "nni.device_action.signature_chip_missing",
                     })),
-                    error: Some(err),
+                    error: Some("nni_signature_chip_missing".to_string()),
                 }),
             )
         }

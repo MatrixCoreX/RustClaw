@@ -156,6 +156,13 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
                 }
               : prev,
           );
+          throw new Error(
+            nniDeviceMessage(actionData, lang) ||
+              t(
+                "未检测到 MatrixAI 设备签名芯片，无法完成本次操作。",
+                "No MatrixAI device signature chip was detected, so this action cannot be completed.",
+              ),
+          );
         }
         throw new Error(body.error || `NNI 操作失败 (${res.status})`);
       }
