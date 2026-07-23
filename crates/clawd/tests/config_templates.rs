@@ -377,6 +377,32 @@ fn registry_covers_all_required_builtins() {
     }
 }
 
+#[test]
+fn registry_owns_the_fixed_on_skill_floor() {
+    let expected = claw_core::config::core_skills_always_enabled()
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect::<BTreeSet<_>>();
+    let registry_paths = [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ];
+
+    for path in registry_paths.iter() {
+        let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+        let actual = registry
+            .fixed_on_names()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            actual,
+            expected,
+            "{}: fixed-on skill policy must match the no-registry fallback",
+            path.display()
+        );
+    }
+}
+
 /// §P4.2：仓内两份 registry 必须满足 capability ↔ shape 一致性
 /// （exec.sudo 必须 confirm + high；fs.write/exec 不允许显式 side_effect=false）。
 /// 这里在 CI 跑一遍，确保 dev 改 registry 时漏配立刻红。

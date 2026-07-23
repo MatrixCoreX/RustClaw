@@ -493,6 +493,9 @@ pub(crate) fn build_skill_views(
     } else {
         None
     };
+    let fixed_on_skills = fixed_on_skill_names(registry.as_deref())
+        .into_iter()
+        .collect::<HashSet<_>>();
 
     let explicitly_disabled: HashSet<String> = skill_switches
         .iter()
@@ -524,22 +527,17 @@ pub(crate) fn build_skill_views(
             enabled.remove(&canonical);
         }
     }
-    for s in claw_core::config::core_skills_always_enabled() {
-        let c = crate::canonical_skill_name(s).to_string();
-        if !explicitly_disabled.contains(&c) {
-            enabled.insert(c);
+    for skill in &fixed_on_skills {
+        if !explicitly_disabled.contains(skill) {
+            enabled.insert(skill.clone());
         }
     }
-    let always_enabled = claw_core::config::core_skills_always_enabled()
-        .iter()
-        .map(|skill| crate::canonical_skill_name(skill).to_string())
-        .collect::<HashSet<_>>();
     for skill in uninstalled_skills {
         let canonical = registry
             .as_ref()
             .and_then(|registry| registry.resolve_canonical(skill).map(String::from))
             .unwrap_or_else(|| crate::canonical_skill_name(skill).to_string());
-        if !always_enabled.contains(&canonical) {
+        if !fixed_on_skills.contains(&canonical) {
             enabled.remove(&canonical);
         }
     }
@@ -560,6 +558,19 @@ pub(crate) fn build_skill_views(
         execution_skills: enabled,
         planner_visible,
     })
+}
+
+fn fixed_on_skill_names(registry: Option<&SkillsRegistry>) -> Vec<String> {
+    let registry_names = registry
+        .map(SkillsRegistry::fixed_on_names)
+        .unwrap_or_default();
+    if !registry_names.is_empty() {
+        return registry_names;
+    }
+    claw_core::config::core_skills_always_enabled()
+        .iter()
+        .map(|skill| crate::canonical_skill_name(skill).to_string())
+        .collect()
 }
 
 pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsResult, String> {
@@ -1424,6 +1435,16 @@ impl AppState {
 
     pub(crate) fn get_skills_list(&self) -> Arc<HashSet<String>> {
         self.snapshot().skills_list.clone()
+    }
+
+    pub(crate) fn fixed_on_skill_names(&self) -> Vec<String> {
+        let registry = self.get_skills_registry();
+        fixed_on_skill_names(registry.as_deref())
+    }
+
+    pub(crate) fn skill_is_fixed_on(&self, name: &str) -> bool {
+        let canonical = self.resolve_canonical_skill_name(name);
+        self.fixed_on_skill_names().contains(&canonical)
     }
 
     pub(crate) fn planner_visible_skills_for_task(&self, task: &ClaimedTask) -> Vec<String> {
