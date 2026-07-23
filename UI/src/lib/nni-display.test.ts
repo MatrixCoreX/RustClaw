@@ -130,7 +130,7 @@ test("renders NNI device messages from machine keys", () => {
       },
       "zh",
     ),
-    "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
+    "参与网络原生智能需要购买并使用带设备签名芯片的 MatrixAI 硬件设备。",
   );
   assert.equal(
     nniDeviceMessage(

@@ -348,7 +348,6 @@ export function NniPage({
           >
             <p className="font-medium">{nniStatusMessage}</p>
             {nniStatusNextStep ? <p className="mt-1 text-sm opacity-80">{nniStatusNextStep}</p> : null}
-            {nniStatus?.error ? <p className="mt-2 break-words font-mono text-xs opacity-75">{nniStatus.error}</p> : null}
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">

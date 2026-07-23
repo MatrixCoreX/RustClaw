@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -33,12 +33,31 @@ struct AppState {
     cookie_name: String,
     session_ttl_secs: u64,
     sessions: Arc<Mutex<HashMap<String, SessionEntry>>>,
+    login_failure_limit: u32,
+    login_lockout_secs: u64,
+    login_attempts: Arc<Mutex<HashMap<LoginAttemptKey, LoginAttemptEntry>>>,
 }
 
 struct SessionEntry {
     user_key: String,
     expires_unix: u64,
 }
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct LoginAttemptKey {
+    client_ip: IpAddr,
+    username: String,
+}
+
+#[derive(Clone, Debug)]
+struct LoginAttemptEntry {
+    consecutive_failures: u32,
+    locked_until_unix: u64,
+    last_failure_unix: u64,
+}
+
+const LOGIN_ATTEMPT_RETENTION_SECS: u64 = 60 * 60;
+const MAX_LOGIN_ATTEMPT_KEYS: usize = 10_000;
 
 fn now_unix_secs() -> u64 {
     SystemTime::now()
@@ -87,6 +106,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let sessions = Arc::new(Mutex::new(HashMap::<String, SessionEntry>::new()));
+    let login_attempts = Arc::new(Mutex::new(
+        HashMap::<LoginAttemptKey, LoginAttemptEntry>::new(),
+    ));
     let state = AppState {
         upstream,
         client,
@@ -96,6 +118,9 @@ async fn main() -> anyhow::Result<()> {
         cookie_name: config.webd.session_cookie_name.clone(),
         session_ttl_secs: config.webd.session_ttl_seconds.max(60),
         sessions,
+        login_failure_limit: config.webd.login_failure_limit.max(1),
+        login_lockout_secs: config.webd.login_lockout_seconds.max(1),
+        login_attempts,
     };
 
     let listen = config.webd.listen.trim().to_string();
@@ -139,10 +164,19 @@ struct WebdLoginBody {
 
 async fn webd_login(
     State(state): State<AppState>,
+    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<WebdLoginBody>,
 ) -> impl IntoResponse {
     let origin = cors_allow_origin_from_headers(&headers);
+    let attempt_key = LoginAttemptKey {
+        client_ip: login_client_ip(&headers, client_addr, state.forward_x_forwarded),
+        username: body.username.trim().to_lowercase(),
+    };
+    let now = now_unix_secs();
+    if let Some(retry_after) = login_retry_after(&state, &attempt_key, now) {
+        return login_locked_response(retry_after, origin.as_ref());
+    }
     let url = format!(
         "{}/v1/internal/webd/verify-login",
         state.upstream.trim_end_matches('/')
@@ -199,10 +233,27 @@ async fn webd_login(
         }
     };
     if !val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if status == StatusCode::UNAUTHORIZED {
+            if let Some(retry_after) = record_login_failure(&state, attempt_key, now_unix_secs()) {
+                return login_locked_response(retry_after, origin.as_ref());
+            }
+            return with_cors(
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "ok": false,
+                        "error": "invalid_credentials",
+                        "error_code": "invalid_credentials"
+                    })),
+                )
+                    .into_response(),
+                origin.as_ref(),
+            );
+        }
         let err = val
             .get("error")
             .and_then(|v| v.as_str())
-            .unwrap_or("login failed");
+            .unwrap_or("login_failed");
         return with_cors(
             (status, Json(json!({ "ok": false, "error": err }))).into_response(),
             origin.as_ref(),
@@ -225,6 +276,7 @@ async fn webd_login(
             );
         }
     };
+    clear_login_failures(&state, &attempt_key);
     let sid = Uuid::new_v4().to_string();
     let expires = now_unix_secs() + state.session_ttl_secs;
     {
@@ -250,6 +302,97 @@ async fn webd_login(
         res.headers_mut().insert(header::SET_COOKIE, v);
     }
     with_cors(res, origin.as_ref())
+}
+
+fn login_client_ip(
+    headers: &HeaderMap,
+    client_addr: SocketAddr,
+    trust_forwarded_from_loopback: bool,
+) -> IpAddr {
+    if !trust_forwarded_from_loopback || !client_addr.ip().is_loopback() {
+        return client_addr.ip();
+    }
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .and_then(|value| value.parse::<IpAddr>().ok())
+        .unwrap_or_else(|| client_addr.ip())
+}
+
+fn prune_login_attempts(attempts: &mut HashMap<LoginAttemptKey, LoginAttemptEntry>, now: u64) {
+    attempts.retain(|_, entry| {
+        entry.locked_until_unix > now
+            || now.saturating_sub(entry.last_failure_unix) <= LOGIN_ATTEMPT_RETENTION_SECS
+    });
+}
+
+fn login_retry_after(state: &AppState, key: &LoginAttemptKey, now: u64) -> Option<u64> {
+    let mut attempts = state.login_attempts.lock().expect("login attempts mutex");
+    prune_login_attempts(&mut attempts, now);
+    let entry = attempts.get(key)?;
+    if entry.locked_until_unix > now {
+        return Some(entry.locked_until_unix - now);
+    }
+    if entry.locked_until_unix != 0 {
+        attempts.remove(key);
+    }
+    None
+}
+
+fn record_login_failure(state: &AppState, key: LoginAttemptKey, now: u64) -> Option<u64> {
+    let mut attempts = state.login_attempts.lock().expect("login attempts mutex");
+    prune_login_attempts(&mut attempts, now);
+    if attempts.len() >= MAX_LOGIN_ATTEMPT_KEYS && !attempts.contains_key(&key) {
+        if let Some(oldest_key) = attempts
+            .iter()
+            .filter(|(_, entry)| entry.locked_until_unix <= now)
+            .min_by_key(|(_, entry)| entry.last_failure_unix)
+            .map(|(key, _)| key.clone())
+        {
+            attempts.remove(&oldest_key);
+        } else {
+            return Some(state.login_lockout_secs);
+        }
+    }
+    let entry = attempts.entry(key).or_insert(LoginAttemptEntry {
+        consecutive_failures: 0,
+        locked_until_unix: 0,
+        last_failure_unix: now,
+    });
+    entry.last_failure_unix = now;
+    entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
+    if entry.consecutive_failures < state.login_failure_limit {
+        return None;
+    }
+    entry.locked_until_unix = now.saturating_add(state.login_lockout_secs);
+    Some(state.login_lockout_secs)
+}
+
+fn clear_login_failures(state: &AppState, key: &LoginAttemptKey) {
+    state
+        .login_attempts
+        .lock()
+        .expect("login attempts mutex")
+        .remove(key);
+}
+
+fn login_locked_response(retry_after: u64, origin: Option<&HeaderValue>) -> Response {
+    let mut response = (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(json!({
+            "ok": false,
+            "error": "login_temporarily_locked",
+            "error_code": "login_temporarily_locked",
+            "data": { "retry_after_seconds": retry_after }
+        })),
+    )
+        .into_response();
+    if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
+        response.headers_mut().insert(header::RETRY_AFTER, value);
+    }
+    with_cors(response, origin)
 }
 
 async fn webd_logout(State(state): State<AppState>, req: Request) -> impl IntoResponse {

@@ -801,8 +801,25 @@ export default function App() {
         body: JSON.stringify({ username: u, password: webdPassword }),
       });
       if (authEpoch !== authFlowEpochRef.current) return;
-      const body = (await res.json()) as { ok?: boolean; error?: string };
+      const body = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        error_code?: string;
+        data?: { retry_after_seconds?: number };
+      };
       if (!res.ok || !body.ok) {
+        if (body.error_code === "invalid_credentials") {
+          throw new Error(t("用户名或密码不正确", "Invalid username or password"));
+        }
+        if (body.error_code === "login_temporarily_locked") {
+          const minutes = Math.max(1, Math.ceil((body.data?.retry_after_seconds ?? 900) / 60));
+          throw new Error(
+            t(
+              `登录尝试次数过多，请在 ${minutes} 分钟后重试`,
+              `Too many sign-in attempts. Try again in ${minutes} minutes.`,
+            ),
+          );
+        }
         throw new Error(body.error ?? `${t("登录失败", "Sign-in failed")} (${res.status})`);
       }
       setBaseUrl(webdBase);
