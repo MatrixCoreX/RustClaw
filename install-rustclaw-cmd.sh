@@ -113,6 +113,16 @@ nginx_site_link_path() {
   fi
 }
 
+nginx_include_dir_for_conf() {
+  local conf_path="$1"
+  local site_link="$2"
+  if [[ "$conf_path" == /etc/nginx/sites-available/* ]] && [[ -n "$site_link" ]]; then
+    printf '%s\n' "/etc/nginx/sites-enabled"
+    return
+  fi
+  printf '%s\n' "$(dirname "$conf_path")"
+}
+
 is_raspberry_pi() {
   if [[ "${RUSTCLAW_FORCE_PI_APP:-0}" == "1" ]]; then
     return 0
@@ -1109,7 +1119,8 @@ if [[ -n "$DEPLOY_UI_NGINX" ]]; then
   fi
   ensure_deployed_ui_readable "$DEPLOY_UI_NGINX"
   ensure_nginx
-  ensure_nginx_site_include "$NGINX_MAIN_CONF" "$NGINX_CONF_DIR"
+  NGINX_INCLUDE_DIR="$(nginx_include_dir_for_conf "$NGINX_CONF" "$NGINX_SITE_LINK")"
+  ensure_nginx_site_include "$NGINX_MAIN_CONF" "$NGINX_INCLUDE_DIR"
   PROXY_UPSTREAM="$(resolve_webd_proxy_upstream)"
   NGINX_CONFIG_CHANGED=0
   if nginx_ui_config_matches "$NGINX_CONF" "$DEPLOY_UI_NGINX" "$PROXY_UPSTREAM"; then
