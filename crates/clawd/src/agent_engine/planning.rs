@@ -629,7 +629,7 @@ fn native_planner_request(
     }
     tools.push(ModelToolDefinition {
         name: NATIVE_RESPOND_TOOL.to_string(),
-        description: "Submit the final user-visible response. Use free_text for prose/scalars, list for exact items, or object for exact named fields. Object field values are JSON encoded in value_json and are validated before delivery.".to_string(),
+        description: "Submit the final user-visible response after required observations. This tool formats answers; it does not execute or simulate runtime capabilities. Runtime-owned provider/config/permission, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. Use free_text for prose/scalars, list for exact items, or object for exact named fields. Object field values are JSON encoded in value_json and are validated before delivery.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": [

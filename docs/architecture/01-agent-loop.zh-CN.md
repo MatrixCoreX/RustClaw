@@ -43,6 +43,8 @@ flowchart TD
 
 终止 `respond` 合同支持模型生成的自由文本、精确列表，以及由 runtime 在物化前
 校验 JSON 值的精确命名字段对象。这样既保留严格机器交付，也不需要在 runtime
-维护多语言固定回复模板。
+维护多语言固定回复模板。它只是格式化边界，不是能力模拟器；runtime 拥有的
+provider、dry-run、artifact/job、checkpoint、diff、verification、repair 和
+rewind 字段必须先有对应 capability observation。
 
 `kind=run_skill` 是明确分开的 API 路径。调用方已经给出技能与参数，因此该路径绕过 planner 选择和 agent loop 轮次决策，但继续使用鉴权、权限与变更检查、任务持久化、生命周期控制和共享技能协议。

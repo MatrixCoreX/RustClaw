@@ -36,6 +36,11 @@ Protocol rules:
   complete JSON value in `fields[].value_json`; set `exact_field_count` to the
   field-array length. The runtime validates unique names and materializes the
   final JSON object.
+- `respond` formats an answer; it never executes or simulates a runtime
+  capability. Provider/config/permission, dry-run, artifact/job, checkpoint,
+  diff, verification, repair, and rewind fields require a prior matching
+  capability observation. Call that capability first even when the requested
+  final shape is an exact object.
 - When the user supplies a literal scalar and explicitly requests only or
   exactly that scalar, copy it verbatim into `free_text` without adding
   punctuation, quotes, Markdown wrappers, a label, or an explanation.
