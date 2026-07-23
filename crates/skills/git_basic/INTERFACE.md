@@ -6,6 +6,8 @@
 ## Capability Summary
 - `git_basic` exposes read-oriented Git repository inspection commands.
 - It is designed for status/history/diff visibility without destructive history changes.
+- Repository selection is workspace-bound. `repo` is a workspace-relative repository directory; it cannot escape `WORKSPACE_ROOT`.
+- Revision reads resolve `target` / `ref` to an exact Git object ID before executing the observation.
 - Not a git repository: returns `status=error` and `error_text` (no silent ok).
 
 ## Actions
@@ -30,16 +32,21 @@ Action selection notes:
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported actions. |
-| `log` | `n` | no | number | 20 | Number of history entries (capped 100). Alias: `limit`. |
+| all | `repo` | no | string | `.` | Workspace-relative repository directory. |
+| `status`, `log`, `branch`, `remote`, `changed_files` | `cursor` | no | integer | 0 | Zero-based observation cursor. |
+| `status`, `log`, `branch`, `remote`, `changed_files` | `limit` | no | integer | 20 | Page size, range 1..200. |
+| `log` | `n` | no | integer | 20 | Alias for `limit`. |
+| `diff`, `diff_cached`, `changed_files` | `path` | no | string | - | Repository-relative pathspec. |
 | `show` | `target` | no | string | `HEAD` | Commit/object target to show. |
 | `show_file_at_rev` | `target` | no | string | `HEAD` | Revision. |
-| `show_file_at_rev` | `path` | yes | string | - | File path in repo. |
-| others | none | no | - | - | Use defaults. |
+| `show_file_at_rev` | `path` | yes | string | - | Repository-relative file path. |
+| `rev_parse` | `ref` | no | string | `HEAD` | Revision expression to resolve. |
 
 ## Error Contract
 - Unsupported action names.
 - Not a git repository: `status=error`, `error_text` set.
 - Invalid target/revision/path; git command failures return readable stderr.
+- Option-like revisions, absolute paths, parent traversal, repositories outside the workspace, and invalid argument types return stable `error_code` values.
 - Non-zero `git` command exit codes are returned as `status=error` with `error_text=git command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `schema_version`, `action`, `subcommand`, `exit_code`, `output`, and action-specific machine fields.
 
@@ -50,8 +57,11 @@ Action selection notes:
   - `action`: string action name; evidence role `status`.
   - `subcommand`: string Git subcommand used; evidence role `field_value`.
   - `exit_code`: integer Git exit code; evidence role `status`.
-  - `target`, `path`, `n`, or `limit`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
-  - `output`: string bounded Git observation; for safe summary actions such as `log`, `status`, `branch`, `current_branch`, `changed_files`, and `rev_parse`, runtime evidence extraction may expose bounded `command_output` / `content_excerpt` plus parsed fields such as `subject`, `state`, or `git_subjects`.
+  - `target`, `revision`, `path`, `cursor`, or `limit`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
+  - `output`: exact Git observation. Large output is preserved for the runtime artifact spill path rather than silently cut inside the skill.
+  - `output_bytes`, `output_sha256`, `truncated`: exact observation integrity fields.
+  - `provenance`: `source=git_cli`, exact repository root, observed HEAD revision, observation time, and read-only operation class.
+  - `page`: stable `cursor`, `limit`, `returned_count`, `total_count`, `has_more`, `next_cursor`, and `previous_cursor` for list actions. `log.total_count` is null because Git history is fetched incrementally.
   - `field_value`: object with stable action-specific evidence:
     - `status`: `branch`, `current_branch`, `upstream`, `ahead`, `behind`, `clean`, `worktree_state`, `changed_count`, `staged_count`, `unstaged_count`, `untracked_count`.
     - `current_branch`: `branch`, `current_branch`.
@@ -68,7 +78,7 @@ Action selection notes:
     - `remotes`: array of `{name, url, direction}` for `remote`.
     - `show_file_at_rev`: stable `source="git_show_file_at_rev"` and `source_kind="git_revision_file"` so revision-bound content requests can be attributed to Git evidence before filesystem fallback.
 - Sensitive fields: diffs and file-at-revision output can contain source or secrets. Provider-facing traces should prefer file lists, stats, excerpts, or hashes unless content was requested; raw `diff`, `show`, and `show_file_at_rev` output remains conservative.
-- Error responses include readable `error_text`; top-level `error_kind` should be used when available.
+- Error responses include readable `error_text`; runtime decisions must use `error_code` / `error_kind`, never parse `error_text`.
 
 ## Request/Response Examples
 ### Example 1

@@ -539,6 +539,9 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 aliases = ["git"]
+description = "Inspect workspace Git repositories through bounded, revision-stable, structured read actions."
+semantic_tags = ["repository_status", "repository_history", "repository_diff", "repository_revision", "source_control"]
+preferred_over_run_cmd = true
 timeout_seconds = 30
 prompt_file = "prompts/skills/git_basic.md"
 output_kind = "text"
@@ -546,22 +549,22 @@ supported_os = ["linux", "macos"]
 required_bins = ["git"]
 planner_capability_aliases = { "git.status" = "git_basic", "git.repository_state" = "git_basic" }
 planner_capabilities = [
-  { name = "git_basic", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.status", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.repository_state", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.current_branch", action = "current_branch", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.branch", action = "branch", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.remote", action = "remote", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.changed_files", action = "changed_files", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.log", action = "log", effect = "observe", optional = ["path", "repo", "n", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git_basic", action = "status", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.status", action = "status", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.repository_state", action = "status", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.current_branch", action = "current_branch", effect = "observe", optional = ["repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.branch", action = "branch", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.remote", action = "remote", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.changed_files", action = "changed_files", effect = "observe", optional = ["path", "repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.log", action = "log", effect = "observe", optional = ["repo", "cursor", "n", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.diff", action = "diff", effect = "observe", optional = ["path", "repo"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.diff_cached", action = "diff_cached", effect = "observe", optional = ["path", "repo"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.rev_parse", action = "rev_parse", effect = "observe", optional = ["path", "repo", "ref"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.show", action = "show", effect = "observe", optional = ["path", "repo", "target"], risk_level = "medium", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.rev_parse", action = "rev_parse", effect = "observe", optional = ["repo", "ref"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.show", action = "show", effect = "observe", optional = ["repo", "target"], risk_level = "medium", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.show_file_at_rev", action = "show_file_at_rev", effect = "observe", required = ["path"], optional = ["repo", "target"], risk_level = "medium", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, repo = { type = "string" }, target = { type = "string" }, ref = { type = "string" }, args = { type = "array", items = { type = "string" } } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["status", "log", "diff", "diff_cached", "branch", "current_branch", "remote", "changed_files", "show", "show_file_at_rev", "rev_parse"] }, path = { type = "string" }, repo = { type = "string" }, target = { type = "string" }, ref = { type = "string" }, cursor = { type = "integer", minimum = 0 }, limit = { type = "integer", minimum = 1, maximum = 200 }, n = { type = "integer", minimum = 1, maximum = 200 } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "install_module"
