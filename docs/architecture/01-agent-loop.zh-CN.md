@@ -42,8 +42,11 @@ flowchart TD
 优先使用 `call_capability`，让 planner 选择稳定能力，再由 resolver 映射到当前 tool 或 skill。`PlanVerifier` 只校验机器合同与策略，不承担第二层语义路由。每个成功的 `CapabilityResultEnvelope` 都会经过有界压缩与脱敏，作为一条通用机器 observation 返回下一轮 planner。领域专用投影可以压缩常用证据，但只是可选优化，不能成为保留 provider、artifact、异步任务或其他结构化结果字段的唯一通道。可恢复错误通过结构化 `RepairEnvelope` 作为 observation 返回同一循环；`BudgetDecision` 则独立决定健康循环应该继续、建立 checkpoint、等待用户、完成还是终止。
 
 终止 `respond` 合同支持模型生成的自由文本、精确列表，以及由 runtime 在物化前
-校验 JSON 值的精确命名字段对象。每个对象 `value_json` 都是一份完整序列化
-JSON 值，字符串必须带 JSON 引号；无效 JSON 进入有界结构化 repair，不会被
+校验 JSON 值的精确命名字段对象。模型自行生成的对象使用 `object`，每个
+`value_json` 都是一份完整序列化 JSON 值，字符串必须带 JSON 引号。当精确值已
+存在于成功的 capability result 中时，`observed_object` 只声明来源 capability
+和点路径，由 runtime 直接复制 JSON 值；缺失或失败引用会被拒绝，不再要求模型
+重新序列化嵌套机器数据。无效的模型生成 JSON 进入有界结构化 repair，不会被
 静默强制转换。当前 shape 不使用的 payload 只允许规范化为空值/零；冗余 object
 content 只有在解析后的 JSON 与命名字段物化对象完全一致时才接受。这样既保留
 严格机器交付，也不需要在 runtime 维护多语言固定回复模板。它只是格式化边界，

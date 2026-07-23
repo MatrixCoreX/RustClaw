@@ -55,9 +55,14 @@ optimizations and cannot be the only path that preserves provider, artifact,
 async-job, or other structured result fields.
 The terminal `respond` contract supports model-authored free text, exact lists,
 and exact named-field objects whose JSON values are validated before the
-runtime materializes the payload. Each object `value_json` is one complete
-serialized JSON value, including JSON quotes around string values. Invalid JSON
-receives a bounded structured repair observation and is not silently coerced.
+runtime materializes the payload. Model-authored objects use `object`; each
+`value_json` is one complete serialized JSON value, including JSON quotes
+around string values. When exact values already exist in successful capability
+results, `observed_object` names the source capability and dotted data path;
+runtime copies the JSON values directly and rejects missing or failed
+references instead of asking the model to re-serialize nested machine data.
+Invalid authored JSON receives a bounded structured repair observation and is
+not silently coerced.
 Payloads unused by the selected shape may canonicalize only to empty/zero.
 Redundant object content is accepted only when its parsed JSON exactly equals
 the object materialized from the named fields.

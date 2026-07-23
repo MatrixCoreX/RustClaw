@@ -24,6 +24,9 @@ fn respond_call(mut arguments: Value) -> ModelToolCall {
     if let Some(arguments) = arguments.as_object_mut() {
         arguments.entry("fields").or_insert_with(|| json!([]));
         arguments
+            .entry("observed_fields")
+            .or_insert_with(|| json!([]));
+        arguments
             .entry("exact_field_count")
             .or_insert_with(|| json!(0));
     }
@@ -334,6 +337,173 @@ fn native_respond_canonicalizes_only_equivalent_redundant_object_payloads() {
 }
 
 #[test]
+fn native_respond_projects_exact_fields_from_successful_capability_observation() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "image.preview_generate",
+            Some("preview_generate".to_string()),
+            json!({
+                "output": "dry_run",
+                "extra": {
+                    "provider": "minimax",
+                    "model": "image-01",
+                    "planned_outputs": [{
+                        "path": "document/media_dry_run/status.png",
+                        "type": "image_file"
+                    }],
+                    "async_contract": {
+                        "status": "accepted",
+                        "poll_after_seconds": 5
+                    }
+                }
+            }),
+        ));
+    let native_turn = turn(
+        vec![respond_call(json!({
+            "shape": "observed_object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [],
+            "observed_fields": [
+                {
+                    "name": "provider",
+                    "capability": "image.preview_generate",
+                    "path": "data.extra.provider"
+                },
+                {
+                    "name": "model",
+                    "capability": "image.preview_generate",
+                    "path": "data.extra.model"
+                },
+                {
+                    "name": "planned_outputs",
+                    "capability": "image.preview_generate",
+                    "path": "data.extra.planned_outputs"
+                },
+                {
+                    "name": "async_contract",
+                    "capability": "image.preview_generate",
+                    "path": "data.extra.async_contract"
+                }
+            ],
+            "exact_field_count": 0
+        }))],
+        "",
+    );
+
+    let actions = actions_from_native_turn_with_groups(
+        &native_turn,
+        &callable_capabilities(),
+        &BTreeMap::new(),
+        Some(&loop_state),
+    )
+    .expect("observed object response");
+    let AgentAction::Respond { content } = &actions[0] else {
+        panic!("expected terminal response");
+    };
+    let content: Value = serde_json::from_str(content).expect("projected object");
+    assert_eq!(content["provider"], "minimax");
+    assert_eq!(content["model"], "image-01");
+    assert_eq!(
+        content["planned_outputs"][0]["path"],
+        "document/media_dry_run/status.png"
+    );
+    assert_eq!(content["async_contract"]["poll_after_seconds"], 5);
+
+    let contradictory_count = turn(
+        vec![respond_call(json!({
+            "shape": "observed_object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [],
+            "observed_fields": [{
+                "name": "provider",
+                "capability": "image.preview_generate",
+                "path": "data.extra.provider"
+            }],
+            "exact_field_count": 2
+        }))],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn_with_groups(
+            &contradictory_count,
+            &callable_capabilities(),
+            &BTreeMap::new(),
+            Some(&loop_state),
+        )
+        .expect_err("non-neutral contradictory count rejected"),
+        "native_respond_observed_object_count_mismatch"
+    );
+}
+
+#[test]
+fn native_respond_rejects_unobserved_or_invalid_field_references() {
+    let mut failed_loop_state = LoopState::default();
+    let mut failed = CapabilityResultEnvelope::ok(
+        "image.preview_generate",
+        Some("preview_generate".to_string()),
+        json!({"extra": {"provider": "minimax"}}),
+    );
+    failed.status = claw_core::capability_result::CapabilityResultStatus::Error;
+    failed_loop_state.capability_results.push(failed);
+
+    let observed_turn = |path: &str| {
+        turn(
+            vec![respond_call(json!({
+                "shape": "observed_object",
+                "content": "",
+                "items": [],
+                "exact_item_count": 0,
+                "fields": [],
+                "observed_fields": [{
+                    "name": "provider",
+                    "capability": "image.preview_generate",
+                    "path": path
+                }],
+                "exact_field_count": 1
+            }))],
+            "",
+        )
+    };
+
+    assert_eq!(
+        actions_from_native_turn_with_groups(
+            &observed_turn("provider"),
+            &callable_capabilities(),
+            &BTreeMap::new(),
+            Some(&failed_loop_state),
+        )
+        .expect_err("failed observations cannot authorize projection"),
+        "native_respond_observed_capability_result_missing"
+    );
+    assert_eq!(
+        actions_from_native_turn_with_groups(
+            &observed_turn("provider"),
+            &callable_capabilities(),
+            &BTreeMap::new(),
+            None,
+        )
+        .expect_err("missing loop observation state rejected"),
+        "native_respond_observation_state_missing"
+    );
+    assert_eq!(
+        actions_from_native_turn_with_groups(
+            &observed_turn("provider value"),
+            &callable_capabilities(),
+            &BTreeMap::new(),
+            Some(&LoopState::default()),
+        )
+        .expect_err("natural-language source reference rejected"),
+        "native_respond_observed_path_invalid"
+    );
+}
+
+#[test]
 fn native_respond_rejects_invalid_or_duplicate_object_fields() {
     let invalid_json = turn(
         vec![respond_call(json!({
@@ -507,7 +677,11 @@ fn native_request_separates_system_protocol_from_user_turn() {
     assert_eq!(request.tools[1].name, "respond");
     assert_eq!(
         request.tools[1].input_schema["properties"]["shape"]["enum"],
-        json!(["free_text", "list", "object"])
+        json!(["free_text", "list", "object", "observed_object"])
+    );
+    assert_eq!(
+        request.tools[1].input_schema["properties"]["observed_fields"]["items"]["required"],
+        json!(["name", "capability", "path"])
     );
 }
 
@@ -576,6 +750,7 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
         ),
         &callable,
         &group_map,
+        None,
     )
     .expect("group action");
     assert!(matches!(
@@ -660,6 +835,7 @@ fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
         ),
         &disclosed,
         &BTreeMap::new(),
+        None,
     )
     .expect("loader action");
     assert!(matches!(
@@ -677,7 +853,7 @@ fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
         "",
     );
     assert_eq!(
-        actions_from_native_turn_with_groups(&hidden_direct, &disclosed, &BTreeMap::new())
+        actions_from_native_turn_with_groups(&hidden_direct, &disclosed, &BTreeMap::new(), None,)
             .expect_err("hidden registry capability must not bypass loading"),
         "native_plan_capability_not_in_runtime_catalog"
     );
@@ -701,6 +877,7 @@ fn native_group_rejects_capability_from_another_group() {
         ),
         &callable,
         &group_map,
+        None,
     )
     .expect_err("cross-group capability rejected");
 
@@ -768,6 +945,7 @@ fn native_response_contract_retry_targets_the_respond_schema() {
             "items",
             "exact_item_count",
             "fields",
+            "observed_fields",
             "exact_field_count"
         ])
     );
