@@ -195,6 +195,67 @@ async fn run_cmd_background_preview_returns_synthetic_refs_without_starting_proc
 }
 
 #[tokio::test]
+async fn run_cmd_dispatches_durable_terminal_sessions_through_the_policy_path() {
+    let root = TempDirGuard::new("run_cmd_terminal_dispatch");
+    let state = test_state(root.path.clone());
+
+    let started = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "action": "terminal_start",
+            "command": "printf 'terminal-ready\\n'; sleep 30",
+            "cwd": ".",
+            "expires_in_seconds": 30,
+            "idle_timeout_seconds": 15
+        }),
+    )
+    .await
+    .expect("terminal start through builtin dispatcher");
+    let started: Value = serde_json::from_str(&started).expect("structured terminal start");
+    let session_id = started["session_id"]
+        .as_str()
+        .expect("terminal session id")
+        .to_string();
+
+    let mut observed = String::new();
+    for _ in 0..80 {
+        let polled = execute_builtin_skill(
+            &state,
+            "run_cmd",
+            &json!({
+                "action": "terminal_poll",
+                "session_id": session_id,
+                "cursor": 0
+            }),
+        )
+        .await
+        .expect("terminal poll through builtin dispatcher");
+        let polled: Value = serde_json::from_str(&polled).expect("structured terminal poll");
+        observed = polled["content"].as_str().unwrap_or_default().to_string();
+        if observed.contains("terminal-ready") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(observed.contains("terminal-ready"), "{observed:?}");
+
+    let terminated = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "action": "terminal_terminate",
+            "session_id": session_id
+        }),
+    )
+    .await
+    .expect("terminal terminate through builtin dispatcher");
+    let terminated: Value =
+        serde_json::from_str(&terminated).expect("structured terminal termination");
+    assert_eq!(terminated["status"], "ok");
+}
+
+#[tokio::test]
 async fn list_dir_accepts_names_only_arg() {
     let root = TempDirGuard::new("list_dir_names_only");
     fs::write(root.path.join("b.txt"), "b").expect("write b");

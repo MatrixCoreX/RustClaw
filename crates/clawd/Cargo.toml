@@ -3,6 +3,7 @@ name = "clawd"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "clawd"
 
 [dependencies]
 anyhow.workspace = true
@@ -34,6 +35,7 @@ tower-http = { version = "0.6", features = ["fs", "cors", "set-header"] }
 regex = "1"
 argon2 = "0.5"
 proc-macro2.workspace = true
+portable-pty.workspace = true
 sha2 = "0.10"
 syn.workspace = true
 
