@@ -1208,6 +1208,22 @@ pub(super) async fn execute_prepared_skill_action(
         .ok()
         .and_then(|slot| slot.clone());
     let structured_extra = structured_extra.lock().ok().and_then(|slot| slot.clone());
+    if normalized_skill == crate::mcp_runtime::MCP_CATALOG_SEARCH_CAPABILITY {
+        let loaded = super::capability_discovery::activate_mcp_search_results(
+            state,
+            task,
+            loop_state,
+            structured_extra.as_ref(),
+        );
+        if !loaded.is_empty() {
+            loop_state.history_compact.push(format!(
+                "round={} step={} mcp_capabilities_loaded={}",
+                loop_state.round_no,
+                step_in_round,
+                loaded.join(",")
+            ));
+        }
+    }
     if let (Some(descriptor), Some(started_at)) = (mcp_descriptor.as_ref(), mcp_started_at) {
         record_mcp_tool_execution_observation(
             state,

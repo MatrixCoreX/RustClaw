@@ -177,6 +177,7 @@ fn skill_permission_profile_hint(entry: &SkillRegistryEntry) -> Option<String> {
 #[path = "capability_map_tests.rs"]
 mod tests;
 
+#[cfg(test)]
 pub(crate) fn build_compact_capability_map_for_task(
     state: &AppState,
     task: &ClaimedTask,
@@ -184,9 +185,33 @@ pub(crate) fn build_compact_capability_map_for_task(
     build_capability_map_for_task_with_detail(state, task, false)
 }
 
+pub(crate) fn build_scoped_compact_capability_map_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+    loaded_skills: &BTreeSet<String>,
+    loaded_mcp_capabilities: &BTreeSet<String>,
+) -> String {
+    build_capability_map_for_task_with_scope(
+        state,
+        task,
+        false,
+        Some(loaded_skills),
+        loaded_mcp_capabilities,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn planner_callable_capability_names_for_task(
     state: &AppState,
     task: &ClaimedTask,
+) -> Vec<String> {
+    planner_callable_capability_names_for_task_with_mcp(state, task, &BTreeSet::new())
+}
+
+pub(crate) fn planner_callable_capability_names_for_task_with_mcp(
+    state: &AppState,
+    task: &ClaimedTask,
+    loaded_mcp_capabilities: &BTreeSet<String>,
 ) -> Vec<String> {
     let mut names = BTreeSet::new();
     if let Some(registry) = state.get_skills_registry() {
@@ -200,8 +225,7 @@ pub(crate) fn planner_callable_capability_names_for_task(
         }
     }
     names.extend(
-        state
-            .mcp_planner_tools()
+        planner_mcp_tools_for_task(state, task, loaded_mcp_capabilities)
             .into_iter()
             .map(|tool| tool.capability),
     );
@@ -209,6 +233,43 @@ pub(crate) fn planner_callable_capability_names_for_task(
         names.retain(|name| allowed.contains(name));
     }
     names.into_iter().collect()
+}
+
+pub(crate) fn planner_mcp_tools_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+    loaded_mcp_capabilities: &BTreeSet<String>,
+) -> Vec<crate::mcp_runtime::McpToolDescriptor> {
+    let allowed = child_allowed_capabilities(task);
+    let mut tools = state
+        .mcp_planner_tools()
+        .into_iter()
+        .map(|tool| (tool.capability.clone(), tool))
+        .collect::<BTreeMap<_, _>>();
+    for capability in loaded_mcp_capabilities {
+        if let Some(tool) = state.mcp_tool(capability) {
+            tools.insert(tool.capability.clone(), tool);
+        }
+    }
+    tools
+        .into_values()
+        .filter(|tool| {
+            allowed
+                .as_ref()
+                .is_none_or(|allowed| allowed.contains(&tool.capability))
+        })
+        .collect()
+}
+
+pub(crate) fn mcp_capability_is_allowed_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+    capability: &str,
+) -> bool {
+    state.mcp_tool(capability).is_some()
+        && child_allowed_capabilities(task)
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(capability))
 }
 
 pub(crate) fn planner_native_capability_groups_for_task(
@@ -390,10 +451,27 @@ fn child_allowed_capabilities(task: &ClaimedTask) -> Option<BTreeSet<String>> {
     )
 }
 
+#[cfg(test)]
 fn build_capability_map_for_task_with_detail(
     state: &AppState,
     task: &ClaimedTask,
     include_registry_skill_hints: bool,
+) -> String {
+    build_capability_map_for_task_with_scope(
+        state,
+        task,
+        include_registry_skill_hints,
+        None,
+        &BTreeSet::new(),
+    )
+}
+
+fn build_capability_map_for_task_with_scope(
+    state: &AppState,
+    task: &ClaimedTask,
+    include_registry_skill_hints: bool,
+    loaded_skills: Option<&BTreeSet<String>>,
+    loaded_mcp_capabilities: &BTreeSet<String>,
 ) -> String {
     let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let sandbox_diagnostics = crate::process_sandbox::sandbox_backend_diagnostics(
@@ -416,16 +494,38 @@ fn build_capability_map_for_task_with_detail(
     let available_set = visible.iter().cloned().collect::<BTreeSet<_>>();
     let unavailable_hints = unavailable_skill_hints(state, &all_visible, &available_set);
     let allowed_child_capabilities = child_allowed_capabilities(task);
-    let mcp_tools = state
-        .mcp_planner_tools()
-        .into_iter()
-        .filter(|tool| {
-            allowed_child_capabilities
-                .as_ref()
-                .is_none_or(|allowed| allowed.contains(&tool.capability))
-        })
-        .collect::<Vec<_>>();
-    let callable_capabilities = planner_callable_capability_names_for_task(state, task);
+    let scoped_visible = if let (Some(registry), Some(loaded_skills)) =
+        (state.get_skills_registry(), loaded_skills)
+    {
+        visible
+            .iter()
+            .filter(|skill| {
+                allowed_child_capabilities.is_some()
+                    || registry.get(skill).is_some_and(|entry| {
+                        entry.planner_eager_load || loaded_skills.contains(*skill)
+                    })
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        visible.clone()
+    };
+    let mcp_tools = planner_mcp_tools_for_task(state, task, loaded_mcp_capabilities);
+    let mut callable_capabilities = BTreeSet::new();
+    if let Some(registry) = state.get_skills_registry() {
+        for skill in &scoped_visible {
+            callable_capabilities.extend(
+                registry
+                    .planner_capabilities(skill)
+                    .iter()
+                    .map(|mapping| mapping.name.clone()),
+            );
+        }
+    }
+    callable_capabilities.extend(mcp_tools.iter().map(|tool| tool.capability.clone()));
+    if let Some(allowed) = allowed_child_capabilities.as_ref() {
+        callable_capabilities.retain(|name| allowed.contains(name));
+    }
     if callable_capabilities.is_empty() {
         let mut lines = vec![
             "Current runtime-available tool capabilities are unavailable; use chat only when no external retrieval or execution is needed.".to_string(),
@@ -442,7 +542,7 @@ fn build_capability_map_for_task_with_detail(
     let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut layered: BTreeMap<PlannerCapabilityKind, BTreeSet<String>> = BTreeMap::new();
     if let Some(registry) = state.get_skills_registry() {
-        for skill in &visible {
+        for skill in &scoped_visible {
             let planner_kind = registry
                 .planner_kind(skill)
                 .unwrap_or(PlannerCapabilityKind::Skill);
@@ -507,7 +607,7 @@ fn build_capability_map_for_task_with_detail(
     if include_registry_skill_hints {
         if let Some(registry) = state.get_skills_registry() {
             let mut hints = Vec::new();
-            for skill in &visible {
+            for skill in &scoped_visible {
                 let Some(entry) = registry.get(skill) else {
                     continue;
                 };
@@ -717,6 +817,17 @@ fn build_capability_map_for_task_with_detail(
                 fields.push(format!("description={description}"));
             }
             lines.push(format!("  - {}: {}", tool.capability, fields.join(",")));
+        }
+    }
+
+    if let Some(loaded_skills) = loaded_skills {
+        let loadable = planner_loadable_capability_group_names_for_task(state, task, loaded_skills);
+        if !loadable.is_empty() {
+            lines.push(format!("loadable_capability_groups={}", loadable.join(",")));
+            lines.push(
+                "capability_group_loader=call_tool:load_capability_groups; args=groups[]; max_items=2"
+                    .to_string(),
+            );
         }
     }
 

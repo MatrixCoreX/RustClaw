@@ -2,7 +2,7 @@ mod client;
 mod manager;
 mod types;
 
-pub(crate) use manager::McpRuntime;
+pub(crate) use manager::{McpRuntime, MCP_CATALOG_SEARCH_CAPABILITY};
 pub(crate) use types::{McpLifecycleSnapshot, McpProbeOutcome, McpToolDescriptor};
 
 #[cfg(test)]

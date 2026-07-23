@@ -56,6 +56,14 @@ pub(crate) fn normalize_resolved_planner_action_for_verifier(
     self::planning_action_normalization::normalize_resolved_executable_action(state, action)
 }
 
+pub(crate) fn planner_internal_tool_is_visible(tool: &str) -> bool {
+    matches!(tool, "subagent" | "load_capability_groups")
+}
+
+pub(crate) fn planner_internal_tool_is_observe_only(tool: &str) -> bool {
+    tool == "load_capability_groups"
+}
+
 pub(crate) fn local_code_strict_json_projection_from_machine_evidence(
     user_text: &str,
     loop_state: &LoopState,
@@ -248,6 +256,12 @@ pub(crate) struct LoopState {
     /// Exact registry skill tokens selected through the native capability
     /// loader. They scope later tool schemas and generated playbooks.
     pub(crate) loaded_capability_skills: BTreeSet<String>,
+    /// Exact MCP capability tokens selected from structured catalog-search
+    /// results. Permission and argument policy still come from the MCP runtime.
+    pub(crate) loaded_mcp_capabilities: BTreeSet<String>,
+    /// Least-recently-used order for the bounded dynamic planner tool surface.
+    /// Registry and MCP entries use separate machine-token namespaces.
+    pub(crate) active_capability_scopes: Vec<String>,
     /// Progress hints only; published to task progress for "processing..." display. Must not contain full raw output.
     pub(crate) progress_messages: Vec<String>,
     /// Final delivery to user. Only respond and fallback finalizer write here. Sole source for AskReply.messages.

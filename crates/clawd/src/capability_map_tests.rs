@@ -228,6 +228,72 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
 }
 
 #[test]
+fn scoped_text_catalog_discloses_only_active_groups_and_loader_tokens() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "scoped-text-capability-catalog".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let loadable =
+        planner_loadable_capability_group_names_for_task(&state, &task, &BTreeSet::new());
+    let selected = loadable
+        .iter()
+        .find(|skill| {
+            state.get_skills_registry().is_some_and(|registry| {
+                registry
+                    .planner_capabilities(skill)
+                    .iter()
+                    .any(|mapping| mapping.name != **skill)
+            })
+        })
+        .cloned()
+        .expect("domain group with a distinct capability token");
+    let capability = state
+        .get_skills_registry()
+        .and_then(|registry| {
+            registry
+                .planner_capabilities(&selected)
+                .iter()
+                .find(|mapping| mapping.name != selected)
+                .map(|mapping| mapping.name.clone())
+        })
+        .expect("selected capability");
+
+    let initial = build_scoped_compact_capability_map_for_task(
+        &state,
+        &task,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+    assert!(initial.contains("loadable_capability_groups="));
+    assert!(initial.contains(&selected));
+    assert!(!initial.contains(&capability));
+
+    let loaded = build_scoped_compact_capability_map_for_task(
+        &state,
+        &task,
+        &BTreeSet::from([selected.clone()]),
+        &BTreeSet::new(),
+    );
+    assert!(loaded.contains(&capability));
+    assert!(!loaded
+        .lines()
+        .find(|line| line.starts_with("loadable_capability_groups="))
+        .and_then(|line| line.split_once('=').map(|(_, tokens)| tokens))
+        .is_some_and(|tokens| tokens.split(',').any(|token| token == selected)));
+}
+
+#[test]
 fn permission_profile_hint_uses_registry_machine_fields() {
     let entry = registry_entry_from(
         r#"

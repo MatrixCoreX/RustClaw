@@ -22,7 +22,7 @@ use super::types::{
     McpToolDescriptor, McpToolPolicy,
 };
 
-const MCP_CATALOG_SEARCH_CAPABILITY: &str = "mcp.catalog.search";
+pub(crate) const MCP_CATALOG_SEARCH_CAPABILITY: &str = "mcp.catalog.search";
 const MCP_CATALOG_SEARCH_OUTPUT_BYTES: usize = 64 * 1024;
 
 pub(crate) struct McpRuntime {
@@ -250,22 +250,14 @@ impl McpRuntime {
 
     pub(crate) fn planner_tools(&self) -> Vec<McpToolDescriptor> {
         let tools = self.tools();
-        let visible_limit = self.config.planner_visible_tools.max(2);
-        if tools.len() <= visible_limit {
-            return tools;
+        if tools.is_empty() {
+            return Vec::new();
         }
-        let mut visible = tools
-            .into_iter()
-            .take(visible_limit.saturating_sub(1))
-            .collect::<Vec<_>>();
-        visible.push(catalog_search_descriptor());
-        visible
+        vec![catalog_search_descriptor()]
     }
 
     pub(crate) fn tool(&self, capability: &str) -> Option<McpToolDescriptor> {
-        if capability == MCP_CATALOG_SEARCH_CAPABILITY
-            && self.tools().len() > self.config.planner_visible_tools.max(2)
-        {
+        if capability == MCP_CATALOG_SEARCH_CAPABILITY && !self.tools().is_empty() {
             return Some(catalog_search_descriptor());
         }
         self.catalog
@@ -1126,7 +1118,10 @@ fn catalog_search_descriptor() -> McpToolDescriptor {
         capability: MCP_CATALOG_SEARCH_CAPABILITY.to_string(),
         server_id: "runtime".to_string(),
         tool_name: "catalog_search".to_string(),
-        description: None,
+        description: Some(
+            "mcp_catalog_search_v2; input=metadata_query; output=exact_capability_schema_policy"
+                .to_string(),
+        ),
         input_schema: json!({
             "type": "object",
             "properties": {
