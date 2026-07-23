@@ -83,6 +83,44 @@ fn planner_uses_raw_last_output_when_no_structured_projection_exists() {
 }
 
 #[test]
+fn planner_projects_unknown_capability_data_without_dropping_machine_fields() {
+    let mut loop_state = LoopState::default();
+    loop_state.last_output = Some("IMAGE_GENERATE_DRY_RUN".to_string());
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "image_generate",
+            Some("preview_generate".to_string()),
+            json!({
+                "output": "IMAGE_GENERATE_DRY_RUN",
+                "extra": {
+                    "provider": "minimax",
+                    "model": "image-01",
+                    "planned_outputs": [{
+                        "type": "image_file",
+                        "path": "document/media_dry_run/status.png"
+                    }],
+                    "async_contract": {
+                        "status": "accepted",
+                        "poll_after_seconds": 5
+                    },
+                    "api_key": "secret-value-must-not-reach-model"
+                }
+            }),
+        ));
+
+    let observation = planner_last_observation(&loop_state);
+
+    assert!(observation.starts_with("capability_result_observation="));
+    assert!(observation.contains("\"provider\":\"minimax\""));
+    assert!(observation.contains("\"model\":\"image-01\""));
+    assert!(observation.contains("\"planned_outputs\""));
+    assert!(observation.contains("\"async_contract\""));
+    assert!(!observation.contains("secret-value-must-not-reach-model"));
+    assert!(!observation.eq("IMAGE_GENERATE_DRY_RUN"));
+}
+
+#[test]
 fn native_tool_call_maps_only_to_capability_action() {
     let actions = actions_from_native_turn(
         &turn(

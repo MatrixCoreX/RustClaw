@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS: usize = 24 * 1024;
+
 pub(super) fn observed_error_step_body(
     step: &crate::executor::StepExecutionResult,
     body: &str,
@@ -83,11 +85,81 @@ pub(in crate::agent_engine) fn latest_structured_capability_observation(
             if result.status != claw_core::capability_result::CapabilityResultStatus::Ok {
                 return None;
             }
-            let normalized =
-                structured_observed_body(&result.capability, &result.data.to_string())?;
+            let normalized = structured_observed_body(&result.capability, &result.data.to_string())
+                .or_else(|| generic_capability_observation(result))?;
             let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
             (!sanitized.trim().is_empty()).then_some(sanitized)
         })
+}
+
+fn generic_capability_observation(
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) -> Option<String> {
+    let projection = serde_json::json!({
+        "schema_version": 1,
+        "capability": &result.capability,
+        "action": &result.action,
+        "status": &result.status,
+        "data": compact_capability_observation_value(&result.data, 0),
+        "effect": &result.effect,
+        "verification": compact_capability_observation_value(&result.verification, 0),
+    });
+    let serialized = serde_json::to_string(&projection).ok()?;
+    let serialized = if serialized.chars().count() <= MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS {
+        serialized
+    } else {
+        serde_json::json!({
+            "schema_version": 1,
+            "capability": &result.capability,
+            "action": &result.action,
+            "status": &result.status,
+            "data": {
+                "truncated": true,
+                "original_chars": serialized.chars().count(),
+                "preview": serialized
+                    .chars()
+                    .take(MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS)
+                    .collect::<String>(),
+            },
+            "effect": &result.effect,
+        })
+        .to_string()
+    };
+    Some(format!("capability_result_observation={serialized}"))
+}
+
+fn compact_capability_observation_value(
+    value: &serde_json::Value,
+    depth: usize,
+) -> serde_json::Value {
+    if depth >= 6 {
+        return serde_json::json!({"truncated": true, "reason": "depth_limit"});
+    }
+    match value {
+        serde_json::Value::Object(object) => serde_json::Value::Object(
+            object
+                .iter()
+                .take(48)
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        compact_capability_observation_value(value, depth + 1),
+                    )
+                })
+                .collect(),
+        ),
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .take(64)
+                .map(|value| compact_capability_observation_value(value, depth + 1))
+                .collect(),
+        ),
+        serde_json::Value::String(text) => {
+            serde_json::Value::String(text.chars().take(8_000).collect())
+        }
+        _ => value.clone(),
+    }
 }
 
 pub(super) fn normalized_structured_observed_fact_allows_artifact_filter_bypass(
