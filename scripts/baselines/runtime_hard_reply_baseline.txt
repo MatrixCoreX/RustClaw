@@ -44,13 +44,23 @@ crates/claw-core/src/secrets.rs	裸 vendor 名	/// `parse` 在 registry 加载�
 crates/claw-core/src/secrets.rs	裸 vendor 名	/// vendor 名按 ASCII 小写归一；调用方负责传"裸 vendor 名"（如 `"openai"`），
 crates/claw-core/src/secrets.rs	鉴权失败	/// 打 vendor API（那样会在远端日志里留下"鉴权失败"，难排查）。
 crates/claw-core/src/skill_registry.rs	capability token must not be empty	return Err("capability token must not be empty".to_string());
+crates/claw-core/src/skill_registry.rs	cross-skill planner capability alias chain `{alias}` ({skill_name}) -> `{target}` ({target_skill}) -> `{next_target}` in {}	"cross-skill planner capability alias chain `{alias}` ({skill_name}) -> `{target}` ({target_skill}) -> `{next_target}` in {}",
+crates/claw-core/src/skill_registry.rs	duplicate normalized planner capability alias `{alias}` for skill `{skill}` in {}	"duplicate normalized planner capability alias `{alias}` for skill `{skill}` in {}",
+crates/claw-core/src/skill_registry.rs	duplicate planner capability alias `{alias}` in {}: `{existing_skill}` -> `{existing_target}` and `{skill_name}` -> `{target}`	"duplicate planner capability alias `{alias}` in {}: `{existing_skill}` -> `{existing_target}` and `{skill_name}` -> `{target}`",
 crates/claw-core/src/skill_registry.rs	duplicate skill alias `{a}` in {}: `{existing}` and `{canonical}`	"duplicate skill alias `{a}` in {}: `{existing}` and `{canonical}`",
 crates/claw-core/src/skill_registry.rs	duplicate skill name `{canonical}` in {}	"duplicate skill name `{canonical}` in {}",
+crates/claw-core/src/skill_registry.rs	empty planner capability alias for skill `{skill}` in {}	"empty planner capability alias for skill `{skill}` in {}",
 crates/claw-core/src/skill_registry.rs	parse capabilities for skill `{canonical}` in {}: {e}	"parse capabilities for skill `{canonical}` in {}: {e}",
 crates/claw-core/src/skill_registry.rs	parse memory_policy for skill `{skill_name}` in {}: source token `{token}` appears in both include and exclude	"parse memory_policy for skill `{skill_name}` in {}: source token `{token}` appears in both include and exclude",
 crates/claw-core/src/skill_registry.rs	parse memory_policy.max_chars for skill `{skill_name}` in {}: value must be greater than 0	"parse memory_policy.max_chars for skill `{skill_name}` in {}: value must be greater than 0",
 crates/claw-core/src/skill_registry.rs	parse memory_policy.{field} for skill `{skill_name}` in {}: unknown source token `{token}`	"parse memory_policy.{field} for skill `{skill_name}` in {}: unknown source token `{token}`",
+crates/claw-core/src/skill_registry.rs	planner capability alias `{alias_name}` is not a declared mapping for skill `{}` in {}	"planner capability alias `{alias_name}` is not a declared mapping for skill `{}` in {}",
+crates/claw-core/src/skill_registry.rs	planner capability alias arguments are not covered by `{target_name}` for alias `{alias_name}` in skill `{}` ({})	"planner capability alias arguments are not covered by `{target_name}` for alias `{alias_name}` in skill `{}` ({})",
+crates/claw-core/src/skill_registry.rs	planner capability alias chain `{alias_name}` -> `{target_name}` is not allowed for skill `{}` in {}	"planner capability alias chain `{alias_name}` -> `{target_name}` is not allowed for skill `{}` in {}",
+crates/claw-core/src/skill_registry.rs	planner capability alias policy mismatch `{alias_name}` -> `{target_name}` for skill `{}` in {}	"planner capability alias policy mismatch `{alias_name}` -> `{target_name}` for skill `{}` in {}",
+crates/claw-core/src/skill_registry.rs	planner capability alias target `{target_name}` is not a declared mapping for skill `{}` in {}	"planner capability alias target `{target_name}` is not a declared mapping for skill `{}` in {}",
 crates/claw-core/src/skill_registry.rs	secrets capability name must match [a-z0-9_]: `{token}`	"secrets capability name must match [a-z0-9_]: `{token}`"
+crates/claw-core/src/skill_registry.rs	self-referential planner capability alias `{alias}` for skill `{skill}` in {}	"self-referential planner capability alias `{alias}` for skill `{skill}` in {}",
 crates/claw-core/src/skill_registry.rs	skill `{name}` declares `exec.sudo` but `requires_confirmation` is not `true` (R1)	"skill `{name}` declares `exec.sudo` but `requires_confirmation` is not `true` (R1)"
 crates/claw-core/src/skill_registry.rs	skill `{name}` declares `exec.sudo` but `risk_level` is not `high` (R2)	"skill `{name}` declares `exec.sudo` but `risk_level` is not `high` (R2)"
 crates/claw-core/src/skill_registry.rs	skill registry shape consistency check failed in {}:\n  - {}	"skill registry shape consistency check failed in {}:\\n  - {}",
@@ -869,6 +879,7 @@ crates/clawd/src/schedule_service.rs	unknown skill: {raw_skill}	.ok_or_else(|| f
 crates/clawd/src/schedule_service.rs	unknown skill: {raw_skill}	.ok_or_else(|| format!("unknown skill: {raw_skill}"))?;
 crates/clawd/src/schedule_service.rs	{param} (required: {required}) - {desc}	rows.push(format!("{param} (required: {required}) - {desc}"));
 crates/clawd/src/semantic_judge.rs	最终文本是否对外发布	//! - finalize 层是"最终文本是否对外发布"的唯一仲裁点；planning / skill_execution
+crates/clawd/src/skill_output_artifact.rs	extra initialized as object	.expect("extra initialized as object")
 crates/clawd/src/skills.rs	policy_token: {policy_token}	format!("policy_token: {policy_token}"),
 crates/clawd/src/skills.rs	private exchange account access failed	"private exchange account access failed".to_string()
 crates/clawd/src/skills.rs	private exchange account access failed	.unwrap_or("private exchange account access failed")
@@ -1127,42 +1138,19 @@ crates/skills/audio_transcribe/src/main.rs	upload audio to OSS failed: {err}	.ma
 crates/skills/audio_transcribe/src/main.rs	{vendor_name} native stt adapter is not available	return Err(format!("{vendor_name} native stt adapter is not available"));
 crates/skills/audio_transcribe/src/main.rs	{vendor_name} transcription request failed: {err}	.map_err(|err| format!("{vendor_name} transcription request failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	{vendor} api key is not configured	return Err(format!("{vendor} api key is not configured"));
-crates/skills/browser_web/src/main.rs	Node.js not found; please install Node.js to use browser_web skill. Helper path: {}	format!("Node.js not found; please install Node.js to use browser_web skill. Helper path: {}", helper_path.display())
-crates/skills/browser_web/src/main.rs	URL must be http or https: {}	return Err(format!("URL must be http or https: {}", url_str));
-crates/skills/browser_web/src/main.rs	args must be object	error_text: Some("args must be object".to_string()),
-crates/skills/browser_web/src/main.rs	at least one URL is required	return Err("at least one URL is required".to_string());
+crates/skills/browser_web/src/main.rs	args must be object	SkillFailure::with_message("INVALID_INPUT", "args must be object"),
+crates/skills/browser_web/src/main.rs	at least one URL is required	"at least one URL is required",
 crates/skills/browser_web/src/main.rs	at least one of url or urls is required	return Err("at least one of url or urls is required".to_string());
+crates/skills/browser_web/src/main.rs	browser helper not found at {}	format!("browser helper not found at {}", helper_path.display()),
 crates/skills/browser_web/src/main.rs	content_mode must be one of: clean, raw	return Err("content_mode must be one of: clean, raw".to_string());
-crates/skills/browser_web/src/main.rs	content_mode must be one of: clean, raw	return Err("content_mode must be one of: clean, raw".to_string());
-crates/skills/browser_web/src/main.rs	extract_top_n must be an integer	.ok_or_else(|| "extract_top_n must be an integer".to_string())?;
-crates/skills/browser_web/src/main.rs	extract_top_n must be between 1 and 10, got {}	"extract_top_n must be between 1 and 10, got {}",
-crates/skills/browser_web/src/main.rs	failed to serialize helper input: {}	.map_err(|e| format!("failed to serialize helper input: {}", e))?;
-crates/skills/browser_web/src/main.rs	failed to start browser helper: {}	format!("failed to start browser helper: {}", e)
-crates/skills/browser_web/src/main.rs	failed to take stdin	.ok_or_else(|| "failed to take stdin".to_string())?;
-crates/skills/browser_web/src/main.rs	failed to wait for helper: {}	.map_err(|e| format!("failed to wait for helper: {}", e))?;
-crates/skills/browser_web/src/main.rs	failed to write to helper stdin: {}	.map_err(|e| format!("failed to write to helper stdin: {}", e))?;
-crates/skills/browser_web/src/main.rs	helper output is not valid UTF-8: {}	.map_err(|e| format!("helper output is not valid UTF-8: {}", e))?;
 crates/skills/browser_web/src/main.rs	max_pages must be an integer	.ok_or_else(|| "max_pages must be an integer".to_string())?;
 crates/skills/browser_web/src/main.rs	max_pages must be between 1 and 10, got {}	return Err(format!("max_pages must be between 1 and 10, got {}", val));
 crates/skills/browser_web/src/main.rs	max_text_chars must be an integer	.ok_or_else(|| "max_text_chars must be an integer".to_string())?;
-crates/skills/browser_web/src/main.rs	max_text_chars must be an integer	.ok_or_else(|| "max_text_chars must be an integer".to_string())?;
-crates/skills/browser_web/src/main.rs	max_text_chars must be between 100 and 200000, got {}	"max_text_chars must be between 100 and 200000, got {}",
 crates/skills/browser_web/src/main.rs	max_text_chars must be between 100 and 200000, got {}	"max_text_chars must be between 100 and 200000, got {}",
 crates/skills/browser_web/src/main.rs	min_content_chars must be an integer	.ok_or_else(|| "min_content_chars must be an integer".to_string())?;
-crates/skills/browser_web/src/main.rs	min_content_chars must be an integer	.ok_or_else(|| "min_content_chars must be an integer".to_string())?;
 crates/skills/browser_web/src/main.rs	min_content_chars must be between 20 and 10000, got {}	"min_content_chars must be between 20 and 10000, got {}",
-crates/skills/browser_web/src/main.rs	min_content_chars must be between 20 and 10000, got {}	"min_content_chars must be between 20 and 10000, got {}",
-crates/skills/browser_web/src/main.rs	query must not be empty	return Err("query must not be empty".to_string());
-crates/skills/browser_web/src/main.rs	query must not be empty	return Err("query must not be empty".to_string());
-crates/skills/browser_web/src/main.rs	top_k must be an integer	.ok_or_else(|| "top_k must be an integer".to_string())?;
-crates/skills/browser_web/src/main.rs	top_k must be an integer	.ok_or_else(|| "top_k must be an integer".to_string())?;
-crates/skills/browser_web/src/main.rs	top_k must be between 1 and 20, got {}	return Err(format!("top_k must be between 1 and 20, got {}", val));
-crates/skills/browser_web/src/main.rs	top_k must be between 1 and 20, got {}	return Err(format!("top_k must be between 1 and 20, got {}", val));
-crates/skills/browser_web/src/main.rs	unknown action: {other}; allowed: open_extract|search_page|search_extract	"unknown action: {other}; allowed: open_extract|search_page|search_extract"
-crates/skills/browser_web/src/main.rs	unsupported engine: {engine}; only 'google' is supported	"unsupported engine: {engine}; only 'google' is supported"
-crates/skills/browser_web/src/main.rs	unsupported engine: {engine}; only 'google' is supported	"unsupported engine: {engine}; only 'google' is supported"
-crates/skills/browser_web/src/main.rs	wait_until must be one of: domcontentloaded, load, networkidle	"wait_until must be one of: domcontentloaded, load, networkidle"
-crates/skills/browser_web/src/main.rs	wait_until must be one of: domcontentloaded, load, networkidle	"wait_until must be one of: domcontentloaded, load, networkidle"
+crates/skills/browser_web/src/main.rs	node executable not found	SkillFailure::with_message("DEPENDENCY_MISSING", "node executable not found")
+crates/skills/browser_web/src/main.rs	wait_until must be one of: domcontentloaded, load, networkidle	return Err("wait_until must be one of: domcontentloaded, load, networkidle".to_string());
 crates/skills/config_edit/src/main.rs	Config changed; restart may be required for already running services to reload it.	"Config changed; restart may be required for already running services to reload it."
 crates/skills/config_edit/src/main.rs	Restart was requested, but config_edit does not execute restarts in this version. Use the approved restart workflow.	"Restart was requested, but config_edit does not execute restarts in this version. Use the approved restart workflow."
 crates/skills/config_edit/src/main.rs	TOML integer is too large	Err(SkillError::invalid_input("TOML integer is too large"))
@@ -1207,140 +1195,6 @@ crates/skills/config_guard/src/main.rs	llm.{vendor}.api_key looks like a real ke
 crates/skills/config_guard/src/main.rs	parse_toml failed for {}: {err}	format!("parse_toml failed for {}: {err}", config_path.display()),
 crates/skills/config_guard/src/main.rs	telegram.bot_token looks like a real token	risks.push("telegram.bot_token looks like a real token".to_string());
 crates/skills/config_guard/src/main.rs	{operation} failed for {path_text}: {err}	format!("{operation} failed for {path_text}: {err}"),
-crates/skills/crypto/src/exchange_api.rs	binance request failed: {err}	.map_err(|err| format!("binance request failed: {err}"))?;
-crates/skills/crypto/src/exchange_api.rs	okx request failed: {err}	.map_err(|err| format!("okx request failed: {err}"))?;
-crates/skills/crypto/src/exchange_api.rs	parse binance response failed: {err}	.map_err(|err| format!("parse binance response failed: {err}"))?;
-crates/skills/crypto/src/exchange_api.rs	parse okx response failed: {err}	.map_err(|err| format!("parse okx response failed: {err}"))?;
-crates/skills/crypto/src/i18n.rs	 (order placed, awaiting fill)	" (order placed, awaiting fill)".to_string(),
-crates/skills/crypto/src/i18n.rs	Order status skipped ({id_text}): missing symbol, {exchange} requires symbol for query	"Order status skipped ({id_text}): missing symbol, {exchange} requires symbol for query"
-crates/skills/crypto/src/i18n.rs	action is blocked by config: {action}	"action is blocked by config: {action}".to_string(),
-crates/skills/crypto/src/i18n.rs	args must be object	"args must be object".to_string(),
-crates/skills/crypto/src/i18n.rs	build http client failed: {error}	"build http client failed: {error}".to_string(),
-crates/skills/crypto/src/i18n.rs	cancel_all_orders {exchange} {sym_info}: no open orders	"cancel_all_orders {exchange} {sym_info}: no open orders".to_string(),
-crates/skills/crypto/src/i18n.rs	exchange is not allowed: {exchange}	"exchange is not allowed: {exchange}".to_string(),
-crates/skills/crypto/src/i18n.rs	exchange is required because no default exchange is configured	"exchange is required because no default exchange is configured".to_string(),
-crates/skills/crypto/src/i18n.rs	indicator requires close_prices	"indicator requires close_prices".to_string(),
-crates/skills/crypto/src/i18n.rs	open_orders {exchange}{symbol_suffix}: none	"open_orders {exchange}{symbol_suffix}: none".to_string(),
-crates/skills/crypto/src/i18n.rs	order cannot be cancelled from status {status}	"order cannot be cancelled from status {status}".to_string(),
-crates/skills/crypto/src/i18n.rs	order not found: {order_id}	"order not found: {order_id}".to_string(),
-crates/skills/crypto/src/i18n.rs	order_cancelled {id_text}	"order_cancelled {id_text}".to_string(),
-crates/skills/crypto/src/i18n.rs	order_id is required	"order_id is required".to_string(),
-crates/skills/crypto/src/i18n.rs	order_id or client_order_id is required	"order_id or client_order_id is required".to_string(),
-crates/skills/crypto/src/i18n.rs	order_type must be market or limit	"order_type must be market or limit".to_string(),
-crates/skills/crypto/src/i18n.rs	price is required for limit order	"price is required for limit order".to_string(),
-crates/skills/crypto/src/i18n.rs	qty is required and must be number	"qty is required and must be number".to_string(),
-crates/skills/crypto/src/i18n.rs	side must be buy or sell	"side must be buy or sell".to_string(),
-crates/skills/crypto/src/i18n.rs	symbol is not allowed: {symbol}	"symbol is not allowed: {symbol}".to_string(),
-crates/skills/crypto/src/i18n.rs	symbol is not available on Binance spot: {symbol}	"symbol is not available on Binance spot: {symbol}".to_string(),
-crates/skills/crypto/src/i18n.rs	symbol is required for binance cancel_order	"symbol is required for binance cancel_order".to_string(),
-crates/skills/crypto/src/i18n.rs	symbol is required for binance order_status	"symbol is required for binance order_status".to_string(),
-crates/skills/crypto/src/i18n.rs	symbol is required for okx cancel_order	"symbol is required for okx cancel_order".to_string(),
-crates/skills/crypto/src/i18n.rs	symbol is required for okx order_status	"symbol is required for okx order_status".to_string(),
-crates/skills/crypto/src/i18n.rs	symbols or symbol is required	"symbols or symbol is required".to_string(),
-crates/skills/crypto/src/i18n.rs	threshold_pct must be > 0	"threshold_pct must be > 0".to_string(),
-crates/skills/crypto/src/i18n.rs	unsupported chain; use bitcoin|ethereum	"unsupported chain; use bitcoin|ethereum".to_string(),
-crates/skills/crypto/src/i18n.rs	unsupported exchange for cancel_order: {exchange}	"unsupported exchange for cancel_order: {exchange}".to_string(),
-crates/skills/crypto/src/i18n.rs	unsupported exchange for order_status: {exchange}	"unsupported exchange for order_status: {exchange}".to_string(),
-crates/skills/crypto/src/i18n.rs	unsupported exchange for positions: {exchange}	"unsupported exchange for positions: {exchange}".to_string(),
-crates/skills/crypto/src/i18n.rs	unsupported execution exchange: {exchange}	"unsupported execution exchange: {exchange}".to_string(),
-crates/skills/crypto/src/main.rs	build hmac failed: {err}	.map_err(|err| format!("build hmac failed: {err}"))?;
-crates/skills/crypto/src/main.rs	private exchange API request failed before a safe response could be read	return "private exchange API request failed before a safe response could be read"
-crates/skills/crypto/src/main.rs	private exchange account access failed	"detail": "private exchange account access failed"
-crates/skills/crypto/src/main.rs	private exchange account access failed	return "private exchange account access failed".to_string();
-crates/skills/crypto/src/market_data.rs	binance bookTicker missing askPrice	.ok_or_else(|| "binance bookTicker missing askPrice".to_string())?;
-crates/skills/crypto/src/market_data.rs	binance bookTicker missing askQty	.ok_or_else(|| "binance bookTicker missing askQty".to_string())?;
-crates/skills/crypto/src/market_data.rs	binance bookTicker missing bidPrice	.ok_or_else(|| "binance bookTicker missing bidPrice".to_string())?;
-crates/skills/crypto/src/market_data.rs	binance bookTicker missing bidQty	.ok_or_else(|| "binance bookTicker missing bidQty".to_string())?;
-crates/skills/crypto/src/market_data.rs	binance bookTicker parse failed: {err}	.map_err(|err| format!("binance bookTicker parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	binance bookTicker request failed: {err}	.map_err(|err| format!("binance bookTicker request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	binance candles response is invalid	.ok_or_else(|| "binance candles response is invalid".to_string())?;
-crates/skills/crypto/src/market_data.rs	binance exchangeInfo parse failed: {err}	.map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	binance exchangeInfo request failed: {err}	.map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	binance quote fallback parse failed: {err}	.map_err(|err| format!("binance quote fallback parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	binance quote fallback request failed: {err}	.map_err(|err| format!("binance quote fallback request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	binance quote missing price field	let price = price.ok_or_else(|| "binance quote missing price field".to_string())?;
-crates/skills/crypto/src/market_data.rs	binance quote parse failed: {err}	.map_err(|err| format!("binance quote parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	binance quote request failed: {err}	.map_err(|err| format!("binance quote request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	coinbase bookTicker missing ask	.ok_or_else(|| "coinbase bookTicker missing ask".to_string())?;
-crates/skills/crypto/src/market_data.rs	coinbase bookTicker missing bid	.ok_or_else(|| "coinbase bookTicker missing bid".to_string())?;
-crates/skills/crypto/src/market_data.rs	coinbase bookTicker parse failed: {err}	.map_err(|err| format!("coinbase bookTicker parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	coinbase bookTicker request failed: {err}	.map_err(|err| format!("coinbase bookTicker request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	coinbase quote missing price	.ok_or_else(|| "coinbase quote missing price".to_string())?;
-crates/skills/crypto/src/market_data.rs	coinbase quote parse failed: {err}	.map_err(|err| format!("coinbase quote parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	coinbase quote request failed: {err}	.map_err(|err| format!("coinbase quote request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	coingecko quote missing symbol node	.ok_or_else(|| "coingecko quote missing symbol node".to_string())?;
-crates/skills/crypto/src/market_data.rs	coingecko quote missing usd	.ok_or_else(|| "coingecko quote missing usd".to_string())?;
-crates/skills/crypto/src/market_data.rs	coingecko quote parse failed: {err}	.map_err(|err| format!("coingecko quote parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	coingecko quote request failed: {err}	.map_err(|err| format!("coingecko quote request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	fetch binance candles failed: {err}	.map_err(|err| format!("fetch binance candles failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	fetch okx candles failed: {err}	.map_err(|err| format!("fetch okx candles failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	gateio bookTicker missing data	.ok_or_else(|| "gateio bookTicker missing data".to_string())?;
-crates/skills/crypto/src/market_data.rs	gateio bookTicker missing highest_bid	.ok_or_else(|| "gateio bookTicker missing highest_bid".to_string())?;
-crates/skills/crypto/src/market_data.rs	gateio bookTicker missing lowest_ask	.ok_or_else(|| "gateio bookTicker missing lowest_ask".to_string())?;
-crates/skills/crypto/src/market_data.rs	gateio bookTicker parse failed: {err}	.map_err(|err| format!("gateio bookTicker parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	gateio bookTicker request failed: {err}	.map_err(|err| format!("gateio bookTicker request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	gateio quote missing data	.ok_or_else(|| "gateio quote missing data".to_string())?;
-crates/skills/crypto/src/market_data.rs	gateio quote missing last	.ok_or_else(|| "gateio quote missing last".to_string())?;
-crates/skills/crypto/src/market_data.rs	gateio quote parse failed: {err}	.map_err(|err| format!("gateio quote parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	gateio quote request failed: {err}	.map_err(|err| format!("gateio quote request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	kraken bookTicker missing result	.ok_or_else(|| "kraken bookTicker missing result".to_string())?;
-crates/skills/crypto/src/market_data.rs	kraken bookTicker missing ticker node	.ok_or_else(|| "kraken bookTicker missing ticker node".to_string())?;
-crates/skills/crypto/src/market_data.rs	kraken bookTicker parse failed: {err}	.map_err(|err| format!("kraken bookTicker parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	kraken bookTicker request failed: {err}	.map_err(|err| format!("kraken bookTicker request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	kraken quote missing result	.ok_or_else(|| "kraken quote missing result".to_string())?;
-crates/skills/crypto/src/market_data.rs	kraken quote missing ticker node	.ok_or_else(|| "kraken quote missing ticker node".to_string())?;
-crates/skills/crypto/src/market_data.rs	kraken quote parse failed: {err}	.map_err(|err| format!("kraken quote parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	kraken quote request failed: {err}	.map_err(|err| format!("kraken quote request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	okx bookTicker missing askPx	.ok_or_else(|| "okx bookTicker missing askPx".to_string())?;
-crates/skills/crypto/src/market_data.rs	okx bookTicker missing askSz	.ok_or_else(|| "okx bookTicker missing askSz".to_string())?;
-crates/skills/crypto/src/market_data.rs	okx bookTicker missing bidPx	.ok_or_else(|| "okx bookTicker missing bidPx".to_string())?;
-crates/skills/crypto/src/market_data.rs	okx bookTicker missing bidSz	.ok_or_else(|| "okx bookTicker missing bidSz".to_string())?;
-crates/skills/crypto/src/market_data.rs	okx bookTicker missing data	.ok_or_else(|| "okx bookTicker missing data".to_string())?;
-crates/skills/crypto/src/market_data.rs	okx bookTicker parse failed: {err}	.map_err(|err| format!("okx bookTicker parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	okx bookTicker request failed: {err}	.map_err(|err| format!("okx bookTicker request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	okx candles response is invalid	.ok_or_else(|| "okx candles response is invalid".to_string())?;
-crates/skills/crypto/src/market_data.rs	okx quote missing data	.ok_or_else(|| "okx quote missing data".to_string())?;
-crates/skills/crypto/src/market_data.rs	okx quote missing last	.ok_or_else(|| "okx quote missing last".to_string())?;
-crates/skills/crypto/src/market_data.rs	okx quote parse failed: {err}	.map_err(|err| format!("okx quote parse failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	okx quote request failed: {err}	.map_err(|err| format!("okx quote request failed: {err}"))?
-crates/skills/crypto/src/market_data.rs	parse binance candles failed: {err}	.map_err(|err| format!("parse binance candles failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	parse okx candles failed: {err}	.map_err(|err| format!("parse okx candles failed: {err}"))?;
-crates/skills/crypto/src/market_handlers.rs	all market sources failed: {}	return Err(format!("all market sources failed: {}", errors.join("; ")));
-crates/skills/crypto/src/market_handlers.rs	binance symbol check ok: {symbol}	format!("binance symbol check ok: {symbol}"),
-crates/skills/crypto/src/market_handlers.rs	crypto healthcheck ok (binance+okx)	"crypto healthcheck ok (binance+okx)".to_string()
-crates/skills/crypto/src/onchain_handlers.rs	ethereum native balance response missing result	.ok_or_else(|| "ethereum native balance response missing result".to_string())?;
-crates/skills/crypto/src/onchain_handlers.rs	ethereum token balance response missing result	.ok_or_else(|| "ethereum token balance response missing result".to_string())?;
-crates/skills/crypto/src/onchain_handlers.rs	fetch bitcoin onchain failed: {err}	.map_err(|err| format!("fetch bitcoin onchain failed: {err}"))?
-crates/skills/crypto/src/onchain_handlers.rs	fetch ethereum native balance failed: {err}	.map_err(|err| format!("fetch ethereum native balance failed: {err}"))?
-crates/skills/crypto/src/onchain_handlers.rs	fetch ethereum onchain failed: {err}	.map_err(|err| format!("fetch ethereum onchain failed: {err}"))?
-crates/skills/crypto/src/onchain_handlers.rs	fetch ethereum token balance failed: {err}	.map_err(|err| format!("fetch ethereum token balance failed: {err}"))?
-crates/skills/crypto/src/onchain_handlers.rs	fetch ethereum tx list failed: {err}	.map_err(|err| format!("fetch ethereum tx list failed: {err}"))?
-crates/skills/crypto/src/onchain_handlers.rs	parse bitcoin onchain failed: {err}	.map_err(|err| format!("parse bitcoin onchain failed: {err}"))?;
-crates/skills/crypto/src/onchain_handlers.rs	parse ethereum native balance failed: {err}	.map_err(|err| format!("parse ethereum native balance failed: {err}"))?;
-crates/skills/crypto/src/onchain_handlers.rs	parse ethereum onchain failed: {err}	.map_err(|err| format!("parse ethereum onchain failed: {err}"))?;
-crates/skills/crypto/src/onchain_handlers.rs	parse ethereum token balance failed: {err}	.map_err(|err| format!("parse ethereum token balance failed: {err}"))?;
-crates/skills/crypto/src/onchain_handlers.rs	parse ethereum tx list failed: {err}	.map_err(|err| format!("parse ethereum tx list failed: {err}"))?;
-crates/skills/crypto/src/onchain_handlers.rs	token contract not configured for ethereum token: {token}	.ok_or_else(|| format!("token contract not configured for ethereum token: {token}"))?;
-crates/skills/crypto/src/trade_execution.rs	binance LOT_SIZE maxQty missing	.ok_or_else(|| "binance LOT_SIZE maxQty missing".to_string())?;
-crates/skills/crypto/src/trade_execution.rs	binance LOT_SIZE minQty missing	.ok_or_else(|| "binance LOT_SIZE minQty missing".to_string())?;
-crates/skills/crypto/src/trade_execution.rs	binance LOT_SIZE stepSize missing	.ok_or_else(|| "binance LOT_SIZE stepSize missing".to_string())?;
-crates/skills/crypto/src/trade_execution.rs	binance PRICE_FILTER tickSize missing	.ok_or_else(|| "binance PRICE_FILTER tickSize missing".to_string())?;
-crates/skills/crypto/src/trade_execution.rs	binance exchangeInfo missing LOT_SIZE filter	.ok_or_else(|| "binance exchangeInfo missing LOT_SIZE filter".to_string())?;
-crates/skills/crypto/src/trade_execution.rs	binance exchangeInfo missing PRICE_FILTER	.ok_or_else(|| "binance exchangeInfo missing PRICE_FILTER".to_string())?;
-crates/skills/crypto/src/trade_execution.rs	binance exchangeInfo missing symbols	.ok_or_else(|| "binance exchangeInfo missing symbols".to_string())?;
-crates/skills/crypto/src/trade_execution.rs	binance exchangeInfo missing symbols	.ok_or_else(|| "binance exchangeInfo missing symbols".to_string())?;
-crates/skills/crypto/src/trade_execution.rs	binance exchangeInfo parse failed: {err}	.map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
-crates/skills/crypto/src/trade_execution.rs	binance exchangeInfo parse failed: {err}	.map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
-crates/skills/crypto/src/trade_execution.rs	binance exchangeInfo request failed: {err}	.map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
-crates/skills/crypto/src/trade_execution.rs	binance exchangeInfo request failed: {err}	.map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
-crates/skills/crypto/src/trade_execution.rs	invalid price for quote_qty_usd conversion	return Err("invalid price for quote_qty_usd conversion".to_string());
-crates/skills/crypto/src/trade_execution.rs	no available balance for {} on binance	"no available balance for {} on binance",
-crates/skills/crypto/src/trade_execution.rs	no available balance for {} on okx	return Err(format!("no available balance for {} on okx", base_asset));
-crates/skills/crypto/src/trade_execution.rs	notional exceeds max_notional_usd: {notional:.4} > {max_notional:.4}	"notional exceeds max_notional_usd: {notional:.4} > {max_notional:.4}"
-crates/skills/crypto/src/trade_handlers.rs	cancel_all_orders on binance requires symbol	.ok_or("cancel_all_orders on binance requires symbol")?;
-crates/skills/crypto/src/trade_handlers.rs	trade_history binance {sym}: none	format!("trade_history binance {sym}: none")
-crates/skills/crypto/src/trade_handlers.rs	trade_history okx {sym_info}: none	format!("trade_history okx {sym_info}: none")
-crates/skills/crypto/src/trade_handlers.rs	trade_history on binance requires symbol	.ok_or("trade_history on binance requires symbol")?;
 crates/skills/db_basic/src/main.rs	args must be object	.ok_or_else(|| SkillError::new("invalid_input", "args must be object"))?;
 crates/skills/db_basic/src/main.rs	next row failed: {err}	.map_err(|err| SkillError::new("sqlite_query_failed", format!("next row failed: {err}")))?
 crates/skills/db_basic/src/main.rs	open sqlite failed: {err}	SkillError::new("sqlite_open_failed", format!("open sqlite failed: {err}")).with_extra(
@@ -1502,31 +1356,53 @@ crates/skills/extension_manager/src/main.rs	{path}.{extra}: unexpected field	ret
 crates/skills/extension_manager/src/main.rs	{path}.{field}: missing required field	return Err(format!("{path}.{field}: missing required field"));
 crates/skills/extension_manager/src/main.rs	{path}: schema missing properties	.ok_or_else(|| format!("{path}: schema missing properties"))?;
 crates/skills/fs_search/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
-crates/skills/fs_search/src/main.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-crates/skills/fs_search/src/main.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-crates/skills/fs_search/src/main.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-crates/skills/fs_search/src/main.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
-crates/skills/fs_search/src/main.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-crates/skills/fs_search/src/main.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-crates/skills/fs_search/src/main.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
 crates/skills/fs_search/src/main.rs	unsupported action; use find_name|find_ext|grep_text|find_images	"unsupported action; use find_name|find_ext|grep_text|find_images".to_string(),
+crates/skills/fs_search/src/workspace_traversal.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	entry type failed: {err}	.map_err(|err| format!("entry type failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	entry type failed: {err}	.map_err(|err| format!("entry type failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	entry type failed: {err}	.map_err(|err| format!("entry type failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	path is outside workspace	Err("path is outside workspace".to_string())
+crates/skills/fs_search/src/workspace_traversal.rs	path resolution failed: {err}	.map_err(|err| format!("path resolution failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	path with '..' is not allowed	return Err("path with '..' is not allowed".to_string());
+crates/skills/fs_search/src/workspace_traversal.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	workspace resolution failed: {err}	.map_err(|err| format!("workspace resolution failed: {err}"))?;
 crates/skills/git_basic/src/main.rs	args must be object	"args must be object".to_string(),
 crates/skills/git_basic/src/main.rs	current directory is not a git repository. Please use git_basic in a git repo.	"current directory is not a git repository. Please use git_basic in a git repo."
 crates/skills/git_basic/src/main.rs	run git failed: {error}	"run git failed: {error}".to_string(),
-crates/skills/git_basic/src/main.rs	show_file_at_rev requires path	return Err("show_file_at_rev requires path".to_string());
 crates/skills/git_basic/src/main.rs	unsupported action; use status|log|diff|branch|show|rev_parse|diff_cached|current_branch|remote|changed_files|show_file_at_rev	"unsupported action; use status|log|diff|branch|show|rev_parse|diff_cached|current_branch|remote|changed_files|show_file_at_rev".to_string(),
 crates/skills/health_check/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/health_check/src/main.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
-crates/skills/http_basic/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
-crates/skills/http_basic/src/main.rs	build client failed: {err}	.map_err(|err| format!("build client failed: {err}"))?;
-crates/skills/http_basic/src/main.rs	create output dir failed: {err}	std::fs::create_dir_all(parent).map_err(|err| format!("create output dir failed: {err}"))
-crates/skills/http_basic/src/main.rs	http request failed: {err}	.map_err(|err| format!("http request failed: {err}"))?;
-crates/skills/http_basic/src/main.rs	output path has no parent directory	.ok_or_else(|| "output path has no parent directory".to_string())?;
-crates/skills/http_basic/src/main.rs	output_path is outside workspace	return Err("output_path is outside workspace".to_string());
-crates/skills/http_basic/src/main.rs	read response failed: {err}	.map_err(|err| format!("read response failed: {err}"))?;
-crates/skills/http_basic/src/main.rs	resolve workspace failed: {err}	workspace_root().map_err(|err| format!("resolve workspace failed: {err}"))?;
-crates/skills/http_basic/src/main.rs	unsupported action; use get or post_json	_ => return Err("unsupported action; use get or post_json".to_string()),
-crates/skills/http_basic/src/main.rs	write output failed: {err}	std::fs::write(&output_path, &body).map_err(|err| format!("write output failed: {err}"))?;
+crates/skills/http_basic/src/main.rs	URL host is required	.ok_or_else(|| HttpBasicError::new("url_host_missing", "URL host is required"))?;
+crates/skills/http_basic/src/main.rs	URL port is unavailable	.ok_or_else(|| HttpBasicError::new("url_port_invalid", "URL port is unavailable"))?;
+crates/skills/http_basic/src/main.rs	URL userinfo is not allowed	"URL userinfo is not allowed",
+crates/skills/http_basic/src/main.rs	args must be object	.ok_or_else(|| HttpBasicError::new("invalid_args", "args must be object"))?;
+crates/skills/http_basic/src/main.rs	domain contains unsupported characters	"domain contains unsupported characters",
+crates/skills/http_basic/src/main.rs	domain list must be array	.ok_or_else(|| HttpBasicError::new("domain_policy_invalid", "domain list must be array"))?;
+crates/skills/http_basic/src/main.rs	domain must be a string	HttpBasicError::new("domain_policy_invalid", "domain must be a string")
+crates/skills/http_basic/src/main.rs	header values must be strings	HttpBasicError::new("headers_invalid", "header values must be strings")
+crates/skills/http_basic/src/main.rs	headers must be object	.ok_or_else(|| HttpBasicError::new("headers_invalid", "headers must be object"))?;
+crates/skills/http_basic/src/main.rs	host resolved to no addresses	HttpBasicError::new("dns_resolution_failed", "host resolved to no addresses")
+crates/skills/http_basic/src/main.rs	http request failed: {error}	HttpBasicError::new("request_failed", format!("http request failed: {error}"))
+crates/skills/http_basic/src/main.rs	https redirect cannot downgrade to http	"https redirect cannot downgrade to http",
+crates/skills/http_basic/src/main.rs	only http and https URLs are supported	"only http and https URLs are supported",
+crates/skills/http_basic/src/main.rs	output path cannot be a symlink	"output path cannot be a symlink",
+crates/skills/http_basic/src/main.rs	output path cannot be a symlink	"output path cannot be a symlink",
+crates/skills/http_basic/src/main.rs	output path has no parent	.ok_or_else(|| HttpBasicError::new("output_path_invalid", "output path has no parent"))?;
+crates/skills/http_basic/src/main.rs	output path is invalid	"output path is invalid",
+crates/skills/http_basic/src/main.rs	output path is invalid	"output path is invalid",
+crates/skills/http_basic/src/main.rs	output_path is outside workspace	"output_path is outside workspace",
+crates/skills/http_basic/src/main.rs	output_path is outside workspace	"output_path is outside workspace",
+crates/skills/http_basic/src/main.rs	output_path is outside workspace	"output_path is outside workspace",
+crates/skills/http_basic/src/main.rs	output_path is outside workspace	"output_path is outside workspace",
+crates/skills/http_basic/src/main.rs	protected header cannot be overridden	"protected header cannot be overridden",
+crates/skills/http_basic/src/main.rs	response exceeds byte limit	HttpBasicError::new("response_too_large", "response exceeds byte limit").with_extra(json!({
+crates/skills/http_basic/src/main.rs	target domain is blocked	"target domain is blocked",
+crates/skills/http_basic/src/main.rs	target domain is not allowed	"target domain is not allowed",
+crates/skills/http_basic/src/main.rs	target resolves to a non-public network address	"target resolves to a non-public network address",
 crates/skills/image_edit/src/i18n.rs	Edited successfully and saved: {path}	"Edited successfully and saved: {path}".to_string(),
 crates/skills/image_edit/src/i18n.rs	图片编辑成功并已保存：{path}	"图片编辑成功并已保存：{path}".to_string(),
 crates/skills/image_edit/src/main.rs	Edited successfully and saved: {path}	"Edited successfully and saved: {path}",
@@ -1762,8 +1638,6 @@ crates/skills/install_module/src/main.rs	invalid module name: {module}	return Er
 crates/skills/install_module/src/main.rs	no modules to install	return Err("no modules to install".to_string());
 crates/skills/install_module/src/main.rs	python3 pip is not available. install python3-pip first	"python" => "python3 pip is not available. install python3-pip first".to_string(),
 crates/skills/install_module/src/main.rs	run installer failed: {err}	.map_err(|err| format!("run installer failed: {err}"))
-crates/skills/invest_copy/src/main.rs	Persona display: {}\nSlug: {}\nOne-liner: {}\nFacets:\n{}\nPreferred wording hints: {}\nChannel preference: {}\nTruncated_input: {}\nFocus_optional: {}\nSource_note_optional: {}\n\nUSER_MATERIAL:\n{}	"Persona display: {}\\nSlug: {}\\nOne-liner: {}\\nFacets:\\n{}\\nPreferred wording hints: {}\\nChannel preference: {}\\nTruncated_input: {}\\nFocus_optional: {}\\nSource_note_optional: {}\\n\\nUSER_MATERIAL:\\n{}",
-crates/skills/invest_copy/src/main.rs	parse embedded personas.toml	toml::from_str(PERSONAS_TOML).context("parse embedded personas.toml")?;
 crates/skills/kb/src/main.rs	ALTER TABLE memory_retrieval_index ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'	"ALTER TABLE memory_retrieval_index ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
 crates/skills/kb/src/main.rs	ALTER TABLE memory_retrieval_index ADD COLUMN source_ref TEXT	"ALTER TABLE memory_retrieval_index ADD COLUMN source_ref TEXT",
 crates/skills/kb/src/main.rs	PRAGMA table_info({table_name})	let pragma = format!("PRAGMA table_info({table_name})");
@@ -1790,7 +1664,6 @@ crates/skills/log_analyze/src/main.rs	read log dir entry failed: {err}	let entry
 crates/skills/log_analyze/src/main.rs	read log dir failed: {err}	let entries = fs::read_dir(path).map_err(|err| format!("read log dir failed: {err}"))?;
 crates/skills/log_analyze/src/main.rs	read log failed: {err}	std::fs::read_to_string(resolved_path).map_err(|err| format!("read log failed: {err}"))?;
 crates/skills/log_analyze/src/main.rs	read log file metadata failed: {err}	.map_err(|err| format!("read log file metadata failed: {err}"))?;
-crates/skills/map_merchant/src/main.rs	places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri	"places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri",
 crates/skills/music_generate/src/async_projection.rs	adapter_result must be object	return Err("adapter_result must be object".to_string());
 crates/skills/music_generate/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/music_generate/src/main.rs	build {provider_name} client failed: {err}	.map_err(|err| format!("build {provider_name} client failed: {err}"))?;
@@ -1819,38 +1692,6 @@ crates/skills/package_manager/src/main.rs	path with '..' is not allowed	Componen
 crates/skills/package_manager/src/main.rs	run package install failed: {err}	.map_err(|err| format!("run package install failed: {err}"))?;
 crates/skills/package_manager/src/main.rs	unsupported action; use detect|install|smart_install|uninstall	_ => Err("unsupported action; use detect|install|smart_install|uninstall".to_string()),
 crates/skills/package_manager/src/main.rs	write install log failed: {err}	eprintln!("write install log failed: {err}");
-crates/skills/photo_organize/src/i18n.rs	No obvious external drive or USB mount points were detected.	"No obvious external drive or USB mount points were detected.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	No photo files were found under `{path}`.	"No photo files were found under `{path}`.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	No photos matching brands {brands} were found under `{path}`.	"No photos matching brands {brands} were found under `{path}`.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	No photos matching filter `{filter_desc}` were found under `{path}`.	"No photos matching filter `{filter_desc}` were found under `{path}`.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	No photos taken in {capture_month} were found under `{path}`.	"No photos taken in {capture_month} were found under `{path}`.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	No preview items.	"No preview items.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	Photo files were found under `{path}`, but none had readable EXIF metadata, so no operation was performed.	"Photo files were found under `{path}`, but none had readable EXIF metadata, so no operation was performed.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	Photo organization completed: scanned {scanned_count} files, skipped {skipped_no_exif} files without readable EXIF, processed {processed} files, {action_word} {applied} files grouped by {group_by_desc}, skipped {skipped} files. Output directory: {output_dir}. Filter: {filter_desc}.	"Photo organization completed: scanned {scanned_count} files, skipped {skipped_no_exif} files without readable EXIF, processed {processed} files, {action_word} {applied} files grouped by {group_by_desc}, skipped {skipped} files. Output directory: {output_dir}. Filter: {filter_desc}.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	Photo organization partially completed: succeeded {success} files, failed {failed} files. First error: {first_error}	"Photo organization partially completed: succeeded {success} files, failed {failed} files. First error: {first_error}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	Preview generated for photo organization: scanned {photo_count} photos, {with_metadata} with readable EXIF metadata, skipped {without_metadata} without readable EXIF. Output directory: {output_dir}.\n\nThis run groups by {group_by_desc}. Filter: {filter_desc}.\n\nFirst {preview_count} preview items:\n{preview_lines}	"Preview generated for photo organization: scanned {photo_count} photos, {with_metadata} with readable EXIF metadata, skipped {without_metadata} without readable EXIF. Output directory: {output_dir}.\\n\\nThis run groups by {group_by_desc}. Filter: {filter_desc}.\\n\\nFirst {preview_count} preview items:\\n{preview_lines}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	This skill has explicit mount-path discovery for macOS and Linux. On the current OS, please provide the photo directory manually as an absolute path.	"This skill has explicit mount-path discovery for macOS and Linux. On the current OS, please provide the photo directory manually as an absolute path.".to_string(),
-crates/skills/photo_organize/src/i18n.rs	Unsupported action `{action}`; allowed: prepare|organize|plan|preview|dry_run|copy|move	"Unsupported action `{action}`; allowed: prepare|organize|plan|preview|dry_run|copy|move"
-crates/skills/photo_organize/src/i18n.rs	Unsupported mode `{mode}`; allowed: plan|copy|move	"Unsupported mode `{mode}`; allowed: plan|copy|move".to_string(),
-crates/skills/photo_organize/src/i18n.rs	args must be object or string	"args must be object or string".to_string(),
-crates/skills/photo_organize/src/i18n.rs	failed to copy file: {source} -> {dest} ({error})	"failed to copy file: {source} -> {dest} ({error})".to_string(),
-crates/skills/photo_organize/src/i18n.rs	failed to create destination directory: {path} ({error})	"failed to create destination directory: {path} ({error})".to_string(),
-crates/skills/photo_organize/src/i18n.rs	failed to parse file name: {path}	"failed to parse file name: {path}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	failed to read directory entry: {path} ({error})	"failed to read directory entry: {path} ({error})".to_string(),
-crates/skills/photo_organize/src/i18n.rs	failed to read directory: {path} ({error})	"failed to read directory: {path} ({error})".to_string(),
-crates/skills/photo_organize/src/i18n.rs	failed to read file metadata: {path} ({error})	"failed to read file metadata: {path} ({error})".to_string(),
-crates/skills/photo_organize/src/i18n.rs	failed to read source_dir metadata: {path} ({error})	"failed to read source_dir metadata: {path} ({error})".to_string(),
-crates/skills/photo_organize/src/i18n.rs	failed to remove original file: {source} ({error})	"failed to remove original file: {source} ({error})".to_string(),
-crates/skills/photo_organize/src/i18n.rs	normalized args must be object	"normalized args must be object".to_string(),
-crates/skills/photo_organize/src/i18n.rs	only photos shot in {capture_month}	"only photos shot in {capture_month}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	only photos shot in {capture_year}	"only photos shot in {capture_year}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	only photos shot on {capture_date}	"only photos shot on {capture_date}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	only photos with brands {brands}	"only photos with brands {brands}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	only photos with camera models {models}	"only photos with camera models {models}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	only photos with lenses {lenses}	"only photos with lenses {lenses}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	resolve current_dir failed: {error}	"resolve current_dir failed: {error}".to_string(),
-crates/skills/photo_organize/src/i18n.rs	source_dir does not exist or is not accessible: {path} ({error})	"source_dir does not exist or is not accessible: {path} ({error})".to_string(),
-crates/skills/photo_organize/src/i18n.rs	source_dir is not a directory: {path}	"source_dir is not a directory: {path}".to_string(),
 crates/skills/process_basic/src/main.rs	PID PPID %CPU %MEM COMM	let mut lines = vec!["PID PPID %CPU %MEM COMM".to_string()];
 crates/skills/process_basic/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/process_basic/src/main.rs	create service logs dir failed: {err}	eprintln!("create service logs dir failed: {err}");
@@ -1942,19 +1783,18 @@ crates/skills/service_control/src/platform.rs	manager {} logs not implemented	ev
 crates/skills/service_control/src/platform.rs	no recent macOS unified log entries found for {}	"no recent macOS unified log entries found for {}",
 crates/skills/service_control/src/platform.rs	not in the sudoers	"not in the sudoers",
 crates/skills/service_control/src/platform.rs	service {} not in whitelist, no log path	evidence.push(format!("service {} not in whitelist, no log path", target));
-crates/skills/stock/src/main.rs	You normalize A-share stock-name typos. Select exactly one alias from the provided candidates, or NONE when uncertain. Output one-line JSON only: {"alias":"<candidate alias>"} or {"alias":"NONE"}.	let system = "You normalize A-share stock-name typos. Select exactly one alias from the provided candidates, or NONE when uncertain. Output one-line JSON only: {\\"alias\\":\\"<candidate alias>\\"} or {\\"alias\\":\\"NONE\\"}.";
-crates/skills/stock/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
-crates/skills/stock/src/main.rs	name,open,prev,current,...	/// 解析新浪 var hq_str_sh600519="name,open,prev,current,...";
-crates/skills/stock/src/main.rs	raw_input: {}\ncandidates:\n{}\nReturn exactly one candidate alias from the list, or NONE.	"raw_input: {}\\ncandidates:\\n{}\\nReturn exactly one candidate alias from the list, or NONE.",
-crates/skills/stock/src/main.rs	stock_alias_choice schema must be valid JSON	.expect("stock_alias_choice schema must be valid JSON")
+crates/skills/system_basic/src/artifact_range.rs	artifact path is outside the workspace artifact root	"artifact path is outside the workspace artifact root",
+crates/skills/system_basic/src/artifact_range.rs	artifact range target must be a regular file	"artifact range target must be a regular file",
 crates/skills/system_basic/src/main.rs	args must be object	.ok_or_else(|| SkillError::invalid_input("args must be object"))?;
 crates/skills/system_basic/src/main.rs	dir_compare requires both paths to be directories	"dir_compare requires both paths to be directories",
 crates/skills/system_basic/src/main.rs	field_paths is required	return Err(SkillError::invalid_input("field_paths is required"));
 crates/skills/system_basic/src/main.rs	inventory_dir requires a directory: {}	"inventory_dir requires a directory: {}",
 crates/skills/system_basic/src/main.rs	name or pattern is required	.ok_or_else(|| SkillError::invalid_input("name or pattern is required"))?;
+crates/skills/system_basic/src/main.rs	read_range requires UTF-8 text: {}	"read_range requires UTF-8 text: {}",
 crates/skills/system_basic/src/main.rs	read_range requires a file, but target is a directory: {}	"read_range requires a file, but target is a directory: {}",
+crates/skills/system_basic/src/main.rs	read_range scan limit exceeded: {} bytes is greater than {}	"read_range scan limit exceeded: {} bytes is greater than {}",
 crates/skills/system_basic/src/main.rs	system info encode failed: {err}	.map_err(|err| SkillError::invalid_data(format!("system info encode failed: {err}")))?;
-crates/skills/system_basic/src/main.rs	unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime	"unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime"
+crates/skills/system_basic/src/main.rs	unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|read_artifact_range|compare_paths|path_batch_facts|diagnose_runtime	"unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|read_artifact_range|compare_paths|path_batch_facts|diagnose_runtime"
 crates/skills/system_basic/src/main.rs	workspace_glance requires a directory: {}	"workspace_glance requires a directory: {}",
 crates/skills/system_basic/src/main.rs	{operation} failed for {path_text}: {err}	Self::new(kind, format!("{operation} failed for {path_text}: {err}")).with_extra(json!({
 crates/skills/system_basic/src/path_helpers.rs	file too large to compare content directly: {} bytes exceeds {}	"file too large to compare content directly: {} bytes exceeds {}",
@@ -2031,48 +1871,37 @@ crates/skills/video_generate/src/main.rs	write video output failed: {err}	std::f
 crates/skills/video_generate/src/main.rs	{provider_name} config missing	.ok_or_else(|| format!("{provider_name} config missing"))?;
 crates/skills/video_generate/src/main.rs	{provider_name} config missing	.ok_or_else(|| format!("{provider_name} config missing"))?;
 crates/skills/video_generate/src/main.rs	{vendor} api key is not configured	return Err(format!("{vendor} api key is not configured"));
-crates/skills/weather/src/main.rs	Provide city or latitude + longitude	"Provide city or latitude + longitude".to_string(),
-crates/skills/weather/src/main.rs	args must be object	"args must be object".to_string(),
-crates/skills/weather/src/main.rs	retry attempts always records the last error	Err(last_err.expect("retry attempts always records the last error"))
-crates/skills/web_search_extract/src/main.rs	Found {} result(s) for "{}" via {} (top sources: {})	"Found {} result(s) for \\"{}\\" via {} (top sources: {})",
-crates/skills/web_search_extract/src/main.rs	No results found for "{}" via {}	return format!("No results found for \\"{}\\" via {}", query, backend);
 crates/skills/web_search_extract/src/main.rs	SERPAPI_API_KEY missing for serpapi backend	env::var("SERPAPI_API_KEY").context("SERPAPI_API_KEY missing for serpapi backend")?;
-crates/skills/web_search_extract/src/main.rs	bing body read failed	.context("bing body read failed")?;
-crates/skills/web_search_extract/src/main.rs	bing non-success response	.context("bing non-success response")?
-crates/skills/web_search_extract/src/main.rs	build http client failed	.context("build http client failed")?;
-crates/skills/web_search_extract/src/main.rs	build http client failed	.context("build http client failed")?;
-crates/skills/web_search_extract/src/main.rs	build http client failed	.context("build http client failed")?;
-crates/skills/web_search_extract/src/main.rs	build http client failed	.context("build http client failed")?;
-crates/skills/web_search_extract/src/main.rs	build http client failed	.context("build http client failed")?;
-crates/skills/web_search_extract/src/main.rs	docs.rs body read failed	.context("docs.rs body read failed")?;
-crates/skills/web_search_extract/src/main.rs	docs.rs search non-success response	.context("docs.rs search non-success response")?
+crates/skills/web_search_extract/src/main.rs	action must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", "action must be string"))
+crates/skills/web_search_extract/src/main.rs	args must be object	.ok_or_else(|| SearchError::new("INVALID_INPUT", "args must be object"))?;
+crates/skills/web_search_extract/src/main.rs	backend exceeds supported length	"backend exceeds supported length",
+crates/skills/web_search_extract/src/main.rs	backend must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", "backend must be string"))
+crates/skills/web_search_extract/src/main.rs	backend redirect limit exceeded	return attempt.error("backend redirect limit exceeded");
+crates/skills/web_search_extract/src/main.rs	backend redirect target blocked	attempt.error("backend redirect target blocked")
+crates/skills/web_search_extract/src/main.rs	bing non-success response	.context("bing non-success response")?;
+crates/skills/web_search_extract/src/main.rs	build search client failed	.context("build search client failed")
+crates/skills/web_search_extract/src/main.rs	docs.rs search non-success response	.context("docs.rs search non-success response")?;
 crates/skills/web_search_extract/src/main.rs	docs.rs search request failed	.context("docs.rs search request failed")?
-crates/skills/web_search_extract/src/main.rs	duckduckgo body read failed	.context("duckduckgo body read failed")?;
-crates/skills/web_search_extract/src/main.rs	duckduckgo non-success response	.context("duckduckgo non-success response")?
-crates/skills/web_search_extract/src/main.rs	github search json parse failed	let payload: Value = res.json().context("github search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	domain filter is invalid	"domain filter is invalid",
+crates/skills/web_search_extract/src/main.rs	duckduckgo non-success response	.context("duckduckgo non-success response")?;
+crates/skills/web_search_extract/src/main.rs	github search json parse failed	serde_json::from_slice(&body).context("github search json parse failed")?;
 crates/skills/web_search_extract/src/main.rs	github search non-success response	.context("github search non-success response")?;
 crates/skills/web_search_extract/src/main.rs	github search request failed	.context("github search request failed")?
+crates/skills/web_search_extract/src/main.rs	include_snippet must be boolean	.ok_or_else(|| SearchError::new("INVALID_INPUT", "include_snippet must be boolean"))
 crates/skills/web_search_extract/src/main.rs	no fallback search source returned candidates	Err(anyhow!("no fallback search source returned candidates"))
-crates/skills/web_search_extract/src/main.rs	search-only skill; use browser_web for page extraction	"notes": "search-only skill; use browser_web for page extraction"
-crates/skills/web_search_extract/src/main.rs	serpapi json parse failed	let v: Value = res.json().context("serpapi json parse failed")?;
-crates/skills/web_search_extract/src/main.rs	serpapi non-success response	.context("serpapi non-success response")?;
-crates/skills/x/src/main.rs	parse x config file failed ({path}): {err}	format!("parse x config file failed ({path}): {err}"),
-crates/skills/x/src/main.rs	read x config file failed ({path}): {err}	format!("read x config file failed ({path}): {err}"),
-crates/skills/x/src/main.rs	read xurl stderr failed: {err}	format!("read xurl stderr failed: {err}"),
-crates/skills/x/src/main.rs	read xurl stdout failed: {err}	format!("read xurl stdout failed: {err}"),
-crates/skills/x/src/main.rs	wait xurl process failed: {err}	format!("wait xurl process failed: {err}"),
-crates/skills/x/src/main.rs	wait xurl process failed: {err}	format!("wait xurl process failed: {err}"),
-crates/skills/x/src/main.rs	x skill args must be string or object, got {}	format!("x skill args must be string or object, got {}", other),
-crates/skills/x/src/main.rs	x skill args.text must be string	XSkillError::new("invalid_input", "x skill args.text must be string")
-crates/skills/x/src/main.rs	x skill text exceeds max chars ({}), got {}	"x skill text exceeds max chars ({}), got {}",
-crates/skills/x/src/main.rs	x skill text is empty	return Err(XSkillError::new("invalid_input", "x skill text is empty"));
-crates/skills/x/src/main.rs	x skill text is empty	return Err(XSkillError::new("invalid_input", "x skill text is empty"));
-crates/skills/x/src/main.rs	xurl response missing data.id: {}	"xurl response missing data.id: {}",
-crates/skills/x/src/main.rs	xurl returned API errors: {}	"xurl returned API errors: {}",
-crates/skills/x/src/main.rs	xurl returned non-JSON success response: {} (parse error: {})	"xurl returned non-JSON success response: {} (parse error: {})",
-crates/skills/x/src/main.rs	xurl returned non-zero exit	"xurl returned non-zero exit".to_string()
-crates/skills/x/src/main.rs	xurl returned success exit code but empty response body	"xurl returned success exit code but empty response body",
-crates/skills/x/src/main.rs	xurl timed out after {} seconds	format!("xurl timed out after {} seconds", timeout.as_secs().max(1)),
+crates/skills/web_search_extract/src/main.rs	query exceeds supported length	"query exceeds supported length",
+crates/skills/web_search_extract/src/main.rs	query must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", "query must be string"))
+crates/skills/web_search_extract/src/main.rs	search backend response exceeds byte limit	return Err(anyhow!("search backend response exceeds byte limit"));
+crates/skills/web_search_extract/src/main.rs	search backend response exceeds byte limit	return Err(anyhow!("search backend response exceeds byte limit"));
+crates/skills/web_search_extract/src/main.rs	search backend response read failed	.context("search backend response read failed")?;
+crates/skills/web_search_extract/src/main.rs	serpapi json parse failed	let v: Value = serde_json::from_slice(&body).context("serpapi json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	serpapi non-success response	.map_err(|_| anyhow!("serpapi non-success response"))?;
+crates/skills/web_search_extract/src/main.rs	{field} has too many entries	format!("{field} has too many entries"),
+crates/skills/web_search_extract/src/main.rs	{field} is outside the supported range	format!("{field} is outside the supported range"),
+crates/skills/web_search_extract/src/main.rs	{field} items must be strings	SearchError::new("INVALID_INPUT", format!("{field} items must be strings"))
+crates/skills/web_search_extract/src/main.rs	{field} must be array	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be array")))?;
+crates/skills/web_search_extract/src/main.rs	{field} must be integer	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be integer")))?;
+crates/skills/web_search_extract/src/main.rs	{field} must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be string")))
 crates/telegramd/src/binding_voice.rs	bind telegram identity failed: {}	"bind telegram identity failed: {}",
 crates/telegramd/src/binding_voice.rs	decode direct classifier response failed	.context("decode direct classifier response failed")?;
 crates/telegramd/src/binding_voice.rs	direct classifier http {status}: {body}	return Err(anyhow!("direct classifier http {status}: {body}"));
@@ -2256,3 +2085,197 @@ crates/whatsappd/src/main.rs	submit task request failed	.context("submit task re
 crates/whatsappd/src/main.rs	upload media missing id	.ok_or_else(|| anyhow!("upload media missing id"))?;
 crates/whatsappd/src/main.rs	webhook signature verify failed: {}	warn!("webhook signature verify failed: {}", err);
 crates/whatsappd/src/main.rs	x-hub-signature-256 prefix invalid	.ok_or_else(|| anyhow!("x-hub-signature-256 prefix invalid"))?;
+optional_skills/crypto/src/exchange_api.rs	binance request failed: {err}	.map_err(|err| format!("binance request failed: {err}"))?;
+optional_skills/crypto/src/exchange_api.rs	okx request failed: {err}	.map_err(|err| format!("okx request failed: {err}"))?;
+optional_skills/crypto/src/exchange_api.rs	parse binance response failed: {err}	.map_err(|err| format!("parse binance response failed: {err}"))?;
+optional_skills/crypto/src/exchange_api.rs	parse okx response failed: {err}	.map_err(|err| format!("parse okx response failed: {err}"))?;
+optional_skills/crypto/src/i18n.rs	 (order placed, awaiting fill)	" (order placed, awaiting fill)".to_string(),
+optional_skills/crypto/src/i18n.rs	Order status skipped ({id_text}): missing symbol, {exchange} requires symbol for query	"Order status skipped ({id_text}): missing symbol, {exchange} requires symbol for query"
+optional_skills/crypto/src/i18n.rs	action is blocked by config: {action}	"action is blocked by config: {action}".to_string(),
+optional_skills/crypto/src/i18n.rs	args must be object	"args must be object".to_string(),
+optional_skills/crypto/src/i18n.rs	build http client failed: {error}	"build http client failed: {error}".to_string(),
+optional_skills/crypto/src/i18n.rs	cancel_all_orders {exchange} {sym_info}: no open orders	"cancel_all_orders {exchange} {sym_info}: no open orders".to_string(),
+optional_skills/crypto/src/i18n.rs	exchange is not allowed: {exchange}	"exchange is not allowed: {exchange}".to_string(),
+optional_skills/crypto/src/i18n.rs	exchange is required because no default exchange is configured	"exchange is required because no default exchange is configured".to_string(),
+optional_skills/crypto/src/i18n.rs	indicator requires close_prices	"indicator requires close_prices".to_string(),
+optional_skills/crypto/src/i18n.rs	open_orders {exchange}{symbol_suffix}: none	"open_orders {exchange}{symbol_suffix}: none".to_string(),
+optional_skills/crypto/src/i18n.rs	order cannot be cancelled from status {status}	"order cannot be cancelled from status {status}".to_string(),
+optional_skills/crypto/src/i18n.rs	order not found: {order_id}	"order not found: {order_id}".to_string(),
+optional_skills/crypto/src/i18n.rs	order_cancelled {id_text}	"order_cancelled {id_text}".to_string(),
+optional_skills/crypto/src/i18n.rs	order_id is required	"order_id is required".to_string(),
+optional_skills/crypto/src/i18n.rs	order_id or client_order_id is required	"order_id or client_order_id is required".to_string(),
+optional_skills/crypto/src/i18n.rs	order_type must be market or limit	"order_type must be market or limit".to_string(),
+optional_skills/crypto/src/i18n.rs	price is required for limit order	"price is required for limit order".to_string(),
+optional_skills/crypto/src/i18n.rs	qty is required and must be number	"qty is required and must be number".to_string(),
+optional_skills/crypto/src/i18n.rs	side must be buy or sell	"side must be buy or sell".to_string(),
+optional_skills/crypto/src/i18n.rs	symbol is not allowed: {symbol}	"symbol is not allowed: {symbol}".to_string(),
+optional_skills/crypto/src/i18n.rs	symbol is not available on Binance spot: {symbol}	"symbol is not available on Binance spot: {symbol}".to_string(),
+optional_skills/crypto/src/i18n.rs	symbol is required for binance cancel_order	"symbol is required for binance cancel_order".to_string(),
+optional_skills/crypto/src/i18n.rs	symbol is required for binance order_status	"symbol is required for binance order_status".to_string(),
+optional_skills/crypto/src/i18n.rs	symbol is required for okx cancel_order	"symbol is required for okx cancel_order".to_string(),
+optional_skills/crypto/src/i18n.rs	symbol is required for okx order_status	"symbol is required for okx order_status".to_string(),
+optional_skills/crypto/src/i18n.rs	symbols or symbol is required	"symbols or symbol is required".to_string(),
+optional_skills/crypto/src/i18n.rs	threshold_pct must be > 0	"threshold_pct must be > 0".to_string(),
+optional_skills/crypto/src/i18n.rs	unsupported chain; use bitcoin|ethereum	"unsupported chain; use bitcoin|ethereum".to_string(),
+optional_skills/crypto/src/i18n.rs	unsupported exchange for cancel_order: {exchange}	"unsupported exchange for cancel_order: {exchange}".to_string(),
+optional_skills/crypto/src/i18n.rs	unsupported exchange for order_status: {exchange}	"unsupported exchange for order_status: {exchange}".to_string(),
+optional_skills/crypto/src/i18n.rs	unsupported exchange for positions: {exchange}	"unsupported exchange for positions: {exchange}".to_string(),
+optional_skills/crypto/src/i18n.rs	unsupported execution exchange: {exchange}	"unsupported execution exchange: {exchange}".to_string(),
+optional_skills/crypto/src/main.rs	build hmac failed: {err}	.map_err(|err| format!("build hmac failed: {err}"))?;
+optional_skills/crypto/src/main.rs	private exchange API request failed before a safe response could be read	return "private exchange API request failed before a safe response could be read"
+optional_skills/crypto/src/main.rs	private exchange account access failed	"detail": "private exchange account access failed"
+optional_skills/crypto/src/main.rs	private exchange account access failed	return "private exchange account access failed".to_string();
+optional_skills/crypto/src/market_data.rs	binance bookTicker missing askPrice	.ok_or_else(|| "binance bookTicker missing askPrice".to_string())?;
+optional_skills/crypto/src/market_data.rs	binance bookTicker missing askQty	.ok_or_else(|| "binance bookTicker missing askQty".to_string())?;
+optional_skills/crypto/src/market_data.rs	binance bookTicker missing bidPrice	.ok_or_else(|| "binance bookTicker missing bidPrice".to_string())?;
+optional_skills/crypto/src/market_data.rs	binance bookTicker missing bidQty	.ok_or_else(|| "binance bookTicker missing bidQty".to_string())?;
+optional_skills/crypto/src/market_data.rs	binance bookTicker parse failed: {err}	.map_err(|err| format!("binance bookTicker parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	binance bookTicker request failed: {err}	.map_err(|err| format!("binance bookTicker request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	binance candles response is invalid	.ok_or_else(|| "binance candles response is invalid".to_string())?;
+optional_skills/crypto/src/market_data.rs	binance exchangeInfo parse failed: {err}	.map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	binance exchangeInfo request failed: {err}	.map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	binance quote fallback parse failed: {err}	.map_err(|err| format!("binance quote fallback parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	binance quote fallback request failed: {err}	.map_err(|err| format!("binance quote fallback request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	binance quote missing price field	let price = price.ok_or_else(|| "binance quote missing price field".to_string())?;
+optional_skills/crypto/src/market_data.rs	binance quote parse failed: {err}	.map_err(|err| format!("binance quote parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	binance quote request failed: {err}	.map_err(|err| format!("binance quote request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	coinbase bookTicker missing ask	.ok_or_else(|| "coinbase bookTicker missing ask".to_string())?;
+optional_skills/crypto/src/market_data.rs	coinbase bookTicker missing bid	.ok_or_else(|| "coinbase bookTicker missing bid".to_string())?;
+optional_skills/crypto/src/market_data.rs	coinbase bookTicker parse failed: {err}	.map_err(|err| format!("coinbase bookTicker parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	coinbase bookTicker request failed: {err}	.map_err(|err| format!("coinbase bookTicker request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	coinbase quote missing price	.ok_or_else(|| "coinbase quote missing price".to_string())?;
+optional_skills/crypto/src/market_data.rs	coinbase quote parse failed: {err}	.map_err(|err| format!("coinbase quote parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	coinbase quote request failed: {err}	.map_err(|err| format!("coinbase quote request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	coingecko quote missing symbol node	.ok_or_else(|| "coingecko quote missing symbol node".to_string())?;
+optional_skills/crypto/src/market_data.rs	coingecko quote missing usd	.ok_or_else(|| "coingecko quote missing usd".to_string())?;
+optional_skills/crypto/src/market_data.rs	coingecko quote parse failed: {err}	.map_err(|err| format!("coingecko quote parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	coingecko quote request failed: {err}	.map_err(|err| format!("coingecko quote request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	fetch binance candles failed: {err}	.map_err(|err| format!("fetch binance candles failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	fetch okx candles failed: {err}	.map_err(|err| format!("fetch okx candles failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	gateio bookTicker missing data	.ok_or_else(|| "gateio bookTicker missing data".to_string())?;
+optional_skills/crypto/src/market_data.rs	gateio bookTicker missing highest_bid	.ok_or_else(|| "gateio bookTicker missing highest_bid".to_string())?;
+optional_skills/crypto/src/market_data.rs	gateio bookTicker missing lowest_ask	.ok_or_else(|| "gateio bookTicker missing lowest_ask".to_string())?;
+optional_skills/crypto/src/market_data.rs	gateio bookTicker parse failed: {err}	.map_err(|err| format!("gateio bookTicker parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	gateio bookTicker request failed: {err}	.map_err(|err| format!("gateio bookTicker request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	gateio quote missing data	.ok_or_else(|| "gateio quote missing data".to_string())?;
+optional_skills/crypto/src/market_data.rs	gateio quote missing last	.ok_or_else(|| "gateio quote missing last".to_string())?;
+optional_skills/crypto/src/market_data.rs	gateio quote parse failed: {err}	.map_err(|err| format!("gateio quote parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	gateio quote request failed: {err}	.map_err(|err| format!("gateio quote request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	kraken bookTicker missing result	.ok_or_else(|| "kraken bookTicker missing result".to_string())?;
+optional_skills/crypto/src/market_data.rs	kraken bookTicker missing ticker node	.ok_or_else(|| "kraken bookTicker missing ticker node".to_string())?;
+optional_skills/crypto/src/market_data.rs	kraken bookTicker parse failed: {err}	.map_err(|err| format!("kraken bookTicker parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	kraken bookTicker request failed: {err}	.map_err(|err| format!("kraken bookTicker request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	kraken quote missing result	.ok_or_else(|| "kraken quote missing result".to_string())?;
+optional_skills/crypto/src/market_data.rs	kraken quote missing ticker node	.ok_or_else(|| "kraken quote missing ticker node".to_string())?;
+optional_skills/crypto/src/market_data.rs	kraken quote parse failed: {err}	.map_err(|err| format!("kraken quote parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	kraken quote request failed: {err}	.map_err(|err| format!("kraken quote request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	okx bookTicker missing askPx	.ok_or_else(|| "okx bookTicker missing askPx".to_string())?;
+optional_skills/crypto/src/market_data.rs	okx bookTicker missing askSz	.ok_or_else(|| "okx bookTicker missing askSz".to_string())?;
+optional_skills/crypto/src/market_data.rs	okx bookTicker missing bidPx	.ok_or_else(|| "okx bookTicker missing bidPx".to_string())?;
+optional_skills/crypto/src/market_data.rs	okx bookTicker missing bidSz	.ok_or_else(|| "okx bookTicker missing bidSz".to_string())?;
+optional_skills/crypto/src/market_data.rs	okx bookTicker missing data	.ok_or_else(|| "okx bookTicker missing data".to_string())?;
+optional_skills/crypto/src/market_data.rs	okx bookTicker parse failed: {err}	.map_err(|err| format!("okx bookTicker parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	okx bookTicker request failed: {err}	.map_err(|err| format!("okx bookTicker request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	okx candles response is invalid	.ok_or_else(|| "okx candles response is invalid".to_string())?;
+optional_skills/crypto/src/market_data.rs	okx quote missing data	.ok_or_else(|| "okx quote missing data".to_string())?;
+optional_skills/crypto/src/market_data.rs	okx quote missing last	.ok_or_else(|| "okx quote missing last".to_string())?;
+optional_skills/crypto/src/market_data.rs	okx quote parse failed: {err}	.map_err(|err| format!("okx quote parse failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	okx quote request failed: {err}	.map_err(|err| format!("okx quote request failed: {err}"))?
+optional_skills/crypto/src/market_data.rs	parse binance candles failed: {err}	.map_err(|err| format!("parse binance candles failed: {err}"))?;
+optional_skills/crypto/src/market_data.rs	parse okx candles failed: {err}	.map_err(|err| format!("parse okx candles failed: {err}"))?;
+optional_skills/crypto/src/market_handlers.rs	all market sources failed: {}	return Err(format!("all market sources failed: {}", errors.join("; ")));
+optional_skills/crypto/src/market_handlers.rs	binance symbol check ok: {symbol}	format!("binance symbol check ok: {symbol}"),
+optional_skills/crypto/src/market_handlers.rs	crypto healthcheck ok (binance+okx)	"crypto healthcheck ok (binance+okx)".to_string()
+optional_skills/crypto/src/onchain_handlers.rs	ethereum native balance response missing result	.ok_or_else(|| "ethereum native balance response missing result".to_string())?;
+optional_skills/crypto/src/onchain_handlers.rs	ethereum token balance response missing result	.ok_or_else(|| "ethereum token balance response missing result".to_string())?;
+optional_skills/crypto/src/onchain_handlers.rs	fetch bitcoin onchain failed: {err}	.map_err(|err| format!("fetch bitcoin onchain failed: {err}"))?
+optional_skills/crypto/src/onchain_handlers.rs	fetch ethereum native balance failed: {err}	.map_err(|err| format!("fetch ethereum native balance failed: {err}"))?
+optional_skills/crypto/src/onchain_handlers.rs	fetch ethereum onchain failed: {err}	.map_err(|err| format!("fetch ethereum onchain failed: {err}"))?
+optional_skills/crypto/src/onchain_handlers.rs	fetch ethereum token balance failed: {err}	.map_err(|err| format!("fetch ethereum token balance failed: {err}"))?
+optional_skills/crypto/src/onchain_handlers.rs	fetch ethereum tx list failed: {err}	.map_err(|err| format!("fetch ethereum tx list failed: {err}"))?
+optional_skills/crypto/src/onchain_handlers.rs	parse bitcoin onchain failed: {err}	.map_err(|err| format!("parse bitcoin onchain failed: {err}"))?;
+optional_skills/crypto/src/onchain_handlers.rs	parse ethereum native balance failed: {err}	.map_err(|err| format!("parse ethereum native balance failed: {err}"))?;
+optional_skills/crypto/src/onchain_handlers.rs	parse ethereum onchain failed: {err}	.map_err(|err| format!("parse ethereum onchain failed: {err}"))?;
+optional_skills/crypto/src/onchain_handlers.rs	parse ethereum token balance failed: {err}	.map_err(|err| format!("parse ethereum token balance failed: {err}"))?;
+optional_skills/crypto/src/onchain_handlers.rs	parse ethereum tx list failed: {err}	.map_err(|err| format!("parse ethereum tx list failed: {err}"))?;
+optional_skills/crypto/src/onchain_handlers.rs	token contract not configured for ethereum token: {token}	.ok_or_else(|| format!("token contract not configured for ethereum token: {token}"))?;
+optional_skills/crypto/src/trade_execution.rs	binance LOT_SIZE maxQty missing	.ok_or_else(|| "binance LOT_SIZE maxQty missing".to_string())?;
+optional_skills/crypto/src/trade_execution.rs	binance LOT_SIZE minQty missing	.ok_or_else(|| "binance LOT_SIZE minQty missing".to_string())?;
+optional_skills/crypto/src/trade_execution.rs	binance LOT_SIZE stepSize missing	.ok_or_else(|| "binance LOT_SIZE stepSize missing".to_string())?;
+optional_skills/crypto/src/trade_execution.rs	binance PRICE_FILTER tickSize missing	.ok_or_else(|| "binance PRICE_FILTER tickSize missing".to_string())?;
+optional_skills/crypto/src/trade_execution.rs	binance exchangeInfo missing LOT_SIZE filter	.ok_or_else(|| "binance exchangeInfo missing LOT_SIZE filter".to_string())?;
+optional_skills/crypto/src/trade_execution.rs	binance exchangeInfo missing PRICE_FILTER	.ok_or_else(|| "binance exchangeInfo missing PRICE_FILTER".to_string())?;
+optional_skills/crypto/src/trade_execution.rs	binance exchangeInfo missing symbols	.ok_or_else(|| "binance exchangeInfo missing symbols".to_string())?;
+optional_skills/crypto/src/trade_execution.rs	binance exchangeInfo missing symbols	.ok_or_else(|| "binance exchangeInfo missing symbols".to_string())?;
+optional_skills/crypto/src/trade_execution.rs	binance exchangeInfo parse failed: {err}	.map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
+optional_skills/crypto/src/trade_execution.rs	binance exchangeInfo parse failed: {err}	.map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
+optional_skills/crypto/src/trade_execution.rs	binance exchangeInfo request failed: {err}	.map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
+optional_skills/crypto/src/trade_execution.rs	binance exchangeInfo request failed: {err}	.map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
+optional_skills/crypto/src/trade_execution.rs	invalid price for quote_qty_usd conversion	return Err("invalid price for quote_qty_usd conversion".to_string());
+optional_skills/crypto/src/trade_execution.rs	no available balance for {} on binance	"no available balance for {} on binance",
+optional_skills/crypto/src/trade_execution.rs	no available balance for {} on okx	return Err(format!("no available balance for {} on okx", base_asset));
+optional_skills/crypto/src/trade_execution.rs	notional exceeds max_notional_usd: {notional:.4} > {max_notional:.4}	"notional exceeds max_notional_usd: {notional:.4} > {max_notional:.4}"
+optional_skills/crypto/src/trade_handlers.rs	cancel_all_orders on binance requires symbol	.ok_or("cancel_all_orders on binance requires symbol")?;
+optional_skills/crypto/src/trade_handlers.rs	trade_history binance {sym}: none	format!("trade_history binance {sym}: none")
+optional_skills/crypto/src/trade_handlers.rs	trade_history okx {sym_info}: none	format!("trade_history okx {sym_info}: none")
+optional_skills/crypto/src/trade_handlers.rs	trade_history on binance requires symbol	.ok_or("trade_history on binance requires symbol")?;
+optional_skills/invest_copy/src/main.rs	Persona display: {}\nSlug: {}\nOne-liner: {}\nFacets:\n{}\nPreferred wording hints: {}\nChannel preference: {}\nTruncated_input: {}\nFocus_optional: {}\nSource_note_optional: {}\n\nUSER_MATERIAL:\n{}	"Persona display: {}\\nSlug: {}\\nOne-liner: {}\\nFacets:\\n{}\\nPreferred wording hints: {}\\nChannel preference: {}\\nTruncated_input: {}\\nFocus_optional: {}\\nSource_note_optional: {}\\n\\nUSER_MATERIAL:\\n{}",
+optional_skills/invest_copy/src/main.rs	parse embedded personas.toml	toml::from_str(PERSONAS_TOML).context("parse embedded personas.toml")?;
+optional_skills/map_merchant/src/main.rs	places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri	"places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri",
+optional_skills/photo_organize/src/i18n.rs	No obvious external drive or USB mount points were detected.	"No obvious external drive or USB mount points were detected.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	No photo files were found under `{path}`.	"No photo files were found under `{path}`.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	No photos matching brands {brands} were found under `{path}`.	"No photos matching brands {brands} were found under `{path}`.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	No photos matching filter `{filter_desc}` were found under `{path}`.	"No photos matching filter `{filter_desc}` were found under `{path}`.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	No photos taken in {capture_month} were found under `{path}`.	"No photos taken in {capture_month} were found under `{path}`.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	No preview items.	"No preview items.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	Photo files were found under `{path}`, but none had readable EXIF metadata, so no operation was performed.	"Photo files were found under `{path}`, but none had readable EXIF metadata, so no operation was performed.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	Photo organization completed: scanned {scanned_count} files, skipped {skipped_no_exif} files without readable EXIF, processed {processed} files, {action_word} {applied} files grouped by {group_by_desc}, skipped {skipped} files. Output directory: {output_dir}. Filter: {filter_desc}.	"Photo organization completed: scanned {scanned_count} files, skipped {skipped_no_exif} files without readable EXIF, processed {processed} files, {action_word} {applied} files grouped by {group_by_desc}, skipped {skipped} files. Output directory: {output_dir}. Filter: {filter_desc}.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	Photo organization partially completed: succeeded {success} files, failed {failed} files. First error: {first_error}	"Photo organization partially completed: succeeded {success} files, failed {failed} files. First error: {first_error}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	Preview generated for photo organization: scanned {photo_count} photos, {with_metadata} with readable EXIF metadata, skipped {without_metadata} without readable EXIF. Output directory: {output_dir}.\n\nThis run groups by {group_by_desc}. Filter: {filter_desc}.\n\nFirst {preview_count} preview items:\n{preview_lines}	"Preview generated for photo organization: scanned {photo_count} photos, {with_metadata} with readable EXIF metadata, skipped {without_metadata} without readable EXIF. Output directory: {output_dir}.\\n\\nThis run groups by {group_by_desc}. Filter: {filter_desc}.\\n\\nFirst {preview_count} preview items:\\n{preview_lines}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	This skill has explicit mount-path discovery for macOS and Linux. On the current OS, please provide the photo directory manually as an absolute path.	"This skill has explicit mount-path discovery for macOS and Linux. On the current OS, please provide the photo directory manually as an absolute path.".to_string(),
+optional_skills/photo_organize/src/i18n.rs	Unsupported action `{action}`; allowed: prepare|organize|plan|preview|dry_run|copy|move	"Unsupported action `{action}`; allowed: prepare|organize|plan|preview|dry_run|copy|move"
+optional_skills/photo_organize/src/i18n.rs	Unsupported mode `{mode}`; allowed: plan|copy|move	"Unsupported mode `{mode}`; allowed: plan|copy|move".to_string(),
+optional_skills/photo_organize/src/i18n.rs	args must be object or string	"args must be object or string".to_string(),
+optional_skills/photo_organize/src/i18n.rs	failed to copy file: {source} -> {dest} ({error})	"failed to copy file: {source} -> {dest} ({error})".to_string(),
+optional_skills/photo_organize/src/i18n.rs	failed to create destination directory: {path} ({error})	"failed to create destination directory: {path} ({error})".to_string(),
+optional_skills/photo_organize/src/i18n.rs	failed to parse file name: {path}	"failed to parse file name: {path}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	failed to read directory entry: {path} ({error})	"failed to read directory entry: {path} ({error})".to_string(),
+optional_skills/photo_organize/src/i18n.rs	failed to read directory: {path} ({error})	"failed to read directory: {path} ({error})".to_string(),
+optional_skills/photo_organize/src/i18n.rs	failed to read file metadata: {path} ({error})	"failed to read file metadata: {path} ({error})".to_string(),
+optional_skills/photo_organize/src/i18n.rs	failed to read source_dir metadata: {path} ({error})	"failed to read source_dir metadata: {path} ({error})".to_string(),
+optional_skills/photo_organize/src/i18n.rs	failed to remove original file: {source} ({error})	"failed to remove original file: {source} ({error})".to_string(),
+optional_skills/photo_organize/src/i18n.rs	normalized args must be object	"normalized args must be object".to_string(),
+optional_skills/photo_organize/src/i18n.rs	only photos shot in {capture_month}	"only photos shot in {capture_month}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	only photos shot in {capture_year}	"only photos shot in {capture_year}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	only photos shot on {capture_date}	"only photos shot on {capture_date}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	only photos with brands {brands}	"only photos with brands {brands}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	only photos with camera models {models}	"only photos with camera models {models}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	only photos with lenses {lenses}	"only photos with lenses {lenses}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	resolve current_dir failed: {error}	"resolve current_dir failed: {error}".to_string(),
+optional_skills/photo_organize/src/i18n.rs	source_dir does not exist or is not accessible: {path} ({error})	"source_dir does not exist or is not accessible: {path} ({error})".to_string(),
+optional_skills/photo_organize/src/i18n.rs	source_dir is not a directory: {path}	"source_dir is not a directory: {path}".to_string(),
+optional_skills/stock/src/main.rs	You normalize A-share stock-name typos. Select exactly one alias from the provided candidates, or NONE when uncertain. Output one-line JSON only: {"alias":"<candidate alias>"} or {"alias":"NONE"}.	let system = "You normalize A-share stock-name typos. Select exactly one alias from the provided candidates, or NONE when uncertain. Output one-line JSON only: {\\"alias\\":\\"<candidate alias>\\"} or {\\"alias\\":\\"NONE\\"}.";
+optional_skills/stock/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
+optional_skills/stock/src/main.rs	name,open,prev,current,...	/// 解析新浪 var hq_str_sh600519="name,open,prev,current,...";
+optional_skills/stock/src/main.rs	raw_input: {}\ncandidates:\n{}\nReturn exactly one candidate alias from the list, or NONE.	"raw_input: {}\\ncandidates:\\n{}\\nReturn exactly one candidate alias from the list, or NONE.",
+optional_skills/stock/src/main.rs	stock_alias_choice schema must be valid JSON	.expect("stock_alias_choice schema must be valid JSON")
+optional_skills/weather/src/main.rs	Provide city or latitude + longitude	"Provide city or latitude + longitude".to_string(),
+optional_skills/weather/src/main.rs	args must be object	"args must be object".to_string(),
+optional_skills/weather/src/main.rs	retry attempts always records the last error	Err(last_err.expect("retry attempts always records the last error"))
+optional_skills/x/src/main.rs	parse x config file failed ({path}): {err}	format!("parse x config file failed ({path}): {err}"),
+optional_skills/x/src/main.rs	read x config file failed ({path}): {err}	format!("read x config file failed ({path}): {err}"),
+optional_skills/x/src/main.rs	read xurl stderr failed: {err}	format!("read xurl stderr failed: {err}"),
+optional_skills/x/src/main.rs	read xurl stdout failed: {err}	format!("read xurl stdout failed: {err}"),
+optional_skills/x/src/main.rs	wait xurl process failed: {err}	format!("wait xurl process failed: {err}"),
+optional_skills/x/src/main.rs	wait xurl process failed: {err}	format!("wait xurl process failed: {err}"),
+optional_skills/x/src/main.rs	x skill args must be string or object, got {}	format!("x skill args must be string or object, got {}", other),
+optional_skills/x/src/main.rs	x skill args.text must be string	XSkillError::new("invalid_input", "x skill args.text must be string")
+optional_skills/x/src/main.rs	x skill text exceeds max chars ({}), got {}	"x skill text exceeds max chars ({}), got {}",
+optional_skills/x/src/main.rs	x skill text is empty	return Err(XSkillError::new("invalid_input", "x skill text is empty"));
+optional_skills/x/src/main.rs	x skill text is empty	return Err(XSkillError::new("invalid_input", "x skill text is empty"));
+optional_skills/x/src/main.rs	xurl response missing data.id: {}	"xurl response missing data.id: {}",
+optional_skills/x/src/main.rs	xurl returned API errors: {}	"xurl returned API errors: {}",
+optional_skills/x/src/main.rs	xurl returned non-JSON success response: {} (parse error: {})	"xurl returned non-JSON success response: {} (parse error: {})",
+optional_skills/x/src/main.rs	xurl returned non-zero exit	"xurl returned non-zero exit".to_string()
+optional_skills/x/src/main.rs	xurl returned success exit code but empty response body	"xurl returned success exit code but empty response body",
+optional_skills/x/src/main.rs	xurl timed out after {} seconds	format!("xurl timed out after {} seconds", timeout.as_secs().max(1)),

@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CARGO_TOML = REPO_ROOT / "Cargo.toml"
 REGISTRY_TOML = REPO_ROOT / "configs" / "skills_registry.toml"
 SKILLS_DIR = REPO_ROOT / "crates" / "skills"
+OPTIONAL_SKILLS_DIR = REPO_ROOT / "optional_skills"
 
 
 MAIN_RS_TEMPLATE = """use std::io::{{self, BufRead, Write}};
@@ -161,6 +162,11 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="optional custom runner name if binary does not follow convention",
     )
+    parser.add_argument(
+        "--on-demand",
+        action="store_true",
+        help="place a bundled Skill Store skill under optional_skills and mark it install_mode=on_demand",
+    )
     return parser.parse_args()
 
 
@@ -206,6 +212,7 @@ def registry_entry_text(
     enabled: bool,
     runner_name: str,
     capabilities: list[str],
+    on_demand: bool,
 ) -> str:
     alias_text = ", ".join(f'"{alias}"' for alias in aliases)
     capability_text = ", ".join(f'"{capability}"' for capability in capabilities)
@@ -220,6 +227,14 @@ def registry_entry_text(
         f'prompt_file = "prompts/skills/{skill_name}.md"',
         f'output_kind = "{output_kind}"',
     ]
+    if on_demand:
+        package_name = skill_name.replace("_", "-") + "-skill"
+        lines.extend(
+            [
+                'install_mode = "on_demand"',
+                f'install_package = "{package_name}"',
+            ]
+        )
     if capabilities:
         lines.append(f"capabilities = [{capability_text}]")
     if runner_name.strip():
@@ -228,8 +243,9 @@ def registry_entry_text(
     return "\n".join(lines)
 
 
-def add_workspace_member(skill_name: str) -> bool:
-    target = f'    "crates/skills/{skill_name}",'
+def add_workspace_member(skill_name: str, on_demand: bool) -> bool:
+    source_root = "optional_skills" if on_demand else "crates/skills"
+    target = f'    "{source_root}/{skill_name}",'
     content = CARGO_TOML.read_text(encoding="utf-8")
     if target in content:
         return False
@@ -268,13 +284,21 @@ def add_registry_entry(
     enabled: bool,
     runner_name: str,
     capabilities: list[str],
+    on_demand: bool,
 ) -> bool:
     content = REGISTRY_TOML.read_text(encoding="utf-8")
     if f'name = "{skill_name}"' in content:
         return False
 
     updated = content.rstrip() + registry_entry_text(
-        skill_name, aliases, timeout, output_kind, enabled, runner_name, capabilities
+        skill_name,
+        aliases,
+        timeout,
+        output_kind,
+        enabled,
+        runner_name,
+        capabilities,
+        on_demand,
     )
     REGISTRY_TOML.write_text(updated + "\n", encoding="utf-8")
     return True
@@ -299,7 +323,7 @@ def main() -> int:
     )
     if args.uses_llm and "llm" not in capabilities:
         capabilities.append("llm")
-    skill_dir = SKILLS_DIR / skill_name
+    skill_dir = (OPTIONAL_SKILLS_DIR if args.on_demand else SKILLS_DIR) / skill_name
 
     created = []
     updated = []
@@ -313,7 +337,7 @@ def main() -> int:
     ):
         created.append(skill_dir / "INTERFACE.md")
 
-    if add_workspace_member(skill_name):
+    if add_workspace_member(skill_name, args.on_demand):
         updated.append(CARGO_TOML)
     if add_registry_entry(
         skill_name=skill_name,
@@ -323,6 +347,7 @@ def main() -> int:
         enabled=not args.disabled,
         runner_name=args.runner_name,
         capabilities=capabilities,
+        on_demand=args.on_demand,
     ):
         updated.append(REGISTRY_TOML)
 

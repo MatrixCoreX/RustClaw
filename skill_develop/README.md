@@ -12,7 +12,8 @@
   - 用于快速生成技能 crate、`INTERFACE.md`，并补 workspace 与 `skills_registry.toml` 基础条目。
 
 ## 适用场景
-- 新增仓内普通 `runner` 技能（`crates/skills/<skill_name>`）。
+- 新增固定/核心普通 `runner` 技能（`crates/skills/<skill_name>`）。
+- 新增 Skill Store 按需 bundled 技能（`optional_skills/<skill_name>`）。
 - 整理外部提交技能（`external_skills/<skill_name>`）的接入规则。
 - 补齐某个技能的 `INTERFACE.md`、registry、prompt、配置。
 - 让 agent 按固定流程接入技能，而不是自由发挥式修改仓库。
@@ -51,6 +52,12 @@ python3 skill_develop/create_skill.py stock --aliases "a_stock,stock_quote" --ti
 python3 skill_develop/create_skill.py report_writer --uses-llm
 ```
 
+如果技能属于 UI Skill Store 的按需安装项：
+
+```bash
+python3 skill_develop/create_skill.py report_writer --on-demand
+```
+
 文本类 skill 默认使用 `configs/config.toml` 的 `[llm].selected_vendor` / `selected_model`。只有确实要让某个 skill 固定走独立模型时，才在该 skill 自己的配置文件里提供注释态覆盖项，例如 `llm_vendor` / `llm_model`，默认保持注释。
 
 如果是外部提交技能，不使用 `create_skill.py`，走 `extension_manager`：
@@ -78,7 +85,8 @@ python3 skill_develop/create_skill.py report_writer --uses-llm
 ```
 
 ## 仓内 runner 标准开发步骤
-1. 运行 `python3 skill_develop/create_skill.py <skill_name>`
+1. 固定/核心技能运行 `python3 skill_develop/create_skill.py <skill_name>`；
+   Skill Store 按需技能增加 `--on-demand`
 2. 实现单行 JSON stdin/stdout 协议
 3. 补全 `INTERFACE.md`
 4. 运行 `python3 scripts/sync_skill_docs.py`
@@ -95,9 +103,8 @@ python3 skill_develop/create_skill.py report_writer --uses-llm
 6. reload skills 或重启 `clawd`，再用 `run_skill` 路径跑一次 happy path
 
 ## `create_skill.py` 支持项
-- 创建 `crates/skills/<skill_name>/Cargo.toml`
-- 创建 `crates/skills/<skill_name>/src/main.rs`
-- 创建 `crates/skills/<skill_name>/INTERFACE.md`
+- 创建 `crates/skills/<skill_name>`，或在 `--on-demand` 时创建
+  `optional_skills/<skill_name>`
 - 自动加入根 `Cargo.toml` 的 workspace member
 - 自动追加 `configs/skills_registry.toml` 基础条目
 - 支持参数：
@@ -108,6 +115,7 @@ python3 skill_develop/create_skill.py report_writer --uses-llm
   - `--uses-llm`
   - `--disabled`
   - `--runner-name`
+  - `--on-demand`
 
 查看帮助：
 
@@ -117,6 +125,8 @@ python3 skill_develop/create_skill.py --help
 
 ## 当前仓库约定
 - 普通技能默认做成 `runner`
+- `install_mode=on_demand` 的 bundled 技能必须放在
+  `optional_skills/<skill_name>`，不得放回核心 `crates/skills`
 - 二进制命名约定：`foo_bar -> foo-bar-skill`
 - 新增普通仓内 runner 技能时，不应修改主程序代码
 - 文本类 skill 需要模型时，在 `configs/skills_registry.toml` 声明 `capabilities = ["llm"]`；默认走系统 `[llm].selected_vendor` / `selected_model`，不要为每个文本 skill 预设独立模型

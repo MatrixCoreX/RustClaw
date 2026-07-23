@@ -105,8 +105,14 @@ When adding a new skill `foo_bar`, all of the following are required:
 外部提交技能（`external_skills/foo_bar`）走 `extension_manager` 时，验证/编译通过后的注册流程必须自动写入工作区、技能 registry，并把 `configs/config.toml` 的 `skill_switches.foo_bar` 记录为 `true`；普通新增 skill 不应再为了接入去改 `clawd` 主流程代码。
 For externally submitted skills (`external_skills/foo_bar`) handled by `extension_manager`, registration after validation/compilation must automatically write the workspace entry, skill registry entry, and `configs/config.toml` `skill_switches.foo_bar = true`; normal new skills should not require changes to the `clawd` main flow.
 
-1. 新建 crate：`crates/skills/foo_bar`（二进制名建议 `foo-bar-skill`）。
-   Create crate: `crates/skills/foo_bar` (binary name recommended: `foo-bar-skill`).
+1. 新建 crate：固定/核心技能使用 `crates/skills/foo_bar`；UI Skill
+   Store 按需安装的 bundled 技能使用 `optional_skills/foo_bar`（二进制名建议
+   `foo-bar-skill`）。`install_mode=on_demand` 的 bundled 技能不得留在
+   `crates/skills`。
+   Create the crate under `crates/skills/foo_bar` for fixed/core skills, or
+   `optional_skills/foo_bar` for bundled skills installed on demand by the UI
+   Skill Store (recommended binary name: `foo-bar-skill`). Bundled
+   `install_mode=on_demand` skills must not remain under `crates/skills`.
 2. 加入工作区：`Cargo.toml` 的 `[workspace].members`。
    Add to workspace: `[workspace].members` in `Cargo.toml`.
 3. 使用约定式 runner 二进制名：默认将 `foo_bar` 编译为 `foo-bar-skill`；只有当二进制名不符合约定时，才在 `configs/skills_registry.toml` 中配置 `runner_name`。
@@ -116,7 +122,7 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
 5. 如果技能需要进入 planner 常规自然语言执行流，优先在 `configs/skills_registry.toml` 声明 `planner_capabilities`（能力名、action、effect、required/optional、risk_level），让 `call_capability` 通过 resolver/verifier 接入；不要为了接入去改 `clawd` 主流程代码。
    If the skill should be used by the planner for normal natural-language execution, declare `planner_capabilities` in `configs/skills_registry.toml` first (capability name, action, effect, required/optional fields, risk_level) so `call_capability` can flow through resolver/verifier; do not modify the `clawd` main flow just to integrate it.
 6. 加入 agent 技能认知 / Add agent skill awareness:
- - `crates/skills/foo_bar/INTERFACE.md`
+ - `<source-root>/foo_bar/INTERFACE.md`
  - 运行 `python3 scripts/sync_skill_docs.py`，生成/更新 `prompts/layers/generated/skills/foo_bar.md`
 - 在 `configs/skills_registry.toml` 中为该技能配置 `prompt_file = "prompts/skills/foo_bar.md"`（逻辑路径；运行时主体读取 `prompts/layers/generated/skills/foo_bar.md`，如有模型差异再叠加 `prompts/layers/vendor_patches/<vendor>/skills/foo_bar.md`）
  - 技能参数契约写入 `INTERFACE.md`，并由 `sync_skill_docs.py` 生成 skill 专属 prompt；不要为单个普通 skill 修改全局 `prompts/layers/overlays/agent_tool_spec.md`
@@ -131,7 +137,8 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
    If the skill needs dedicated config, add `configs/*.toml` and README docs, and add `## Config Entry Points` to `INTERFACE.md` so the real setup path is explicit (config file / environment variable / local DB or API / login state / dependency).
 9. 新技能必须附带接口说明文档，便于生成给 LLM 判断/路由用的技能 md。
    New skills must include an interface spec document so that skill markdown for LLM judgment/routing can be generated reliably.
-   - 建议路径 / Recommended path: `crates/skills/<skill>/INTERFACE.md`
+   - 建议路径 / Recommended path: `crates/skills/<skill>/INTERFACE.md` or
+     `optional_skills/<skill>/INTERFACE.md`
    - 最小内容 / Minimum content:
      - 功能概述 / Capability summary
      - `action` 列表 / `action` list
@@ -144,10 +151,11 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
 10. 使用自动同步脚本维护技能文档：`python3 scripts/sync_skill_docs.py`。
    Use the auto-sync script to maintain skill docs: `python3 scripts/sync_skill_docs.py`.
    - 技能发现目录 / Skill discovery roots:
-     - `crates/skills/*`（内建技能 / built-in skills）
+     - `crates/skills/*`（固定/核心内建技能 / fixed or core built-in skills）
+     - `optional_skills/*`（Skill Store 按需内建技能 / on-demand bundled skills）
      - `external_skills/*`（外部提交技能 / externally submitted skills）
-   - 新 skill 目录（`crates/skills/<skill>`）出现时，自动创建：
-     - `crates/skills/<skill>/INTERFACE.md`
+   - 新 skill 目录（`crates/skills/<skill>` 或 `optional_skills/<skill>`）出现时，自动创建：
+     - `<source-root>/<skill>/INTERFACE.md`
     - `prompts/layers/generated/skills/<skill>.md`
    - 新外部 skill 目录（`external_skills/<skill>`）出现时，自动创建：
     - `prompts/layers/generated/skills/<skill>.md`（前提：开发者已提供 `external_skills/<skill>/INTERFACE.md`）

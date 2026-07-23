@@ -50,7 +50,8 @@ def count_lines(path: Path) -> int:
 def scan(root: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     violations: list[dict[str, object]] = []
     debt: list[dict[str, object]] = []
-    for path in sorted((root / "crates").rglob("*.rs")):
+    rust_roots = (root / "crates", root / "optional_skills")
+    for path in sorted(path for rust_root in rust_roots for path in rust_root.rglob("*.rs")):
         if is_skipped(path, root):
             continue
         rel = rel_path(path, root)

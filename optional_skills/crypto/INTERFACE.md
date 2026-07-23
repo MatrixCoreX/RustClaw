@@ -1,7 +1,7 @@
 # crypto Interface Spec
 
 > This file is managed by `scripts/sync_skill_docs.py`.
-> Keep this spec aligned with `crates/skills/crypto/src/main.rs`.
+> Keep this spec aligned with `optional_skills/crypto/src/main.rs`.
 
 ## Capability Summary
 - `crypto` provides market data queries, technical indicators, on-chain lookups, and full spot order lifecycle operations.

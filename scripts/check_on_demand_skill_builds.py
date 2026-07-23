@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from skill_store_packages import on_demand_pairs
+from skill_store_packages import on_demand_specs
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +45,7 @@ DIRECT_WORKSPACE_BUILD_FORBIDDEN = (
 )
 
 
-def cargo_package_targets() -> dict[str, set[str]]:
+def cargo_package_targets() -> dict[str, tuple[set[str], Path]]:
     completed = subprocess.run(
         ["cargo", "metadata", "--no-deps", "--format-version", "1"],
         cwd=ROOT,
@@ -56,11 +56,14 @@ def cargo_package_targets() -> dict[str, set[str]]:
     metadata = json.loads(completed.stdout)
     workspace_members = set(metadata.get("workspace_members", []))
     return {
-        package["name"]: {
-            target["name"]
-            for target in package.get("targets", [])
-            if "bin" in target.get("kind", [])
-        }
+        package["name"]: (
+            {
+                target["name"]
+                for target in package.get("targets", [])
+                if "bin" in target.get("kind", [])
+            },
+            Path(package["manifest_path"]).resolve(),
+        )
         for package in metadata.get("packages", [])
         if package.get("id") in workspace_members
     }
@@ -68,19 +71,37 @@ def cargo_package_targets() -> dict[str, set[str]]:
 
 def main() -> int:
     errors: list[str] = []
-    pairs = on_demand_pairs(ROOT / "configs/skills_registry.toml")
-    if not pairs:
+    specs = on_demand_specs(ROOT / "configs/skills_registry.toml")
+    if not specs:
         errors.append("registry has no on-demand Skill Store packages")
     try:
         package_targets = cargo_package_targets()
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         errors.append(f"cargo metadata unavailable: {error}")
         package_targets = {}
-    for package, runner in pairs:
-        if package not in package_targets:
-            errors.append(f"registry install_package is not a workspace package: {package}")
-        elif runner not in package_targets[package]:
-            errors.append(f"registry runner is not a binary target of {package}: {runner}")
+    for spec in specs:
+        package_data = package_targets.get(spec.package)
+        expected_manifest = (ROOT / spec.source_dir / "Cargo.toml").resolve()
+        legacy_source = ROOT / "crates" / "skills" / spec.skill_name
+        if package_data is None:
+            errors.append(
+                f"registry install_package is not a workspace package: {spec.package}"
+            )
+        else:
+            targets, manifest_path = package_data
+            if spec.runner not in targets:
+                errors.append(
+                    f"registry runner is not a binary target of {spec.package}: {spec.runner}"
+                )
+            if manifest_path != expected_manifest:
+                errors.append(
+                    f"on-demand package source mismatch: {spec.package} "
+                    f"expected={expected_manifest} actual={manifest_path}"
+                )
+        if legacy_source.exists():
+            errors.append(
+                f"on-demand skill must not remain under core source root: {legacy_source}"
+            )
     for relative, snippets in REQUIRED_SNIPPETS.items():
         raw = (ROOT / relative).read_text(encoding="utf-8")
         for snippet in snippets:
@@ -95,7 +116,10 @@ def main() -> int:
         for error in errors:
             print(f"ON_DEMAND_SKILL_BUILD_CHECK error={error}")
         return 1
-    print(f"ON_DEMAND_SKILL_BUILD_CHECK ok packages={len(pairs)}")
+    print(
+        "ON_DEMAND_SKILL_BUILD_CHECK "
+        f"ok packages={len(specs)} source_root=optional_skills"
+    )
     return 0
 
 

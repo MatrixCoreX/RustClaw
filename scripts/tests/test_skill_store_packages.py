@@ -10,7 +10,7 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from skill_store_packages import on_demand_pairs  # noqa: E402
+from skill_store_packages import on_demand_pairs, on_demand_specs  # noqa: E402
 
 
 class SkillStorePackagesTest(unittest.TestCase):
@@ -40,6 +40,13 @@ install_mode = "on_demand"
                 [
                     ("custom-runner-skill", "custom-runner-skill"),
                     ("sample-package", "sample-optional-skill"),
+                ],
+            )
+            self.assertEqual(
+                [spec.source_dir.as_posix() for spec in on_demand_specs(registry)],
+                [
+                    "optional_skills/custom_optional",
+                    "optional_skills/sample_optional",
                 ],
             )
 

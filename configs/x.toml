@@ -1,5 +1,5 @@
 # X skill standalone config
-# This file is read by crates/skills/x/src/main.rs
+# This file is read by optional_skills/x/src/main.rs
 # You can override each field with environment variables:
 # - X_USE_XURL
 # - XURL_BIN

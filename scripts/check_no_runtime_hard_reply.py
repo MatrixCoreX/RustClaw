@@ -108,7 +108,7 @@ def is_test_path(path: str) -> bool:
 
 
 def is_production_rust_path(path: str) -> bool:
-    if not path.startswith("crates/") or not path.endswith(".rs"):
+    if not path.startswith(("crates/", "optional_skills/")) or not path.endswith(".rs"):
         return False
     return not is_test_path(path)
 
@@ -183,9 +183,11 @@ def current_diff() -> str:
 
 
 def production_rust_files() -> list[Path]:
+    roots = (REPO_ROOT / "crates", REPO_ROOT / "optional_skills")
     return sorted(
         path
-        for path in (REPO_ROOT / "crates").rglob("*.rs")
+        for root in roots
+        for path in root.rglob("*.rs")
         if is_production_rust_path(path.relative_to(REPO_ROOT).as_posix())
     )
 

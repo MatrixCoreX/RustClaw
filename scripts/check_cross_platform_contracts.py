@@ -74,7 +74,7 @@ REQUIRED_FILE_TOKENS = {
         "default_service_manager",
         '"launchd".to_string()',
     ),
-    "crates/skills/photo_organize/src/main.rs": (
+    "optional_skills/photo_organize/src/main.rs": (
         '#[cfg(target_os = "macos")]',
         "discover_macos_volume_roots",
         '#[cfg(target_os = "linux")]',

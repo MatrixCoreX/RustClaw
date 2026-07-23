@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const STOCK_ALIAS_CHOICE_SCHEMA_RAW: &str =
-    include_str!("../../../../prompts/schemas/stock_alias_choice.schema.json");
+    include_str!("../../../prompts/schemas/stock_alias_choice.schema.json");
 
 static STOCK_ALIAS_CHOICE_SCHEMA: OnceLock<Value> = OnceLock::new();
 

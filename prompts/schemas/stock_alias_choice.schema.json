@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rustclaw.local/schemas/stock_alias_choice.schema.json",
   "title": "Stock Alias Choice Output",
-  "description": "Schema for the inline JSON object returned by the stock skill's LLM alias disambiguator in `crates/skills/stock/src/main.rs::choose_candidate_via_llm`.",
+  "description": "Schema for the inline JSON object returned by the stock skill's LLM alias disambiguator in `optional_skills/stock/src/main.rs::choose_candidate_via_llm`.",
   "type": "object",
   "additionalProperties": false,
   "required": [
