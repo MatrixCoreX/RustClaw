@@ -49,6 +49,7 @@ restart `clawd`; for a full runtime update, restart the selected channel
 adapters too.
 
 The admin Release update path verifies the checksum, preserves runtime
-directories, replaces prebuilt files, and restarts `clawd`. If an existing
-RustClaw nginx site is configured, packaged `UI/dist` is copied without a local
-UI build. A local Pi install without nginx is not configured for nginx.
+directories, atomically replaces each prebuilt binary so the running `clawd`
+executable can be upgraded, and then restarts `clawd`. If an existing RustClaw
+nginx site is configured, packaged `UI/dist` is copied without a local UI
+build. A local Pi install without nginx is not configured for nginx.

@@ -1107,7 +1107,14 @@ fi
 
 echo "deploying_binaries"
 mkdir -p target/release
-cp -a "$package_dir/target/release/." target/release/
+for source_path in "$package_dir"/target/release/*; do
+  binary_name="$(basename "$source_path")"
+  target_path="target/release/$binary_name"
+  temp_target="target/release/.${binary_name}.rustclaw-new.$$"
+  rm -f "$temp_target"
+  cp -a "$source_path" "$temp_target"
+  mv -f "$temp_target" "$target_path"
+done
 chmod +x target/release/* 2>/dev/null || true
 
 if [[ -d "$package_dir/UI/dist" ]]; then

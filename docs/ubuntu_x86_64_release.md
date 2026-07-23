@@ -45,6 +45,7 @@ and `UI/dist`. Do not overwrite live secrets or channel settings with packaged
 defaults.
 
 The admin Release update path verifies the checksum, preserves runtime
-directories, replaces prebuilt files, and restarts `clawd`. If the host already
-has a RustClaw nginx site, it copies the packaged `UI/dist` into that site
-without rebuilding. A local install with no nginx site remains nginx-free.
+directories, atomically replaces each prebuilt binary so the running `clawd`
+executable can be upgraded, and then restarts `clawd`. If the host already has
+a RustClaw nginx site, it copies the packaged `UI/dist` into that site without
+rebuilding. A local install with no nginx site remains nginx-free.
