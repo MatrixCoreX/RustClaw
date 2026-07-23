@@ -368,7 +368,7 @@ export function useConsoleProjections({
       },
       {
         id: "chat" as const,
-        label: t("对话Agent", "Chat"),
+        label: t("Agent", "Agent"),
         icon: <MessageCircle className="h-4 w-4" />,
       },
       {
