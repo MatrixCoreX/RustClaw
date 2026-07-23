@@ -457,18 +457,19 @@ pub(super) fn resolve_path(
     if !normalized_candidate.starts_with(normalized_root) {
         return Err(SkillError::path_denied("path is outside workspace"));
     }
-    Ok(candidate)
+    Ok(normalized_candidate)
 }
 
 pub(super) fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> SkillResult<()> {
-    if path.is_file() {
+    let meta =
+        std::fs::symlink_metadata(path).map_err(|err| SkillError::io("metadata", path, err))?;
+    if meta.file_type().is_symlink() || meta.is_file() {
         let _ = f(path);
         return Ok(());
     }
-    if path.is_dir() && f(path) {
+    if meta.is_dir() && f(path) {
         return Ok(());
     }
-    let meta = std::fs::metadata(path).map_err(|err| SkillError::io("metadata", path, err))?;
     if !meta.is_dir() {
         return Err(SkillError::not_a_directory(format!(
             "path search requires a directory: {}",
@@ -479,7 +480,10 @@ pub(super) fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Ski
     for entry in iter {
         let entry = entry.map_err(|err| SkillError::io("dir_entry", path, err))?;
         let p = entry.path();
-        if p.is_dir() {
+        let file_type = entry
+            .file_type()
+            .map_err(|err| SkillError::io("file_type", &p, err))?;
+        if file_type.is_dir() && !file_type.is_symlink() {
             walk_collect(&p, f)?;
         } else if f(&p) {
             return Ok(());

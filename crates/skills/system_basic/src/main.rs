@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 mod model_catalog_field_alias;
 mod path_helpers;
@@ -20,6 +21,8 @@ use platform_helpers::*;
 use structured_helpers::*;
 
 const SKILL_NAME: &str = "system_basic";
+const MAX_READ_RANGE_SCAN_BYTES: u64 = 32 * 1024 * 1024;
+const DEFAULT_READ_RANGE_OUTPUT_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -443,6 +446,7 @@ fn inventory_dir(
     let dirs_only = bool_arg(obj, "dirs_only", false);
     let names_only = bool_arg(obj, "names_only", false);
     let max_entries = u64_arg_any(obj, &["max_entries", "limit"], 200).clamp(1, 1000) as usize;
+    let cursor = u64_arg_any(obj, &["cursor", "offset"], 0) as usize;
     let sort_by = obj
         .get("sort_by")
         .and_then(Value::as_str)
@@ -468,12 +472,16 @@ fn inventory_dir(
         if !include_hidden && is_hidden {
             continue;
         }
-        let meta = item
-            .metadata()
+        let file_type = item
+            .file_type()
+            .map_err(|err| SkillError::io("file_type", &entry_path, err))?;
+        let meta = std::fs::symlink_metadata(&entry_path)
             .map_err(|err| SkillError::io("metadata", &entry_path, err))?;
-        let kind = if meta.is_dir() {
+        let kind = if file_type.is_symlink() {
+            "symlink"
+        } else if file_type.is_dir() {
             "dir"
-        } else if meta.is_file() {
+        } else if file_type.is_file() {
             "file"
         } else {
             "other"
@@ -504,17 +512,24 @@ fn inventory_dir(
             "name": file_name,
             "path": rel,
             "kind": kind,
+            "is_symlink": file_type.is_symlink(),
             "hidden": is_hidden,
-            "size_bytes": if meta.is_file() { meta.len() } else { 0 },
+            "size_bytes": if file_type.is_file() { meta.len() } else { 0 },
             "modified_ts": modified_ts,
         }));
     }
 
     let size_summary = inventory_size_summary(&entries);
     sort_inventory_entries(&mut entries, &sort_by);
-    if entries.len() > max_entries {
-        entries.truncate(max_entries);
-    }
+    let total_entries = entries.len();
+    let matched_counts = inventory_entry_counts(&entries);
+    let snapshot_hash = sha256_hex(&serde_json::to_vec(&entries).unwrap_or_default());
+    let page_start = cursor.min(total_entries);
+    let page_end = page_start.saturating_add(max_entries).min(total_entries);
+    let has_more = page_end < total_entries;
+    let next_cursor = has_more.then_some(page_end);
+    let previous_cursor = (page_start > 0).then_some(page_start.saturating_sub(max_entries));
+    let entries = entries[page_start..page_end].to_vec();
 
     let mut file_count = 0usize;
     let mut dir_count = 0usize;
@@ -554,12 +569,26 @@ fn inventory_dir(
         "names_only": names_only,
         "sort_by": sort_by,
         "ext_filter": ext_filters,
+        "total_entries": total_entries,
+        "returned_entries": entries.len(),
+        "truncated": entries.len() != total_entries,
+        "snapshot_hash": format!("sha256:{snapshot_hash}"),
+        "page": {
+            "cursor": page_start,
+            "limit": max_entries,
+            "returned": entries.len(),
+            "total": total_entries,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
+            "previous_cursor": previous_cursor,
+        },
         "counts": {
             "files": file_count,
             "dirs": dir_count,
             "total": entries.len(),
             "hidden": hidden_count,
         },
+        "matched_counts": matched_counts,
         "size_summary": size_summary,
         "has_hidden": hidden_count > 0,
         "names": names,
@@ -571,6 +600,33 @@ fn inventory_dir(
         "entries": if names_only { Value::Array(Vec::new()) } else { Value::Array(entries) },
     })
     .to_string())
+}
+
+fn inventory_entry_counts(entries: &[Value]) -> Value {
+    let mut files = 0usize;
+    let mut dirs = 0usize;
+    let mut symlinks = 0usize;
+    let mut other = 0usize;
+    let mut hidden = 0usize;
+    for entry in entries {
+        if entry.get("hidden").and_then(Value::as_bool) == Some(true) {
+            hidden += 1;
+        }
+        match entry.get("kind").and_then(Value::as_str).unwrap_or("other") {
+            "file" => files += 1,
+            "dir" => dirs += 1,
+            "symlink" => symlinks += 1,
+            _ => other += 1,
+        }
+    }
+    json!({
+        "files": files,
+        "dirs": dirs,
+        "symlinks": symlinks,
+        "other": other,
+        "hidden": hidden,
+        "total": entries.len(),
+    })
 }
 
 fn inventory_size_summary(entries: &[Value]) -> Value {
@@ -1346,8 +1402,42 @@ fn read_range(
             real.display()
         )));
     }
-    let text =
-        std::fs::read_to_string(&real).map_err(|err| SkillError::io("read_file", &real, err))?;
+    if meta.len() > MAX_READ_RANGE_SCAN_BYTES {
+        return Err(SkillError::new(
+            "file_too_large",
+            format!(
+                "read_range scan limit exceeded: {} bytes is greater than {}",
+                meta.len(),
+                MAX_READ_RANGE_SCAN_BYTES
+            ),
+        )
+        .with_extra(json!({
+            "error_code": "read_range_scan_limit_exceeded",
+            "path": path,
+            "resolved_path": real.display().to_string(),
+            "size_bytes": meta.len(),
+            "max_scan_bytes": MAX_READ_RANGE_SCAN_BYTES,
+            "requires_artifact_read": true,
+        })));
+    }
+    let bytes = std::fs::read(&real).map_err(|err| SkillError::io("read_file", &real, err))?;
+    let content_hash = sha256_hex(&bytes);
+    if bytes.contains(&0) {
+        return Err(unsupported_text_encoding_error(
+            path,
+            &real,
+            bytes.len() as u64,
+            "nul_byte",
+        ));
+    }
+    let (encoding, text_bytes) = if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+        ("utf-8-bom", &bytes[3..])
+    } else {
+        ("utf-8", bytes.as_slice())
+    };
+    let text = std::str::from_utf8(text_bytes).map_err(|_| {
+        unsupported_text_encoding_error(path, &real, bytes.len() as u64, "invalid_utf8")
+    })?;
     let lines: Vec<&str> = text.lines().collect();
     let total_lines = lines.len();
     let start = obj
@@ -1376,6 +1466,8 @@ fn read_range(
     let n = u64_arg(obj, "n", 20).clamp(1, 500) as usize;
     let raw = bool_arg(obj, "raw", false) || bool_arg(obj, "verbatim", false);
     let max_line_chars = u64_arg(obj, "max_line_chars", 800).clamp(80, 4000) as usize;
+    let max_bytes =
+        u64_arg(obj, "max_bytes", DEFAULT_READ_RANGE_OUTPUT_BYTES).clamp(256, 1024 * 1024) as usize;
     let field_selector = obj
         .get("field_selector")
         .or_else(|| obj.get("selector"))
@@ -1407,6 +1499,9 @@ fn read_range(
     let mut excerpt_lines = Vec::new();
     let mut compacted_lines = 0usize;
     let mut truncated_lines = 0usize;
+    let mut excerpt_truncated = false;
+    let mut partial_line = false;
+    let mut last_emitted_line = None;
     if total_lines > 0 && from > 0 {
         for idx in from..=to {
             if let Some(line) = lines.get(idx - 1) {
@@ -1417,12 +1512,46 @@ fn read_range(
                 if rendered.truncated {
                     truncated_lines += 1;
                 }
-                excerpt_lines.push(format!("{idx}|{}", rendered.text));
+                let rendered_line = format!("{idx}|{}", rendered.text);
+                let current_bytes = excerpt_lines.iter().map(String::len).sum::<usize>()
+                    + excerpt_lines.len().saturating_sub(1);
+                let separator_bytes = usize::from(!excerpt_lines.is_empty());
+                if current_bytes
+                    .saturating_add(separator_bytes)
+                    .saturating_add(rendered_line.len())
+                    > max_bytes
+                {
+                    let available =
+                        max_bytes.saturating_sub(current_bytes.saturating_add(separator_bytes));
+                    if available > 0 {
+                        excerpt_lines.push(truncate_utf8_bytes(&rendered_line, available));
+                        last_emitted_line = Some(idx);
+                        partial_line = true;
+                        truncated_lines += 1;
+                    }
+                    excerpt_truncated = true;
+                    break;
+                }
+                excerpt_lines.push(rendered_line);
+                last_emitted_line = Some(idx);
             }
         }
     }
 
     let excerpt = excerpt_lines.join("\n");
+    let semantic_truncation = from > 1 || to < total_lines;
+    let next_start_line = if excerpt_truncated {
+        last_emitted_line.map(|line| if partial_line { line } else { line + 1 })
+    } else if matches!(mode.as_str(), "head" | "range") && to < total_lines {
+        Some(to + 1)
+    } else {
+        None
+    };
+    let previous_start_line = if mode == "tail" && from > 1 {
+        Some(from.saturating_sub(n).max(1))
+    } else {
+        None
+    };
     let mut output = json!({
         "action": "read_range",
         "path": path,
@@ -1433,12 +1562,32 @@ fn read_range(
         "end_line": to,
         "total_lines": total_lines,
         "line_count": total_lines,
+        "returned_line_count": excerpt_lines.len(),
         "excerpt": excerpt,
+        "excerpt_bytes": excerpt.len(),
+        "max_bytes": max_bytes,
+        "encoding": encoding,
+        "binary": false,
+        "content_type": "text",
+        "size_bytes": bytes.len(),
+        "sha256": content_hash,
+        "content_hash": format!("sha256:{content_hash}"),
+        "truncated": semantic_truncation || excerpt_truncated || truncated_lines > 0,
+        "page": {
+            "start_line": from,
+            "end_line": last_emitted_line.unwrap_or(0),
+            "total_lines": total_lines,
+            "has_more": next_start_line.is_some(),
+            "next_start_line": next_start_line,
+            "previous_start_line": previous_start_line,
+            "partial_line": partial_line,
+        },
         "line_safety": {
             "raw": raw,
             "max_line_chars": max_line_chars,
             "compacted_lines": compacted_lines,
             "truncated_lines": truncated_lines,
+            "excerpt_truncated": excerpt_truncated,
         },
     });
     if from == 1 && to >= 1 {
@@ -1489,6 +1638,45 @@ fn read_range(
     }
 
     Ok(output.to_string())
+}
+
+fn unsupported_text_encoding_error(
+    path: &str,
+    resolved_path: &Path,
+    size_bytes: u64,
+    detection: &'static str,
+) -> SkillError {
+    SkillError::new(
+        "unsupported_encoding",
+        format!(
+            "read_range requires UTF-8 text: {}",
+            resolved_path.display()
+        ),
+    )
+    .with_extra(json!({
+        "error_code": "unsupported_text_encoding",
+        "path": path,
+        "resolved_path": resolved_path.display().to_string(),
+        "size_bytes": size_bytes,
+        "binary": true,
+        "detected_encoding": "binary_or_unsupported",
+        "detection": detection,
+    }))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes.min(value.len());
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_string()
 }
 
 fn normalize_read_range_field_selector(selector: &str) -> Option<&'static str> {
