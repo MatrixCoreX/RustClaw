@@ -10,22 +10,5 @@
     "https://stackoverflow.blog/",
     "https://openai.com/news/",
     "https://www.nytimes.com/"
-  ],
-  "search_queries": [
-    {
-      "query": "Playwright browser automation",
-      "lang": "en",
-      "region": "us"
-    },
-    {
-      "query": "Rust async programming guide",
-      "lang": "en",
-      "region": "us"
-    },
-    {
-      "query": "latest web scraping techniques",
-      "lang": "en",
-      "region": "us"
-    }
   ]
 }

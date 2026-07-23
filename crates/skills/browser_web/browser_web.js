@@ -2,10 +2,11 @@ const fs = require('fs/promises');
 const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
 const { execFileSync } = require('child_process');
 
 const PAGE_TIMEOUT_MS = 45000;
-const SEARCH_SETTLE_MS = 2000;
 const EXTRACT_SETTLE_MS = 1200;
 const EXCERPT_LIMIT = 500;
 const VALID_WAIT_UNTIL = new Set(['domcontentloaded', 'load', 'networkidle']);
@@ -18,6 +19,10 @@ const DEFAULT_CHUNK_CHARS = 3000;
 const DEFAULT_MAX_CAPTURE_IMAGES = 12;
 const DEFAULT_IMAGE_FETCH_TIMEOUT_MS = 15000;
 const DEFAULT_IMAGE_FETCH_MAX_BYTES = 6 * 1024 * 1024;
+const MAX_CAPTURE_HTML_CHARS = 4 * 1024 * 1024;
+const MAX_NETWORK_POLICY_EVENTS = 200;
+const MAX_NETWORK_REDIRECTS = 5;
+const DNS_POLICY_CACHE = new Map();
 
 class SkillError extends Error {
     constructor(code, message, meta = null) {
@@ -32,6 +37,193 @@ let playwright = null;
 
 function normalizeWhitespace(text) {
     return (text || '').replace(/\s+/g, ' ').trim();
+}
+
+function domainMatches(host, domain) {
+    return host === domain || host.endsWith(`.${domain}`);
+}
+
+function isPrivateIpv4(ip) {
+    const parts = ip.split('.').map(Number);
+    if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+        return true;
+    }
+    const [a, b, c] = parts;
+    return a === 0
+        || a === 10
+        || a === 127
+        || (a === 100 && b >= 64 && b <= 127)
+        || (a === 169 && b === 254)
+        || (a === 172 && b >= 16 && b <= 31)
+        || (a === 192 && b === 168)
+        || (a === 192 && b === 0 && (c === 0 || c === 2))
+        || (a === 198 && (b === 18 || b === 19))
+        || (a === 198 && b === 51 && c === 100)
+        || (a === 203 && b === 0 && c === 113)
+        || a >= 224;
+}
+
+function isPrivateIpv6(ip) {
+    const value = ip.toLowerCase();
+    if (value === '::' || value === '::1') return true;
+    if (value.startsWith('fc') || value.startsWith('fd')) return true;
+    if (/^fe[89ab]/.test(value)) return true;
+    if (value.startsWith('ff')) return true;
+    if (value.startsWith('2001:db8:')) return true;
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
+    return mapped ? isPrivateIpv4(mapped[1]) : false;
+}
+
+function isPrivateIp(ip) {
+    const family = net.isIP(ip);
+    if (family === 4) return isPrivateIpv4(ip);
+    if (family === 6) return isPrivateIpv6(ip);
+    return true;
+}
+
+function isProxySyntheticIp(ip) {
+    if (net.isIP(ip) !== 4) return false;
+    const [a, b] = ip.split('.').map(Number);
+    return a === 198 && (b === 18 || b === 19);
+}
+
+function firstProxyValue(scheme) {
+    const names = scheme === 'https:'
+        ? ['HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+        : ['HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy'];
+    for (const name of names) {
+        const value = (process.env[name] || '').trim();
+        if (value) return value;
+    }
+    return null;
+}
+
+function hostMatchesNoProxy(host) {
+    const value = (process.env.NO_PROXY || process.env.no_proxy || '').trim();
+    if (!value) return false;
+    return value.split(',').map((entry) => entry.trim()).some((entry) => {
+        if (entry === '*') return true;
+        const withoutPort = entry.includes(':') && !entry.startsWith('[')
+            ? entry.split(':')[0]
+            : entry;
+        const domain = withoutPort.replace(/^\./, '').replace(/\.$/, '').toLowerCase();
+        return domain !== '' && domainMatches(host, domain);
+    });
+}
+
+async function validateNetworkUrl(rawUrl, policy = {}, applyDomainPolicy = false) {
+    let parsed;
+    try {
+        parsed = new URL(rawUrl);
+    } catch {
+        throw new SkillError('URL_INVALID', 'url_invalid');
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw new SkillError('URL_SCHEME_BLOCKED', 'url_scheme_blocked');
+    }
+    if (parsed.username || parsed.password) {
+        throw new SkillError('URL_CREDENTIALS_BLOCKED', 'url_credentials_blocked');
+    }
+    const host = parsed.hostname
+        .toLowerCase()
+        .replace(/^\[/, '')
+        .replace(/\]$/, '')
+        .replace(/\.$/, '');
+    const domainsAllow = Array.isArray(policy.domainsAllow) ? policy.domainsAllow : [];
+    const domainsDeny = Array.isArray(policy.domainsDeny) ? policy.domainsDeny : [];
+    if (applyDomainPolicy && domainsDeny.some((domain) => domainMatches(host, domain))) {
+        throw new SkillError('DOMAIN_BLOCKED', 'domain_blocked');
+    }
+    if (
+        applyDomainPolicy
+        && domainsAllow.length > 0
+        && !domainsAllow.some((domain) => domainMatches(host, domain))
+    ) {
+        throw new SkillError('DOMAIN_NOT_ALLOWED', 'domain_not_allowed');
+    }
+    if (
+        host === 'localhost'
+        || host.endsWith('.localhost')
+        || host.endsWith('.local')
+        || host.endsWith('.internal')
+    ) {
+        throw new SkillError('PRIVATE_NETWORK_BLOCKED', 'private_network_blocked');
+    }
+
+    const literalFamily = net.isIP(host);
+    let addresses;
+    if (literalFamily) {
+        addresses = [host];
+    } else if (DNS_POLICY_CACHE.has(host)) {
+        addresses = DNS_POLICY_CACHE.get(host);
+    } else {
+        let resolved;
+        try {
+            resolved = await dns.lookup(host, { all: true, verbatim: true });
+        } catch {
+            throw new SkillError('DNS_RESOLUTION_FAILED', 'dns_resolution_failed');
+        }
+        addresses = Array.from(new Set(resolved.map((entry) => entry.address)));
+        DNS_POLICY_CACHE.set(host, addresses);
+    }
+    const proxyMediated = !literalFamily && Boolean(firstProxyValue(parsed.protocol)) && !hostMatchesNoProxy(host);
+    if (
+        addresses.length === 0
+        || addresses.some((address) => isPrivateIp(address) && !(proxyMediated && isProxySyntheticIp(address)))
+    ) {
+        throw new SkillError('PRIVATE_NETWORK_BLOCKED', 'private_network_blocked');
+    }
+    parsed.hash = '';
+    return {
+        url: parsed.toString(),
+        host,
+        proxy_mediated: proxyMediated,
+        resolved_addresses: addresses,
+    };
+}
+
+async function installNetworkGuard(context, policy) {
+    const events = [];
+    await context.route('**/*', async (route) => {
+        const request = route.request();
+        const url = request.url();
+        if (!/^https?:/i.test(url)) {
+            await route.continue();
+            return;
+        }
+        try {
+            const observation = await validateNetworkUrl(
+                url,
+                policy,
+                request.isNavigationRequest() && request.resourceType() === 'document'
+            );
+            if (
+                events.length < MAX_NETWORK_POLICY_EVENTS
+                && (request.isNavigationRequest() || request.resourceType() === 'document')
+            ) {
+                events.push({
+                    decision: 'allow',
+                    url: observation.url,
+                    host: observation.host,
+                    proxy_mediated: observation.proxy_mediated,
+                    resource_type: request.resourceType(),
+                });
+            }
+            await route.continue();
+        } catch (error) {
+            const classified = classifyError(error);
+            if (events.length < MAX_NETWORK_POLICY_EVENTS) {
+                events.push({
+                    decision: 'deny',
+                    url,
+                    error_code: classified.code,
+                    resource_type: request.resourceType(),
+                });
+            }
+            await route.abort('blockedbyclient');
+        }
+    });
+    return events;
 }
 
 function buildExcerpt(text, limit = EXCERPT_LIMIT) {
@@ -79,7 +271,7 @@ function ensureWithinRoot(root, target) {
     const absRoot = path.resolve(root);
     const absTarget = path.resolve(target);
     if (absTarget !== absRoot && !absTarget.startsWith(`${absRoot}${path.sep}`)) {
-        throw new SkillError('EMPTY_CONTENT', `capture path escapes root: ${target}`);
+        throw new SkillError('WORKSPACE_PATH_OUTSIDE', 'workspace_path_outside');
     }
     return absTarget;
 }
@@ -111,33 +303,81 @@ function chunkTextByChars(text, maxChars) {
     return chunks;
 }
 
-async function downloadImageToFile(url, outputPath) {
+async function readResponseBytes(response, maxBytes) {
+    const declared = Number(response.headers.get('content-length') || 0);
+    if (declared > maxBytes) {
+        throw new SkillError('RESPONSE_TOO_LARGE', 'response_too_large');
+    }
+    if (!response.body || typeof response.body.getReader !== 'function') {
+        throw new SkillError('RESPONSE_READ_FAILED', 'response_body_unavailable');
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maxBytes) {
+            await reader.cancel().catch(() => {});
+            throw new SkillError('RESPONSE_TOO_LARGE', 'response_too_large');
+        }
+        chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, total);
+}
+
+async function downloadImageToFile(url, outputPath, networkPolicy = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DEFAULT_IMAGE_FETCH_TIMEOUT_MS);
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            signal: controller.signal,
-            headers: {
-                'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'accept': 'image/*,*/*;q=0.8',
-            },
-        });
+        let current = (await validateNetworkUrl(url, networkPolicy, false)).url;
+        let response = null;
+        for (let redirect = 0; redirect <= MAX_NETWORK_REDIRECTS; redirect += 1) {
+            response = await fetch(current, {
+                method: 'GET',
+                signal: controller.signal,
+                redirect: 'manual',
+                headers: {
+                    'user-agent': 'RustClaw/1.0',
+                    'accept': 'image/*,*/*;q=0.8',
+                },
+            });
+            if (response.status < 300 || response.status >= 400) break;
+            if (redirect === MAX_NETWORK_REDIRECTS) {
+                throw new SkillError('REDIRECT_LIMIT_EXCEEDED', 'redirect_limit_exceeded');
+            }
+            const location = response.headers.get('location');
+            if (!location) {
+                throw new SkillError('REDIRECT_URL_INVALID', 'redirect_location_missing');
+            }
+            const next = new URL(location, current);
+            if (new URL(current).protocol === 'https:' && next.protocol !== 'https:') {
+                throw new SkillError('REDIRECT_SCHEME_DOWNGRADE', 'redirect_scheme_downgrade');
+            }
+            current = (await validateNetworkUrl(next.toString(), networkPolicy, false)).url;
+        }
+        if (!response) {
+            throw new SkillError('RESPONSE_READ_FAILED', 'response_unavailable');
+        }
         if (!response.ok) {
-            throw new Error(`http ${response.status}`);
+            throw new SkillError('HTTP_STATUS_ERROR', `http_status_${response.status}`);
         }
         const contentType = response.headers.get('content-type') || '';
         if (!contentType.toLowerCase().includes('image/')) {
-            throw new Error(`not image content-type: ${contentType || 'unknown'}`);
+            throw new SkillError('CONTENT_TYPE_BLOCKED', 'content_type_blocked');
         }
-        const arrayBuffer = await response.arrayBuffer();
-        if (arrayBuffer.byteLength > DEFAULT_IMAGE_FETCH_MAX_BYTES) {
-            throw new Error(`image too large: ${arrayBuffer.byteLength} bytes`);
-        }
+        const body = await readResponseBytes(response, DEFAULT_IMAGE_FETCH_MAX_BYTES);
         const ext = guessExtFromContentType(contentType);
         const finalPath = outputPath.endsWith(ext) ? outputPath : `${outputPath}${ext}`;
-        await fs.writeFile(finalPath, Buffer.from(arrayBuffer));
-        return { ok: true, path: finalPath, bytes: arrayBuffer.byteLength, contentType };
+        await fs.writeFile(finalPath, body);
+        return {
+            ok: true,
+            path: finalPath,
+            bytes: body.byteLength,
+            contentType,
+            sha256: crypto.createHash('sha256').update(body).digest('hex'),
+        };
     } catch (err) {
         return { ok: false, error: compactErrorMessage(err) };
     } finally {
@@ -155,7 +395,11 @@ async function initCaptureStorage(options = {}) {
     const now = new Date();
     const date = toIsoDate(now);
     const runId = sanitizeForFilename(options.runId || createRunId(now));
-    const root = path.resolve(options.captureRoot || DEFAULT_CAPTURE_ROOT);
+    const workspaceRoot = path.resolve(options.workspaceRoot || process.cwd());
+    const root = ensureWithinRoot(
+        workspaceRoot,
+        path.resolve(options.captureRoot || DEFAULT_CAPTURE_ROOT)
+    );
     const runRoot = ensureWithinRoot(root, path.join(root, source, date, runId));
 
     const dirs = {
@@ -250,38 +494,10 @@ function classifyError(err) {
         return err;
     }
     const msg = compactErrorMessage(err);
-    const lower = msg.toLowerCase();
-    if (lower.includes('timeout')) {
+    if (err && err.name === 'TimeoutError') {
         return new SkillError('NAV_TIMEOUT', msg);
     }
-    if (lower.includes('playwright') || lower.includes('chromium') || lower.includes('node.js')) {
-        return new SkillError('DEPENDENCY_MISSING', msg);
-    }
-    if (lower.includes('operation not permitted') || lower.includes('seccomp')) {
-        return new SkillError('DEPENDENCY_MISSING', msg);
-    }
-    if (lower.includes('selector')) {
-        return new SkillError('SELECTOR_MISS', msg);
-    }
-    if (lower.includes('captcha') || lower.includes('access denied') || lower.includes('forbidden')) {
-        return new SkillError('BOT_BLOCKED', msg);
-    }
-    return new SkillError('EMPTY_CONTENT', msg);
-}
-
-function detectBotBlock(title, text) {
-    const joined = `${title || ''}\n${text || ''}`.toLowerCase();
-    const patterns = [
-        'captcha',
-        'are you a robot',
-        'access denied',
-        'forbidden',
-        'verify you are human',
-        'unusual traffic',
-        'security check',
-        'temporarily blocked',
-    ];
-    return patterns.some((p) => joined.includes(p));
+    return new SkillError('BROWSER_OPERATION_FAILED', msg);
 }
 
 function truncateText(text, maxChars) {
@@ -320,12 +536,15 @@ function chooseWaitUntilForUrl(url, preferredWaitUntil, waitMap) {
     return preferredWaitUntil;
 }
 
-async function loadWaitMap(customPath) {
+async function loadWaitMap(customPath, workspaceRoot = process.cwd()) {
     const candidates = [];
     if (customPath && typeof customPath === 'string' && customPath.trim() !== '') {
-        candidates.push(path.isAbsolute(customPath) ? customPath : path.join(process.cwd(), customPath.trim()));
+        const candidate = path.isAbsolute(customPath)
+            ? customPath
+            : path.join(workspaceRoot, customPath.trim());
+        candidates.push(ensureWithinRoot(workspaceRoot, candidate));
     }
-    candidates.push(DEFAULT_WAIT_MAP_PATH);
+    candidates.push(ensureWithinRoot(workspaceRoot, DEFAULT_WAIT_MAP_PATH));
 
     for (const candidate of candidates) {
         if (!fsSync.existsSync(candidate)) {
@@ -353,13 +572,23 @@ async function navigateWithFallback(page, url, preferredWaitUntil) {
     for (const waitUntil of attempts) {
         const started = Date.now();
         try {
-            await page.goto(url, { waitUntil, timeout: PAGE_TIMEOUT_MS });
+            const response = await page.goto(url, { waitUntil, timeout: PAGE_TIMEOUT_MS });
+            const responseStatus = response ? response.status() : null;
             trace.push({
                 wait_until: waitUntil,
                 status: 'ok',
+                status_code: responseStatus,
+                final_url: page.url(),
                 latency_ms: Date.now() - started,
             });
-            return { ok: true, waitUntil, attempts: trace.length, trace };
+            return {
+                ok: true,
+                waitUntil,
+                attempts: trace.length,
+                trace,
+                responseStatus,
+                finalUrl: page.url(),
+            };
         } catch (err) {
             lastError = err;
             trace.push({
@@ -380,7 +609,7 @@ async function navigateWithFallback(page, url, preferredWaitUntil) {
     };
 }
 
-async function createBrowserContext() {
+async function createBrowserContext(networkPolicy = {}) {
     if (!playwright) {
         try {
             playwright = require('playwright');
@@ -400,18 +629,23 @@ async function createBrowserContext() {
     delete launchEnv.WAYLAND_DISPLAY;
     delete launchEnv.XAUTHORITY;
 
-    const browser = await playwright.chromium.launch({
-        executablePath,
-        headless: true,
-        env: launchEnv,
-        args: [
-            '--headless=new',
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-        ],
-    });
+    let browser;
+    try {
+        browser = await playwright.chromium.launch({
+            executablePath,
+            headless: true,
+            env: launchEnv,
+            args: [
+                '--headless=new',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+            ],
+        });
+    } catch (error) {
+        throw new SkillError('DEPENDENCY_MISSING', compactErrorMessage(error));
+    }
 
     const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -421,7 +655,8 @@ async function createBrowserContext() {
 
     context.setDefaultNavigationTimeout(PAGE_TIMEOUT_MS);
     context.setDefaultTimeout(PAGE_TIMEOUT_MS);
-    return { browser, context, runtimeCheck, executablePath };
+    const networkPolicyEvents = await installNetworkGuard(context, networkPolicy);
+    return { browser, context, runtimeCheck, executablePath, networkPolicyEvents };
 }
 
 function chooseChromiumExecutablePath() {
@@ -472,7 +707,7 @@ function chromiumExecutableCandidates() {
     ];
     for (const command of commandCandidates) {
         try {
-            const resolved = execFileSync('sh', ['-lc', `command -v ${command} 2>/dev/null`], {
+            const resolved = execFileSync('which', [command], {
                 encoding: 'utf8',
                 stdio: ['ignore', 'pipe', 'ignore'],
             }).trim();
@@ -528,7 +763,11 @@ async function extractPage(page, url, waitUntil, options = {}) {
     }
 
     await page.waitForTimeout(EXTRACT_SETTLE_MS);
-    const rawHtml = await page.content();
+    const fullRawHtml = await page.content();
+    const rawHtmlTruncated = fullRawHtml.length > MAX_CAPTURE_HTML_CHARS;
+    const rawHtml = rawHtmlTruncated
+        ? fullRawHtml.slice(0, MAX_CAPTURE_HTML_CHARS)
+        : fullRawHtml;
 
     const extracted = await page.evaluate(() => {
         const title = document.title || '';
@@ -616,6 +855,16 @@ async function extractPage(page, url, waitUntil, options = {}) {
                 .join('\n')
         );
         const fallbackText = norm([fallbackTitle, fallbackDescription, fallbackBody].filter(Boolean).join('\n'));
+        const challengeSelectors = [
+            'iframe[src*="captcha"]',
+            'iframe[src*="challenges.cloudflare.com"]',
+            '[id*="captcha"]',
+            '[class*="captcha"]',
+            'input[name*="captcha"]',
+        ];
+        const challengeSignals = challengeSelectors
+            .map((selector) => ({ selector, count: document.querySelectorAll(selector).length }))
+            .filter((entry) => entry.count > 0);
 
         return {
             title,
@@ -623,6 +872,7 @@ async function extractPage(page, url, waitUntil, options = {}) {
             fallback_title: fallbackTitle,
             fallback_text: fallbackText,
             image_candidates: imageCandidates,
+            challenge_signals: challengeSignals,
             extraction_trace: {
                 used_main: useMain,
                 best_selector: bestSelector,
@@ -638,6 +888,7 @@ async function extractPage(page, url, waitUntil, options = {}) {
     const rawText = normalizeWhitespace(extracted.text || '');
     const contentMode = options.contentMode === 'raw' ? 'raw' : 'clean';
     const cleaned = contentMode === 'raw' ? rawText : sanitizeExtractedText(rawText);
+    const textTruncated = cleaned.length > (options.maxTextChars || DEFAULT_MAX_TEXT_CHARS);
     let finalText = truncateText(cleaned, options.maxTextChars || DEFAULT_MAX_TEXT_CHARS);
     let finalTitle = normalizeWhitespace(extracted.title || extracted.fallback_title || '');
 
@@ -652,10 +903,15 @@ async function extractPage(page, url, waitUntil, options = {}) {
         finalTitle = parseDomain(finalUrl || url);
     }
 
-    if (detectBotBlock(finalTitle, finalText)) {
-        throw new SkillError('BOT_BLOCKED', 'page appears blocked by anti-bot challenge', {
+    if (
+        [401, 403, 429].includes(nav.responseStatus)
+        || (extracted.challenge_signals || []).length > 0
+    ) {
+        throw new SkillError('BOT_BLOCKED', 'structured_challenge_signal', {
             nav_trace: nav.trace,
             final_url: finalUrl,
+            response_status: nav.responseStatus,
+            challenge_signals: extracted.challenge_signals || [],
         });
     }
 
@@ -693,10 +949,16 @@ async function extractPage(page, url, waitUntil, options = {}) {
         nav_wait_until: nav.waitUntil,
         nav_attempts: nav.attempts,
         nav_attempt_trace: nav.trace,
+        response_status: nav.responseStatus,
         latency_ms: Date.now() - pageStart,
         extraction_trace: extracted.extraction_trace,
+        text_truncated: textTruncated,
+        text_chars_before_limit: cleaned.length,
+        content_sha256: sha256Hex(finalText),
         screenshot_path: screenshotPath,
         raw_html: rawHtml,
+        raw_html_truncated: rawHtmlTruncated,
+        raw_html_chars_before_limit: fullRawHtml.length,
         image_candidates: extracted.image_candidates || [],
     };
 }
@@ -717,8 +979,11 @@ async function openExtract(input) {
         captureSource = 'browser_web',
         runId = null,
         chunkChars = DEFAULT_CHUNK_CHARS,
-        captureImages = true,
+        captureImages = false,
         maxCaptureImages = DEFAULT_MAX_CAPTURE_IMAGES,
+        domainsAllow = [],
+        domainsDeny = [],
+        workspaceRoot = process.cwd(),
     } = input;
 
     if (!urls || !Array.isArray(urls) || urls.length === 0) {
@@ -728,22 +993,41 @@ async function openExtract(input) {
         throw new SkillError('EMPTY_CONTENT', 'contentMode must be one of clean|raw');
     }
 
-    const { map: waitMap, path: waitMapResolved } = await loadWaitMap(waitMapPath);
+    const networkPolicy = { domainsAllow, domainsDeny };
+    const validatedUrls = [];
+    for (const url of urls) {
+        validatedUrls.push((await validateNetworkUrl(url, networkPolicy, true)).url);
+    }
+    const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+    const { map: waitMap, path: waitMapResolved } = await loadWaitMap(
+        waitMapPath,
+        resolvedWorkspaceRoot
+    );
     const capture = await initCaptureStorage({
         enableCapture,
         captureRoot,
         captureSource,
         runId,
         source: 'browser_web',
+        workspaceRoot: resolvedWorkspaceRoot,
     });
-    const effectiveScreenshotDir = screenshotDir
-        ? (path.isAbsolute(screenshotDir) ? screenshotDir : path.join(process.cwd(), screenshotDir))
-        : (capture.enabled ? capture.dirs.images : DEFAULT_SCREENSHOT_ROOT);
-    const { browser, context, runtimeCheck, executablePath } = await createBrowserContext();
+    const effectiveScreenshotDir = ensureWithinRoot(
+        resolvedWorkspaceRoot,
+        screenshotDir
+        ? (path.isAbsolute(screenshotDir) ? screenshotDir : path.join(resolvedWorkspaceRoot, screenshotDir))
+        : (capture.enabled ? capture.dirs.images : DEFAULT_SCREENSHOT_ROOT)
+    );
+    const {
+        browser,
+        context,
+        runtimeCheck,
+        executablePath,
+        networkPolicyEvents,
+    } = await createBrowserContext(networkPolicy);
     const items = [];
 
     try {
-        for (const url of urls) {
+        for (const url of validatedUrls) {
             const page = await context.newPage();
             try {
                 const screenshotPath = buildScreenshotPath(effectiveScreenshotDir, url, items.length + 1);
@@ -781,7 +1065,7 @@ async function openExtract(input) {
                             for (let i = 0; i < candidates.length; i += 1) {
                                 const img = candidates[i];
                                 const stem = path.join(capture.dirs.images, `${baseName}_img_${String(i + 1).padStart(2, '0')}`);
-                                const dl = await downloadImageToFile(img.src, stem);
+                                const dl = await downloadImageToFile(img.src, stem, networkPolicy);
                                 if (!dl.ok) {
                                     imageCaptureErrors.push({ url: img.src, error: dl.error });
                                     continue;
@@ -793,6 +1077,7 @@ async function openExtract(input) {
                                     height: img.height || 0,
                                     bytes: dl.bytes,
                                     content_type: dl.contentType,
+                                    sha256: dl.sha256,
                                     path: toPosixRel(capture.runRoot, dl.path),
                                 });
                             }
@@ -855,6 +1140,16 @@ async function openExtract(input) {
                 }
                 delete item.raw_html;
                 delete item.image_candidates;
+                item.trust = {
+                    classification: 'untrusted_web_content',
+                    instructions_executable: false,
+                };
+                item.provenance = {
+                    source: 'browser',
+                    requested_url: url,
+                    final_url: item.final_url || url,
+                    observed_at: item.extracted_at,
+                };
                 item.wait_strategy = {
                     requested_wait_until: waitUntil,
                     effective_wait_until: effectiveWait,
@@ -905,14 +1200,31 @@ async function openExtract(input) {
     const successCount = items.filter((item) => item.fetch_method === 'browser').length;
     const failureCount = items.length - successCount;
     const citations = items.filter((item) => item.final_url || item.url).map((item) => item.final_url || item.url);
-    const summary = failureCount > 0
-        ? `Extracted ${successCount} page(s); ${failureCount} page(s) failed browser extraction`
-        : `Extracted ${successCount} page(s) using browser`;
+    const sourceRefs = items
+        .filter((item) => item.final_url || item.url)
+        .map((item, index) => ({
+            url: item.final_url || item.url,
+            title: item.title || null,
+            rank: index + 1,
+            kind: 'browser_page',
+            content_sha256: item.content_sha256 || null,
+        }));
 
     return {
         items,
-        summary,
+        summary: 'browser_extract_result_set',
+        success_count: successCount,
+        failure_count: failureCount,
         citations,
+        source_refs: sourceRefs,
+        trust: {
+            classification: 'untrusted_web_content',
+            instructions_executable: false,
+        },
+        network_policy: {
+            decisions: networkPolicyEvents,
+            decisions_truncated: networkPolicyEvents.length >= MAX_NETWORK_POLICY_EVENTS,
+        },
         capture: capture.enabled ? {
             run_root: capture.runRoot,
             raw_html_dir: capture.dirs.rawHtml,
@@ -947,6 +1259,11 @@ function partialExtractionItem(url, err, executablePath, runtimeCheck) {
             error_code: classified.code,
             error: classified.message,
             diagnostics: meta,
+            content_sha256: text ? sha256Hex(text) : null,
+            trust: {
+                classification: 'untrusted_web_content',
+                instructions_executable: false,
+            },
             runtime: {
                 chromium_executable_path: executablePath || 'playwright-default',
                 runtime_restriction_signals: runtimeCheck,
@@ -955,200 +1272,22 @@ function partialExtractionItem(url, err, executablePath, runtimeCheck) {
     };
 }
 
-async function searchPage(input) {
-    const { query, engine = 'google', topK = 5, region = null, lang = 'en' } = input;
-
-    if (!query || typeof query !== 'string' || query.trim() === '') {
-        throw new SkillError('EMPTY_CONTENT', 'query is required and must be a non-empty string');
-    }
-    if (engine !== 'google') {
-        throw new SkillError('SELECTOR_MISS', `Unsupported engine: ${engine}; only 'google' is supported`);
-    }
-
-    const { browser, context, runtimeCheck, executablePath } = await createBrowserContext();
-    const page = await context.newPage();
-    const langParam = typeof lang === 'string' && lang.trim() ? lang.trim() : 'en';
-    const regionParam = typeof region === 'string' && region.trim() ? `&gl=${encodeURIComponent(region.trim())}` : '';
-    const searchUrl = `https://www.google.com/search?hl=${encodeURIComponent(langParam)}${regionParam}&q=${encodeURIComponent(query)}`;
-
-    try {
-        const nav = await navigateWithFallback(page, searchUrl, 'domcontentloaded');
-        if (!nav.ok) {
-            throw new SkillError('NAV_TIMEOUT', `google search page navigation failed: ${compactErrorMessage(nav.error)}`, {
-                nav_trace: nav.trace,
-            });
-        }
-
-        await page.waitForTimeout(SEARCH_SETTLE_MS);
-
-        const extracted = await page.evaluate((k) => {
-            const normalize = (txt) => (txt || '').replace(/\s+/g, ' ').trim();
-            const seen = new Set();
-            const out = [];
-            const strategies = [
-                { name: 'legacy_anchor_h3', rootSelector: 'a:has(h3)' },
-                { name: 'result_blocks', rootSelector: 'div.g, div.MjjYud, div[data-hveid]' },
-                { name: 'generic_anchor', rootSelector: 'a[href]' },
-            ];
-
-            const diagnostics = {
-                strategy_hits: {},
-                selected_strategy: null,
-                fallback_used: false,
-                total_candidates: 0,
-            };
-
-            const resolveHref = (href) => {
-                let resolved = null;
-                try {
-                    const url = new URL(href, 'https://www.google.com');
-                    if (url.hostname === 'www.google.com' && url.pathname === '/url') {
-                        resolved = url.searchParams.get('q') || url.searchParams.get('url');
-                    } else if (url.protocol === 'http:' || url.protocol === 'https:') {
-                        resolved = url.toString();
-                    }
-                } catch {
-                    resolved = null;
-                }
-                if (!resolved || !/^https?:\/\//i.test(resolved)) {
-                    return null;
-                }
-                return resolved;
-            };
-
-            for (const strategy of strategies) {
-                if (out.length >= k) break;
-                const nodes = Array.from(document.querySelectorAll(strategy.rootSelector));
-                diagnostics.strategy_hits[strategy.name] = nodes.length;
-                diagnostics.total_candidates += nodes.length;
-
-                for (const node of nodes) {
-                    if (out.length >= k) break;
-                    const anchor = node.matches('a[href]') ? node : node.querySelector('a[href]');
-                    if (!anchor) continue;
-
-                    const href = anchor.getAttribute('href');
-                    const resolved = href ? resolveHref(href) : null;
-                    if (!resolved || seen.has(resolved)) continue;
-
-                    const h3 = anchor.querySelector('h3') || node.querySelector('h3');
-                    const title = normalize(h3 ? h3.innerText : anchor.innerText || '');
-                    if (!title) continue;
-
-                    const snippetNode = node.querySelector('div[data-sncf="1"], div.VwiC3b, span.aCOpRe, div.yXK7lf, div[style*="-webkit-line-clamp"], div[role="heading"] + div');
-                    out.push({
-                        title,
-                        url: resolved,
-                        snippet: normalize(snippetNode ? snippetNode.innerText : ''),
-                        source: 'google',
-                    });
-                    seen.add(resolved);
-                }
-
-                if (out.length > 0 && diagnostics.selected_strategy === null) {
-                    diagnostics.selected_strategy = strategy.name;
-                }
-            }
-
-            diagnostics.fallback_used = diagnostics.selected_strategy !== 'legacy_anchor_h3';
-            return { items: out, diagnostics };
-        }, topK);
-
-        const items = extracted.items || [];
-        if (items.length === 0) {
-            throw new SkillError('SELECTOR_MISS', `No search results extracted from Google for "${query}"`, {
-                search_url: searchUrl,
-                selector_diagnostics: extracted.diagnostics,
-                nav_trace: nav.trace,
-            });
-        }
-
-        return {
-            items,
-            summary: `Found ${items.length} search result(s) for "${query}"`,
-            citations: items.map((item) => item.url),
-            nav_wait_until: nav.waitUntil,
-            nav_attempts: nav.attempts,
-            nav_attempt_trace: nav.trace,
-            diagnostics: extracted.diagnostics,
-            runtime: {
-                chromium_executable_path: executablePath || 'playwright-default',
-                runtime_restriction_signals: runtimeCheck,
-            },
-        };
-    } finally {
-        await browser.close().catch(() => {});
-    }
+function isRetryableErrorCode(code) {
+    return new Set([
+        'BROWSER_OPERATION_FAILED',
+        'DNS_RESOLUTION_FAILED',
+        'NAV_TIMEOUT',
+    ]).has(code);
 }
 
-function summarizeText(text) {
-    const clean = normalizeWhitespace(text || '');
-    if (!clean) {
-        return '';
-    }
-    const hardLimit = 280;
-    if (clean.length <= hardLimit) {
-        return clean;
-    }
-    const parts = clean.split(/(?<=[.!?])\s+/);
-    let out = '';
-    for (const sentence of parts) {
-        const next = `${out} ${sentence}`.trim();
-        if (next.length > hardLimit) {
-            break;
-        }
-        out = next;
-    }
-    return out || `${clean.slice(0, hardLimit)}...`;
-}
-
-async function searchExtract(input) {
-    const {
-        query,
-        engine = 'google',
-        topK = 5,
-        extractTopN = 3,
-        waitUntil = 'domcontentloaded',
-        summarize = true,
-        contentMode = 'clean',
-        maxTextChars = DEFAULT_MAX_TEXT_CHARS,
-        failFast = false,
-        region = null,
-        lang = 'en',
-    } = input;
-
-    const searchResult = await searchPage({ query, engine, topK, region, lang });
-    const urlsToExtract = searchResult.items.slice(0, extractTopN).map((item) => item.url);
-    if (urlsToExtract.length === 0) {
-        return {
-            items: [],
-            summary: `No search results found for "${query}"`,
-            citations: [],
-            search_diagnostics: searchResult.diagnostics || null,
-        };
-    }
-
-    const extractResult = await openExtract({
-        urls: urlsToExtract,
-        waitUntil,
-        contentMode,
-        maxTextChars,
-        failFast,
-    });
-
-    if (summarize) {
-        extractResult.items = extractResult.items.map((item) => ({
-            ...item,
-            summary: summarizeText(item.text || item.content_excerpt || ''),
-        }));
-    }
-
-    return {
-        items: extractResult.items,
-        summary: `Searched Google for "${query}" and extracted ${extractResult.items.length} page(s)`,
-        citations: extractResult.citations,
-        search_diagnostics: searchResult.diagnostics || null,
-    };
+function writeFailure(error, details = null) {
+    const classified = classifyError(error);
+    process.stderr.write(`${JSON.stringify({
+        error_code: classified.code,
+        error_text: classified.message,
+        retryable: isRetryableErrorCode(classified.code),
+        details: details || classified.meta || null,
+    })}\n`);
 }
 
 async function main() {
@@ -1160,7 +1299,7 @@ async function main() {
     }
 
     if (!inputData.trim()) {
-        process.stderr.write('[EMPTY_CONTENT] No input data received\n');
+        writeFailure(new SkillError('INVALID_INPUT', 'input_empty'));
         process.exit(1);
     }
 
@@ -1168,7 +1307,9 @@ async function main() {
     try {
         input = JSON.parse(inputData.trim());
     } catch (e) {
-        process.stderr.write(`[EMPTY_CONTENT] Failed to parse input JSON: ${e.message}\n`);
+        writeFailure(new SkillError('INVALID_INPUT', 'input_json_invalid', {
+            parser_error: compactErrorMessage(e),
+        }));
         process.exit(1);
     }
 
@@ -1181,34 +1322,28 @@ async function main() {
             case 'open_extract':
                 result = await openExtract(input);
                 break;
-            case 'searchPage':
-            case 'search_page':
-                result = await searchPage(input);
-                break;
-            case 'searchExtract':
-            case 'search_extract':
-                result = await searchExtract(input);
-                break;
             default:
-                throw new SkillError('EMPTY_CONTENT', `Unknown action: ${action}`);
+                throw new SkillError('INVALID_ACTION', 'unsupported_action');
         }
 
         process.stdout.write(`${JSON.stringify(result)}\n`);
     } catch (error) {
         const classified = classifyError(error);
         const runtimeCheck = await readRuntimeRestrictionSignals();
-        let extraMsg = classified.message;
-        let outCode = classified.code;
-        if (
-            runtimeCheck.restricted
-            || extraMsg.includes('Operation not permitted')
-        ) {
-            extraMsg = `${extraMsg}; runtime restriction detected (NoNewPrivs=${runtimeCheck.no_new_privs}, Seccomp=${runtimeCheck.seccomp})`;
-            outCode = 'DEPENDENCY_MISSING';
-        }
-        process.stderr.write(`[${outCode}] ${extraMsg}\n`);
-        if (classified.meta) {
-            process.stderr.write(`${JSON.stringify(classified.meta)}\n`);
+        if (runtimeCheck.restricted) {
+            writeFailure(
+                new SkillError('DEPENDENCY_MISSING', classified.message),
+                {
+                    cause_error_code: classified.code,
+                    runtime_restriction: runtimeCheck,
+                    cause_details: classified.meta || null,
+                }
+            );
+        } else {
+            writeFailure(classified, {
+                runtime_restriction: runtimeCheck,
+                cause_details: classified.meta || null,
+            });
         }
         process.exit(1);
     }
@@ -1216,10 +1351,15 @@ async function main() {
 
 if (require.main === module) {
     main().catch((error) => {
-        const classified = classifyError(error);
-        process.stderr.write(`[${classified.code}] ${classified.message}\n`);
+        writeFailure(error);
         process.exit(1);
     });
 }
 
-module.exports = { SkillError, partialExtractionItem };
+module.exports = {
+    SkillError,
+    classifyError,
+    isPrivateIp,
+    partialExtractionItem,
+    validateNetworkUrl,
+};
