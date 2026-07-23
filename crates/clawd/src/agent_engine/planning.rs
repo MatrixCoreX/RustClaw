@@ -73,8 +73,29 @@ impl<'a> PlannerToolLibrary<'a> {
         crate::capability_map::planner_callable_capability_names_for_task(self.state, self.task)
     }
 
-    fn native_capability_groups(&self) -> Vec<crate::capability_map::PlannerNativeCapabilityGroup> {
+    fn all_native_capability_groups(
+        &self,
+    ) -> Vec<crate::capability_map::PlannerNativeCapabilityGroup> {
         crate::capability_map::planner_native_capability_groups_for_task(self.state, self.task)
+    }
+
+    fn disclosed_native_capability_groups(
+        &self,
+        loop_state: &LoopState,
+    ) -> Vec<crate::capability_map::PlannerNativeCapabilityGroup> {
+        crate::capability_map::planner_disclosed_native_capability_groups_for_task(
+            self.state,
+            self.task,
+            &loop_state.loaded_capability_skills,
+        )
+    }
+
+    fn loadable_capability_group_names(&self, loop_state: &LoopState) -> Vec<String> {
+        crate::capability_map::planner_loadable_capability_group_names_for_task(
+            self.state,
+            self.task,
+            &loop_state.loaded_capability_skills,
+        )
     }
 }
 
@@ -331,7 +352,11 @@ pub(super) async fn plan_round_actions(
         .as_ref()
         .map(crate::task_budget_contract::TaskBudgetSlice::provider_call_timeout_seconds);
     let callable_capability_names = planner_tool_library.callable_capability_names();
-    let native_capability_groups = planner_tool_library.native_capability_groups();
+    let all_native_capability_groups = planner_tool_library.all_native_capability_groups();
+    let native_capability_groups =
+        planner_tool_library.disclosed_native_capability_groups(loop_state);
+    let loadable_capability_group_names =
+        planner_tool_library.loadable_capability_group_names(loop_state);
     let native_capability_group_map = native_capability_groups
         .iter()
         .map(|group| {
@@ -345,12 +370,40 @@ pub(super) async fn plan_round_actions(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let native_callable_capability_names = disclosed_callable_capability_names(
+        &callable_capability_names,
+        &all_native_capability_groups,
+        &native_capability_groups,
+    );
+    let selected_native_group_count = native_capability_groups
+        .iter()
+        .filter(|group| {
+            loop_state
+                .loaded_capability_skills
+                .contains(&group.skill_name)
+        })
+        .count();
+    let eager_native_group_count = native_capability_groups
+        .len()
+        .saturating_sub(selected_native_group_count);
     let native_request = native_planner_request(
         &native_system_prompt,
         &native_user_prompt,
         provider_timeout_seconds,
         &callable_capability_names,
+        &all_native_capability_groups,
         &native_capability_groups,
+        &loadable_capability_group_names,
+    );
+    crate::prompt_budget::publish_model_tool_surface_budget_report(
+        state,
+        task,
+        "agent_loop_planner",
+        &native_request.tools,
+        native_callable_capability_names.len(),
+        eager_native_group_count,
+        selected_native_group_count,
+        skill_context.disclosure_mode,
     );
     if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback(
         state,
@@ -366,7 +419,7 @@ pub(super) async fn plan_round_actions(
         loop {
             match actions_from_native_turn_with_groups(
                 &native_turn,
-                &callable_capability_names,
+                &native_callable_capability_names,
                 &native_capability_group_map,
             ) {
                 Ok(_) => break,
@@ -498,12 +551,36 @@ pub(super) async fn plan_round_actions(
     Ok(plan_result)
 }
 
+fn disclosed_callable_capability_names(
+    callable_capability_names: &[String],
+    all_native_capability_groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
+    disclosed_native_capability_groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
+) -> Vec<String> {
+    let registry_capabilities = all_native_capability_groups
+        .iter()
+        .flat_map(|group| group.capability_names.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let mut disclosed = callable_capability_names
+        .iter()
+        .filter(|name| !registry_capabilities.contains(*name))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    disclosed.extend(
+        disclosed_native_capability_groups
+            .iter()
+            .flat_map(|group| group.capability_names.iter().cloned()),
+    );
+    disclosed.into_iter().collect()
+}
+
 fn native_planner_request(
     system_prompt: &str,
     user_prompt: &str,
     provider_timeout_seconds: Option<u64>,
     callable_capability_names: &[String],
+    all_native_capability_groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
     native_capability_groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
+    loadable_capability_group_names: &[String],
 ) -> ModelTurnRequest {
     let mut metadata = std::collections::BTreeMap::new();
     if let Some(timeout_seconds) = provider_timeout_seconds {
@@ -512,7 +589,7 @@ fn native_planner_request(
             Value::Number(timeout_seconds.into()),
         );
     }
-    let grouped_capability_names = native_capability_groups
+    let grouped_capability_names = all_native_capability_groups
         .iter()
         .flat_map(|group| group.capability_names.iter().cloned())
         .collect::<BTreeSet<_>>();
@@ -527,6 +604,11 @@ fn native_planner_request(
             NATIVE_CALL_CAPABILITY_TOOL,
             "schema:runtime_ungrouped_capability_catalog_v1",
             &ungrouped_capability_names,
+        ));
+    }
+    if !loadable_capability_group_names.is_empty() {
+        tools.push(native_capability_loader_tool_definition(
+            loadable_capability_group_names,
         ));
     }
     for group in native_capability_groups {
@@ -579,6 +661,30 @@ fn native_planner_request(
     }
 }
 
+fn native_capability_loader_tool_definition(group_names: &[String]) -> ModelToolDefinition {
+    ModelToolDefinition {
+        name: super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
+        description: "Load one or two exact registry capability groups for the next planner turn. Use only group tokens advertised in this schema. This tool changes planner context only and performs no external action.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "required": ["groups"],
+            "properties": {
+                "groups": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": super::capability_discovery::MAX_GROUPS_PER_LOAD,
+                    "items": {
+                        "type": "string",
+                        "enum": group_names
+                    }
+                }
+            },
+            "additionalProperties": false
+        }),
+        strict: true,
+    }
+}
+
 fn native_capability_tool_definition(
     tool_name: &str,
     description: &str,
@@ -610,11 +716,18 @@ fn native_capability_tool_definition(
 fn native_contract_repair_signal(error_code: &str) -> String {
     let respond_contract_error = error_code.starts_with("native_respond_")
         || error_code == "native_plan_respond_tool_required";
+    let loader_contract_error = error_code.starts_with("native_capability_group_load_");
     let (tool_name, required_argument_fields, next_action) = if respond_contract_error {
         (
             NATIVE_RESPOND_TOOL,
             vec!["shape", "content", "items", "exact_item_count"],
             "retry_native_respond_call",
+        )
+    } else if loader_contract_error {
+        (
+            super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL,
+            vec!["groups"],
+            "retry_native_capability_group_load",
         )
     } else {
         (
@@ -727,6 +840,9 @@ fn action_from_native_tool_call(
     match call.name.as_str() {
         NATIVE_CALL_CAPABILITY_TOOL => action_from_native_capability_call(call),
         NATIVE_RESPOND_TOOL => action_from_native_respond_call(call),
+        super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL => {
+            action_from_native_capability_group_load(call)
+        }
         tool_name if native_capability_groups.contains_key(tool_name) => {
             let action = action_from_native_capability_call(call)?;
             let AgentAction::CallCapability { capability, .. } = &action else {
@@ -743,6 +859,31 @@ fn action_from_native_tool_call(
         }
         _ => Err("native_plan_unknown_tool".to_string()),
     }
+}
+
+fn action_from_native_capability_group_load(call: &ModelToolCall) -> Result<AgentAction, String> {
+    let arguments = call
+        .arguments
+        .as_object()
+        .ok_or_else(|| "native_capability_group_load_arguments_not_object".to_string())?;
+    let groups = arguments
+        .get("groups")
+        .and_then(Value::as_array)
+        .filter(|groups| {
+            !groups.is_empty() && groups.len() <= super::capability_discovery::MAX_GROUPS_PER_LOAD
+        })
+        .ok_or_else(|| "native_capability_group_load_groups_invalid".to_string())?;
+    if groups.iter().any(|group| {
+        group
+            .as_str()
+            .is_none_or(|token| !super::capability_discovery::is_capability_group_token(token))
+    }) {
+        return Err("native_capability_group_load_token_invalid".to_string());
+    }
+    Ok(AgentAction::CallTool {
+        tool: super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
+        args: json!({"groups": groups}),
+    })
 }
 
 fn action_from_native_capability_call(call: &ModelToolCall) -> Result<AgentAction, String> {

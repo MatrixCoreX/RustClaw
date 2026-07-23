@@ -181,6 +181,53 @@ fn native_capability_groups_expose_distinct_registry_tools() {
 }
 
 #[test]
+fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "native-capability-disclosure".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+
+    let full = planner_native_capability_groups_for_task(&state, &task);
+    let initial =
+        planner_disclosed_native_capability_groups_for_task(&state, &task, &BTreeSet::new());
+    let loadable =
+        planner_loadable_capability_group_names_for_task(&state, &task, &BTreeSet::new());
+    assert!(initial.len() < full.len());
+    assert!(initial
+        .iter()
+        .any(|group| group.tool_name == "call_fs_basic"));
+    assert!(initial
+        .iter()
+        .any(|group| group.tool_name == "call_git_basic"));
+    let domain_group = loadable
+        .first()
+        .cloned()
+        .expect("fixture must expose an on-demand group");
+    assert!(!initial.iter().any(|group| group.skill_name == domain_group));
+
+    let loaded = BTreeSet::from([domain_group.clone()]);
+    let expanded = planner_disclosed_native_capability_groups_for_task(&state, &task, &loaded);
+    assert!(expanded
+        .iter()
+        .any(|group| group.skill_name == domain_group));
+    assert!(
+        !planner_loadable_capability_group_names_for_task(&state, &task, &loaded)
+            .contains(&domain_group)
+    );
+}
+
+#[test]
 fn permission_profile_hint_uses_registry_machine_fields() {
     let entry = registry_entry_from(
         r#"
@@ -300,6 +347,13 @@ fn child_task_catalog_exposes_only_contract_allowed_capabilities() {
         .into_iter()
         .flat_map(|group| group.capability_names)
         .collect::<BTreeSet<_>>();
+    let disclosed_group_names =
+        planner_disclosed_native_capability_groups_for_task(&state, &task, &BTreeSet::new())
+            .into_iter()
+            .flat_map(|group| group.capability_names)
+            .collect::<BTreeSet<_>>();
+    let loadable_groups =
+        planner_loadable_capability_group_names_for_task(&state, &task, &BTreeSet::new());
     let compact = build_capability_map_for_task_with_detail(&state, &task, true);
 
     assert_eq!(
@@ -310,6 +364,8 @@ fn child_task_catalog_exposes_only_contract_allowed_capabilities() {
         ]
     );
     assert_eq!(native_group_names, names.iter().cloned().collect());
+    assert_eq!(disclosed_group_names, native_group_names);
+    assert!(loadable_groups.is_empty());
     assert!(compact.contains("filesystem.find_entries"));
     assert!(compact.contains("filesystem.read_text_range"));
     assert!(!compact.contains("agent.subagent"));

@@ -11,6 +11,7 @@ const NATIVE_GROUP_TOOL_NAME_CHAR_BUDGET: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlannerNativeCapabilityGroup {
+    pub(crate) skill_name: String,
     pub(crate) tool_name: String,
     pub(crate) description: String,
     pub(crate) capability_names: Vec<String>,
@@ -214,6 +215,47 @@ pub(crate) fn planner_native_capability_groups_for_task(
     state: &AppState,
     task: &ClaimedTask,
 ) -> Vec<PlannerNativeCapabilityGroup> {
+    planner_native_capability_groups_for_task_filtered(state, task, None)
+}
+
+pub(crate) fn planner_disclosed_native_capability_groups_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+    loaded_skills: &BTreeSet<String>,
+) -> Vec<PlannerNativeCapabilityGroup> {
+    planner_native_capability_groups_for_task_filtered(state, task, Some(loaded_skills))
+}
+
+pub(crate) fn planner_loadable_capability_group_names_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+    loaded_skills: &BTreeSet<String>,
+) -> Vec<String> {
+    if child_allowed_capabilities(task).is_some() {
+        return Vec::new();
+    }
+    let Some(registry) = state.get_skills_registry() else {
+        return Vec::new();
+    };
+    let mut skills = state.planner_available_skills_for_task(task);
+    skills.sort();
+    skills
+        .into_iter()
+        .filter(|skill| {
+            registry.get(skill).is_some_and(|entry| {
+                !entry.planner_eager_load
+                    && !loaded_skills.contains(skill)
+                    && !entry.planner_capabilities.is_empty()
+            })
+        })
+        .collect()
+}
+
+fn planner_native_capability_groups_for_task_filtered(
+    state: &AppState,
+    task: &ClaimedTask,
+    loaded_skills: Option<&BTreeSet<String>>,
+) -> Vec<PlannerNativeCapabilityGroup> {
     let allowed = child_allowed_capabilities(task);
     let mut skills = state.planner_available_skills_for_task(task);
     skills.sort();
@@ -226,6 +268,12 @@ pub(crate) fn planner_native_capability_groups_for_task(
         let Some(entry) = registry.get(&skill) else {
             continue;
         };
+        if allowed.is_none()
+            && loaded_skills
+                .is_some_and(|loaded| !entry.planner_eager_load && !loaded.contains(&skill))
+        {
+            continue;
+        }
         let capability_names = entry
             .planner_capabilities
             .iter()
@@ -279,6 +327,7 @@ pub(crate) fn planner_native_capability_groups_for_task(
             .take(NATIVE_GROUP_DESCRIPTION_CHAR_BUDGET)
             .collect();
         groups.push(PlannerNativeCapabilityGroup {
+            skill_name: skill,
             tool_name,
             description,
             capability_names,

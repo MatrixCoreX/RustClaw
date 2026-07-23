@@ -438,6 +438,11 @@ pub struct SkillRegistryEntry {
     pub enabled: bool,
     #[serde(default = "default_true")]
     pub planner_visible: bool,
+    /// Keep this skill's native capability group in the initial planner tool
+    /// surface. Domain skills should remain false and be loaded by exact
+    /// registry token through the runtime capability loader.
+    #[serde(default)]
+    pub planner_eager_load: bool,
     #[serde(default)]
     pub kind: SkillKind,
     #[serde(default)]

@@ -68,6 +68,11 @@ pub(crate) fn build_checkpoint_resume_state(
     json!({
         "schema_version": 1,
         "stage": stage.as_str(),
+        "loaded_capability_skills": loop_state
+            .loaded_capability_skills
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
         "last_output": loop_state
             .last_output
             .as_deref()
@@ -109,6 +114,12 @@ pub(crate) fn restore_checkpoint_resume_state(
     loop_state.output_vars.insert(
         "agent_loop.resume_stage".to_string(),
         stage.as_str().to_string(),
+    );
+    loop_state.loaded_capability_skills.extend(
+        bounded_string_array(resume_state, "loaded_capability_skills")
+            .into_iter()
+            .filter(|token| super::capability_discovery::is_capability_group_token(token))
+            .take(super::capability_discovery::MAX_LOADED_GROUPS_PER_TASK),
     );
 
     if let Some(last_output) = bounded_string_field(resume_state, "last_output") {

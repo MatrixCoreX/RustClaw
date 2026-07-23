@@ -302,7 +302,16 @@ fn candidate_skill_scope_from_loop_state(
         .planner_available_skills_for_task(task)
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let mut selected = Vec::new();
+    let mut selected = loop_state
+        .loaded_capability_skills
+        .iter()
+        .filter(|skill| available.contains(*skill))
+        .cloned()
+        .collect::<Vec<_>>();
+    selected.truncate(MAX_SCOPED_SKILL_PLAYBOOKS);
+    if selected.len() >= MAX_SCOPED_SKILL_PLAYBOOKS {
+        return selected.into_iter().collect();
+    }
     for round in loop_state.round_traces.iter().rev() {
         let Some(plan) = round.plan_result.as_ref() else {
             continue;

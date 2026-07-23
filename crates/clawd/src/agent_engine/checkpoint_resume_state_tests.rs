@@ -17,6 +17,7 @@ fn checkpoint_for_stage(stage: AgentCheckpointStage) -> crate::task_lifecycle::T
     source.last_user_visible_respond = Some("completed-result".to_string());
     source.last_publishable_synthesis_output = Some("synthesized-result".to_string());
     source.last_capability_synthesis_output = Some("capability-result".to_string());
+    source.loaded_capability_skills.insert("crypto".to_string());
 
     crate::task_lifecycle::TaskCheckpoint {
         schema_version: 1,
@@ -96,6 +97,10 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
             Some("capability-result")
         );
         assert_eq!(
+            restored.loaded_capability_skills,
+            std::collections::BTreeSet::from(["crypto".to_string()])
+        );
+        assert_eq!(
             restored
                 .successful_action_fingerprints
                 .get("mutation:fingerprint"),
@@ -113,6 +118,14 @@ fn restart_snapshot_is_bounded_and_ignores_unknown_stage_tokens() {
         .push(json!({"payload": "x".repeat(MAX_OBSERVATION_BYTES + 100)}));
     let mut snapshot = build_checkpoint_resume_state(&source, AgentCheckpointStage::ToolExecution);
     snapshot["stage"] = json!("untrusted_stage");
+    snapshot["loaded_capability_skills"] = json!([
+        "crypto",
+        "weather",
+        "bad group",
+        "rss_fetch",
+        "kb",
+        "extra_group"
+    ]);
     let boundary = json!({"agent_loop_resume_state": snapshot});
     let mut restored = LoopState::new();
 
@@ -124,4 +137,13 @@ fn restart_snapshot_is_bounded_and_ignores_unknown_stage_tokens() {
         Some(MAX_LAST_OUTPUT_CHARS)
     );
     assert!(restored.task_observations.is_empty());
+    assert_eq!(
+        restored.loaded_capability_skills,
+        std::collections::BTreeSet::from([
+            "crypto".to_string(),
+            "kb".to_string(),
+            "rss_fetch".to_string(),
+            "weather".to_string(),
+        ])
+    );
 }
