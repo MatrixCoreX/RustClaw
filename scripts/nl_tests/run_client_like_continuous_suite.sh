@@ -13,6 +13,7 @@ CHAT_ID_VALUE="${CHAT_ID:--1002403753217}"
 EXTERNAL_CHAT_ID_VALUE="${EXTERNAL_CHAT_ID:-}"
 EXTERNAL_USER_ID_VALUE="${EXTERNAL_USER_ID:-}"
 USER_KEY_VALUE="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
+CHANNEL_VALUE="${CLIENT_LIKE_CHANNEL:-telegram}"
 CONFIG_PATH_VALUE="${RUSTCLAW_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
 DB_PATH_VALUE="${RUSTCLAW_DB_PATH:-}"
 WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-1200}"
@@ -46,8 +47,9 @@ Usage:
   bash scripts/nl_tests/run_client_like_continuous_suite.sh [options]
 
 What it tests:
-  Directly POSTs /v1/tasks to clawd, but uses the same request shape as telegramd:
-  channel=telegram, stable user_id/chat_id, external ids, user_key, and text payload.
+  Directly POSTs /v1/tasks to clawd with stable user_id/chat_id, external ids,
+  user_key, and text payload. The default channel is telegram for historical
+  client parity; isolated server wrappers set the non-delivering ui channel.
   Multiple turns reuse one client identity so clawd accumulates tasks, conversation state, and memory.
 
 Options:
@@ -56,6 +58,8 @@ Options:
   --chat-id ID               Telegram raw chat id. Default: deterministic negative group id
   --external-user-id ID      Telegramd-compatible external_user_id. Default: user-id
   --external-chat-id ID      Telegramd-compatible external_chat_id. Default: chat-id
+  --channel CHANNEL          Submission channel: ui or telegram. Default:
+                             CLIENT_LIKE_CHANNEL or telegram
   --user-key KEY             RustClaw user key. Default: RUSTCLAW_USER_KEY/USER_KEY or first enabled admin key
   --config PATH              config.toml used to resolve DB path for assertions
   --db-path PATH             main SQLite DB path for assertions
@@ -140,6 +144,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --external-chat-id)
       EXTERNAL_CHAT_ID_VALUE="${2:-}"
+      shift 2
+      ;;
+    --channel)
+      CHANNEL_VALUE="${2:-}"
       shift 2
       ;;
     --user-key)
@@ -277,6 +285,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${CHANNEL_VALUE}" != "ui" && "${CHANNEL_VALUE}" != "telegram" ]]; then
+  echo "--channel must be ui or telegram" >&2
+  exit 2
+fi
 
 need_cmd curl
 need_cmd python3
@@ -1281,7 +1294,7 @@ submit_turn() {
   fi
 
   for ((submit_attempt = 1; submit_attempt <= max_submit_attempts; submit_attempt++)); do
-    submit_raw="$(submit_client_like_telegram_task "$prompt" "" "" "$EXTERNAL_USER_ID_VALUE" "$turn_external_chat_id")"
+    submit_raw="$(submit_client_like_task "$prompt" "" "" "$EXTERNAL_USER_ID_VALUE" "$turn_external_chat_id" "$CHANNEL_VALUE")"
     submit_status=0
     submit_extract="$(extract_submit_task_id "$submit_raw" 2>&1)" || submit_status=$?
     if [[ "$submit_status" -eq 0 ]]; then
@@ -1786,7 +1799,7 @@ PY
 
 verify_db_state() {
   local require_test_id_memory="${1:-1}"
-  python3 - "$DB_PATH_VALUE" "$TEST_ID" "$require_test_id_memory" "${TASK_IDS[@]}" <<'PY'
+  python3 - "$DB_PATH_VALUE" "$TEST_ID" "$require_test_id_memory" "$CHANNEL_VALUE" "${TASK_IDS[@]}" <<'PY'
 import sqlite3
 import sys
 from pathlib import Path
@@ -1794,7 +1807,8 @@ from pathlib import Path
 db_path = Path(sys.argv[1])
 test_id = sys.argv[2]
 require_test_id_memory = sys.argv[3] == "1"
-task_ids = sys.argv[4:]
+expected_channel = sys.argv[4]
+task_ids = sys.argv[5:]
 if not db_path.exists():
     raise SystemExit(f"database not found: {db_path}")
 if not task_ids:
@@ -1815,9 +1829,9 @@ if len(rows) != len(task_ids):
 first = rows[0]
 user_id = first["user_id"]
 user_key = str(first["user_key"] or "")
-if any(row["channel"] != "telegram" for row in rows):
+if any(row["channel"] != expected_channel for row in rows):
     channels = sorted({str(row["channel"]) for row in rows})
-    raise SystemExit(f"expected telegram channel, got {channels}")
+    raise SystemExit(f"expected {expected_channel} channel, got {channels}")
 
 conversation_keys = sorted({(row["user_id"], row["chat_id"]) for row in rows})
 for row in rows:
@@ -2173,6 +2187,7 @@ TASK_IDS=()
 
 echo "CLIENT_LIKE_CONTINUOUS_SUITE"
 echo "base_url=${BASE_URL}"
+echo "channel=${CHANNEL_VALUE}"
 echo "db_path_ref=$(path_ref "$DB_PATH_VALUE")"
 echo "raw_user_id=${USER_ID}"
 echo "raw_chat_id=${CHAT_ID}"

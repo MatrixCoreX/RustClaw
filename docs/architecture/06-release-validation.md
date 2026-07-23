@@ -41,3 +41,12 @@ Live-provider tests are acceptance evidence, not an excuse to encode one failed
 sentence as a runtime branch. A failure should be repaired at the capability
 contract, registry metadata, prompt, verifier, adapter, or provider boundary
 that caused it.
+
+`scripts/nl_tests/run_all_nl_with_server.sh` starts live NL acceptance in an
+isolated local runtime by default: it allocates a loopback port, copies the
+selected config, uses temporary task and audit databases, and submits through
+the non-delivering `ui` channel. The temporary state is removed after the run.
+Reusing a development server and its databases requires the explicit
+`--reuse-server` option. Use `--suite` or `--category` to run the smallest
+affected scope; numbered raw `LLM#1..N` request/return fields remain enabled
+unless the caller explicitly disables them.

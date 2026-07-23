@@ -34,3 +34,10 @@ flowchart TD
 - CLI exec/replay/session/goal/TUI/LLM trace 产物及 UI lint/build/test。
 
 Live provider 测试是验收证据，不能把某个失败句子直接编码成 runtime 分支。应在真正导致问题的 capability contract、registry metadata、prompt、verifier、adapter 或 provider 边界完成修复。
+
+`scripts/nl_tests/run_all_nl_with_server.sh` 默认在隔离的本地 runtime 中运行
+实际 NL 验收：自动分配 loopback 端口、复制选定配置、使用临时 task/audit
+数据库，并通过不会向外发送消息的 `ui` channel 提交。运行结束后会删除临时
+状态；只有显式传入 `--reuse-server` 才会复用开发服务器及其数据库。使用
+`--suite` 或 `--category` 选择最小受影响范围；除非调用方明确关闭，测试仍会
+打印带编号的原始 `LLM#1..N` 请求/返回字段。
