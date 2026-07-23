@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BellRing,
   Cpu,
   Download,
@@ -180,152 +181,201 @@ export function DashboardPage({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+      <section className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
             <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
               {t("系统更新", "System Update")}
             </p>
             <h3 className="mt-2 text-base font-semibold text-white">
-              {t("拉取更新或分项编译", "Pull updates or build parts")}
+              {t("选择适合当前设备的更新方式", "Choose an update method for this device")}
             </h3>
             <p className="mt-2 text-sm leading-7 text-white/65">
               {t(
-                "完整编译会先尝试正常拉取远端版本，再编译并重启 clawd；也可以直接下载 GitHub Release 预编译包部署，避免在设备上长时间编译。",
-                "A full build pulls the remote version first, then builds and restarts clawd. You can also deploy a prebuilt GitHub Release package to avoid long on-device builds.",
+                "普通用户建议使用 Release 更新。只有需要源码改动或排障时，才在当前设备上拉取并编译。",
+                "Release updates are recommended for most users. Pull and compile source on this device only for source changes or troubleshooting.",
               )}
             </p>
           </div>
           {isAdminIdentity ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void onFetchWorkspaceUpdateStatus()}
-                disabled={workspaceUpdateLoading || systemRestarting}
-                className="theme-topbar-btn px-3 py-2 text-sm"
-              >
-                {workspaceUpdateLoading && !workspaceUpdateRunning ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                {t("检查远端版本", "Check remote")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void onStartWorkspaceUpdate("full")}
-                disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                className="theme-accent-btn"
-              >
-                {workspaceUpdateRunning ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                {workspaceUpdateRunning
-                  ? t("编译进行中", "Building")
-                  : workspaceUpdateHasRemoteDiff
-                    ? t("拉取并编译", "Pull and Build")
-                    : t("完整编译", "Build All")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void onStartWorkspaceUpdate("ui_only")}
-                disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                className="theme-secondary-btn px-3 py-2 text-sm"
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                {t("只编译 UI", "Build UI")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void onStartWorkspaceUpdate("clawd_only")}
-                disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                className="theme-secondary-btn px-3 py-2 text-sm"
-              >
-                <Cpu className="h-4 w-4" />
-                {t("只编译 clawd", "Build clawd")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void onStartWorkspaceUpdate("release_deploy")}
-                disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                className="theme-secondary-btn px-3 py-2 text-sm"
-              >
-                <Download className="h-4 w-4" />
-                {t("下载 Release 部署", "Deploy Release")}
-              </button>
-              {workspaceUpdateStatus?.status === "running" ? (
-                <button
-                  type="button"
-                  onClick={() => void onCancelWorkspaceUpdate()}
-                  disabled={workspaceUpdateCanceling || systemRestarting}
-                  className="theme-secondary-btn px-3 py-2 text-sm text-red-100 hover:border-red-400/35 hover:bg-red-500/10"
-                >
-                  {workspaceUpdateCanceling ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <X className="h-4 w-4" />
-                  )}
-                  {workspaceUpdateCanceling
-                    ? t("停止中", "Stopping")
-                    : workspaceUpdateStatus.mode === "release_deploy"
-                      ? t("停止部署", "Stop Deploy")
-                      : t("停止编译", "Stop Build")}
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => {
-                  const confirmed = window.confirm(
-                    t(
-                      "现在重启 RustClaw？重启期间页面会短暂断开，稍后会自动恢复。",
-                      "Restart RustClaw now? The page may disconnect briefly and then recover.",
-                    ),
-                  );
-                  if (confirmed) void onRestartSystem();
-                }}
-                disabled={workspaceUpdateLoading || workspaceUpdateStatus?.status === "running" || systemRestarting}
-                className="theme-secondary-btn px-3 py-2 text-sm"
-              >
-                {systemRestarting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                {systemRestarting ? t("重启中", "Restarting") : t("重启 RustClaw", "Restart RustClaw")}
-              </button>
-              {piAppStatus?.available ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const confirmed = window.confirm(
-                      t(
-                        "现在重启 Pi App 小程序？小屏界面会短暂关闭后重新打开。",
-                        "Restart the Pi App now? The small-screen app will close briefly and reopen.",
-                      ),
-                    );
-                    if (confirmed) void onRestartPiApp();
-                  }}
-                  disabled={piAppRestarting || systemRestarting}
-                  className="theme-secondary-btn px-3 py-2 text-sm"
-                  title={piAppStatus.model || undefined}
-                >
-                  {piAppRestarting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  {piAppRestarting ? t("重启中", "Restarting") : t("重启 Pi App", "Restart Pi App")}
-                </button>
-              ) : null}
-            </div>
+            <button
+              type="button"
+              onClick={() => void onFetchWorkspaceUpdateStatus()}
+              disabled={workspaceUpdateLoading || systemRestarting}
+              className="theme-topbar-btn px-3 py-2 text-sm"
+            >
+              {workspaceUpdateLoading && !workspaceUpdateRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {t("检查远端版本", "Check remote")}
+            </button>
           ) : (
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/55">
               {t("仅管理员可更新", "Admin only")}
             </span>
           )}
         </div>
+
+        {isAdminIdentity ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.06] p-4 sm:p-5">
+              <div className="flex items-start gap-3">
+                <span className="rounded-lg bg-emerald-400/10 p-2 text-emerald-200">
+                  <Download className="h-5 w-5" />
+                </span>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-sm font-semibold text-white">{t("Release 更新", "Release Update")}</h4>
+                    <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[11px] text-emerald-200">
+                      {t("推荐", "Recommended")}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-white/65">
+                    {t(
+                      "下载适合当前系统和架构的预编译包，保留本地配置与数据后更新并重启。无需在本机编译。",
+                      "Downloads the prebuilt package for this system and architecture, preserves local configuration and data, then updates and restarts without compiling locally.",
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void onStartWorkspaceUpdate("release_deploy")}
+                disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                className="theme-accent-btn mt-4"
+              >
+                {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "release_deploy" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "release_deploy"
+                  ? t("更新中", "Updating")
+                  : t("更新", "Update")}
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-4 sm:p-5">
+              <div className="flex items-start gap-3">
+                <span className="rounded-lg bg-amber-400/10 p-2 text-amber-200">
+                  <Cpu className="h-5 w-5" />
+                </span>
+                <div>
+                  <h4 className="text-sm font-semibold text-white">
+                    {t("拉取源码并编译", "Pull Source and Compile")}
+                  </h4>
+                  <p className="mt-2 text-sm leading-6 text-white/65">
+                    {t(
+                      "用于开发或排障，可完整拉取并编译，也可只编译 UI 或 clawd。",
+                      "For development or troubleshooting. Pull and build everything, or build only the UI or clawd.",
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs leading-5 text-amber-100/85">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  {t(
+                    "自己编译存在风险：耗时较长，会占用较多 CPU、内存和磁盘；依赖、网络或本地源码冲突都可能导致失败，低配置设备可能暂时无法响应。",
+                    "Compiling locally carries risk: it can take a long time and consume significant CPU, memory, and disk. Dependencies, network issues, or local source conflicts can fail the build, and low-resource devices may become temporarily unresponsive.",
+                  )}
+                </span>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void onStartWorkspaceUpdate("full")}
+                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                  className="theme-secondary-btn px-3 py-2 text-sm"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  {workspaceUpdateHasRemoteDiff ? t("拉取并编译", "Pull and Build") : t("完整编译", "Build All")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onStartWorkspaceUpdate("ui_only")}
+                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                  className="theme-secondary-btn px-3 py-2 text-sm"
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  {t("只编译 UI", "Build UI")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onStartWorkspaceUpdate("clawd_only")}
+                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                  className="theme-secondary-btn px-3 py-2 text-sm"
+                >
+                  <Cpu className="h-4 w-4" />
+                  {t("只编译 clawd", "Build clawd")}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isAdminIdentity ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {workspaceUpdateStatus?.status === "running" ? (
+              <button
+                type="button"
+                onClick={() => void onCancelWorkspaceUpdate()}
+                disabled={workspaceUpdateCanceling || systemRestarting}
+                className="theme-secondary-btn px-3 py-2 text-sm text-red-100 hover:border-red-400/35 hover:bg-red-500/10"
+              >
+                {workspaceUpdateCanceling ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <X className="h-4 w-4" />
+                )}
+                {workspaceUpdateCanceling
+                  ? t("停止中", "Stopping")
+                  : workspaceUpdateStatus.mode === "release_deploy"
+                    ? t("停止更新", "Stop Update")
+                    : t("停止编译", "Stop Build")}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                const confirmed = window.confirm(
+                  t(
+                    "现在重启 RustClaw？重启期间页面会短暂断开，稍后会自动恢复。",
+                    "Restart RustClaw now? The page may disconnect briefly and then recover.",
+                  ),
+                );
+                if (confirmed) void onRestartSystem();
+              }}
+              disabled={workspaceUpdateLoading || workspaceUpdateStatus?.status === "running" || systemRestarting}
+              className="theme-secondary-btn px-3 py-2 text-sm"
+            >
+              {systemRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {systemRestarting ? t("重启中", "Restarting") : t("重启 RustClaw", "Restart RustClaw")}
+            </button>
+            {piAppStatus?.available ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const confirmed = window.confirm(
+                    t(
+                      "现在重启 Pi App 小程序？小屏界面会短暂关闭后重新打开。",
+                      "Restart the Pi App now? The small-screen app will close briefly and reopen.",
+                    ),
+                  );
+                  if (confirmed) void onRestartPiApp();
+                }}
+                disabled={piAppRestarting || systemRestarting}
+                className="theme-secondary-btn px-3 py-2 text-sm"
+                title={piAppStatus.model || undefined}
+              >
+                {piAppRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {piAppRestarting ? t("重启中", "Restarting") : t("重启 Pi App", "Restart Pi App")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {workspaceUpdateMessage ? (
           <p className="mt-4 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2 text-sm text-sky-100">
