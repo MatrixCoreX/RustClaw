@@ -101,3 +101,39 @@ fn large_json_output_keeps_inline_projection_valid_json() {
         original
     );
 }
+
+#[test]
+fn existing_async_output_is_published_without_losing_source() {
+    let workspace = TestWorkspace::new();
+    let source_dir = workspace.root.join(".rustclaw/async_jobs/job");
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("stdout");
+    let content = "async output\n".repeat(5000);
+    fs::write(&source, &content).unwrap();
+
+    let published = publish_existing_task_artifact(
+        &workspace.root,
+        "task:async",
+        "async-process",
+        &source,
+        "stdout.log",
+        "text/plain; charset=utf-8",
+        json!({"stream": "stdout", "job_id": "local_process:test"}),
+    )
+    .expect("publish")
+    .expect("non-empty artifact");
+
+    let published_path = workspace
+        .root
+        .join(published.artifact_ref["path"].as_str().unwrap());
+    assert_eq!(fs::read_to_string(published_path).unwrap(), content);
+    assert_eq!(fs::read_to_string(source).unwrap(), content);
+    assert_eq!(
+        published.range_handle["read_capability"],
+        "artifact.read_range"
+    );
+    assert_eq!(
+        published.artifact_ref["metadata"]["stream"],
+        Value::String("stdout".to_string())
+    );
+}
