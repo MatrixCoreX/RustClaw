@@ -439,11 +439,16 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
 }
 
 fn uses_long_running_upstream_wait(method: &axum::http::Method, path_and_query: &str) -> bool {
-    *method == axum::http::Method::POST
-        && path_and_query
-            .split('?')
-            .next()
-            .is_some_and(|path| path == "/v1/skills/store/install")
+    let path = path_and_query.split('?').next().unwrap_or(path_and_query);
+    if *method == axum::http::Method::POST && path == "/v1/skills/store/install" {
+        return true;
+    }
+    if *method != axum::http::Method::GET {
+        return false;
+    }
+    path.strip_prefix("/v1/tasks/")
+        .and_then(|suffix| suffix.strip_suffix("/events"))
+        .is_some_and(|task_id| !task_id.is_empty() && !task_id.contains('/'))
 }
 
 fn plain_error(status: StatusCode, msg: &str, origin: Option<&HeaderValue>) -> Response {
