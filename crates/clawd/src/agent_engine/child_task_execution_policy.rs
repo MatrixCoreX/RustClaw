@@ -32,6 +32,7 @@ pub(super) fn child_task_execution_policy_error(
         .unwrap_or_default();
     let (allowed_capabilities, invalid_capability_count, capability_limit_exceeded) =
         child_allowed_capabilities(contract);
+    let allowed_capabilities = canonicalize_allowed_capabilities(state, allowed_capabilities);
     let selected = selected_capability(state, normalized_skill, args);
     let mut violations = Vec::new();
 
@@ -138,6 +139,26 @@ fn child_allowed_capabilities(contract: &Value) -> (BTreeSet<String>, usize, boo
         allowed.insert(token.to_string());
     }
     (allowed, invalid_count, capability_limit_exceeded)
+}
+
+fn canonicalize_allowed_capabilities(
+    state: &AppState,
+    allowed: BTreeSet<String>,
+) -> BTreeSet<String> {
+    let registry = state.get_skills_registry();
+    allowed
+        .into_iter()
+        .map(|capability| {
+            registry
+                .as_ref()
+                .and_then(|registry| {
+                    registry
+                        .canonical_planner_capability_name(&capability)
+                        .map(ToString::to_string)
+                })
+                .unwrap_or(capability)
+        })
+        .collect()
 }
 
 fn is_machine_capability_token(value: &str) -> bool {

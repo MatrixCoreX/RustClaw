@@ -556,6 +556,11 @@ pub struct SkillRegistryEntry {
     /// `capabilities`, which declares runtime/security resources.
     #[serde(default)]
     pub planner_capabilities: Vec<PlannerCapabilityMapping>,
+    /// Historical capability tokens accepted at resolver/API boundaries but
+    /// omitted from the model-facing planner surface. Keys and values are
+    /// exact planner capability tokens within this skill.
+    #[serde(default)]
+    pub planner_capability_aliases: BTreeMap<String, String>,
     /// Optional matrix evidence admission metadata. Runtime enablement and
     /// matrix evidence eligibility are intentionally separate: an external
     /// skill can be callable while still ineligible for strict evidence use.
@@ -730,6 +735,157 @@ fn normalize_planner_capabilities(
         });
     }
     out
+}
+
+fn normalize_planner_capability_aliases(
+    aliases: &BTreeMap<String, String>,
+    skill: &str,
+    path: &Path,
+) -> Result<BTreeMap<String, String>, String> {
+    let mut normalized = BTreeMap::new();
+    for (raw_alias, raw_target) in aliases {
+        let alias = normalize_planner_capability_name(raw_alias);
+        let target = normalize_planner_capability_name(raw_target);
+        if alias.is_empty() || target.is_empty() {
+            return Err(format!(
+                "empty planner capability alias for skill `{skill}` in {}",
+                path.display()
+            ));
+        }
+        if alias == target {
+            return Err(format!(
+                "self-referential planner capability alias `{alias}` for skill `{skill}` in {}",
+                path.display()
+            ));
+        }
+        if normalized.insert(alias.clone(), target).is_some() {
+            return Err(format!(
+                "duplicate normalized planner capability alias `{alias}` for skill `{skill}` in {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(normalized)
+}
+
+fn planner_capability_policy_equivalent(
+    alias: &PlannerCapabilityMapping,
+    target: &PlannerCapabilityMapping,
+) -> bool {
+    alias.action == target.action
+        && alias.effect == target.effect
+        && alias.risk_level == target.risk_level
+        && alias.once_per_task == target.once_per_task
+        && alias.dedup_scope == target.dedup_scope
+        && alias.dedup_fields == target.dedup_fields
+        && alias.idempotent == target.idempotent
+        && alias.execution_mode == target.execution_mode
+        && alias.async_adapter_kind == target.async_adapter_kind
+        && alias.isolation_profile == target.isolation_profile
+        && alias.network_access == target.network_access
+        && alias.filesystem_write == target.filesystem_write
+        && alias.external_publish == target.external_publish
+        && alias.credential_access == target.credential_access
+        && alias.subprocess == target.subprocess
+        && alias.package_install == target.package_install
+        && alias.privilege_escalation == target.privilege_escalation
+        && alias.final_answer_shape == target.final_answer_shape
+}
+
+fn planner_capability_argument_surface_covers(
+    alias: &PlannerCapabilityMapping,
+    target: &PlannerCapabilityMapping,
+) -> bool {
+    let target_args = target
+        .required
+        .iter()
+        .chain(target.optional.iter())
+        .collect::<std::collections::BTreeSet<_>>();
+    alias
+        .required
+        .iter()
+        .chain(alias.optional.iter())
+        .all(|arg| target_args.contains(arg))
+}
+
+fn validate_planner_capability_aliases(
+    entry: &SkillRegistryEntry,
+    path: &Path,
+) -> Result<(), String> {
+    for (alias_name, target_name) in &entry.planner_capability_aliases {
+        if entry.planner_capability_aliases.contains_key(target_name) {
+            return Err(format!(
+                "planner capability alias chain `{alias_name}` -> `{target_name}` is not allowed for skill `{}` in {}",
+                entry.name,
+                path.display()
+            ));
+        }
+        let alias = entry
+            .planner_capabilities
+            .iter()
+            .find(|mapping| mapping.name == *alias_name)
+            .ok_or_else(|| {
+                format!(
+                    "planner capability alias `{alias_name}` is not a declared mapping for skill `{}` in {}",
+                    entry.name,
+                    path.display()
+                )
+            })?;
+        let target = entry
+            .planner_capabilities
+            .iter()
+            .find(|mapping| mapping.name == *target_name)
+            .ok_or_else(|| {
+                format!(
+                    "planner capability alias target `{target_name}` is not a declared mapping for skill `{}` in {}",
+                    entry.name,
+                    path.display()
+                )
+            })?;
+        if !planner_capability_policy_equivalent(alias, target) {
+            return Err(format!(
+                "planner capability alias policy mismatch `{alias_name}` -> `{target_name}` for skill `{}` in {}",
+                entry.name,
+                path.display()
+            ));
+        }
+        if !planner_capability_argument_surface_covers(alias, target) {
+            return Err(format!(
+                "planner capability alias arguments are not covered by `{target_name}` for alias `{alias_name}` in skill `{}` ({})",
+                entry.name,
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_global_planner_capability_aliases(
+    registry: &SkillsRegistry,
+    path: &Path,
+) -> Result<(), String> {
+    let mut aliases = BTreeMap::<String, (String, String)>::new();
+    for (skill_name, entry) in &registry.by_name {
+        for (alias, target) in &entry.planner_capability_aliases {
+            if let Some((existing_skill, existing_target)) =
+                aliases.insert(alias.clone(), (skill_name.clone(), target.clone()))
+            {
+                return Err(format!(
+                    "duplicate planner capability alias `{alias}` in {}: `{existing_skill}` -> `{existing_target}` and `{skill_name}` -> `{target}`",
+                    path.display()
+                ));
+            }
+        }
+    }
+    for (alias, (skill_name, target)) in &aliases {
+        if let Some((target_skill, next_target)) = aliases.get(target) {
+            return Err(format!(
+                "cross-skill planner capability alias chain `{alias}` ({skill_name}) -> `{target}` ({target_skill}) -> `{next_target}` in {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn default_isolation_profile_for_effect(
@@ -1076,6 +1232,12 @@ impl SkillsRegistry {
             entry.platform_notes = normalize_metadata_lines(&entry.platform_notes);
             entry.planner_capabilities =
                 normalize_planner_capabilities(&entry.planner_capabilities);
+            entry.planner_capability_aliases = normalize_planner_capability_aliases(
+                &entry.planner_capability_aliases,
+                &canonical,
+                path,
+            )?;
+            validate_planner_capability_aliases(&entry, path)?;
             entry.matrix_admission = entry
                 .matrix_admission
                 .as_ref()
@@ -1130,6 +1292,7 @@ impl SkillsRegistry {
             by_name,
             alias_to_name,
         };
+        validate_global_planner_capability_aliases(&registry, path)?;
 
         // §P4.2：声明的 capabilities 必须和 manifest 的 shape 一致，否则
         // 加载失败 — 例如 exec.sudo 不允许自动执行（必须 confirm + high
@@ -1360,7 +1523,11 @@ impl SkillsRegistry {
             required_bins: entry.required_bins.clone(),
             optional_bins: entry.optional_bins.clone(),
             platform_notes: entry.platform_notes.clone(),
-            planner_capabilities: entry.planner_capabilities.clone(),
+            planner_capabilities: self
+                .planner_exposed_capabilities(canonical_name)
+                .into_iter()
+                .cloned()
+                .collect(),
             capabilities: entry.resolved_capabilities.clone(),
         })
     }
@@ -1374,6 +1541,39 @@ impl SkillsRegistry {
             Some(entry) => entry.planner_capabilities.as_slice(),
             None => &[],
         }
+    }
+
+    pub fn planner_exposed_capabilities(
+        &self,
+        canonical_name: &str,
+    ) -> Vec<&PlannerCapabilityMapping> {
+        let Some(entry) = self.get(canonical_name) else {
+            return Vec::new();
+        };
+        entry
+            .planner_capabilities
+            .iter()
+            .filter(|mapping| !entry.planner_capability_aliases.contains_key(&mapping.name))
+            .collect()
+    }
+
+    pub fn canonical_planner_capability_name(&self, capability: &str) -> Option<&str> {
+        let normalized = normalize_planner_capability_name(capability);
+        for entry in self.by_name.values() {
+            if let Some(target) = entry.planner_capability_aliases.get(&normalized) {
+                return Some(target.as_str());
+            }
+        }
+        for entry in self.by_name.values() {
+            if let Some(mapping) = entry
+                .planner_capabilities
+                .iter()
+                .find(|mapping| mapping.name == normalized)
+            {
+                return Some(mapping.name.as_str());
+            }
+        }
+        None
     }
 
     pub fn has_semantic_tag(&self, canonical_name: &str, tag: &str) -> bool {

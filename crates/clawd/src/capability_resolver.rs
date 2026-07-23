@@ -184,6 +184,10 @@ fn resolve_registry_capability_action(
         else {
             continue;
         };
+        let canonical_capability = registry
+            .canonical_planner_capability_name(&mapping.name)
+            .unwrap_or(mapping.name.as_str())
+            .to_string();
         let manifest = registry.manifest(&skill);
         let planner_kind = manifest
             .as_ref()
@@ -193,7 +197,7 @@ fn resolve_registry_capability_action(
             blocked.push(CapabilityResolutionRecord::blocked(
                 reason_code,
                 normalized_capability.to_string(),
-                mapping.name.clone(),
+                canonical_capability,
                 &skill,
                 planner_kind,
             ));
@@ -201,7 +205,7 @@ fn resolve_registry_capability_action(
         }
         candidates.push(ResolverCandidate {
             skill,
-            capability: mapping.name.clone(),
+            capability: canonical_capability,
             action: mapping.action.clone(),
             planner_kind,
             preferred: mapping.preferred

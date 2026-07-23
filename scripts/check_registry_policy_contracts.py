@@ -19,6 +19,26 @@ REGISTRIES = [
 ALLOWED_EFFECTS = {"observe", "validate", "mutate", "external"}
 ALLOWED_RISK_LEVELS = {"low", "medium", "high", "unknown"}
 ALLOWED_DEDUP_SCOPES = {"args", "action", "resource"}
+ALIAS_POLICY_FIELDS = (
+    "action",
+    "effect",
+    "risk_level",
+    "once_per_task",
+    "dedup_scope",
+    "dedup_fields",
+    "idempotent",
+    "execution_mode",
+    "async_adapter_kind",
+    "isolation_profile",
+    "network_access",
+    "filesystem_write",
+    "external_publish",
+    "credential_access",
+    "subprocess",
+    "package_install",
+    "privilege_escalation",
+    "final_answer_shape",
+)
 
 
 def load_registry(path: Path) -> list[dict[str, Any]]:
@@ -106,18 +126,139 @@ def check_skill_capability_surface(registry_path: Path, skill: dict[str, Any]) -
     return [f"{prefix}: planner_visible_enabled_skill_missing_planner_capabilities"]
 
 
-def scan_registries(registries: list[Path]) -> tuple[list[str], int]:
+def normalized_policy_value(capability: dict[str, Any], field: str) -> Any:
+    effect = capability.get("effect")
+    if field == "isolation_profile" and field not in capability:
+        return {
+            "observe": "read_only",
+            "validate": "read_only",
+            "mutate": "local_current_workspace",
+            "external": "remote_executor",
+        }.get(effect)
+    if field == "network_access" and field not in capability:
+        return effect == "external"
+    if field == "filesystem_write" and field not in capability:
+        return effect == "mutate"
+    if field == "external_publish" and field not in capability:
+        return effect == "external"
+    if field == "credential_access" and field not in capability:
+        return False if effect in ALLOWED_EFFECTS else None
+    return capability.get(field)
+
+
+def check_skill_capability_aliases(
+    registry_path: Path, skill: dict[str, Any]
+) -> tuple[list[str], int]:
+    aliases = skill.get("planner_capability_aliases") or {}
+    if not isinstance(aliases, dict):
+        skill_name = str(skill.get("name") or "unknown_skill")
+        return (
+            [
+                f"{registry_path.relative_to(ROOT)}:{skill_name}: "
+                "planner_capability_aliases_must_be_table"
+            ],
+            0,
+        )
+    capabilities = {
+        str(capability.get("name") or "").strip(): capability
+        for capability in skill.get("planner_capabilities") or []
+    }
+    skill_name = str(skill.get("name") or "unknown_skill").strip() or "unknown_skill"
+    prefix = f"{registry_path.relative_to(ROOT)}:{skill_name}"
+    findings: list[str] = []
+    for raw_alias, raw_target in aliases.items():
+        alias = str(raw_alias).strip()
+        target = str(raw_target).strip()
+        if alias == target:
+            findings.append(f"{prefix}: capability_alias_self_reference={alias}")
+            continue
+        if target in aliases:
+            findings.append(f"{prefix}: capability_alias_chain={alias}->{target}")
+        alias_capability = capabilities.get(alias)
+        target_capability = capabilities.get(target)
+        if alias_capability is None:
+            findings.append(f"{prefix}: capability_alias_missing_mapping={alias}")
+            continue
+        if target_capability is None:
+            findings.append(f"{prefix}: capability_alias_missing_target={alias}->{target}")
+            continue
+        drift = [
+            field
+            for field in ALIAS_POLICY_FIELDS
+            if normalized_policy_value(alias_capability, field)
+            != normalized_policy_value(target_capability, field)
+        ]
+        if drift:
+            findings.append(
+                f"{prefix}: capability_alias_policy_drift={alias}->{target} fields={','.join(drift)}"
+            )
+        target_args = set(target_capability.get("required") or []) | set(
+            target_capability.get("optional") or []
+        )
+        alias_args = set(alias_capability.get("required") or []) | set(
+            alias_capability.get("optional") or []
+        )
+        uncovered = sorted(alias_args - target_args)
+        if uncovered:
+            findings.append(
+                f"{prefix}: capability_alias_arguments_uncovered={alias}->{target} "
+                f"args={','.join(uncovered)}"
+            )
+    return findings, len(aliases)
+
+
+def check_registry_global_aliases(
+    registry_path: Path, skills: list[dict[str, Any]]
+) -> list[str]:
+    owners: dict[str, tuple[str, str]] = {}
+    findings: list[str] = []
+    prefix = str(registry_path.relative_to(ROOT))
+    for skill in skills:
+        skill_name = str(skill.get("name") or "unknown_skill").strip() or "unknown_skill"
+        aliases = skill.get("planner_capability_aliases") or {}
+        if not isinstance(aliases, dict):
+            continue
+        for raw_alias, raw_target in aliases.items():
+            alias = str(raw_alias).strip()
+            target = str(raw_target).strip()
+            if alias in owners:
+                existing_skill, existing_target = owners[alias]
+                findings.append(
+                    f"{prefix}: duplicate_capability_alias={alias} "
+                    f"owners={existing_skill}->{existing_target},{skill_name}->{target}"
+                )
+            else:
+                owners[alias] = (skill_name, target)
+    for alias, (skill_name, target) in owners.items():
+        if target in owners:
+            target_skill, next_target = owners[target]
+            findings.append(
+                f"{prefix}: cross_skill_capability_alias_chain={alias}({skill_name})"
+                f"->{target}({target_skill})->{next_target}"
+            )
+    return findings
+
+
+def scan_registries(registries: list[Path]) -> tuple[list[str], int, int]:
     findings: list[str] = []
     capability_count = 0
+    alias_count = 0
     for registry_path in registries:
-        for skill in load_registry(registry_path):
+        skills = load_registry(registry_path)
+        findings.extend(check_registry_global_aliases(registry_path, skills))
+        for skill in skills:
             findings.extend(check_skill_capability_surface(registry_path, skill))
+            alias_findings, skill_alias_count = check_skill_capability_aliases(
+                registry_path, skill
+            )
+            findings.extend(alias_findings)
+            alias_count += skill_alias_count
             for index, capability in enumerate(skill.get("planner_capabilities") or []):
                 capability_count += 1
                 findings.extend(
                     check_capability(registry_path, skill, index, capability)
                 )
-    return findings, capability_count
+    return findings, capability_count, alias_count
 
 
 def run_self_test() -> int:
@@ -179,6 +320,55 @@ def run_self_test() -> int:
     if not any("planner_visible_enabled_skill_missing_planner_capabilities" in finding for finding in surface_findings):
         print(f"SELF_TEST_FAIL missing_surface_finding:{surface_findings}", file=sys.stderr)
         return 1
+    alias_findings, alias_count = check_skill_capability_aliases(
+        registry_path,
+        {
+            "name": "alias_skill",
+            "planner_capability_aliases": {"legacy.read": "canonical.read"},
+            "planner_capabilities": [
+                {
+                    "name": "canonical.read",
+                    "action": "read",
+                    "effect": "observe",
+                    "risk_level": "low",
+                    "idempotent": True,
+                    "dedup_scope": "args",
+                    "required": ["path"],
+                },
+                {
+                    "name": "legacy.read",
+                    "action": "read",
+                    "effect": "observe",
+                    "risk_level": "low",
+                    "idempotent": True,
+                    "dedup_scope": "args",
+                    "required": ["path"],
+                },
+            ],
+        },
+    )
+    if alias_findings or alias_count != 1:
+        print(f"SELF_TEST_FAIL valid_alias_rejected:{alias_findings}", file=sys.stderr)
+        return 1
+    duplicate_findings = check_registry_global_aliases(
+        registry_path,
+        [
+            {
+                "name": "first",
+                "planner_capability_aliases": {"legacy.read": "first.read"},
+            },
+            {
+                "name": "second",
+                "planner_capability_aliases": {"legacy.read": "second.read"},
+            },
+        ],
+    )
+    if not any("duplicate_capability_alias" in finding for finding in duplicate_findings):
+        print(
+            f"SELF_TEST_FAIL missing_duplicate_alias_finding:{duplicate_findings}",
+            file=sys.stderr,
+        )
+        return 1
     print("REGISTRY_POLICY_CONTRACT_SELF_TEST ok")
     return 0
 
@@ -190,12 +380,12 @@ def main(argv: list[str]) -> int:
     if args.self_test:
         return run_self_test()
 
-    findings, capability_count = scan_registries(REGISTRIES)
+    findings, capability_count, alias_count = scan_registries(REGISTRIES)
 
     if findings:
         print(
             "REGISTRY_POLICY_CONTRACT_CHECK "
-            f"findings={len(findings)} capabilities={capability_count}"
+            f"findings={len(findings)} capabilities={capability_count} aliases={alias_count}"
         )
         for finding in findings:
             print(finding)
@@ -203,7 +393,7 @@ def main(argv: list[str]) -> int:
 
     print(
         "REGISTRY_POLICY_CONTRACT_CHECK "
-        f"ok registries={len(REGISTRIES)} capabilities={capability_count}"
+        f"ok registries={len(REGISTRIES)} capabilities={capability_count} aliases={alias_count}"
     )
     return 0
 

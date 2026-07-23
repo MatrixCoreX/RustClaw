@@ -173,6 +173,16 @@ fn native_capability_groups_expose_distinct_registry_tools() {
     assert_eq!(doc_parse.tool_name, "call_doc_parse");
     assert!(doc_parse.description.contains("document_summary"));
     assert_ne!(doc_parse.tool_name, filesystem.tool_name);
+    assert_eq!(filesystem.capability_names.len(), 17);
+    assert!(filesystem
+        .capability_names
+        .contains(&"filesystem.read_text_range".to_string()));
+    assert!(!filesystem
+        .capability_names
+        .contains(&"filesystem.read_file".to_string()));
+    assert!(!filesystem
+        .capability_names
+        .contains(&"fs_basic.read_file".to_string()));
     assert!(groups.iter().all(|group| {
         !group.capability_names.is_empty()
             && group.tool_name.chars().count() <= NATIVE_GROUP_TOOL_NAME_CHAR_BUDGET
@@ -251,8 +261,8 @@ fn scoped_text_catalog_discloses_only_active_groups_and_loader_tokens() {
         .find(|skill| {
             state.get_skills_registry().is_some_and(|registry| {
                 registry
-                    .planner_capabilities(skill)
-                    .iter()
+                    .planner_exposed_capabilities(skill)
+                    .into_iter()
                     .any(|mapping| mapping.name != **skill)
             })
         })
@@ -262,8 +272,8 @@ fn scoped_text_catalog_discloses_only_active_groups_and_loader_tokens() {
         .get_skills_registry()
         .and_then(|registry| {
             registry
-                .planner_capabilities(&selected)
-                .iter()
+                .planner_exposed_capabilities(&selected)
+                .into_iter()
                 .find(|mapping| mapping.name != selected)
                 .map(|mapping| mapping.name.clone())
         })

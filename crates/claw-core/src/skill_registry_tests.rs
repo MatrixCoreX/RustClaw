@@ -102,6 +102,88 @@ planner_eager_load = false
 }
 
 #[test]
+fn planner_capability_aliases_are_hidden_but_resolve_to_canonical_policy() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "fs_basic"
+planner_capability_aliases = { "filesystem.read_file" = "filesystem.read_text_range" }
+planner_capabilities = [
+  { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"], optional = ["start_line"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.read_file", action = "read_text_range", effect = "observe", required = ["path"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
+"#,
+    )
+    .expect("load alias registry");
+
+    assert_eq!(registry.planner_capabilities("fs_basic").len(), 2);
+    assert_eq!(
+        registry
+            .planner_exposed_capabilities("fs_basic")
+            .into_iter()
+            .map(|mapping| mapping.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["filesystem.read_text_range"]
+    );
+    assert_eq!(
+        registry.canonical_planner_capability_name("filesystem.read_file"),
+        Some("filesystem.read_text_range")
+    );
+    assert_eq!(
+        registry
+            .manifest("fs_basic")
+            .expect("manifest")
+            .planner_capabilities
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn planner_capability_alias_policy_drift_is_rejected() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "fs_basic"
+planner_capability_aliases = { "filesystem.read_file" = "filesystem.read_text_range" }
+planner_capabilities = [
+  { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.read_file", action = "read_text_range", effect = "mutate", required = ["path"], risk_level = "high", idempotent = false, dedup_scope = "action" },
+]
+"#,
+    )
+    .expect_err("policy drift must fail");
+
+    assert!(error.contains("planner capability alias policy mismatch"));
+}
+
+#[test]
+fn duplicate_cross_skill_planner_capability_alias_is_rejected() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "first"
+planner_capability_aliases = { "legacy.read" = "first.read" }
+planner_capabilities = [
+  { name = "first.read", action = "read", effect = "observe", risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "legacy.read", action = "read", effect = "observe", risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
+
+[[skills]]
+name = "second"
+planner_capability_aliases = { "legacy.read" = "second.read" }
+planner_capabilities = [
+  { name = "second.read", action = "read", effect = "observe", risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "legacy.read", action = "read", effect = "observe", risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
+"#,
+    )
+    .expect_err("duplicate aliases must fail");
+
+    assert!(error.contains("duplicate planner capability alias"));
+}
+
+#[test]
 fn config_guard_ownership_leads_the_compact_registry_description() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
     let registry = SkillsRegistry::load_from_path(&path).expect("load workspace registry");
