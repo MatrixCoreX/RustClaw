@@ -540,6 +540,31 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
 }
 
 #[test]
+fn native_respond_tool_requires_runtime_observation_for_machine_evidence() {
+    let request = native_planner_request(
+        "system",
+        "user",
+        None,
+        &callable_capabilities(),
+        &[],
+        &[],
+        &[],
+    );
+    let respond = request
+        .tools
+        .iter()
+        .find(|tool| tool.name == "respond")
+        .expect("respond tool");
+
+    assert!(respond.description.contains("does not execute or simulate"));
+    assert!(respond
+        .description
+        .contains("prior matching capability result"));
+    assert!(respond.description.contains("checkpoint"));
+    assert!(respond.description.contains("verification"));
+}
+
+#[test]
 fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
     let groups = vec![crate::capability_map::PlannerNativeCapabilityGroup {
         skill_name: "doc_parse".to_string(),
