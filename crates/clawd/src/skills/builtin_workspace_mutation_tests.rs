@@ -3,7 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{
-    rewind_structured_mutation, run_checkpointed_workspace_mutation, structured_mutation_diff,
+    atomic_write_file, rewind_structured_mutation, run_checkpointed_workspace_mutation,
+    structured_mutation_diff,
 };
 
 struct TestWorkspace {
@@ -38,6 +39,44 @@ fn checkpoint_id(output: &str) -> String {
         .and_then(Value::as_str)
         .expect("checkpoint id")
         .to_string()
+}
+
+#[test]
+fn atomic_write_replaces_content_without_leaving_temporary_files() {
+    let workspace = TestWorkspace::new("atomic-write");
+    let path = workspace.path().join("document.txt");
+    fs::write(&path, "before").expect("seed file");
+
+    atomic_write_file(&path, b"after").expect("atomic write");
+
+    assert_eq!(fs::read_to_string(&path).expect("read file"), "after");
+    let temporary_files = fs::read_dir(workspace.path())
+        .expect("read workspace")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".rustclaw-write-")
+        })
+        .count();
+    assert_eq!(temporary_files, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_write_preserves_existing_unix_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = TestWorkspace::new("atomic-write-mode");
+    let path = workspace.path().join("script.sh");
+    fs::write(&path, "#!/bin/sh\n").expect("seed script");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o750)).expect("set mode");
+
+    atomic_write_file(&path, b"#!/bin/sh\nexit 0\n").expect("atomic write");
+
+    let mode = fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+    assert_eq!(mode, 0o750);
 }
 
 #[test]

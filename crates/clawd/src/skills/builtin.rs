@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::io::{Read as IoRead, Seek as IoSeek, SeekFrom, Write as IoWrite};
+use std::io::{Read as IoRead, Seek as IoSeek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
 use crate::{AppState, ClaimedTask};
@@ -29,7 +29,7 @@ use builtin_run_cmd::{
     suggested_command_from_args, RunSafeCommandError,
 };
 use builtin_schedule::execute_schedule_workflow_for_task;
-use builtin_workspace_mutation::run_checkpointed_workspace_mutation;
+use builtin_workspace_mutation::{atomic_write_file, run_checkpointed_workspace_mutation};
 use builtin_workspace_patch::execute_workspace_patch;
 
 fn builtin_error(
@@ -304,44 +304,37 @@ pub(crate) async fn execute_builtin_skill_with_task(
                                     Some(&real_path),
                                 )
                             })?;
-                        let mut file = std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(&real_path)
-                            .map_err(|err| {
-                                io_builtin_error(
+                        let mut bytes = match std::fs::read(&real_path) {
+                            Ok(bytes) => bytes,
+                            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                            Err(err) => {
+                                return Err(io_builtin_error(
                                     "write_file",
-                                    "open_for_append",
+                                    "read_before_append",
                                     &err,
                                     Some(path),
                                     Some(&real_path),
-                                )
-                            })?;
+                                ));
+                            }
+                        };
                         if prepend_line_separator {
-                            file.write_all(b"\n").map_err(|err| {
-                                io_builtin_error(
-                                    "write_file",
-                                    "append_line_separator",
-                                    &err,
-                                    Some(path),
-                                    Some(&real_path),
-                                )
-                            })?;
+                            bytes.push(b'\n');
                         }
-                        file.write_all(content.as_bytes()).map_err(|err| {
+                        bytes.extend_from_slice(content.as_bytes());
+                        atomic_write_file(&real_path, &bytes).map_err(|err| {
                             io_builtin_error(
                                 "write_file",
-                                "append_file",
+                                "atomic_append_file",
                                 &err,
                                 Some(path),
                                 Some(&real_path),
                             )
                         })?;
                     } else {
-                        std::fs::write(&real_path, content).map_err(|err| {
+                        atomic_write_file(&real_path, content.as_bytes()).map_err(|err| {
                             io_builtin_error(
                                 "write_file",
-                                "write_file",
+                                "atomic_write_file",
                                 &err,
                                 Some(path),
                                 Some(&real_path),
