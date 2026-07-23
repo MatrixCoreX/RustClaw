@@ -100,6 +100,19 @@ fn zero_action_observation_ready_round_is_not_model_finished() {
 }
 
 #[test]
+fn capability_scope_load_round_is_not_model_finished() {
+    let outcome = RoundOutcome {
+        executed_actions: 1,
+        had_error: false,
+        stop_signal: Some("capability_groups_loaded".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    };
+
+    assert!(!round_model_finished(Some(&outcome)));
+}
+
+#[test]
 fn budget_telemetry_uses_machine_replan_and_resume_tokens() {
     use crate::task_budget_contract::BudgetDecision;
 
