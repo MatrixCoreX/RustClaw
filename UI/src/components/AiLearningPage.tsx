@@ -13,7 +13,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 
 import readmeEn from "../../../README.md?raw";
 import readmeZh from "../../../README.zh-CN.md?raw";
-import { parseReadmeLearningPages } from "../lib/ai-learning";
+import { classifyLearningLink, parseReadmeLearningPages } from "../lib/ai-learning";
 
 type UiLanguage = "zh" | "en";
 type Translate = (zh: string, en: string) => string;
@@ -159,6 +159,26 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
     () => parseReadmeLearningPages(lang === "zh" ? readmeZh : readmeEn),
     [lang],
   );
+  const chapters = useMemo(() => {
+    const grouped: Array<{
+      id: string;
+      title: string;
+      pages: Array<{ index: number; page: (typeof pages)[number] }>;
+    }> = [];
+    pages.forEach((item, index) => {
+      const current = grouped[grouped.length - 1];
+      if (!current || current.id !== item.chapterId) {
+        grouped.push({
+          id: item.chapterId,
+          title: item.chapterTitle,
+          pages: [{ index, page: item }],
+        });
+      } else {
+        current.pages.push({ index, page: item });
+      }
+    });
+    return grouped;
+  }, [pages]);
   const [pageIndex, setPageIndex] = useState(0);
 
   useEffect(() => {
@@ -176,16 +196,29 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
         const source = mermaidSource(children);
         return source ? <MermaidDiagram source={source} t={t} /> : <pre>{children}</pre>;
       },
-      a: ({ href, children }) => (
-        <a href={href} target={href?.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
-          {children}
-        </a>
-      ),
+      a: ({ href, children }) => {
+        const linkKind = classifyLearningLink(href);
+        if (linkKind === "external") {
+          return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+        }
+        if (linkKind === "internal") {
+          return <a href={href}>{children}</a>;
+        }
+        return (
+          <span
+            className="learning-reference"
+            title={t("仓库内参考资料", "Repository reference")}
+          >
+            {children}
+          </span>
+        );
+      },
     }),
-    [lang],
+    [lang, t],
   );
 
   if (!page) return null;
+  const chapterIndex = chapters.findIndex((chapter) => chapter.id === page.chapterId);
 
   return (
     <section className="overflow-hidden rounded-lg border border-white/10 bg-[var(--theme-card)]">
@@ -201,7 +234,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
                 {t("理解 RustClaw 的设计与运行流程", "Understand RustClaw design and runtime flows")}
               </h2>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--theme-text-muted)]">
-                {t("内容直接来自中文 README，按主题分页；流程图可以缩放和全屏查看。", "Content comes directly from the English README, organized by topic with zoomable flow diagrams.")}
+                {t("内容整理自项目说明，按主题与具体流程细分；流程图支持缩放和全屏查看。", "Project documentation is organized into focused topics and flows, with zoomable full-screen diagrams.")}
               </p>
             </div>
           </div>
@@ -244,31 +277,63 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
             value={pageIndex}
             onChange={(event) => setPageIndex(Number(event.target.value))}
           >
-            {pages.map((item, index) => <option key={item.id} value={index}>{index + 1}. {item.title}</option>)}
+            {chapters.map((chapter) => (
+              <optgroup key={chapter.id} label={chapter.title}>
+                {chapter.pages.map(({ index, page: item }) => (
+                  <option key={item.id} value={index}>
+                    {index + 1}. {item.kind === "chapter" && chapter.pages.length > 1
+                      ? t("主题概览", "Topic overview")
+                      : item.title}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
           </select>
-          <nav className="hidden space-y-1 lg:block" aria-label={t("README 分页", "README pages")}>
-            {pages.map((item, index) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setPageIndex(index)}
-                className={`w-full rounded-md px-3 py-2.5 text-left text-sm transition ${index === pageIndex ? "bg-orange-400/12 font-medium text-[var(--theme-text-strong)]" : "text-[var(--theme-text-muted)] hover:bg-white/5 hover:text-[var(--theme-text-strong)]"}`}
-                aria-current={index === pageIndex ? "page" : undefined}
-              >
-                <span className="mr-2 font-mono text-[10px] text-[var(--theme-text-faint)]">{String(index + 1).padStart(2, "0")}</span>
-                {item.title}
-              </button>
+          <nav
+            className="theme-scrollbar hidden max-h-[calc(100vh-10rem)] space-y-3 overflow-y-auto pr-1 lg:block"
+            aria-label={t("学习主题", "Learning topics")}
+          >
+            {chapters.map((chapter) => (
+              <section key={chapter.id}>
+                {chapter.pages.length > 1 && (
+                  <p className="px-3 pb-1 text-[11px] font-medium leading-5 text-[var(--theme-text-soft)]">
+                    {chapter.title}
+                  </p>
+                )}
+                <div className="space-y-1">
+                  {chapter.pages.map(({ index, page: item }) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setPageIndex(index)}
+                      className={`w-full rounded-md px-3 py-2 text-left text-sm leading-5 transition ${index === pageIndex ? "bg-orange-400/12 font-medium text-[var(--theme-text-strong)]" : "text-[var(--theme-text-muted)] hover:bg-white/5 hover:text-[var(--theme-text-strong)]"}`}
+                      aria-current={index === pageIndex ? "page" : undefined}
+                    >
+                      <span className="mr-2 font-mono text-[10px] text-[var(--theme-text-faint)]">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      {item.kind === "chapter" && chapter.pages.length > 1
+                        ? t("主题概览", "Topic overview")
+                        : item.title}
+                    </button>
+                  ))}
+                </div>
+              </section>
             ))}
           </nav>
         </aside>
 
         <main className="min-w-0 px-4 py-5 sm:px-7 sm:py-7">
           <div className="mb-5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--theme-text-faint)]">
-            <span>{t("章节", "Section")} {pageIndex + 1}</span>
+            <span>{t("主题", "Topic")} {chapterIndex + 1} / {chapters.length}</span>
             <span aria-hidden="true">/</span>
-            <span>{page.subsectionCount} {t("个小节", "subsections")}</span>
-            <span aria-hidden="true">/</span>
-            <span>{page.diagramCount} {t("张流程图", "diagrams")}</span>
+            <span>{t("内容页", "Page")} {pageIndex + 1} / {pages.length}</span>
+            {page.diagramCount > 0 && (
+              <>
+                <span aria-hidden="true">/</span>
+                <span>{page.diagramCount} {t("张流程图", "diagrams")}</span>
+              </>
+            )}
           </div>
           <article className="learning-markdown mx-auto max-w-5xl">
             <ReactMarkdown components={markdownComponents}>{page.markdown}</ReactMarkdown>
