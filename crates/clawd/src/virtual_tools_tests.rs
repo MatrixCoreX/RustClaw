@@ -576,6 +576,45 @@ fn fs_basic_find_entries_max_entries_rewrites_to_fs_search_max_results() {
 }
 
 #[test]
+fn fs_basic_search_pagination_args_reach_runtime_backing_skill() {
+    let find = rewrite_virtual_tool_call(
+        "fs_basic",
+        json!({
+            "action": "find_entries",
+            "root": "crates",
+            "pattern": "*.rs",
+            "max_results": 25,
+            "cursor": 50,
+            "max_depth": 12,
+            "max_files": 40000
+        }),
+    )
+    .unwrap()
+    .expect("find rewrite");
+    assert_eq!(find.runtime_tool, "fs_search");
+    assert_eq!(find.runtime_args["cursor"], 50);
+    assert_eq!(find.runtime_args["max_depth"], 12);
+    assert_eq!(find.runtime_args["max_files"], 40000);
+
+    let grep = rewrite_virtual_tool_call(
+        "fs_basic",
+        json!({
+            "action": "grep_text",
+            "root": "crates",
+            "query": "CapabilityResolver",
+            "max_results": 10,
+            "cursor": 20,
+            "max_line_chars": 320
+        }),
+    )
+    .unwrap()
+    .expect("grep rewrite");
+    assert_eq!(grep.runtime_tool, "fs_search");
+    assert_eq!(grep.runtime_args["cursor"], 20);
+    assert_eq!(grep.runtime_args["max_line_chars"], 320);
+}
+
+#[test]
 fn fs_basic_find_entries_entry_name_alias_rewrites_to_name_search() {
     let args = json!({
         "action": "find_entries",
