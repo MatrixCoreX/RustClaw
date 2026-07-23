@@ -476,6 +476,11 @@
     text-underline-offset: 3px;
   }
 
+  .learning-markdown .learning-reference {
+    color: var(--theme-text-soft);
+    text-decoration: none;
+  }
+
   .learning-markdown blockquote {
     border-left: 3px solid var(--theme-focus-ring);
     background: var(--theme-card-strong);
