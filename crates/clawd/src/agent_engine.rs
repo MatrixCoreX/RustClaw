@@ -1,12 +1,13 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use tracing::{debug, info};
 
 mod arg_resolver;
 mod async_start_checkpoint;
 mod attempt_ledger;
+mod capability_discovery;
 mod capability_result_synthesis;
 mod checkpoint_resume_state;
 #[allow(dead_code)]
@@ -244,6 +245,9 @@ pub(crate) struct LoopState {
     pub(crate) task_budget_worker_soft_limit_ms: u64,
     pub(crate) tool_calls_total: usize,
     pub(crate) total_steps_executed: usize,
+    /// Exact registry skill tokens selected through the native capability
+    /// loader. They scope later tool schemas and generated playbooks.
+    pub(crate) loaded_capability_skills: BTreeSet<String>,
     /// Progress hints only; published to task progress for "processing..." display. Must not contain full raw output.
     pub(crate) progress_messages: Vec<String>,
     /// Final delivery to user. Only respond and fallback finalizer write here. Sole source for AskReply.messages.

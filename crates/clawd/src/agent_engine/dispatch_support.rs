@@ -515,6 +515,18 @@ pub(super) async fn handle_call_tool_action(
     args: &Value,
     action_trace_kind: &'static str,
 ) -> Result<ActionLoopDecision, String> {
+    if tool == super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL {
+        return super::capability_discovery::handle_capability_group_load(
+            state,
+            task,
+            loop_state,
+            args,
+            fingerprint,
+            global_step,
+            step_in_round,
+            executed_actions,
+        );
+    }
     let mut resolved_args = resolve_arg_value(args, loop_state);
     let mut normalized_skill = state.resolve_canonical_skill_name(tool);
     if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {

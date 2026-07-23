@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use crate::{AppState, ClaimedTask};
+use claw_core::model_turn::ModelToolDefinition;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PromptSection<'a> {
@@ -74,6 +75,87 @@ pub(crate) fn publish_prompt_section_budget_report(
             prompt_label,
             error = %error,
             "prompt_section_budget_event_publish_failed"
+        );
+    }
+}
+
+pub(crate) fn model_tool_surface_budget_report(
+    prompt_label: &str,
+    tools: &[ModelToolDefinition],
+    callable_capability_count: usize,
+    eager_group_count: usize,
+    selected_group_count: usize,
+    disclosure_mode: &str,
+) -> Value {
+    let serialized = serde_json::to_string(tools).unwrap_or_default();
+    let estimate = crate::token_estimator::estimate_generic_tokens(&serialized);
+    let tool_reports = tools
+        .iter()
+        .map(|tool| {
+            let schema = serde_json::to_string(&tool.input_schema).unwrap_or_default();
+            let schema_estimate = crate::token_estimator::estimate_generic_tokens(&schema);
+            let capability_enum_count = tool
+                .input_schema
+                .pointer("/properties/capability/enum")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
+            json!({
+                "name": tool.name,
+                "description_char_count": tool.description.chars().count(),
+                "schema_byte_count": schema_estimate.byte_count,
+                "schema_char_count": schema_estimate.char_count,
+                "schema_token_estimate": schema_estimate.provider_tokens,
+                "capability_enum_count": capability_enum_count,
+                "strict": tool.strict,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "schema_version": 1,
+        "prompt_label": prompt_label,
+        "disclosure_mode": disclosure_mode,
+        "tool_count": tools.len(),
+        "callable_capability_count": callable_capability_count,
+        "eager_group_count": eager_group_count,
+        "selected_group_count": selected_group_count,
+        "serialized_byte_count": estimate.byte_count,
+        "serialized_char_count": estimate.char_count,
+        "serialized_token_estimate": estimate.provider_tokens,
+        "serialized_token_safety_estimate": estimate.safety_tokens,
+        "token_estimator": estimate.estimator.as_str(),
+        "tools": tool_reports,
+    })
+}
+
+pub(crate) fn publish_model_tool_surface_budget_report(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt_label: &str,
+    tools: &[ModelToolDefinition],
+    callable_capability_count: usize,
+    eager_group_count: usize,
+    selected_group_count: usize,
+    disclosure_mode: &str,
+) {
+    let report = model_tool_surface_budget_report(
+        prompt_label,
+        tools,
+        callable_capability_count,
+        eager_group_count,
+        selected_group_count,
+        disclosure_mode,
+    );
+    if let Err(error) = crate::task_event_transport::publish_claimed_event(
+        state,
+        task,
+        "model_tool_surface_budget",
+        report,
+    ) {
+        tracing::warn!(
+            task_id = task.task_id,
+            prompt_label,
+            error = %error,
+            "model_tool_surface_budget_event_publish_failed"
         );
     }
 }
