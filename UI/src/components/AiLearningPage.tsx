@@ -3,6 +3,7 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,12 +11,15 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   BookOpenCheck,
   ChevronLeft,
   ChevronRight,
+  LoaderCircle,
   Maximize2,
   Minimize2,
+  RefreshCw,
   RotateCcw,
   ZoomIn,
   ZoomOut,
@@ -25,6 +29,13 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import readmeEn from "../../../README.md?raw";
 import readmeZh from "../../../README.zh-CN.md?raw";
 import { classifyLearningLink, parseReadmeLearningPages } from "../lib/ai-learning";
+import {
+  fitDiagramScale,
+  readDiagramSize,
+  renderMermaid,
+  scaledDiagramSize,
+  type DiagramSize,
+} from "../lib/mermaid-viewer";
 
 type UiLanguage = "zh" | "en";
 type Translate = (zh: string, en: string) => string;
@@ -38,7 +49,8 @@ function currentMermaidTheme(): "dark" | "neutral" {
   return document.documentElement.dataset.theme === "light" ? "neutral" : "dark";
 }
 
-function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
+function MermaidDiagram({ source, lang }: { source: string; lang: UiLanguage }) {
+  const t = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const diagramId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -51,8 +63,15 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
   } | null>(null);
   const [theme, setTheme] = useState<"dark" | "neutral">(() => currentMermaidTheme());
   const [zoom, setZoom] = useState(1);
+  const [fitToViewport, setFitToViewport] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [renderAttempt, setRenderAttempt] = useState(0);
+  const [diagramSize, setDiagramSize] = useState<DiagramSize | null>(null);
+  const [renderedSvg, setRenderedSvg] = useState<string | null>(null);
+  const bindFunctionsRef = useRef<((element: Element) => void) | undefined>(undefined);
+  const renderSequenceRef = useRef(0);
   const [isPanning, setIsPanning] = useState(false);
 
   useEffect(() => {
@@ -62,41 +81,79 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
   }, []);
 
   useEffect(() => {
-    let active = true;
+    const renderSequence = ++renderSequenceRef.current;
     setError(false);
-    void import("mermaid")
-      .then(async ({ default: mermaid }) => {
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          theme,
-          flowchart: { htmlLabels: true, curve: "basis", useMaxWidth: true },
-        });
-        const result = await mermaid.render(`rustclaw-${diagramId}-${theme}`, source);
-        if (!active || !containerRef.current) return;
-        containerRef.current.innerHTML = result.svg;
-        result.bindFunctions?.(containerRef.current);
+    setLoading(true);
+    setDiagramSize(null);
+    setRenderedSvg(null);
+    bindFunctionsRef.current = undefined;
+    void renderMermaid(
+      `rustclaw-${diagramId}-${theme}-${renderSequence}-${renderAttempt}`,
+      source,
+      theme,
+    )
+      .then((result) => {
+        if (renderSequenceRef.current !== renderSequence) return;
+        const size = readDiagramSize(result.svg);
+        if (!size) throw new Error("invalid_svg_dimensions");
+        bindFunctionsRef.current = result.bindFunctions;
+        setRenderedSvg(result.svg);
+        setDiagramSize(size);
+        setLoading(false);
       })
       .catch(() => {
-        if (active) setError(true);
+        if (renderSequenceRef.current !== renderSequence) return;
+        setLoading(false);
+        setError(true);
       });
     return () => {
-      active = false;
+      if (renderSequenceRef.current === renderSequence) {
+        renderSequenceRef.current += 1;
+      }
     };
-  }, [diagramId, source, theme]);
+  }, [diagramId, renderAttempt, source, theme]);
+
+  useLayoutEffect(() => {
+    if (renderedSvg && containerRef.current) {
+      bindFunctionsRef.current?.(containerRef.current);
+    }
+  }, [renderedSvg]);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !diagramSize || !fitToViewport) return;
+    const updateFit = () => {
+      const horizontalPadding = window.innerWidth >= 640 ? 48 : 32;
+      setZoom(fitDiagramScale(viewport.clientWidth - horizontalPadding, diagramSize.width));
+    };
+    updateFit();
+    const observer = new ResizeObserver(updateFit);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [diagramSize, expanded, fitToViewport]);
 
   useEffect(() => {
     if (!expanded) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setExpanded(false);
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [expanded]);
 
   const resetView = () => {
-    setZoom(1);
+    setFitToViewport(true);
     viewportRef.current?.scrollTo({ left: 0, top: 0 });
+  };
+
+  const updateZoom = (delta: number) => {
+    setFitToViewport(false);
+    setZoom((value) => Math.min(2.5, Math.max(0.1, Number((value + delta).toFixed(1)))));
   };
 
   const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -155,13 +212,16 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
     event.preventDefault();
   };
 
-  return (
+  const canvasSize = diagramSize ? scaledDiagramSize(diagramSize, zoom) : null;
+  const diagram = (
     <figure
       className={
         expanded
-          ? "fixed inset-3 z-[70] flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/15 bg-[#12161f] shadow-2xl sm:inset-6"
+          ? "fixed inset-3 z-[200] flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/15 bg-[var(--theme-body-bg)] shadow-2xl sm:inset-6"
           : "my-6 overflow-hidden rounded-lg border border-white/10 bg-[var(--theme-card-strong)]"
       }
+      role={expanded ? "dialog" : undefined}
+      aria-modal={expanded || undefined}
     >
       <figcaption className="flex min-h-11 items-center justify-between gap-3 border-b border-white/10 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-[var(--theme-text-muted)]">
@@ -174,15 +234,15 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
             className="theme-topbar-nav-btn !min-h-8 !px-2"
             title={t("缩小", "Zoom out")}
             aria-label={t("缩小流程图", "Zoom out diagram")}
-            onClick={() => setZoom((value) => Math.max(0.6, Number((value - 0.2).toFixed(1))))}
+            onClick={() => updateZoom(-0.2)}
           >
             <ZoomOut className="h-4 w-4" />
           </button>
           <button
             type="button"
             className="theme-topbar-nav-btn !min-h-8 !px-2"
-            title={t("恢复大小", "Reset zoom")}
-            aria-label={t("恢复流程图大小", "Reset diagram zoom")}
+            title={t("适应窗口", "Fit to window")}
+            aria-label={t("让流程图适应窗口", "Fit diagram to window")}
             onClick={resetView}
           >
             <RotateCcw className="h-4 w-4" />
@@ -192,7 +252,7 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
             className="theme-topbar-nav-btn !min-h-8 !px-2"
             title={t("放大", "Zoom in")}
             aria-label={t("放大流程图", "Zoom in diagram")}
-            onClick={() => setZoom((value) => Math.min(2, Number((value + 0.2).toFixed(1))))}
+            onClick={() => updateZoom(0.2)}
           >
             <ZoomIn className="h-4 w-4" />
           </button>
@@ -225,21 +285,46 @@ function MermaidDiagram({ source, t }: { source: string; t: Translate }) {
         onPointerCancel={endPan}
         onKeyDown={panWithKeyboard}
       >
-        {error ? (
+        {loading ? (
+          <div className="flex min-h-40 items-center justify-center text-[var(--theme-text-muted)]">
+            <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" />
+            <span className="ml-2 text-sm">{t("正在生成流程图...", "Rendering diagram...")}</span>
+          </div>
+        ) : error ? (
           <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-4">
             <p className="text-sm text-amber-100">{t("流程图暂时无法渲染，下面保留原始 Mermaid 定义。", "The diagram could not be rendered. Its Mermaid source is preserved below.")}</p>
+            <button
+              type="button"
+              className="theme-secondary-btn mt-3 !px-3"
+              onClick={() => setRenderAttempt((value) => value + 1)}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t("重新加载", "Retry")}
+            </button>
             <pre className="mt-3 overflow-auto text-xs text-[var(--theme-text-body)]"><code>{source}</code></pre>
           </div>
-        ) : (
+        ) : null}
+        {!error ? (
           <div
-            ref={containerRef}
-            className="mermaid-canvas mx-auto min-h-28 origin-top-left transition-[width] duration-150"
-            style={{ width: `${zoom * 100}%` }}
-          />
-        )}
+            className={`relative mx-auto ${loading ? "hidden" : ""}`}
+            style={canvasSize ? { width: canvasSize.width, height: canvasSize.height } : undefined}
+          >
+            <div
+              ref={containerRef}
+              className="mermaid-canvas absolute left-0 top-0 origin-top-left"
+              style={diagramSize ? {
+                width: diagramSize.width,
+                height: diagramSize.height,
+                transform: `scale(${zoom})`,
+              } : undefined}
+              dangerouslySetInnerHTML={renderedSvg ? { __html: renderedSvg } : undefined}
+            />
+          </div>
+        ) : null}
       </div>
     </figure>
   );
+  return expanded ? createPortal(diagram, document.body) : diagram;
 }
 
 function mermaidSource(children: ReactNode): string | null {
@@ -289,7 +374,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
     () => ({
       pre: ({ children }) => {
         const source = mermaidSource(children);
-        return source ? <MermaidDiagram source={source} t={t} /> : <pre>{children}</pre>;
+        return source ? <MermaidDiagram source={source} lang={lang} /> : <pre>{children}</pre>;
       },
       a: ({ href, children }) => {
         const linkKind = classifyLearningLink(href);
@@ -309,7 +394,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
         );
       },
     }),
-    [lang, t],
+    [lang],
   );
 
   if (!page) return null;

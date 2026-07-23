@@ -536,8 +536,14 @@
 
   .mermaid-canvas svg {
     display: block;
-    height: auto;
+    width: 100%;
+    height: 100%;
     max-width: none !important;
+  }
+
+  .mermaid-canvas {
+    contain: layout paint;
+    will-change: transform;
   }
 
   .setup-hero {
