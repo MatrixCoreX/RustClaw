@@ -388,6 +388,153 @@
     box-shadow: none;
   }
 
+  .learning-markdown {
+    color: var(--theme-text-body);
+    overflow-wrap: anywhere;
+  }
+
+  .learning-markdown > :first-child {
+    margin-top: 0;
+  }
+
+  .learning-markdown h1,
+  .learning-markdown h2,
+  .learning-markdown h3,
+  .learning-markdown h4 {
+    color: var(--theme-text-strong);
+    font-weight: 650;
+    letter-spacing: 0;
+    scroll-margin-top: 5rem;
+  }
+
+  .learning-markdown h1 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.75rem;
+    line-height: 2.2rem;
+  }
+
+  .learning-markdown h2 {
+    margin-top: 2rem;
+    margin-bottom: 0.9rem;
+    border-bottom: 1px solid var(--theme-border);
+    padding-bottom: 0.65rem;
+    font-size: 1.4rem;
+    line-height: 1.9rem;
+  }
+
+  .learning-markdown h3 {
+    margin-top: 1.8rem;
+    margin-bottom: 0.7rem;
+    font-size: 1.1rem;
+    line-height: 1.6rem;
+  }
+
+  .learning-markdown h4 {
+    margin-top: 1.4rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.95rem;
+    line-height: 1.5rem;
+  }
+
+  .learning-markdown p,
+  .learning-markdown li {
+    font-size: 0.9rem;
+    line-height: 1.75rem;
+  }
+
+  .learning-markdown p,
+  .learning-markdown ul,
+  .learning-markdown ol,
+  .learning-markdown blockquote,
+  .learning-markdown table,
+  .learning-markdown pre {
+    margin-top: 0.8rem;
+    margin-bottom: 0.8rem;
+  }
+
+  .learning-markdown ul,
+  .learning-markdown ol {
+    padding-left: 1.4rem;
+  }
+
+  .learning-markdown ul {
+    list-style: disc;
+  }
+
+  .learning-markdown ol {
+    list-style: decimal;
+  }
+
+  .learning-markdown li + li {
+    margin-top: 0.25rem;
+  }
+
+  .learning-markdown a {
+    color: var(--theme-icon-soft-color);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .learning-markdown blockquote {
+    border-left: 3px solid var(--theme-focus-ring);
+    background: var(--theme-card-strong);
+    padding: 0.7rem 1rem;
+    color: var(--theme-text-muted);
+  }
+
+  .learning-markdown pre {
+    max-width: 100%;
+    overflow: auto;
+    border: 1px solid var(--theme-border);
+    border-radius: 0.5rem;
+    background: var(--theme-code-bg);
+    padding: 0.9rem 1rem;
+    font-size: 0.78rem;
+    line-height: 1.45rem;
+  }
+
+  .learning-markdown :not(pre) > code {
+    border-radius: 0.3rem;
+    background: var(--theme-code-bg);
+    padding: 0.12rem 0.32rem;
+    color: var(--theme-text-strong);
+    font-size: 0.82em;
+  }
+
+  .learning-markdown table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+
+  .learning-markdown th,
+  .learning-markdown td {
+    min-width: 9rem;
+    border: 1px solid var(--theme-border);
+    padding: 0.65rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .learning-markdown th {
+    background: var(--theme-table-head);
+    color: var(--theme-text-strong);
+  }
+
+  .learning-markdown hr {
+    margin: 1.8rem 0;
+    border-color: var(--theme-border);
+  }
+
+  .mermaid-canvas svg {
+    display: block;
+    height: auto;
+    max-width: none !important;
+  }
+
   .setup-hero {
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--theme-card) 88%, rgba(255, 138, 76, 0.08) 12%) 0%, var(--theme-card) 100%);

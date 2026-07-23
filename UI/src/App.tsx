@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AuthKeysPage } from "./components/AuthKeysPage";
+import { AiLearningPage } from "./components/AiLearningPage";
 import { ChatPage } from "./components/ChatPage";
 import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
 import { ConsoleLayout } from "./components/ConsoleLayout";
@@ -64,7 +65,7 @@ import type {
   ConsolePage,
 } from "./types/api";
 
-const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "nni", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
+const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
 
 const STORAGE_KEYS = {
   baseUrl: "rustclaw.monitor.baseUrl",
@@ -1438,6 +1439,8 @@ export default function App() {
               onQueryChatTeachingLlmDebug={queryChatTeachingLlmDebug}
             />
           ) : null}
+
+          {currentPage === "ai_learning" ? <AiLearningPage lang={lang} t={t} /> : null}
 
           {currentPage === "nni" ? (
             <NniPage

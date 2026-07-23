@@ -1008,4 +1008,4 @@ export interface ServiceActionNotice {
 }
 
 export type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" | "lark";
-export type ConsolePage = "dashboard" | "chat" | "nni" | "services" | "channels" | "models" | "skills" | "skill_store" | "memory" | "logs" | "tasks";
+export type ConsolePage = "dashboard" | "chat" | "ai_learning" | "nni" | "services" | "channels" | "models" | "skills" | "skill_store" | "memory" | "logs" | "tasks";

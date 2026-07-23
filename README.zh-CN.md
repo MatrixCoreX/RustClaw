@@ -841,6 +841,7 @@ rustclaw -key disable rk-xxxx
 - `clawd` 提供内部 API
 - `webd` 作为浏览器访问层/反向代理桥接
 - nginx 托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`
+- 导航栏中的 `AI 学习` 页面直接读取随 UI 打包的 README，按一级主题分页，并把 Mermaid 流程图渲染为可缩放、可全屏查看的图形；切换 UI 语言时会选择对应语言的 README。
 
 在默认配置里，`configs/config.toml` 中的 `clawd` 监听通常是 `0.0.0.0:8787`，`webd` 默认监听常见为 `0.0.0.0:8788`；部署脚本会从 `configs/channels/webd.toml` 推导反代上游地址。
 
