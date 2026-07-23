@@ -560,6 +560,12 @@ fn native_respond_tool_requires_runtime_observation_for_machine_evidence() {
     assert!(respond
         .description
         .contains("prior matching capability result"));
+    assert!(respond
+        .description
+        .contains("domain parse/normalize/validate/preview"));
+    assert!(respond
+        .description
+        .contains("not a substitute for the disclosed domain capability"));
     assert!(respond.description.contains("checkpoint"));
     assert!(respond.description.contains("verification"));
 }
@@ -723,6 +729,48 @@ fn native_response_contract_retry_targets_the_respond_schema() {
     assert_eq!(
         observation["protocol_observation"]["next_action"],
         "retry_native_respond_call"
+    );
+}
+
+#[test]
+fn native_object_response_schema_and_repair_explain_serialized_json_values() {
+    let request = native_planner_request(
+        "protocol",
+        "current turn",
+        Some(90),
+        &callable_capabilities(),
+        &[],
+        &[],
+        &[],
+    );
+    let respond = request
+        .tools
+        .iter()
+        .find(|tool| tool.name == "respond")
+        .expect("respond tool");
+    let value_json_description = respond.input_schema["properties"]["fields"]["items"]
+        ["properties"]["value_json"]["description"]
+        .as_str()
+        .expect("value_json description");
+    assert!(value_json_description.contains("complete_serialized_json_value_v1"));
+    assert!(value_json_description.contains("json_string_requires_surrounding_quotes=true"));
+
+    let signal = native_contract_repair_signal("native_respond_object_field_json_invalid");
+    let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
+    assert_eq!(
+        observation["protocol_observation"]["argument_constraints"]["fields[].value_json"]
+            ["encoding"],
+        "complete_serialized_json_value"
+    );
+    assert_eq!(
+        observation["protocol_observation"]["argument_constraints"]["fields[].value_json"]
+            ["json_string_requires_surrounding_quotes"],
+        true
+    );
+    assert_eq!(
+        observation["protocol_observation"]["argument_constraints"]["fields[].value_json"]
+            ["malformed_json"],
+        "rejected"
     );
 }
 
