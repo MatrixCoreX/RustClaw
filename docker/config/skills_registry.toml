@@ -26,6 +26,7 @@ optional_bins = ["sudo"]
 platform_notes = ["Executes through bash on Linux/macOS; sudo use is gated by task policy."]
 description = "Inspect command permission, preview a resumable background-command contract without starting a process, inspect bounded CLI help, or execute shell commands through the managed runtime."
 semantic_tags = ["command_execution", "command_permission_preview", "background_command_preview", "async_checkpoint_preview", "cli_help"]
+planner_capability_aliases = { "system.run_cmd" = "system.run_command", "system.shell_run" = "system.run_command", "run_cmd" = "system.run_command" }
 planner_capabilities = [
   { name = "system.preview_command_permission", action = "preview_command_permission", effect = "observe", required = ["command"], optional = ["cwd"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "system.preview_background_command", action = "preview_background_command", effect = "observe", required = ["command"], optional = ["cwd", "poll_after_seconds", "expires_in_seconds"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false, final_answer_shape = "lifecycle_result" },
@@ -214,6 +215,7 @@ confirmation_exempt_when = [
   { action = "diff" },
   { action = "review_child_patch" },
 ]
+planner_capability_aliases = { "filesystem.stat_path" = "filesystem.stat_paths", "filesystem.list_dir" = "filesystem.list_entries", "filesystem.list_names" = "filesystem.list_entries", "filesystem.list_file_names" = "filesystem.list_entries", "filesystem.list_directory_names" = "filesystem.list_entries", "fs.count_entries" = "filesystem.count_entries", "fs_basic.count_entries" = "filesystem.count_entries", "filesystem.read_range" = "filesystem.read_text_range", "filesystem.read_text" = "filesystem.read_text_range", "filesystem.read_file" = "filesystem.read_text_range", "fs_basic.read_text" = "filesystem.read_text_range", "fs_basic.read_range" = "filesystem.read_text_range", "fs_basic.read_file" = "filesystem.read_text_range", "filesystem.find_files" = "filesystem.find_entries", "filesystem.find_paths" = "filesystem.find_entries", "fs.find_entries" = "filesystem.find_entries", "fs_basic.find_entries" = "filesystem.find_entries", "filesystem.search_text" = "filesystem.grep_text", "filesystem.write_text" = "filesystem.write_file", "filesystem.append_file" = "filesystem.append_text", "filesystem.make_directory" = "filesystem.make_dir", "filesystem.create_dir" = "filesystem.make_dir", "filesystem.create_directory" = "filesystem.make_dir", "filesystem.delete_path" = "filesystem.remove_path", "filesystem.apply_patch" = "workspace.apply_patch" }
 planner_capabilities = [
   { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "filesystem.stat_path", action = "stat_paths", effect = "observe", required = ["path|paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -319,6 +321,7 @@ capabilities = ["fs.read"]
 preferred_over_run_cmd = true
 supported_os = ["linux", "macos"]
 platform_notes = ["Virtual planner tool; runtime read actions delegate to system_basic and RustClaw config guard."]
+planner_capability_aliases = { "config_basic.read_field" = "config.read_field" }
 planner_capabilities = [
   { name = "config.read_field", action = "read_field", effect = "observe", required = ["path", "field_path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "scalar" },
   { name = "config_basic.read_field", action = "read_field", effect = "observe", required = ["path", "field_path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "scalar" },
@@ -360,6 +363,7 @@ confirmation_exempt_when = [
   { action = "read_back" },
   { action = "restart_if_requested", restart = false },
 ]
+planner_capability_aliases = { "config.plan_change" = "config.preview_change", "config.plan_config_change" = "config.preview_change", "config.apply_config_change" = "config.apply_change", "config.write_field" = "config.apply_change", "config.set_field" = "config.apply_change", "config.guard_config" = "config.guard_after_change", "config.guard" = "config.guard_after_change", "config.risk" = "config.guard_after_change" }
 planner_capabilities = [
   { name = "config.preview_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.plan_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -481,6 +485,7 @@ preferred_over_run_cmd = true
 supported_os = ["linux", "macos"]
 optional_bins = ["hostname", "sysctl"]
 platform_notes = ["Linux uses /proc for detailed runtime probes; macOS uses sysctl where available."]
+planner_capability_aliases = { "system_basic.read_text_range" = "system.read_range" }
 planner_capabilities = [
   { name = "system.info", action = "info", effect = "observe", risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "system.runtime_status", action = "runtime_status", effect = "observe", required = ["kind"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "scalar" },
@@ -531,6 +536,7 @@ prompt_file = "prompts/skills/git_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 required_bins = ["git"]
+planner_capability_aliases = { "git.status" = "git_basic", "git.repository_state" = "git_basic" }
 planner_capabilities = [
   { name = "git_basic", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.status", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -692,6 +698,7 @@ confirmation_exempt_when = [
   { action = "schema_version" },
   { action = "user_version" },
 ]
+planner_capability_aliases = { "db.query" = "database.query", "db.sqlite_query" = "database.query", "sqlite.query" = "database.query", "sqlite.sqlite_query" = "database.query", "database.list" = "database.list_tables", "db.list_tables" = "database.list_tables", "db.list" = "database.list_tables", "sqlite.list_tables" = "database.list_tables", "sqlite.list" = "database.list_tables", "db.schema_version" = "database.schema_version", "sqlite.schema_version" = "database.schema_version", "db.user_version" = "database.user_version", "sqlite.user_version" = "database.user_version" }
 planner_capabilities = [
   { name = "database.query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "db.query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -732,6 +739,7 @@ output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["docker"]
 platform_notes = ["Read-only Docker inspection returns available=false when Docker CLI or daemon is unavailable."]
+planner_capability_aliases = { "docker.ps" = "docker.list_containers", "docker_basic.ps" = "docker.list_containers", "docker.images" = "docker.list_images", "docker_basic.images" = "docker.list_images", "docker.logs" = "docker.read_logs", "docker_basic.logs" = "docker.read_logs", "docker.restart" = "docker.restart_container", "docker_basic.restart" = "docker.restart_container", "docker.start" = "docker.start_container", "docker_basic.start" = "docker.start_container", "docker.stop" = "docker.stop_container", "docker_basic.stop" = "docker.stop_container" }
 planner_capabilities = [
   { name = "docker.list_containers", action = "ps", effect = "observe", optional = ["limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "docker.ps", action = "ps", effect = "observe", optional = ["limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -1014,6 +1022,7 @@ retryable = true
 supported_os = ["linux", "macos"]
 optional_bins = ["pgrep", "ps", "uname", "df", "brew", "sysctl", "vm_stat"]
 platform_notes = ["Linux reads /proc for uptime/load/memory; macOS uses sysctl/vm_stat where available."]
+planner_capability_aliases = { "system.health_check" = "health_check" }
 planner_capabilities = [
   { name = "health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "system.health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -1035,6 +1044,7 @@ description = "Analyze log files or log directories for errors, warnings, failur
 semantic_tags = ["log_analysis", "log_anomaly", "error_summary", "warning_summary", "failure_diagnosis", "recovery_summary"]
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
+planner_capability_aliases = { "logs.analyze" = "log_analyze" }
 planner_capabilities = [
   { name = "log_analyze", action = "analyze", effect = "observe", optional = ["path", "requested_path", "keywords", "max_lines", "max_matches", "tail_lines", "tail", "n"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "logs.analyze", action = "analyze", effect = "observe", optional = ["path", "requested_path", "keywords", "max_lines", "max_matches", "tail_lines", "tail", "n"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -1060,6 +1070,7 @@ output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["systemctl", "service", "journalctl", "brew", "launchctl", "log", "sudo", "ps"]
 platform_notes = ["Linux supports systemd/service managers; macOS prefers Homebrew services and limited launchd inspection/lifecycle guidance."]
+planner_capability_aliases = { "service_control.status" = "service_control", "service.status" = "service_control", "service_control.start" = "service.start", "service_control.stop" = "service.stop", "service_control.restart" = "service.restart" }
 planner_capabilities = [
   { name = "service_control", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "service_control.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -1258,6 +1269,7 @@ platform_notes = ["Markdown/text/html/docx parse in-process; PDF extraction uses
 semantic_tags = ["document_parsing", "document_summary", "key_point_extraction", "section_summary", "markdown_document", "readme_document", "grounded_document_synthesis", "table_extraction"]
 input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, max_bytes = { type = "integer" }, section = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+planner_capability_aliases = { "document.parse" = "doc_parse" }
 planner_capabilities = [
   { name = "doc_parse", action = "parse_doc", effect = "observe", required = ["path"], optional = ["max_chars", "max_bytes", "section", "include_metadata", "mode"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "document.parse", action = "parse_doc", effect = "observe", required = ["path"], optional = ["max_chars", "max_bytes", "section", "include_metadata", "mode"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -1276,6 +1288,7 @@ prompt_file = "prompts/skills/transform.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 platform_notes = ["Pure structured-data transform; no filesystem or command dependency."]
+planner_capability_aliases = { "data.transform" = "transform", "data.transform_records" = "transform" }
 planner_capabilities = [
   { name = "transform", action = "transform_data", effect = "observe", required = ["data|records|csv_text|csv|input"], optional = ["ops", "output_format", "result_shape", "strict", "null_policy"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "data.transform", action = "transform_data", effect = "observe", required = ["data|records|csv_text|csv|input"], optional = ["ops", "output_format", "result_shape", "strict", "null_policy"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },

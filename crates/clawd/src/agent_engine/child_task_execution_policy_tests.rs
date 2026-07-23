@@ -37,8 +37,10 @@ kind = "builtin"
 planner_kind = "tool"
 risk_level = "low"
 side_effect = false
+planner_capability_aliases = { "filesystem.read_file" = "filesystem.read_text_range" }
 planner_capabilities = [
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"], risk_level = "low", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "filesystem.read_file", action = "read_text_range", effect = "observe", required = ["path"], risk_level = "low", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "filesystem.publish_text", action = "publish_text", effect = "external", required = ["path"], risk_level = "high", isolation_profile = "local_worktree", network_access = true, filesystem_write = true, external_publish = true, credential_access = true, subprocess = false, package_install = false, privilege_escalation = false },
 ]
@@ -70,6 +72,21 @@ fn read_only_child_accepts_declared_observe_capability() {
         "read_only",
         serde_json::json!(["filesystem.read_text_range"]),
     );
+
+    assert!(child_task_execution_policy_error(
+        &state,
+        &task,
+        "fs_basic",
+        &serde_json::json!({"action": "read_text_range", "path": "README.md"})
+    )
+    .is_none());
+}
+
+#[test]
+fn read_only_child_accepts_legacy_alias_as_canonical_scope() {
+    let state = test_state();
+    install_filesystem_registry(&state);
+    let task = child_task("read_only", serde_json::json!(["filesystem.read_file"]));
 
     assert!(child_task_execution_policy_error(
         &state,

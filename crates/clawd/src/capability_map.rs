@@ -218,8 +218,8 @@ pub(crate) fn planner_callable_capability_names_for_task_with_mcp(
         for skill in state.planner_available_skills_for_task(task) {
             names.extend(
                 registry
-                    .planner_capabilities(&skill)
-                    .iter()
+                    .planner_exposed_capabilities(&skill)
+                    .into_iter()
                     .map(|mapping| mapping.name.clone()),
             );
         }
@@ -229,7 +229,7 @@ pub(crate) fn planner_callable_capability_names_for_task_with_mcp(
             .into_iter()
             .map(|tool| tool.capability),
     );
-    if let Some(allowed) = child_allowed_capabilities(task) {
+    if let Some(allowed) = child_allowed_capabilities(state, task) {
         names.retain(|name| allowed.contains(name));
     }
     names.into_iter().collect()
@@ -240,7 +240,7 @@ pub(crate) fn planner_mcp_tools_for_task(
     task: &ClaimedTask,
     loaded_mcp_capabilities: &BTreeSet<String>,
 ) -> Vec<crate::mcp_runtime::McpToolDescriptor> {
-    let allowed = child_allowed_capabilities(task);
+    let allowed = child_allowed_capabilities(state, task);
     let mut tools = state
         .mcp_planner_tools()
         .into_iter()
@@ -267,7 +267,7 @@ pub(crate) fn mcp_capability_is_allowed_for_task(
     capability: &str,
 ) -> bool {
     state.mcp_tool(capability).is_some()
-        && child_allowed_capabilities(task)
+        && child_allowed_capabilities(state, task)
             .as_ref()
             .is_none_or(|allowed| allowed.contains(capability))
 }
@@ -292,7 +292,7 @@ pub(crate) fn planner_loadable_capability_group_names_for_task(
     task: &ClaimedTask,
     loaded_skills: &BTreeSet<String>,
 ) -> Vec<String> {
-    if child_allowed_capabilities(task).is_some() {
+    if child_allowed_capabilities(state, task).is_some() {
         return Vec::new();
     }
     let Some(registry) = state.get_skills_registry() else {
@@ -317,7 +317,7 @@ fn planner_native_capability_groups_for_task_filtered(
     task: &ClaimedTask,
     loaded_skills: Option<&BTreeSet<String>>,
 ) -> Vec<PlannerNativeCapabilityGroup> {
-    let allowed = child_allowed_capabilities(task);
+    let allowed = child_allowed_capabilities(state, task);
     let mut skills = state.planner_available_skills_for_task(task);
     skills.sort();
     let mut used_tool_names = BTreeSet::new();
@@ -335,8 +335,8 @@ fn planner_native_capability_groups_for_task_filtered(
         {
             continue;
         }
-        let capability_names = entry
-            .planner_capabilities
+        let exposed_capabilities = registry.planner_exposed_capabilities(&skill);
+        let capability_names = exposed_capabilities
             .iter()
             .map(|mapping| mapping.name.trim())
             .filter(|name| !name.is_empty())
@@ -372,9 +372,8 @@ fn planner_native_capability_groups_for_task_filtered(
         if !semantic_tags.is_empty() {
             description_parts.push(format!("semantic_tags={}", semantic_tags.join("|")));
         }
-        let leaf_contracts = entry
-            .planner_capabilities
-            .iter()
+        let leaf_contracts = exposed_capabilities
+            .into_iter()
             .filter(|mapping| mapping.description.is_some() || !mapping.semantic_tags.is_empty())
             .filter(|mapping| capability_names.contains(&mapping.name))
             .map(planner_capability_hint)
@@ -432,11 +431,12 @@ fn native_capability_group_tool_name(
     base
 }
 
-fn child_allowed_capabilities(task: &ClaimedTask) -> Option<BTreeSet<String>> {
+fn child_allowed_capabilities(state: &AppState, task: &ClaimedTask) -> Option<BTreeSet<String>> {
     let payload = serde_json::from_str::<serde_json::Value>(&task.payload_json).ok()?;
     if !crate::repo::child_tasks::is_child_subagent_payload(&payload) {
         return None;
     }
+    let registry = state.get_skills_registry();
     Some(
         payload
             .pointer("/child_task_contract/scope/allowed_capabilities")
@@ -446,7 +446,13 @@ fn child_allowed_capabilities(task: &ClaimedTask) -> Option<BTreeSet<String>> {
             .filter_map(serde_json::Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
+            .map(|value| {
+                registry
+                    .as_ref()
+                    .and_then(|registry| registry.canonical_planner_capability_name(value))
+                    .unwrap_or(value)
+                    .to_string()
+            })
             .collect(),
     )
 }
@@ -493,7 +499,7 @@ fn build_capability_map_for_task_with_scope(
     let visible = state.planner_available_skills_for_task(task);
     let available_set = visible.iter().cloned().collect::<BTreeSet<_>>();
     let unavailable_hints = unavailable_skill_hints(state, &all_visible, &available_set);
-    let allowed_child_capabilities = child_allowed_capabilities(task);
+    let allowed_child_capabilities = child_allowed_capabilities(state, task);
     let scoped_visible = if let (Some(registry), Some(loaded_skills)) =
         (state.get_skills_registry(), loaded_skills)
     {
@@ -516,8 +522,8 @@ fn build_capability_map_for_task_with_scope(
         for skill in &scoped_visible {
             callable_capabilities.extend(
                 registry
-                    .planner_capabilities(skill)
-                    .iter()
+                    .planner_exposed_capabilities(skill)
+                    .into_iter()
                     .map(|mapping| mapping.name.clone()),
             );
         }
@@ -546,7 +552,7 @@ fn build_capability_map_for_task_with_scope(
             let planner_kind = registry
                 .planner_kind(skill)
                 .unwrap_or(PlannerCapabilityKind::Skill);
-            for mapping in registry.planner_capabilities(skill) {
+            for mapping in registry.planner_exposed_capabilities(skill) {
                 if allowed_child_capabilities
                     .as_ref()
                     .is_some_and(|allowed| !allowed.contains(&mapping.name))
@@ -612,9 +618,9 @@ fn build_capability_map_for_task_with_scope(
                     continue;
                 };
                 if allowed_child_capabilities.as_ref().is_some_and(|allowed| {
-                    !entry
-                        .planner_capabilities
-                        .iter()
+                    !registry
+                        .planner_exposed_capabilities(skill)
+                        .into_iter()
                         .any(|mapping| allowed.contains(&mapping.name))
                 }) {
                     continue;
@@ -651,9 +657,9 @@ fn build_capability_map_for_task_with_scope(
                     .map(|capability| capability.as_token())
                     .take(8)
                     .collect::<Vec<_>>();
-                let planner_capability_tokens = entry
-                    .planner_capabilities
-                    .iter()
+                let planner_capability_tokens = registry
+                    .planner_exposed_capabilities(skill)
+                    .into_iter()
                     .filter(|mapping| {
                         allowed_child_capabilities
                             .as_ref()

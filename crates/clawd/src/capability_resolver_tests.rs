@@ -125,6 +125,29 @@ fn config_key_listing_resolves_through_registry_contract() {
 }
 
 #[test]
+fn compatibility_capability_token_resolves_with_canonical_audit_reference() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.read_file",
+        json!({"path": "README.md"}),
+    );
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected filesystem tool action");
+    };
+
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("read_text_range")
+    );
+    assert_eq!(
+        record.canonical_capability_ref.as_deref(),
+        Some("filesystem.read_text_range")
+    );
+}
+
+#[test]
 fn config_read_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
     let (action, _record) = resolve_capability_action_with_record_for_state(
