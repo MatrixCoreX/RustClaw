@@ -170,6 +170,97 @@ fn provider_safe_structured_output_projection(
     }
 }
 
+fn provider_safe_capability_result_evidence(
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) -> serde_json::Value {
+    const MAX_STRUCTURED_RESULT_CHARS: usize = 8_000;
+
+    let Ok(serialized) = serde_json::to_string(result) else {
+        return json!({
+            "projection": "unavailable",
+            "reason_code": "capability_result_serialize_failed",
+        });
+    };
+    let sanitized = crate::visible_text::sanitize_user_visible_text(&serialized);
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&sanitized) else {
+        return json!({
+            "projection": "unavailable",
+            "reason_code": "capability_result_sanitize_failed",
+        });
+    };
+    let sanitized_chars = sanitized.chars().count();
+    if sanitized_chars <= MAX_STRUCTURED_RESULT_CHARS {
+        return json!({
+            "projection": "structured_result",
+            "result": value,
+        });
+    }
+
+    let mut scalar_facts = Vec::new();
+    collect_provider_safe_scalar_facts("", &value, &mut scalar_facts);
+    let total_scalar_facts = scalar_facts.len();
+    let head = scalar_facts.iter().take(48);
+    let tail_start = total_scalar_facts.saturating_sub(48).max(48);
+    let tail = scalar_facts.iter().skip(tail_start);
+    let bounded_facts = head.chain(tail).cloned().collect::<Vec<_>>();
+    json!({
+        "projection": "bounded_scalar_facts",
+        "truncated": true,
+        "original_chars": sanitized_chars,
+        "total_scalar_facts": total_scalar_facts,
+        "facts": bounded_facts,
+    })
+}
+
+fn collect_provider_safe_scalar_facts(
+    path: &str,
+    value: &serde_json::Value,
+    out: &mut Vec<serde_json::Value>,
+) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, child) in object {
+                let child_path = if path.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{path}.{key}")
+                };
+                collect_provider_safe_scalar_facts(&child_path, child, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                collect_provider_safe_scalar_facts(&format!("{path}[{index}]"), child, out);
+            }
+        }
+        serde_json::Value::String(text) => {
+            const MAX_SCALAR_STRING_CHARS: usize = 512;
+            let text_chars = text.chars().count();
+            let value = if text_chars <= MAX_SCALAR_STRING_CHARS {
+                serde_json::Value::String(text.clone())
+            } else {
+                serde_json::Value::String(format!(
+                    "{}...(truncated)",
+                    text.chars()
+                        .take(MAX_SCALAR_STRING_CHARS)
+                        .collect::<String>()
+                ))
+            };
+            out.push(json!({
+                "path": path,
+                "value": value,
+                "original_chars": text_chars,
+            }));
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            out.push(json!({
+                "path": path,
+                "value": value,
+            }));
+        }
+    }
+}
+
 pub(in crate::answer_verifier) fn execution_evidence_prompt_block(
     journal: &crate::task_journal::TaskJournal,
 ) -> String {
@@ -182,7 +273,21 @@ pub(in crate::answer_verifier) fn execution_evidence_prompt_block(
         .map(provider_safe_step_evidence)
         .collect::<Vec<_>>();
     steps.reverse();
-    serde_json::to_string_pretty(&steps).unwrap_or_else(|_| "[]".to_string())
+    let capability_results = journal
+        .capability_results
+        .iter()
+        .rev()
+        .take(MAX_VERIFIER_STEPS)
+        .map(provider_safe_capability_result_evidence)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    serde_json::to_string_pretty(&json!({
+        "step_evidence": steps,
+        "capability_result_evidence": capability_results,
+    }))
+    .unwrap_or_else(|_| "{}".to_string())
 }
 
 pub(in crate::answer_verifier) fn current_context_prompt_block(
