@@ -45,6 +45,10 @@ impl CodeIndexError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RepositoryIndex {
     schema_version: u32,
+    #[serde(default)]
+    generated_at: u64,
+    #[serde(default)]
+    scan_complete: bool,
     files: BTreeMap<String, IndexedFile>,
 }
 
@@ -52,6 +56,8 @@ impl Default for RepositoryIndex {
     fn default() -> Self {
         Self {
             schema_version: INDEX_SCHEMA_VERSION,
+            generated_at: 0,
+            scan_complete: false,
             files: BTreeMap::new(),
         }
     }
@@ -93,6 +99,8 @@ struct RefreshStats {
     reused_files: usize,
     removed_files: usize,
     skipped_files: usize,
+    scan_truncated: bool,
+    refreshed_at: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -152,8 +160,12 @@ fn refresh_index(
 ) -> Result<(RepositoryIndex, RefreshStats), CodeIndexError> {
     let index_path = workspace_root.join(INDEX_RELATIVE_PATH);
     let previous = load_index(&index_path);
-    let candidates = collect_source_candidates(workspace_root, max_files)?;
-    let mut stats = RefreshStats::default();
+    let (candidates, scan_truncated) = collect_source_candidates(workspace_root, max_files)?;
+    let mut stats = RefreshStats {
+        scan_truncated,
+        refreshed_at: crate::now_ts_u64(),
+        ..RefreshStats::default()
+    };
     let mut files = BTreeMap::new();
 
     for candidate in candidates {
@@ -182,6 +194,8 @@ fn refresh_index(
         .count();
     let index = RepositoryIndex {
         schema_version: INDEX_SCHEMA_VERSION,
+        generated_at: stats.refreshed_at,
+        scan_complete: !stats.scan_truncated,
         files,
     };
     persist_index(&index_path, &index)?;
@@ -222,7 +236,7 @@ fn persist_index(path: &Path, index: &RepositoryIndex) -> Result<(), CodeIndexEr
 fn collect_source_candidates(
     workspace_root: &Path,
     max_files: usize,
-) -> Result<Vec<SourceCandidate>, CodeIndexError> {
+) -> Result<(Vec<SourceCandidate>, bool), CodeIndexError> {
     let mut candidates = Vec::new();
     let mut stack = vec![workspace_root.to_path_buf()];
     while let Some(directory) = stack.pop() {
@@ -262,14 +276,15 @@ fn collect_source_candidates(
                 size_bytes: metadata.len(),
                 modified_ns: modified_ns(&metadata),
             });
-            if candidates.len() >= max_files {
+            if candidates.len() > max_files {
                 candidates.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-                return Ok(candidates);
+                candidates.truncate(max_files);
+                return Ok((candidates, true));
             }
         }
     }
     candidates.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok(candidates)
+    Ok((candidates, false))
 }
 
 fn excluded_directory(name: &str) -> bool {
@@ -607,17 +622,16 @@ fn search_symbols(
     let query = required_machine_string(args, "query")?;
     let mode = optional_machine_string(args, "mode").unwrap_or("exact");
     validate_search_mode(mode)?;
-    let max_results = result_limit(args)?;
-    let mut matches = all_definitions(index)
+    let matches = all_definitions(index)
         .filter(|(_, symbol)| symbol_matches(&symbol.name, query, mode))
         .map(|(path, symbol)| definition_value(path, symbol))
         .collect::<Vec<_>>();
-    matches.truncate(max_results);
+    let (matches, page) = paginate_values(matches, args)?;
     Ok(query_result(
         "search_symbols",
         index,
         refresh,
-        json!({"query": query, "mode": mode, "definitions": matches}),
+        json!({"query": query, "mode": mode, "definitions": matches, "page": page}),
     ))
 }
 
@@ -627,17 +641,16 @@ fn find_definitions(
     refresh: &RefreshStats,
 ) -> Result<Value, CodeIndexError> {
     let symbol = required_machine_string(args, "symbol")?;
-    let max_results = result_limit(args)?;
-    let mut definitions = all_definitions(index)
+    let definitions = all_definitions(index)
         .filter(|(_, definition)| definition.name == symbol || definition.qualified_name == symbol)
         .map(|(path, definition)| definition_value(path, definition))
         .collect::<Vec<_>>();
-    definitions.truncate(max_results);
+    let (definitions, page) = paginate_values(definitions, args)?;
     Ok(query_result(
         "find_definitions",
         index,
         refresh,
-        json!({"symbol": symbol, "definitions": definitions}),
+        json!({"symbol": symbol, "definitions": definitions, "page": page}),
     ))
 }
 
@@ -647,17 +660,16 @@ fn find_references(
     refresh: &RefreshStats,
 ) -> Result<Value, CodeIndexError> {
     let symbol = required_machine_string(args, "symbol")?;
-    let max_results = result_limit(args)?;
-    let mut references = all_references(index)
+    let references = all_references(index)
         .filter(|(_, reference)| reference.name == symbol)
         .map(|(path, reference)| reference_value(path, reference))
         .collect::<Vec<_>>();
-    references.truncate(max_results);
+    let (references, page) = paginate_values(references, args)?;
     Ok(query_result(
         "find_references",
         index,
         refresh,
-        json!({"symbol": symbol, "references": references}),
+        json!({"symbol": symbol, "references": references, "page": page}),
     ))
 }
 
@@ -670,14 +682,13 @@ fn list_tests(
         .map(normalize_relative_path)
         .transpose()?;
     let symbol_filter = optional_machine_string(args, "symbol");
-    let max_results = result_limit(args)?;
     let referenced_paths = symbol_filter.map(|symbol| {
         all_references(index)
             .filter(|(_, reference)| reference.name == symbol)
             .map(|(path, _)| path.to_string())
             .collect::<BTreeSet<_>>()
     });
-    let mut tests = all_definitions(index)
+    let tests = all_definitions(index)
         .filter(|(path, definition)| {
             definition.is_test
                 && path_filter
@@ -691,12 +702,12 @@ fn list_tests(
         })
         .map(|(path, definition)| definition_value(path, definition))
         .collect::<Vec<_>>();
-    tests.truncate(max_results);
+    let (tests, page) = paginate_values(tests, args)?;
     Ok(query_result(
         "list_tests",
         index,
         refresh,
-        json!({"path": path_filter, "symbol": symbol_filter, "tests": tests}),
+        json!({"path": path_filter, "symbol": symbol_filter, "tests": tests, "page": page}),
     ))
 }
 
@@ -708,13 +719,12 @@ fn changed_impact(
 ) -> Result<Value, CodeIndexError> {
     let changed_paths =
         machine_paths(args.get("paths"))?.unwrap_or_else(|| git_changed_paths(workspace_root));
-    let max_results = result_limit(args)?;
     let changed = changed_paths.iter().cloned().collect::<BTreeSet<_>>();
     let changed_symbols = all_definitions(index)
         .filter(|(path, _)| changed.contains(*path))
         .map(|(_, definition)| definition.name.clone())
         .collect::<BTreeSet<_>>();
-    let mut dependent_files = all_references(index)
+    let all_dependent_files = all_references(index)
         .filter(|(path, reference)| {
             !changed.contains(*path) && changed_symbols.contains(&reference.name)
         })
@@ -722,17 +732,17 @@ fn changed_impact(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    dependent_files.truncate(max_results);
     let impacted_paths = changed
         .iter()
         .cloned()
-        .chain(dependent_files.iter().cloned())
+        .chain(all_dependent_files.iter().cloned())
         .collect::<BTreeSet<_>>();
-    let mut impacted_tests = all_definitions(index)
+    let impacted_tests = all_definitions(index)
         .filter(|(path, definition)| definition.is_test && impacted_paths.contains(*path))
         .map(|(path, definition)| definition_value(path, definition))
         .collect::<Vec<_>>();
-    impacted_tests.truncate(max_results);
+    let (dependent_files, dependent_files_page) = paginate_strings(all_dependent_files, args)?;
+    let (impacted_tests, impacted_tests_page) = paginate_values(impacted_tests, args)?;
     Ok(query_result(
         "changed_impact",
         index,
@@ -742,6 +752,11 @@ fn changed_impact(
             "changed_symbols": changed_symbols,
             "dependent_files": dependent_files,
             "impacted_tests": impacted_tests,
+            "page": dependent_files_page,
+            "pages": {
+                "dependent_files": dependent_files_page,
+                "impacted_tests": impacted_tests_page,
+            },
         }),
     ))
 }
@@ -762,7 +777,6 @@ fn retrieve_context(
     }
     let mode = optional_machine_string(args, "mode").unwrap_or("exact");
     validate_search_mode(mode)?;
-    let max_results = result_limit(args)?;
     let context_lines = bounded_usize(
         args.get("context_lines"),
         DEFAULT_CONTEXT_LINES,
@@ -770,7 +784,7 @@ fn retrieve_context(
         MAX_CONTEXT_LINES,
     )?;
     let path_set = paths.iter().cloned().collect::<BTreeSet<_>>();
-    let mut selected = all_definitions(index)
+    let selected = all_definitions(index)
         .filter(|(path, definition)| {
             (!symbols.is_empty()
                 && symbols.iter().any(|symbol| {
@@ -781,7 +795,7 @@ fn retrieve_context(
         })
         .map(|(path, definition)| (path.to_string(), definition.clone()))
         .collect::<Vec<_>>();
-    selected.truncate(max_results);
+    let (selected, page) = paginate_pairs(selected, args)?;
     let mut snippets = Vec::new();
     for (path, definition) in selected {
         snippets.push(context_snippet(
@@ -796,11 +810,11 @@ fn retrieve_context(
         .filter_map(|snippet| snippet.get("path").and_then(Value::as_str))
         .map(str::to_string)
         .collect::<BTreeSet<_>>();
-    let mut related_tests = all_definitions(index)
+    let related_tests = all_definitions(index)
         .filter(|(path, definition)| definition.is_test && selected_paths.contains(*path))
         .map(|(path, definition)| definition_value(path, definition))
         .collect::<Vec<_>>();
-    related_tests.truncate(max_results);
+    let (related_tests, related_tests_page) = paginate_values(related_tests, args)?;
     Ok(query_result(
         "retrieve_context",
         index,
@@ -811,6 +825,8 @@ fn retrieve_context(
             "mode": mode,
             "snippets": snippets,
             "related_tests": related_tests,
+            "page": page,
+            "related_tests_page": related_tests_page,
         }),
     ))
 }
@@ -826,6 +842,7 @@ fn context_snippet(
     let path = workspace_root.join(relative_path);
     let source = fs::read_to_string(&path)
         .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    let content_sha256 = format!("sha256:{:x}", Sha256::digest(source.as_bytes()));
     let excerpt = source
         .lines()
         .skip(start_line.saturating_sub(1))
@@ -846,6 +863,9 @@ fn context_snippet(
         "start_line": start_line,
         "end_line": end_line,
         "excerpt": excerpt,
+        "content_sha256": content_sha256,
+        "source": "refreshed_repository_index",
+        "freshness": "refreshed_this_call",
         "range_handle": {
             "path": relative_path,
             "start_line": start_line,
@@ -861,12 +881,28 @@ fn query_result(
     refresh: &RefreshStats,
     data: Value,
 ) -> Value {
+    let page = data.get("page").cloned();
+    let truncated = page
+        .as_ref()
+        .and_then(|page| page.get("has_more"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     json!({
         "schema_version": INDEX_SCHEMA_VERSION,
         "kind": "repository_code_index",
         "action": action,
         "status_code": "ok",
         "summary": index_summary(index, refresh),
+        "page": page,
+        "truncated": truncated,
+        "provenance": {
+            "source": "rustclaw_repository_index",
+            "backend": "syn_ast_with_file_fallback",
+            "index_ref": INDEX_RELATIVE_PATH,
+            "generated_at": index.generated_at,
+            "refreshed_at": refresh.refreshed_at,
+            "scan_complete": index.scan_complete,
+        },
         "data": data,
     })
 }
@@ -888,6 +924,17 @@ fn index_summary(index: &RepositoryIndex, refresh: &RefreshStats) -> Value {
         .flat_map(|file| file.symbols.iter())
         .filter(|symbol| symbol.is_test)
         .count();
+    let mut parse_status_counts = BTreeMap::<String, usize>::new();
+    for file in index.files.values() {
+        *parse_status_counts
+            .entry(file.parse_status.clone())
+            .or_default() += 1;
+    }
+    let fallback_file_count = index
+        .files
+        .values()
+        .filter(|file| file.parse_status != "parsed")
+        .count();
     json!({
         "file_count": index.files.len(),
         "symbol_count": symbol_count,
@@ -898,6 +945,14 @@ fn index_summary(index: &RepositoryIndex, refresh: &RefreshStats) -> Value {
         "reused_files": refresh.reused_files,
         "removed_files": refresh.removed_files,
         "skipped_files": refresh.skipped_files,
+        "scan_truncated": refresh.scan_truncated,
+        "scan_complete": index.scan_complete,
+        "generated_at": index.generated_at,
+        "refreshed_at": refresh.refreshed_at,
+        "index_source": "rustclaw_repository_index",
+        "index_backend": "syn_ast_with_file_fallback",
+        "fallback_file_count": fallback_file_count,
+        "parse_status_counts": parse_status_counts,
         "index_ref": INDEX_RELATIVE_PATH,
     })
 }
@@ -928,6 +983,8 @@ fn definition_value(path: &str, definition: &SymbolDefinition) -> Value {
         "end_line": definition.end_line,
         "visibility": definition.visibility,
         "is_test": definition.is_test,
+        "source": "syn_ast",
+        "freshness": "refreshed_this_call",
         "range_handle": {
             "path": path,
             "start_line": definition.line,
@@ -943,6 +1000,8 @@ fn reference_value(path: &str, reference: &SymbolReference) -> Value {
         "name": reference.name,
         "line": reference.line,
         "kind": reference.kind,
+        "source": "syn_ast",
+        "freshness": "refreshed_this_call",
         "range_handle": {
             "path": path,
             "start_line": reference.line,
@@ -979,6 +1038,68 @@ fn result_limit(args: &JsonMap<String, Value>) -> Result<usize, CodeIndexError> 
         1,
         HARD_MAX_RESULTS,
     )
+}
+
+fn paginate_values(
+    values: Vec<Value>,
+    args: &JsonMap<String, Value>,
+) -> Result<(Vec<Value>, Value), CodeIndexError> {
+    paginate_items(values, args)
+}
+
+fn paginate_strings(
+    values: Vec<String>,
+    args: &JsonMap<String, Value>,
+) -> Result<(Vec<String>, Value), CodeIndexError> {
+    paginate_items(values, args)
+}
+
+fn paginate_pairs(
+    values: Vec<(String, SymbolDefinition)>,
+    args: &JsonMap<String, Value>,
+) -> Result<(Vec<(String, SymbolDefinition)>, Value), CodeIndexError> {
+    paginate_items(values, args)
+}
+
+fn paginate_items<T>(
+    values: Vec<T>,
+    args: &JsonMap<String, Value>,
+) -> Result<(Vec<T>, Value), CodeIndexError> {
+    let limit = result_limit(args)?;
+    let requested_cursor = args
+        .get("cursor")
+        .map(|value| {
+            value
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(|| CodeIndexError::new("invalid_args", "code_index.cursor_invalid"))
+        })
+        .transpose()?
+        .unwrap_or(0);
+    let total_count = values.len();
+    let start = requested_cursor.min(total_count);
+    let end = start.saturating_add(limit).min(total_count);
+    let returned = end.saturating_sub(start);
+    let page_values = values
+        .into_iter()
+        .skip(start)
+        .take(returned)
+        .collect::<Vec<_>>();
+    Ok((
+        page_values,
+        json!({
+            "cursor": start,
+            "requested_cursor": requested_cursor,
+            "start_index": start,
+            "end_index": end,
+            "limit": limit,
+            "returned_count": returned,
+            "total_count": total_count,
+            "has_more": end < total_count,
+            "next_cursor": (end < total_count).then_some(end),
+            "previous_cursor": (start > 0).then_some(start.saturating_sub(limit)),
+        }),
+    ))
 }
 
 fn bounded_usize(
