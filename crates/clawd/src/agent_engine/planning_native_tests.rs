@@ -20,7 +20,13 @@ fn turn(tool_calls: Vec<ModelToolCall>, text: &str) -> ModelTurnResponse {
     }
 }
 
-fn respond_call(arguments: Value) -> ModelToolCall {
+fn respond_call(mut arguments: Value) -> ModelToolCall {
+    if let Some(arguments) = arguments.as_object_mut() {
+        arguments.entry("fields").or_insert_with(|| json!([]));
+        arguments
+            .entry("exact_field_count")
+            .or_insert_with(|| json!(0));
+    }
     ModelToolCall {
         id: "respond-1".to_string(),
         name: "respond".to_string(),
@@ -212,6 +218,79 @@ fn native_respond_rejects_list_count_mismatch_and_extra_content() {
 }
 
 #[test]
+fn native_respond_materializes_exact_structured_object_fields() {
+    let actions = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "shape": "object",
+                "content": "",
+                "items": [],
+                "exact_item_count": 0,
+                "fields": [
+                    {"name": "provider", "value_json": "\"minimax\""},
+                    {
+                        "name": "async_contract",
+                        "value_json": "{\"status\":\"accepted\",\"poll_after_seconds\":5}"
+                    }
+                ],
+                "exact_field_count": 2
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect("object response");
+
+    let AgentAction::Respond { content } = &actions[0] else {
+        panic!("expected terminal response");
+    };
+    let content: Value = serde_json::from_str(content).expect("materialized object json");
+    assert_eq!(content["provider"], "minimax");
+    assert_eq!(content["async_contract"]["status"], "accepted");
+    assert_eq!(content["async_contract"]["poll_after_seconds"], 5);
+}
+
+#[test]
+fn native_respond_rejects_invalid_or_duplicate_object_fields() {
+    let invalid_json = turn(
+        vec![respond_call(json!({
+            "shape": "object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [{"name": "provider", "value_json": "minimax"}],
+            "exact_field_count": 1
+        }))],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn(&invalid_json, &callable_capabilities())
+            .expect_err("invalid JSON lexical value rejected"),
+        "native_respond_object_field_json_invalid"
+    );
+
+    let duplicate = turn(
+        vec![respond_call(json!({
+            "shape": "object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [
+                {"name": "provider", "value_json": "\"minimax\""},
+                {"name": "provider", "value_json": "\"other\""}
+            ],
+            "exact_field_count": 2
+        }))],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn(&duplicate, &callable_capabilities())
+            .expect_err("duplicate object field rejected"),
+        "native_respond_object_field_duplicate"
+    );
+}
+
+#[test]
 fn native_respond_cannot_be_mixed_with_runtime_actions() {
     let mixed = turn(
         vec![
@@ -345,7 +424,7 @@ fn native_request_separates_system_protocol_from_user_turn() {
     assert_eq!(request.tools[1].name, "respond");
     assert_eq!(
         request.tools[1].input_schema["properties"]["shape"]["enum"],
-        json!(["free_text", "list"])
+        json!(["free_text", "list", "object"])
     );
 }
 
@@ -569,7 +648,14 @@ fn native_response_contract_retry_targets_the_respond_schema() {
     assert_eq!(observation["protocol_observation"]["tool_name"], "respond");
     assert_eq!(
         observation["protocol_observation"]["required_argument_fields"],
-        json!(["shape", "content", "items", "exact_item_count"])
+        json!([
+            "shape",
+            "content",
+            "items",
+            "exact_item_count",
+            "fields",
+            "exact_field_count"
+        ])
     );
     assert_eq!(
         observation["protocol_observation"]["next_action"],

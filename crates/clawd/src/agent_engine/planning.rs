@@ -10,7 +10,7 @@ use claw_core::model_turn::{
     ModelMessage, ModelRole, ModelToolCall, ModelToolChoice, ModelToolDefinition, ModelTurnRequest,
     ModelTurnResponse,
 };
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use tracing::{info, warn};
 
@@ -27,6 +27,7 @@ const NATIVE_CALL_CAPABILITY_TOOL: &str = "call_capability";
 const NATIVE_RESPOND_TOOL: &str = "respond";
 const MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS: usize = 2;
 const MAX_NATIVE_RESPONSE_ITEMS: usize = 64;
+const MAX_NATIVE_RESPONSE_FIELDS: usize = 64;
 
 fn planner_last_observation(loop_state: &LoopState) -> String {
     super::observed_output::latest_structured_capability_observation(loop_state)
@@ -628,14 +629,21 @@ fn native_planner_request(
     }
     tools.push(ModelToolDefinition {
         name: NATIVE_RESPOND_TOOL.to_string(),
-        description: "Submit the final user-visible response with a machine-verifiable response shape. For free_text, put the answer in content and use an empty items array with exact_item_count=0. For list, leave content empty and provide exactly the final list items plus their exact count.".to_string(),
+        description: "Submit the final user-visible response. Use free_text for prose/scalars, list for exact items, or object for exact named fields. Object field values are JSON encoded in value_json and are validated before delivery.".to_string(),
         input_schema: json!({
             "type": "object",
-            "required": ["shape", "content", "items", "exact_item_count"],
+            "required": [
+                "shape",
+                "content",
+                "items",
+                "exact_item_count",
+                "fields",
+                "exact_field_count"
+            ],
             "properties": {
                 "shape": {
                     "type": "string",
-                    "enum": ["free_text", "list"]
+                    "enum": ["free_text", "list", "object"]
                 },
                 "content": {
                     "type": "string",
@@ -650,6 +658,32 @@ fn native_planner_request(
                     "type": "integer",
                     "minimum": 0,
                     "maximum": MAX_NATIVE_RESPONSE_ITEMS
+                },
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "value_json"],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                            },
+                            "value_json": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 65536
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "maxItems": MAX_NATIVE_RESPONSE_FIELDS
+                },
+                "exact_field_count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": MAX_NATIVE_RESPONSE_FIELDS
                 }
             },
             "additionalProperties": false
@@ -728,7 +762,14 @@ fn native_contract_repair_signal(error_code: &str) -> String {
     let (tool_name, required_argument_fields, next_action) = if respond_contract_error {
         (
             NATIVE_RESPOND_TOOL,
-            vec!["shape", "content", "items", "exact_item_count"],
+            vec![
+                "shape",
+                "content",
+                "items",
+                "exact_item_count",
+                "fields",
+                "exact_field_count",
+            ],
             "retry_native_respond_call",
         )
     } else if loader_contract_error {
@@ -939,13 +980,27 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
         .and_then(|value| usize::try_from(value).ok())
         .filter(|value| *value <= MAX_NATIVE_RESPONSE_ITEMS)
         .ok_or_else(|| "native_respond_exact_item_count_invalid".to_string())?;
+    let fields = arguments
+        .get("fields")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "native_respond_fields_not_array".to_string())?;
+    let exact_field_count = arguments
+        .get("exact_field_count")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value <= MAX_NATIVE_RESPONSE_FIELDS)
+        .ok_or_else(|| "native_respond_exact_field_count_invalid".to_string())?;
 
     match shape {
         "free_text" => {
             if content.trim().is_empty() {
                 return Err("native_respond_free_text_empty".to_string());
             }
-            if !items.is_empty() || exact_item_count != 0 {
+            if !items.is_empty()
+                || exact_item_count != 0
+                || !fields.is_empty()
+                || exact_field_count != 0
+            {
                 return Err("native_respond_free_text_contract_mismatch".to_string());
             }
             Ok(AgentAction::Respond {
@@ -955,6 +1010,9 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
         "list" => {
             if !content.trim().is_empty() {
                 return Err("native_respond_list_content_not_empty".to_string());
+            }
+            if !fields.is_empty() || exact_field_count != 0 {
+                return Err("native_respond_list_fields_not_empty".to_string());
             }
             if exact_item_count == 0 || items.len() != exact_item_count {
                 return Err("native_respond_list_count_mismatch".to_string());
@@ -977,6 +1035,44 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
                 .map(|(index, item)| format!("{}. {item}", index + 1))
                 .collect::<Vec<_>>()
                 .join("\n");
+            Ok(AgentAction::Respond { content })
+        }
+        "object" => {
+            if !content.trim().is_empty() || !items.is_empty() || exact_item_count != 0 {
+                return Err("native_respond_object_non_field_payload".to_string());
+            }
+            if exact_field_count == 0 || fields.len() != exact_field_count {
+                return Err("native_respond_object_count_mismatch".to_string());
+            }
+            let mut object = Map::new();
+            for field in fields {
+                let field = field
+                    .as_object()
+                    .ok_or_else(|| "native_respond_object_field_invalid".to_string())?;
+                let name = field
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| {
+                        !name.is_empty()
+                            && name.len() <= 128
+                            && !name.contains('\r')
+                            && !name.contains('\n')
+                    })
+                    .ok_or_else(|| "native_respond_object_field_name_invalid".to_string())?;
+                let value_json = field
+                    .get("value_json")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty() && value.len() <= 65536)
+                    .ok_or_else(|| "native_respond_object_field_value_invalid".to_string())?;
+                let value = serde_json::from_str(value_json)
+                    .map_err(|_| "native_respond_object_field_json_invalid".to_string())?;
+                if object.insert(name.to_string(), value).is_some() {
+                    return Err("native_respond_object_field_duplicate".to_string());
+                }
+            }
+            let content = serde_json::to_string(&Value::Object(object))
+                .map_err(|_| "native_respond_object_serialize_failed".to_string())?;
             Ok(AgentAction::Respond { content })
         }
         _ => Err("native_respond_shape_unsupported".to_string()),

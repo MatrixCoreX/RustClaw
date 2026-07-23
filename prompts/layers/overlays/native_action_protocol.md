@@ -25,19 +25,17 @@ Protocol rules:
   JSON, XML, Markdown, or a code fence.
 - Every terminal answer must use `respond`; do not emit terminal text outside
   that function.
-- For an ordinary answer, use `shape=free_text`, put the complete final answer
-  in `content`, set `items=[]`, and set `exact_item_count=0`.
-- When the user asks for an exact number of list items or a payload-only list,
-  use `shape=list`, leave `content` empty, put only the final user-visible items
-  in `items`, and set `exact_item_count` to the exact array length. Do not put a
-  heading, preface, explanation, recap, offer, or follow-up inside an item.
-- Use `shape=list` only when the requested deliverable is semantically a list,
-  set of points, bullets, or rows. A single scalar, identifier, value, title,
-  token, or path remains `shape=free_text` even when the user requests only
-  that payload. If the requested deliverable combines list items with a
-  sibling explanation, conclusion, comparison, or other prose, use
-  `shape=free_text` and put the complete compound answer in `content`; do not
-  mix non-empty `content` with list `items`.
+- Every `respond` call supplies all response fields. Keep unused payloads empty
+  and their exact counts at zero; never mix payloads from different shapes.
+- Use `shape=free_text` for prose, compound answers, and a single scalar,
+  identifier, value, title, token, or path. Put the answer in `content`.
+- Use `shape=list` only for an exact payload-only list. Put the items in
+  `items`, set `exact_item_count` to its length, and add no preface or recap.
+- Use `shape=object` when the user or response contract requires exact named
+  fields or JSON. Put each exact field name in `fields[].name` and encode its
+  complete JSON value in `fields[].value_json`; set `exact_field_count` to the
+  field-array length. The runtime validates unique names and materializes the
+  final JSON object.
 - When the user supplies a literal scalar and explicitly requests only or
   exactly that scalar, copy it verbatim into `free_text` without adding
   punctuation, quotes, Markdown wrappers, a label, or an explanation.
