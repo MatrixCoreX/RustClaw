@@ -96,18 +96,29 @@ export async function followTaskEventStream(
     });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let streamDisconnected = false;
     try {
       while (!terminal && !signal?.aborted) {
-        const { value, done } = await reader.read();
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch {
+          if (signal?.aborted) return;
+          streamDisconnected = true;
+          break;
+        }
+        const { value, done } = chunk;
         if (done) break;
         parser.push(decoder.decode(value, { stream: true }));
       }
-      parser.push(decoder.decode());
-      parser.finish();
-      await Promise.all(pendingHandlers);
+      if (!streamDisconnected) {
+        parser.push(decoder.decode());
+        parser.finish();
+      }
     } finally {
       reader.releaseLock();
     }
+    await Promise.all(pendingHandlers);
     if (!terminal && !signal?.aborted) {
       await abortableDelay(RECONNECT_DELAY_MS, signal);
     }
@@ -117,11 +128,11 @@ export async function followTaskEventStream(
 function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    const timeout = window.setTimeout(resolve, delayMs);
+    const timeout = globalThis.setTimeout(resolve, delayMs);
     signal?.addEventListener(
       "abort",
       () => {
-        window.clearTimeout(timeout);
+        globalThis.clearTimeout(timeout);
         resolve();
       },
       { once: true },

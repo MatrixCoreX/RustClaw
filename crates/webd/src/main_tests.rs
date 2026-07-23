@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
 
@@ -88,6 +88,30 @@ fn skill_store_install_uses_long_running_upstream_wait() {
     assert!(!uses_long_running_upstream_wait(&Method::POST, "/v1/tasks"));
 }
 
+#[test]
+fn task_event_stream_uses_long_running_upstream_wait() {
+    assert!(uses_long_running_upstream_wait(
+        &Method::GET,
+        "/v1/tasks/task-123/events"
+    ));
+    assert!(uses_long_running_upstream_wait(
+        &Method::GET,
+        "/v1/tasks/task-123/events?cursor=17"
+    ));
+    assert!(!uses_long_running_upstream_wait(
+        &Method::POST,
+        "/v1/tasks/task-123/events"
+    ));
+    assert!(!uses_long_running_upstream_wait(
+        &Method::GET,
+        "/v1/tasks/task-123"
+    ));
+    assert!(!uses_long_running_upstream_wait(
+        &Method::GET,
+        "/v1/tasks/nested/task/events"
+    ));
+}
+
 async fn delayed_upstream_response() -> &'static str {
     tokio::time::sleep(Duration::from_millis(80)).await;
     "ok"
@@ -103,7 +127,8 @@ async fn install_wait_outlives_normal_proxy_deadline() {
         .expect("read delayed upstream address");
     let upstream = Router::new()
         .route("/v1/skills/store/install", post(delayed_upstream_response))
-        .route("/v1/skills/store/remove", post(delayed_upstream_response));
+        .route("/v1/skills/store/remove", post(delayed_upstream_response))
+        .route("/v1/tasks/task-123/events", get(delayed_upstream_response));
     let upstream_task = tokio::spawn(async move {
         axum::serve(listener, upstream)
             .await
@@ -150,6 +175,54 @@ async fn install_wait_outlives_normal_proxy_deadline() {
         .expect("build remove request");
     let remove_response = proxy_inner(state, client_addr, remove).await;
     assert_eq!(remove_response.status(), StatusCode::BAD_GATEWAY);
+
+    upstream_task.abort();
+}
+
+#[tokio::test]
+async fn task_event_stream_outlives_normal_proxy_deadline() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind delayed upstream");
+    let addr = listener
+        .local_addr()
+        .expect("read delayed upstream address");
+    let upstream = Router::new().route("/v1/tasks/task-123/events", get(delayed_upstream_response));
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(listener, upstream)
+            .await
+            .expect("serve delayed upstream");
+    });
+
+    let state = AppState {
+        upstream: format!("http://{addr}"),
+        client: reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(1))
+            .timeout(Duration::from_millis(20))
+            .build()
+            .expect("build short-deadline client"),
+        long_running_client: reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(1))
+            .build()
+            .expect("build long-running client"),
+        forward_x_forwarded: false,
+        max_incoming_body_bytes: 1024,
+        cookie_name: "test-session".to_string(),
+        session_ttl_secs: 60,
+        sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/tasks/task-123/events?cursor=0")
+        .body(Body::empty())
+        .expect("build task event request");
+
+    let response = proxy_inner(state, SocketAddr::from(([127, 0, 0, 1], 41003)), request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 32)
+        .await
+        .expect("read task event response");
+    assert_eq!(&body[..], b"ok");
 
     upstream_task.abort();
 }
