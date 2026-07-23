@@ -50,6 +50,8 @@ adapters too.
 
 The admin Release update path verifies the checksum, preserves runtime
 directories, atomically replaces each prebuilt binary so the running `clawd`
-executable can be upgraded, and then restarts `clawd`. If an existing RustClaw
+executable can be upgraded, and then restarts `clawd`. A systemd-managed Linux
+installation schedules that restart in a separate transient unit so stopping
+the old service cannot kill its own restart process. If an existing RustClaw
 nginx site is configured, packaged `UI/dist` is copied without a local UI
 build. A local Pi install without nginx is not configured for nginx.

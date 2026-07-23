@@ -36,4 +36,4 @@ Archive 同时上传为 workflow artifact 和 GitHub Release asset。
 
 替换文件后重启所需服务。仅后端更新重启 `clawd`；完整 runtime 更新还应重启已选择 channel adapter。
 
-Admin Release 更新路径验证 checksum、保留 runtime 目录，并通过原子替换逐个更新预编译二进制，避免覆盖正在运行的 `clawd` 时出现 `Text file busy`，随后重启 `clawd`。已有 RustClaw nginx site 时直接复制包内 `UI/dist`，不在树莓派本地编译 UI；没有 nginx 的本地安装不会被配置 nginx。
+Admin Release 更新路径验证 checksum、保留 runtime 目录，并通过原子替换逐个更新预编译二进制，避免覆盖正在运行的 `clawd` 时出现 `Text file busy`，随后重启 `clawd`。systemd 托管的 Linux 安装会用独立 transient unit 调度重启，避免旧 service 停止时同时杀死自己的重启进程。已有 RustClaw nginx site 时直接复制包内 `UI/dist`，不在树莓派本地编译 UI；没有 nginx 的本地安装不会被配置 nginx。

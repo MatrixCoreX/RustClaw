@@ -1202,6 +1202,61 @@ fn finish_workspace_update_succeeded(
 }
 
 fn schedule_workspace_update_clawd_restart(workspace_root: &Path) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("INVOCATION_ID").is_some() {
+        return schedule_workspace_update_systemd_restart();
+    }
+
+    schedule_workspace_update_direct_restart(workspace_root)
+}
+
+#[cfg(target_os = "linux")]
+fn schedule_workspace_update_systemd_restart() -> Result<(), String> {
+    let service_unit =
+        std::env::var("RUSTCLAW_SYSTEMD_UNIT").unwrap_or_else(|_| "rustclaw.service".to_string());
+    if !is_safe_systemd_unit_name(&service_unit) {
+        return Err("RUSTCLAW_SYSTEMD_UNIT contains unsupported characters".to_string());
+    }
+
+    let systemctl = ["/usr/bin/systemctl", "/bin/systemctl"]
+        .into_iter()
+        .find(|path| Path::new(path).is_file())
+        .ok_or_else(|| "systemctl not found for systemd-managed restart".to_string())?;
+    let transient_unit = format!(
+        "rustclaw-restart-{}-{}",
+        std::process::id(),
+        current_unix_ts()
+    );
+    let status = StdCommand::new("systemd-run")
+        .arg("--quiet")
+        .arg(format!("--unit={transient_unit}"))
+        .arg("--on-active=2s")
+        .arg("--property=Type=oneshot")
+        .arg(systemctl)
+        .arg("restart")
+        .arg(&service_unit)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null())
+        .status()
+        .map_err(|err| format!("failed to schedule systemd restart: {err}"))?;
+    if !status.success() {
+        return Err(format!(
+            "systemd-run failed to schedule restart for {service_unit}"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn is_safe_systemd_unit_name(unit: &str) -> bool {
+    !unit.is_empty()
+        && unit
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'@'))
+}
+
+fn schedule_workspace_update_direct_restart(workspace_root: &Path) -> Result<(), String> {
     let script_path = workspace_root.join("component_start/start-clawd.sh");
     if !script_path.exists() {
         return Err("component_start/start-clawd.sh not found in workspace root".to_string());

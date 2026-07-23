@@ -1116,3 +1116,12 @@ fn workspace_update_release_deploy_uses_stable_release_and_prebuilt_ui() {
     assert!(!script.contains("cp -a \"$package_dir/target/release/.\" target/release/"));
     assert!(!script.contains("build-ui-nginx.sh --deploy-if-configured"));
 }
+
+#[test]
+fn workspace_update_systemd_unit_name_accepts_only_machine_tokens() {
+    assert!(is_safe_systemd_unit_name("rustclaw.service"));
+    assert!(is_safe_systemd_unit_name("rustclaw-worker@1.service"));
+    assert!(!is_safe_systemd_unit_name(""));
+    assert!(!is_safe_systemd_unit_name("rustclaw.service; reboot"));
+    assert!(!is_safe_systemd_unit_name("rustclaw service"));
+}

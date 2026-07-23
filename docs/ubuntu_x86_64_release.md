@@ -46,6 +46,8 @@ defaults.
 
 The admin Release update path verifies the checksum, preserves runtime
 directories, atomically replaces each prebuilt binary so the running `clawd`
-executable can be upgraded, and then restarts `clawd`. If the host already has
-a RustClaw nginx site, it copies the packaged `UI/dist` into that site without
+executable can be upgraded, and then restarts `clawd`. A systemd-managed Linux
+installation schedules that restart in a separate transient unit so stopping
+the old service cannot kill its own restart process. If the host already has a
+RustClaw nginx site, it copies the packaged `UI/dist` into that site without
 rebuilding. A local install with no nginx site remains nginx-free.
