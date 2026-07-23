@@ -10,6 +10,14 @@ import {
 } from "../lib/chat-attachments";
 import { followTaskEventStream } from "../lib/task-event-stream";
 import { extractTaskText } from "../lib/task-result";
+import {
+  preferredVoiceRecorderMimeType,
+  shouldRetryVoiceCaptureWithDefault,
+  voiceAudioTrackConstraints,
+  voiceInputDeviceOptions,
+  voiceRecorderOptions,
+  type VoiceInputDeviceOption,
+} from "../lib/voice-recording";
 import type {
   ApiResponse,
   ChatAttachment,
@@ -152,6 +160,12 @@ export function useChatRuntime({
   const [chatSending, setChatSending] = useState(false);
   const [chatRecording, setChatRecording] = useState(false);
   const [chatVoiceRecordingSupported] = useState(canUseDirectVoiceRecording);
+  const [chatAudioInputDevices, setChatAudioInputDevices] = useState<
+    VoiceInputDeviceOption[]
+  >([]);
+  const [chatAudioInputDeviceId, setChatAudioInputDeviceIdState] = useState(
+    loadSelectedVoiceInputDeviceId,
+  );
   const [chatError, setChatError] = useState<string | null>(null);
   const chatAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const chatMediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -161,6 +175,7 @@ export function useChatRuntime({
   const chatSendingValueRef = useRef(false);
   const chatRecordingValueRef = useRef(false);
   const chatTeachingModeValueRef = useRef(false);
+  const chatAudioInputDeviceIdRef = useRef(chatAudioInputDeviceId);
   const activeChatThreadRef = useRef(activeChatThread);
   const teachingTraceAutoLoadKeysRef = useRef<Set<string>>(new Set());
   const voiceSendOnStopRef = useRef(false);
@@ -171,11 +186,43 @@ export function useChatRuntime({
   chatSendingValueRef.current = chatSending;
   chatRecordingValueRef.current = chatRecording;
   chatTeachingModeValueRef.current = chatTeachingMode;
+  chatAudioInputDeviceIdRef.current = chatAudioInputDeviceId;
   activeChatThreadRef.current = activeChatThread;
 
   useEffect(() => {
     persistChatThreadState(chatThreadState);
   }, [chatThreadState]);
+
+  useEffect(() => {
+    if (!chatVoiceRecordingSupported || !navigator.mediaDevices?.enumerateDevices) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const devices = voiceInputDeviceOptions(
+          await navigator.mediaDevices.enumerateDevices(),
+        );
+        if (active) setChatAudioInputDevices(devices);
+      } catch {
+        if (active) setChatAudioInputDevices([]);
+      }
+    };
+    const handleDeviceChange = () => {
+      void refresh();
+    };
+    void refresh();
+    navigator.mediaDevices.addEventListener?.("devicechange", handleDeviceChange);
+    return () => {
+      active = false;
+      navigator.mediaDevices.removeEventListener?.("devicechange", handleDeviceChange);
+    };
+  }, [chatVoiceRecordingSupported]);
+
+  const setChatAudioInputDeviceId = (deviceId: string) => {
+    const normalized = deviceId.trim();
+    chatAudioInputDeviceIdRef.current = normalized;
+    setChatAudioInputDeviceIdState(normalized);
+    persistSelectedVoiceInputDeviceId(normalized);
+  };
 
   const updateChatThreadById = (
     threadId: string,
@@ -422,16 +469,32 @@ export function useChatRuntime({
     }
     try {
       voiceStopRequestedRef.current = false;
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const selectedDeviceId = chatAudioInputDeviceIdRef.current;
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: voiceAudioTrackConstraints(selectedDeviceId),
+        });
+      } catch (error) {
+        if (!selectedDeviceId || !shouldRetryVoiceCaptureWithDefault(error)) throw error;
+        setChatAudioInputDeviceId("");
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: voiceAudioTrackConstraints(),
+        });
+      }
       if (voiceStopRequestedRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         voiceSendOnStopRef.current = false;
         return;
       }
-      const recorderMimeType = preferredRecorderMimeType();
-      const recorder = recorderMimeType
-        ? new MediaRecorder(stream, { mimeType: recorderMimeType })
-        : new MediaRecorder(stream);
+      if (navigator.mediaDevices.enumerateDevices) {
+        void navigator.mediaDevices
+          .enumerateDevices()
+          .then((devices) => setChatAudioInputDevices(voiceInputDeviceOptions(devices)))
+          .catch(() => undefined);
+      }
+      const recorderMimeType = preferredVoiceRecorderMimeType();
+      const recorder = new MediaRecorder(stream, voiceRecorderOptions(recorderMimeType));
       chatAudioChunksRef.current = [];
       voiceSendOnStopRef.current = true;
       recorder.ondataavailable = (event) => {
@@ -796,6 +859,8 @@ export function useChatRuntime({
     chatSending,
     chatRecording,
     chatVoiceRecordingSupported,
+    chatAudioInputDevices,
+    chatAudioInputDeviceId,
     chatError,
     chatAttachmentInputRef,
     setChatTeachingMode,
@@ -807,6 +872,7 @@ export function useChatRuntime({
     removeChatAttachment,
     startChatVoiceRecording,
     stopChatVoiceRecording,
+    setChatAudioInputDeviceId,
     sendChatMessage,
     queryChatTeachingLlmDebug,
     chatThreads: chatThreadSummaries,
@@ -1195,16 +1261,29 @@ function canUseDirectVoiceRecording(): boolean {
   );
 }
 
-function preferredRecorderMimeType(): string | undefined {
-  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) {
-    return undefined;
+const SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY =
+  "rustclaw.ui.chat.selected_voice_input_device.v1";
+
+function loadSelectedVoiceInputDeviceId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY)?.trim() ?? "";
+  } catch {
+    return "";
   }
-  return [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-  ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+}
+
+function persistSelectedVoiceInputDeviceId(deviceId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (deviceId) {
+      window.localStorage.setItem(SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY, deviceId);
+    } else {
+      window.localStorage.removeItem(SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY);
+    }
+  } catch {
+    // Browser privacy settings may disable local storage; recording still works.
+  }
 }
 
 function defaultAttachmentPrompt(

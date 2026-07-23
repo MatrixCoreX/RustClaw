@@ -1,4 +1,11 @@
-import { useMemo, useState, type KeyboardEvent, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import {
   FileText,
   Loader2,
@@ -24,6 +31,7 @@ import {
   teachingRunByMessageId,
 } from "../lib/chat-teaching";
 import type { ChatAttachment, ChatMessage, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
+import type { VoiceInputDeviceOption } from "../lib/voice-recording";
 import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 
 type Translate = (zh: string, en: string) => string;
@@ -75,6 +83,8 @@ export interface ChatPageProps {
   chatSending: boolean;
   chatRecording: boolean;
   chatVoiceRecordingSupported: boolean;
+  chatAudioInputDevices: VoiceInputDeviceOption[];
+  chatAudioInputDeviceId: string;
   chatError: string | null;
   chatAttachmentInputRef: RefObject<HTMLInputElement | null>;
   toLocalTime: (value: number | null | undefined) => string;
@@ -90,6 +100,7 @@ export interface ChatPageProps {
   onRemoveAttachment: (index: number) => void;
   onStartVoiceRecording: () => unknown | Promise<unknown>;
   onStopVoiceRecording: () => unknown | Promise<unknown>;
+  onAudioInputDeviceChange: (deviceId: string) => void;
   onSendMessage: () => unknown | Promise<unknown>;
   onQueryChatTeachingLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
 }
@@ -112,6 +123,8 @@ export function ChatPage({
   chatSending,
   chatRecording,
   chatVoiceRecordingSupported,
+  chatAudioInputDevices,
+  chatAudioInputDeviceId,
   chatError,
   chatAttachmentInputRef,
   toLocalTime,
@@ -127,10 +140,12 @@ export function ChatPage({
   onRemoveAttachment,
   onStartVoiceRecording,
   onStopVoiceRecording,
+  onAudioInputDeviceChange,
   onSendMessage,
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
   const [threadSearch, setThreadSearch] = useState("");
+  const messageListRef = useRef<HTMLDivElement | null>(null);
   const normalizedThreadSearch = threadSearch.trim().toLowerCase();
   const visibleChatThreads = useMemo(() => {
     if (!normalizedThreadSearch) return chatThreads;
@@ -158,6 +173,18 @@ export function ChatPage({
     () => teachingRunByMessageId(chatTeachingRuns),
     [chatTeachingRuns],
   );
+
+  useEffect(() => {
+    const messageList = messageListRef.current;
+    if (!messageList) return;
+    const frame = window.requestAnimationFrame(() => {
+      messageList.scrollTo({
+        top: messageList.scrollHeight,
+        behavior: chatSending ? "smooth" : "auto",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeChatThreadId, chatMessages.length, chatSending]);
   const teachingPanelVisible = chatTeachingMode;
   const selectTeachingRunFromMessage = (run: ChatTeachingRunSummary) => {
     if (!chatTeachingMode) return;
@@ -275,7 +302,10 @@ export function ChatPage({
         </div>
       </div>
 
-      <div className="h-80 space-y-3 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3">
+      <div
+        ref={messageListRef}
+        className="h-80 space-y-3 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3"
+      >
         {chatMessages.map((message) => {
           const messageTeachingRun = teachingRunByMessage.get(message.id) ?? null;
           const messageTeachingEnabled = teachingMessageInteractive(chatTeachingMode, messageTeachingRun);
@@ -342,6 +372,7 @@ export function ChatPage({
             </div>
           );
         })}
+        {chatSending ? <ChatWorkingIndicator t={t} /> : null}
       </div>
 
       {teachingPanelVisible ? (
@@ -416,44 +447,63 @@ export function ChatPage({
               {t("上传图片/文件", "Upload image/file")}
             </button>
             {chatVoiceRecordingSupported ? (
-              <button
-                type="button"
-                onPointerDown={(event) => {
-                  if (event.button !== 0) return;
-                  event.preventDefault();
-                  event.currentTarget.setPointerCapture?.(event.pointerId);
-                  void onStartVoiceRecording();
-                }}
-                onPointerUp={(event) => {
-                  event.preventDefault();
-                  onStopVoiceRecording();
-                }}
-                onPointerCancel={() => onStopVoiceRecording()}
-                onKeyDown={(event) => {
-                  if (event.repeat || (event.key !== " " && event.key !== "Enter")) return;
-                  event.preventDefault();
-                  void onStartVoiceRecording();
-                }}
-                onKeyUp={(event) => {
-                  if (event.key !== " " && event.key !== "Enter") return;
-                  event.preventDefault();
-                  onStopVoiceRecording();
-                }}
-                onContextMenu={(event) => event.preventDefault()}
-                disabled={chatSending}
-                className={
-                  chatRecording
-                    ? "inline-flex select-none items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    : "inline-flex select-none items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                }
-              >
-                {chatRecording ? (
-                  <Square className="h-3.5 w-3.5" />
-                ) : (
-                  <Mic className="h-3.5 w-3.5" />
-                )}
-                {chatRecording ? t("松开发送", "Release to send") : t("按住说话", "Hold to talk")}
-              </button>
+              <>
+                <label className="inline-flex items-center gap-1.5 text-xs text-white/70">
+                  <span>{t("麦克风", "Microphone")}</span>
+                  <select
+                    value={chatAudioInputDeviceId}
+                    onChange={(event) => onAudioInputDeviceChange(event.target.value)}
+                    disabled={chatSending || chatRecording}
+                    className="theme-input h-8 max-w-52 py-1 text-xs"
+                    title={t("选择录音使用的麦克风", "Choose the microphone used for recording")}
+                  >
+                    <option value="">{t("系统默认", "System default")}</option>
+                    {chatAudioInputDevices.map((device, index) => (
+                      <option key={device.deviceId} value={device.deviceId}>
+                        {device.label || t(`麦克风 ${index + 1}`, `Microphone ${index + 1}`)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    event.currentTarget.setPointerCapture?.(event.pointerId);
+                    void onStartVoiceRecording();
+                  }}
+                  onPointerUp={(event) => {
+                    event.preventDefault();
+                    onStopVoiceRecording();
+                  }}
+                  onPointerCancel={() => onStopVoiceRecording()}
+                  onKeyDown={(event) => {
+                    if (event.repeat || (event.key !== " " && event.key !== "Enter")) return;
+                    event.preventDefault();
+                    void onStartVoiceRecording();
+                  }}
+                  onKeyUp={(event) => {
+                    if (event.key !== " " && event.key !== "Enter") return;
+                    event.preventDefault();
+                    onStopVoiceRecording();
+                  }}
+                  onContextMenu={(event) => event.preventDefault()}
+                  disabled={chatSending}
+                  className={
+                    chatRecording
+                      ? "inline-flex select-none items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      : "inline-flex select-none items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  }
+                >
+                  {chatRecording ? (
+                    <Square className="h-3.5 w-3.5" />
+                  ) : (
+                    <Mic className="h-3.5 w-3.5" />
+                  )}
+                  {chatRecording ? t("松开发送", "Release to send") : t("按住说话", "Hold to talk")}
+                </button>
+              </>
             ) : null}
             <span className="text-xs text-white/45">
               {chatVoiceRecordingSupported
@@ -640,6 +690,36 @@ function TeachingRunHistory({
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function ChatWorkingIndicator({ t }: { t: Translate }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={t("Agent 正在处理", "Agent is working")}
+      data-testid="chat-working-indicator"
+      className="space-y-1"
+    >
+      <div className="text-[11px] text-white/50">assistant</div>
+      <div className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-emerald-300/15 bg-emerald-500/15 px-3 py-2 text-sm text-white">
+        <Loader2
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 text-emerald-200 motion-safe:animate-spin"
+        />
+        <span className="motion-safe:animate-pulse">{t("正在处理", "Working")}</span>
+        <span aria-hidden="true" className="inline-flex items-center gap-1">
+          {[0, 1, 2].map((index) => (
+            <span
+              key={index}
+              className="h-1.5 w-1.5 rounded-full bg-emerald-200 motion-safe:animate-pulse"
+              style={{ animationDelay: `${index * 180}ms` }}
+            />
+          ))}
+        </span>
       </div>
     </div>
   );
