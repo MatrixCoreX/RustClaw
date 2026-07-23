@@ -118,6 +118,10 @@ fn retrieve_context_uses_structured_symbols_and_bounded_source_ranges() {
         snippet["range_handle"]["read_capability"],
         "filesystem.read_text_range"
     );
+    assert!(snippet["content_sha256"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("sha256:")));
+    assert_eq!(snippet["freshness"], "refreshed_this_call");
 }
 
 #[test]
@@ -162,4 +166,82 @@ fn workspace_traversal_is_rejected_as_machine_error() {
     )
     .expect_err("traversal must fail");
     assert_eq!(error.code, "path_outside_workspace");
+}
+
+#[test]
+fn symbol_results_expose_stable_cursor_pages() {
+    let repo = TempRepo::new();
+    fs::write(
+        repo.path.join("src/more.rs"),
+        "pub fn helper() -> usize { 9 }\n",
+    )
+    .expect("write second helper");
+
+    let first = execute_json(
+        &repo,
+        json!({
+            "action": "search_symbols",
+            "query": "helper",
+            "max_results": 1,
+            "cursor": 0
+        }),
+    );
+    assert_eq!(first["page"]["total_count"], 2);
+    assert_eq!(first["page"]["returned_count"], 1);
+    assert_eq!(first["page"]["has_more"], true);
+    assert_eq!(first["truncated"], true);
+    let cursor = first["page"]["next_cursor"].as_u64().unwrap();
+    let first_path = first["data"]["definitions"][0]["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let second = execute_json(
+        &repo,
+        json!({
+            "action": "search_symbols",
+            "query": "helper",
+            "max_results": 1,
+            "cursor": cursor
+        }),
+    );
+    assert_eq!(second["page"]["cursor"], cursor);
+    assert_eq!(second["page"]["has_more"], false);
+    assert_ne!(second["data"]["definitions"][0]["path"], first_path);
+}
+
+#[test]
+fn index_summary_exposes_freshness_and_file_only_fallback_coverage() {
+    let repo = TempRepo::new();
+    fs::write(
+        repo.path.join("src/helper.py"),
+        "def helper():\n    return 1\n",
+    )
+    .expect("write Python fallback");
+
+    let refreshed = execute_json(&repo, json!({"action": "refresh"}));
+    assert_eq!(refreshed["summary"]["scan_complete"], true);
+    assert_eq!(refreshed["summary"]["scan_truncated"], false);
+    assert_eq!(refreshed["summary"]["fallback_file_count"], 1);
+    assert_eq!(refreshed["summary"]["parse_status_counts"]["file_only"], 1);
+    assert!(refreshed["summary"]["generated_at"].as_u64().unwrap() > 0);
+    assert_eq!(
+        refreshed["summary"]["index_backend"],
+        "syn_ast_with_file_fallback"
+    );
+}
+
+#[test]
+fn max_file_budget_is_reported_as_incomplete_index_evidence() {
+    let repo = TempRepo::new();
+    let exact = execute_json(&repo, json!({"action": "refresh", "max_files": 1}));
+    assert_eq!(exact["summary"]["scan_complete"], true);
+    assert_eq!(exact["summary"]["scan_truncated"], false);
+
+    fs::write(repo.path.join("src/more.rs"), "pub fn more() {}\n").expect("write more source");
+
+    let refreshed = execute_json(&repo, json!({"action": "refresh", "max_files": 1}));
+    assert_eq!(refreshed["summary"]["file_count"], 1);
+    assert_eq!(refreshed["summary"]["scan_complete"], false);
+    assert_eq!(refreshed["summary"]["scan_truncated"], true);
 }

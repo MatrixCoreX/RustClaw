@@ -28,15 +28,16 @@ handles; it does not infer repository intent from user prose.
 | Action | Required | Optional |
 | --- | --- | --- |
 | `refresh` | - | `max_files` |
-| `search_symbols` | `query` | `mode`, `max_results`, `max_files` |
-| `find_definitions` | `symbol` | `max_results`, `max_files` |
-| `find_references` | `symbol` | `max_results`, `max_files` |
-| `list_tests` | - | `path`, `symbol`, `max_results`, `max_files` |
-| `changed_impact` | - | `paths`, `max_results`, `max_files` |
-| `retrieve_context` | `symbols` or `paths` | `mode`, `context_lines`, `max_results`, `max_files` |
+| `search_symbols` | `query` | `mode`, `cursor`, `max_results`, `max_files` |
+| `find_definitions` | `symbol` | `cursor`, `max_results`, `max_files` |
+| `find_references` | `symbol` | `cursor`, `max_results`, `max_files` |
+| `list_tests` | - | `path`, `symbol`, `cursor`, `max_results`, `max_files` |
+| `changed_impact` | - | `paths`, `cursor`, `max_results`, `max_files` |
+| `retrieve_context` | `symbols` or `paths` | `mode`, `context_lines`, `cursor`, `max_results`, `max_files` |
 
 `mode` is a machine enum: `exact|prefix|contains`. `symbols` and `paths`
 accept a string or string array. Paths must be workspace-relative.
+Use `page.next_cursor` for exact continuation; do not invent a cursor.
 
 ## Planning Rules
 
@@ -49,6 +50,8 @@ accept a string or string array. Paths must be workspace-relative.
 - Use `code.changed_impact` before selecting focused tests after a patch.
 - Treat results as conservative parser evidence. Rust symbols use `syn`;
   other recognized source languages currently provide file inventory only.
+- Check `summary.scan_complete`, `summary.parse_status_counts`, and
+  `provenance` before treating an empty page as exhaustive.
 - A missing definition/reference is not proof that a symbol does not exist in
   an unsupported language, generated file, dynamic macro expansion, or
   excluded directory.
