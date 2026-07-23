@@ -51,13 +51,16 @@ pub(crate) fn multi_field_machine_record_is_language_neutral(candidate: &str) ->
         return true;
     }
     if lines.len() >= 2 {
-        return lines.iter().all(|line| machine_record_field(line));
+        return lines.iter().all(|line| machine_record_field(line))
+            || machine_record_has_data_dominant_values(&lines);
     }
     let Some(line) = lines.first() else {
         return false;
     };
     let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
-    fields.len() >= 2 && fields.iter().all(|field| machine_record_field(field))
+    fields.len() >= 2
+        && (fields.iter().all(|field| machine_record_field(field))
+            || machine_record_has_data_dominant_values(&fields))
 }
 
 fn markdown_machine_field_report_is_language_neutral(lines: &[&str]) -> bool {
@@ -109,18 +112,36 @@ fn markdown_code_record_inline_fields(line: &str) -> Option<usize> {
 }
 
 fn machine_record_field(field: &str) -> bool {
-    let separator = field.find('=').or_else(|| field.find(':'));
-    let Some(separator) = separator else {
+    machine_record_parts(field).is_some_and(|(_, value)| machine_record_value(value))
+}
+
+fn machine_record_has_data_dominant_values(fields: &[&str]) -> bool {
+    if fields.len() < 3 {
         return false;
-    };
+    }
+    let mut machine_value_count = 0usize;
+    for field in fields {
+        let Some((_, value)) = machine_record_parts(field) else {
+            return false;
+        };
+        if machine_record_value(value) {
+            machine_value_count += 1;
+        }
+    }
+    machine_value_count >= 2 && machine_value_count.saturating_mul(2) > fields.len()
+}
+
+fn machine_record_parts(field: &str) -> Option<(&str, &str)> {
+    let separator = field.find('=').or_else(|| field.find(':'));
+    let separator = separator?;
     let (key, value_with_separator) = field.split_at(separator);
     let value = value_with_separator.get(1..).unwrap_or_default().trim();
-    !key.is_empty()
+    (!key.is_empty()
         && !value.is_empty()
         && key
             .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-        && machine_record_value(value)
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+    .then_some((key, value))
 }
 
 fn machine_record_value(value: &str) -> bool {
