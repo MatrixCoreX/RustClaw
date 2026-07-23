@@ -22,7 +22,8 @@ flowchart TD
     K --> L[PlanVerifier<br/>Schema + effect + permission]
     L --> M[工具 / 技能适配器]
     M --> N[CapabilityResultEnvelope<br/>证据 + 产物 + continuation]
-    N --> O[证据覆盖与 repair 状态]
+    N --> NX[有界脱敏 planner observation<br/>通用 envelope + 可选领域投影]
+    NX --> O[证据覆盖与 repair 状态]
     O -->|需要修复| I
     O --> P{BudgetDecision}
     P -->|continue| I
@@ -38,7 +39,7 @@ flowchart TD
     V --> T
 ```
 
-优先使用 `call_capability`，让 planner 选择稳定能力，再由 resolver 映射到当前 tool 或 skill。`PlanVerifier` 只校验机器合同与策略，不承担第二层语义路由。可恢复错误通过结构化 `RepairEnvelope` 作为 observation 返回同一循环；`BudgetDecision` 则独立决定健康循环应该继续、建立 checkpoint、等待用户、完成还是终止。
+优先使用 `call_capability`，让 planner 选择稳定能力，再由 resolver 映射到当前 tool 或 skill。`PlanVerifier` 只校验机器合同与策略，不承担第二层语义路由。每个成功的 `CapabilityResultEnvelope` 都会经过有界压缩与脱敏，作为一条通用机器 observation 返回下一轮 planner。领域专用投影可以压缩常用证据，但只是可选优化，不能成为保留 provider、artifact、异步任务或其他结构化结果字段的唯一通道。可恢复错误通过结构化 `RepairEnvelope` 作为 observation 返回同一循环；`BudgetDecision` 则独立决定健康循环应该继续、建立 checkpoint、等待用户、完成还是终止。
 
 终止 `respond` 合同支持模型生成的自由文本、精确列表，以及由 runtime 在物化前
 校验 JSON 值的精确命名字段对象。这样既保留严格机器交付，也不需要在 runtime

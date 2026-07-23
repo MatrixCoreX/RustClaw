@@ -25,7 +25,8 @@ flowchart TD
     K --> L[PlanVerifier<br/>schema + effect + permission]
     L --> M[Tool / skill adapter]
     M --> N[CapabilityResultEnvelope<br/>evidence + artifacts + continuation]
-    N --> O[Evidence coverage + repair state]
+    N --> NX[Bounded redacted planner observation<br/>generic envelope + optional domain projection]
+    NX --> O[Evidence coverage + repair state]
     O -->|repair needed| I
     O --> P{BudgetDecision}
     P -->|continue| I
@@ -47,6 +48,11 @@ and the resolver maps it to the current tool or skill implementation.
 semantic router. Recoverable errors return to the same loop as structured
 `RepairEnvelope` observations. `BudgetDecision` separately controls whether a
 healthy loop continues, checkpoints, waits for the user, finishes, or stops.
+Every successful `CapabilityResultEnvelope` is projected into one bounded,
+redacted machine observation for the next planner turn. Domain-specific
+projections may make common evidence more compact, but they are optional
+optimizations and cannot be the only path that preserves provider, artifact,
+async-job, or other structured result fields.
 The terminal `respond` contract supports model-authored free text, exact lists,
 and exact named-field objects whose JSON values are validated before the
 runtime materializes the payload. This preserves strict machine delivery
