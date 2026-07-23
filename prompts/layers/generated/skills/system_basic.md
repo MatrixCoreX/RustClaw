@@ -39,6 +39,7 @@
 - `validate_structured`
 - `find_path`
 - `read_range`
+- `read_artifact_range`
 - `compare_paths`
 - `path_batch_facts`
 - `diagnose_runtime`
@@ -103,6 +104,9 @@
 | `read_range` | `max_line_chars` | no | integer | `800` | Per-line character preview cap, clamped to `80..4000`. |
 | `read_range` | `raw` | no | bool | `false` | Disable the safety compaction applied to recognized internal model-I/O log records. |
 | `read_range` | `field_selector` | no | string | - | Use machine token `title` to project the first markdown/document heading into `field_value`. Prefer the virtual `fs_basic.read_text_range` contract for new plans. |
+| `read_artifact_range` | `path` | yes | string(path) | - | Runtime-owned regular file below `<workspace>/.rustclaw/artifacts`; paths outside that root are rejected. Prefer planner capability `artifact.read_range`. |
+| `read_artifact_range` | `start_byte` / `cursor` | no | integer | `0` | Exact byte offset for the requested page. |
+| `read_artifact_range` | `max_bytes` | no | integer | `65536` | Page size clamped to `256..1048576`; UTF-8 pages stop at a character boundary and binary pages return base64. |
 | `compare_paths` | `left_path` | yes | string(path) | - | First path to compare. |
 | `compare_paths` | `right_path` | yes | string(path) | - | Second path to compare. |
 | `path_batch_facts` | `paths` | yes | string[]/string | - | Explicit paths to inspect in batch. |
@@ -123,6 +127,7 @@
 - `dir_compare` requires both target paths to be directories and reports summary diffs instead of a full recursive listing.
 - `read_range` and `compare_paths` return explicit read/metadata errors for missing or unreadable target paths.
 - `read_range` accepts UTF-8 and UTF-8 with BOM. Binary/NUL or invalid UTF-8 input returns `error_kind=unsupported_encoding` plus `error_code=unsupported_text_encoding`; files beyond the bounded scan limit return `error_kind=file_too_large` plus `requires_artifact_read=true`.
+- `read_artifact_range` accepts only canonical regular files below the workspace artifact root and returns exact byte-page metadata, full-file SHA-256, UTF-8 or base64 content, and a continuation cursor.
 - `tree_summary` intentionally truncates deep/wide trees and reports truncation metadata instead of dumping the full directory. Success output includes `summary_rows` mirrored as `results` and `candidates`; each directory row carries machine fields such as `path`, `name`, `file_count`, `dir_count`, `child_count`, `omitted_children`, and `truncated`.
 - Runtime data collection should degrade gracefully where possible (for example, missing `/proc` fields produce fallback values instead of fabricated data).
 - Successful responses that already use JSON text are also mirrored into the optional `extra` field for machine-readable consumers.
@@ -153,6 +158,8 @@
   - `action`, `root`, `count`, and `results`; evidence roles `path`, `results`, and `count`.
 - `read_range` success `extra` fields:
   - `action`, `path`, `resolved_path`, `start_line`, `end_line`, `total_lines`, `line_count` (stable alias of total file lines), `returned_line_count`, `excerpt`, `excerpt_bytes`, `encoding`, `binary`, `size_bytes`, `sha256`, `content_hash`, `truncated`, `page`, and `line_safety`; optional `first_line` appears when the observed slice includes line 1, and selector projections remain optional; evidence roles `path`, `field_value`, and `count`.
+- `read_artifact_range` success `extra` fields:
+  - `action`, `path`, `resolved_path`, `artifact_root`, `content`, `encoding`, `binary`, `size_bytes`, `returned_bytes`, `sha256`, `content_hash`, `truncated`, and exact byte `page` metadata; evidence roles `path`, `field_value`, and `count`.
 - `compare_paths` success `extra` fields:
   - `left` and `right` structured path fact objects with `exists`, `kind`, `size`, and modified time fields.
   - `comparison` structured comparison fields such as `same_path`, `same_kind`, `same_name`, `same_size`, `size_delta_bytes`, `left_newer`, and `same_content`.

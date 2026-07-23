@@ -44,7 +44,7 @@ impl CommandOutputArtifactSummary {
                     "path": artifact.get("path")?.as_str()?,
                     "start_byte": 0,
                     "end_byte": artifact.pointer("/metadata/size_bytes")?.as_u64()?,
-                    "read_capability": "filesystem.read_text_range",
+                    "read_capability": "artifact.read_range",
                 }))
             })
             .collect::<Vec<_>>();

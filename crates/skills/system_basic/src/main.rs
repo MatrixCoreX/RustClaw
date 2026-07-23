@@ -10,11 +10,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+mod artifact_range;
 mod model_catalog_field_alias;
 mod path_helpers;
 mod platform_helpers;
 mod structured_helpers;
 
+use artifact_range::*;
 use model_catalog_field_alias::*;
 use path_helpers::*;
 use platform_helpers::*;
@@ -222,11 +224,12 @@ fn execute_action(
         }
         "find_path" => find_path(workspace_root, obj, allow_path_outside_workspace),
         "read_range" => read_range(workspace_root, obj, allow_path_outside_workspace),
+        "read_artifact_range" => read_artifact_range(workspace_root, obj),
         "compare_paths" => compare_paths(workspace_root, obj, allow_path_outside_workspace),
         "path_batch_facts" => path_batch_facts(workspace_root, obj, allow_path_outside_workspace),
         "diagnose_runtime" => diagnose_runtime(workspace_root, obj),
         other => Err(SkillError::unsupported_action(format!(
-            "unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime"
+            "unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|read_artifact_range|compare_paths|path_batch_facts|diagnose_runtime"
         ))),
     }
 }

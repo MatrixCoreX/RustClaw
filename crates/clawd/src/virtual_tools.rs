@@ -57,6 +57,7 @@ fn canonicalize_system_basic_call(args: Value) -> Option<VirtualToolCanonicalCal
         "inventory_dir" => ("fs_basic", "list_dir"),
         "count_inventory" => ("fs_basic", "count_entries"),
         "read_range" => ("fs_basic", "read_text_range"),
+        "read_artifact_range" => ("fs_basic", "read_artifact_range"),
         "compare_paths" => ("fs_basic", "compare_paths"),
         "find_path" => {
             move_value_alias_if_missing(&mut obj, "pattern", &["name"]);
@@ -203,6 +204,14 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             obj.insert(
                 "action".to_string(),
                 Value::String("read_range".to_string()),
+            );
+            Ok(rewrite_to("system_basic", obj))
+        }
+        "read_artifact_range" => {
+            move_value_alias_if_missing(&mut obj, "path", &["file", "file_path"]);
+            obj.insert(
+                "action".to_string(),
+                Value::String("read_artifact_range".to_string()),
             );
             Ok(rewrite_to("system_basic", obj))
         }
