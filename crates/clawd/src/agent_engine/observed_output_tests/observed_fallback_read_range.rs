@@ -147,6 +147,52 @@ fn observed_answer_language_compatibility_accepts_language_neutral_machine_field
 }
 
 #[test]
+fn observed_answer_language_compatibility_accepts_machine_fields_with_observed_content() {
+    let english_content =
+        "path: /home/guagua/rustclaw/README.md\nline_count: 1432\nfirst_line: # RustClaw";
+    let multilingual_content =
+        "path=/tmp/notes.md\nline_count=12\nfirst_line=服务状态已恢复";
+
+    assert!(observed_answer_language_compatible(
+        english_content,
+        "zh-CN"
+    ));
+    assert!(observed_answer_language_compatible(
+        multilingual_content,
+        "en"
+    ));
+    assert!(!observed_answer_language_compatible(
+        "status=ok\nexplanation=task completed\nnext_step=please retry",
+        "zh-CN"
+    ));
+}
+
+#[test]
+fn read_range_observation_preserves_bounded_machine_metadata() {
+    let value = serde_json::json!({
+        "action": "read_range",
+        "path": "/tmp/README.md",
+        "resolved_path": "/tmp/README.md",
+        "mode": "head",
+        "requested_n": 1,
+        "start_line": 1,
+        "end_line": 1,
+        "line_count": 1432,
+        "excerpt": "1|# RustClaw"
+    });
+
+    let observation = read_range_observed_candidate(&value).expect("read range observation");
+
+    assert!(observation.contains("path=/tmp/README.md"));
+    assert!(observation.contains("line_count=1432"));
+    assert!(observation.contains("start_line=1"));
+    assert!(observation.contains("end_line=1"));
+    assert!(observation.contains("requested_n=1"));
+    assert!(observation.contains("mode=head"));
+    assert!(observation.ends_with("\n# RustClaw"));
+}
+
+#[test]
 fn observed_answer_language_compatibility_accepts_markdown_machine_field_reports() {
     let inline = "`printf T2_JA_A`: decision=require_confirmation, risk_level=high, confirmation_required=true\n\
                   `printf T2_JA_B`: decision=require_confirmation, risk_level=high, confirmation_required=true";

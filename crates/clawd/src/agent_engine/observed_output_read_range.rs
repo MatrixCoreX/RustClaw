@@ -87,8 +87,29 @@ pub(super) fn read_range_observed_candidate(value: &serde_json::Value) -> Option
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| !v.is_empty());
-    Some(match path {
-        Some(path) => format!("read_range path={path}\n{excerpt}"),
-        None => excerpt,
-    })
+    let mut metadata = vec!["read_range".to_string()];
+    if let Some(path) = path {
+        metadata.push(format!("path={path}"));
+    }
+    if let Some(line_count) = value
+        .get("line_count")
+        .or_else(|| value.get("total_lines"))
+        .and_then(|v| v.as_u64())
+    {
+        metadata.push(format!("line_count={line_count}"));
+    }
+    for key in ["start_line", "end_line", "requested_n"] {
+        if let Some(number) = value.get(key).and_then(|v| v.as_u64()) {
+            metadata.push(format!("{key}={number}"));
+        }
+    }
+    if let Some(mode) = value
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        metadata.push(format!("mode={mode}"));
+    }
+    Some(format!("{}\n{excerpt}", metadata.join(" ")))
 }
