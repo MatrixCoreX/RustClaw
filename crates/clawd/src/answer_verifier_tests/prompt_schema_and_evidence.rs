@@ -388,3 +388,58 @@ fn execution_evidence_prompt_includes_compact_numeric_evidence() {
     assert!(block.contains("57264444014"));
     assert!(!block.contains("\"output_excerpt\""));
 }
+
+#[test]
+fn execution_evidence_prompt_preserves_exact_capability_machine_facts() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-provider-safe-capability-result",
+        "ask",
+        "perform a workspace mutation and report its verification",
+    );
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            r#"{"action":"remove","workspace_mutation":"sha256:092ebc56...(truncated)"}"#
+                .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.capability_results.push(
+        claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "filesystem.remove",
+            Some("remove".to_string()),
+            json!({
+                "workspace_mutation": "sha256:092ebc56d24bab12311379bae3603262954ca66aa0406f43ac5c33baeacd2c00",
+                "checkpoint": "mutation_7dc8f398aa9d42bba4ed0ae48ad9d8a4",
+                "api_key": "secret-value-that-must-not-reach-the-verifier"
+            }),
+        ),
+    );
+
+    let block = execution_evidence_prompt_block(&journal);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&block).expect("verifier evidence block must remain valid JSON");
+
+    assert!(parsed.get("step_evidence").is_some(), "block: {block}");
+    assert!(
+        parsed.get("capability_result_evidence").is_some(),
+        "block: {block}"
+    );
+    assert!(
+        block.contains("sha256:092ebc56d24bab12311379bae3603262954ca66aa0406f43ac5c33baeacd2c00"),
+        "block: {block}"
+    );
+    assert!(
+        block.contains("mutation_7dc8f398aa9d42bba4ed0ae48ad9d8a4"),
+        "block: {block}"
+    );
+    assert!(
+        !block.contains("secret-value-that-must-not-reach-the-verifier"),
+        "block: {block}"
+    );
+    assert!(block.contains("[REDACTED]"), "block: {block}");
+}
