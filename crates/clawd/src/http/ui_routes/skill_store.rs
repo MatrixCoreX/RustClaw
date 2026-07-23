@@ -52,9 +52,7 @@ fn render_skill_store_config(
 }
 
 fn skill_store_item_is_locked(state: &AppState, skill_name: &str) -> bool {
-    claw_core::config::core_skills_always_enabled()
-        .iter()
-        .any(|name| state.resolve_canonical_skill_name(name) == skill_name)
+    state.skill_is_fixed_on(skill_name)
         || state
             .get_skills_registry()
             .and_then(|registry| registry.planner_kind(skill_name))
@@ -70,9 +68,7 @@ fn skill_store_item_belongs_to_other_group(state: &AppState, skill_name: &str) -
     {
         return true;
     }
-    let is_base_skill = claw_core::config::base_skill_names()
-        .iter()
-        .any(|name| state.resolve_canonical_skill_name(name) == skill_name);
+    let is_base_skill = state.skill_is_fixed_on(skill_name);
     let is_media_skill = skill_name.starts_with("image_")
         || skill_name.starts_with("audio_")
         || skill_name.starts_with("video_")

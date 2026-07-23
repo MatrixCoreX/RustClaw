@@ -6,35 +6,13 @@ pub(super) fn default_skill_max_concurrency() -> usize {
     1
 }
 
-/// UI 中归类为「基础技能」并默认固定开启：文件基础能力 + 系统维护基础能力。
+/// No-registry compatibility fallback for operator-facing fixed-on skills.
 pub fn base_skill_names() -> &'static [&'static str] {
-    &[
-        "run_cmd",
-        "code_index",
-        "fs_basic",
-        "config_basic",
-        "config_edit",
-        "read_file",
-        "write_file",
-        "list_dir",
-        "make_dir",
-        "remove_file",
-        "schedule",
-        "subagent",
-        "extension_manager",
-        "kb",
-        "rss_fetch",
-        "system_basic",
-        "process_basic",
-        "config_guard",
-        "fs_search",
-        "git_basic",
-        "service_control",
-        "archive_basic",
-    ]
+    core_skills_always_enabled()
 }
 
-/// UI 保存技能开关时强制保持开启的技能；手工编辑 config.toml 仍遵守「false = 强制关闭」契约。
+/// No-registry compatibility fallback. New policy belongs in
+/// `skills_registry.toml` through `fixed_on = true`.
 pub fn core_skills_always_enabled() -> &'static [&'static str] {
     &[
         "run_cmd",

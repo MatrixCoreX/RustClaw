@@ -305,6 +305,9 @@ export interface SkillListItem {
   retryable?: boolean | null;
   output_kind?: string | null;
   enabled?: boolean | null;
+  fixed_on?: boolean | null;
+  initial_core?: boolean | null;
+  deferred?: boolean | null;
   runtime_available?: boolean | null;
   unavailable_reason?: string | null;
   current_os?: string | null;
@@ -347,6 +350,12 @@ export interface SkillsConfigResponse {
   base_skill_names?: string[];
   /** UI 保存时强制保持开启的技能；用于把开关按钮显示为不可关闭 */
   core_skill_names?: string[];
+  /** Registry-owned fixed-on skills. This supersedes the compatibility core list. */
+  fixed_on_skill_names?: string[];
+  /** Skills whose capability groups are present on the initial planner surface. */
+  initial_core_skill_names?: string[];
+  /** Planner-visible skills loaded only when the model requests their exact group. */
+  deferred_skill_names?: string[];
   /** planner_kind=tool 的底层工具能力；UI 归到工具分组并固定开启 */
   tool_skill_names?: string[];
   /** 后端判定的 UI 锁定名单，保存时也会被强制保持开启 */

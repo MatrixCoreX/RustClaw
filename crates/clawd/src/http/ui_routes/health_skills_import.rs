@@ -459,6 +459,13 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
             .as_ref()
             .map(|entry| output_kind_token(entry.output_kind).to_string()),
         enabled: Some(enabled),
+        fixed_on: registry_entry.as_ref().map(|entry| entry.fixed_on),
+        initial_core: registry_entry
+            .as_ref()
+            .map(|entry| entry.planner_visible && entry.planner_eager_load),
+        deferred: registry_entry
+            .as_ref()
+            .map(|entry| entry.planner_visible && !entry.planner_eager_load),
         runtime_available,
         unavailable_reason,
         current_os: availability.as_ref().map(|item| item.current_os.clone()),

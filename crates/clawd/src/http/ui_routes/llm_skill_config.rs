@@ -338,10 +338,7 @@ fn compute_effective_enabled(
         }
     }
     for skill in uninstalled {
-        if !claw_core::config::core_skills_always_enabled()
-            .iter()
-            .any(|name| state.resolve_canonical_skill_name(name) == *skill)
-        {
+        if !state.skill_is_fixed_on(skill) {
             set.remove(skill);
         }
     }
@@ -546,15 +543,19 @@ async fn get_skills_config(
     let mut effective = compute_effective_enabled(&baseline, &switches, &uninstalled, &state);
     effective.retain(|s| !hide_skill_in_ui(&state, s));
     let restart_required = skills_restart_required(&runtime_visible, &effective);
-    let base_skill_names: Vec<String> = claw_core::config::base_skill_names()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let core_skill_names: Vec<String> = claw_core::config::core_skills_always_enabled()
-        .iter()
-        .filter(|s| !hide_skill_in_ui(&state, s))
-        .map(|s| s.to_string())
-        .collect();
+    let mut fixed_on_skill_names = state
+        .fixed_on_skill_names()
+        .into_iter()
+        .filter(|name| !hide_skill_in_ui(&state, name))
+        .collect::<Vec<_>>();
+    fixed_on_skill_names.sort_unstable();
+    let base_skill_names = fixed_on_skill_names.clone();
+    let core_skill_names = fixed_on_skill_names.clone();
+    let (initial_core_skill_names, deferred_skill_names) = state
+        .get_skills_registry()
+        .as_ref()
+        .map(|registry| (registry.initial_core_names(), registry.deferred_names()))
+        .unwrap_or_default();
     let tool_skill_names = registry_tool_capability_names(&state);
     let locked_skill_names = {
         let mut set = BTreeSet::new();
@@ -600,6 +601,9 @@ async fn get_skills_config(
                 "managed_skills": managed,
                 "base_skill_names": base_skill_names,
                 "core_skill_names": core_skill_names,
+                "fixed_on_skill_names": fixed_on_skill_names,
+                "initial_core_skill_names": initial_core_skill_names,
+                "deferred_skill_names": deferred_skill_names,
                 "tool_skill_names": tool_skill_names,
                 "locked_skill_names": locked_skill_names,
                 "external_skill_names": external_skill_names,
@@ -975,7 +979,10 @@ async fn update_skills_config(
     };
     let baseline = collect_skills_baseline(&parsed, &state);
     let uninstalled = collect_uninstalled_skills(&parsed, &state);
-    let core_skills = claw_core::config::core_skills_always_enabled();
+    let fixed_on_skills = state
+        .fixed_on_skill_names()
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let tool_skill_names = registry_tool_capability_names(&state)
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -985,7 +992,7 @@ async fn update_skills_config(
         if skill.is_empty() || hide_skill_in_ui(&state, &skill) {
             continue;
         }
-        let is_core = core_skills.iter().any(|s| *s == skill);
+        let is_core = fixed_on_skills.contains(&skill);
         let is_tool = tool_skill_names.contains(&skill);
         switches.insert(skill, if is_core || is_tool { true } else { v });
     }

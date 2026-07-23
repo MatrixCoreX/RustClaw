@@ -1176,6 +1176,12 @@ struct SkillListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    fixed_on: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    initial_core: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deferred: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     runtime_available: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     unavailable_reason: Option<String>,

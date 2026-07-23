@@ -67,6 +67,41 @@ kind = "runner"
 }
 
 #[test]
+fn registry_projects_fixed_and_initial_core_policy_separately() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "run_cmd"
+fixed_on = true
+planner_eager_load = true
+
+[[skills]]
+name = "schedule"
+fixed_on = true
+planner_eager_load = false
+
+[[skills]]
+name = "weather"
+fixed_on = false
+planner_eager_load = false
+"#,
+    )
+    .expect("registry");
+
+    assert_eq!(
+        registry.fixed_on_names(),
+        vec!["run_cmd".to_string(), "schedule".to_string()]
+    );
+    assert_eq!(registry.initial_core_names(), vec!["run_cmd".to_string()]);
+    assert_eq!(
+        registry.deferred_names(),
+        vec!["schedule".to_string(), "weather".to_string()]
+    );
+    assert!(registry.is_fixed_on("schedule"));
+    assert!(!registry.is_fixed_on("weather"));
+}
+
+#[test]
 fn config_guard_ownership_leads_the_compact_registry_description() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
     let registry = SkillsRegistry::load_from_path(&path).expect("load workspace registry");

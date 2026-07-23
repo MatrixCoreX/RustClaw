@@ -436,6 +436,12 @@ pub struct SkillRegistryEntry {
     pub name: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Keep this installed skill enabled in operator-facing configuration.
+    /// An explicit `skill_switches.<name> = false` remains an emergency
+    /// operator override; this flag primarily owns UI locking and the default
+    /// runtime floor.
+    #[serde(default)]
+    pub fixed_on: bool,
     #[serde(default = "default_true")]
     pub planner_visible: bool,
     /// Keep this skill's native capability group in the initial planner tool
@@ -1170,6 +1176,43 @@ impl SkillsRegistry {
         self.get(canonical_name)
             .map(|entry| entry.planner_visible)
             .unwrap_or(true)
+    }
+
+    pub fn fixed_on_names(&self) -> Vec<String> {
+        let mut names = self
+            .by_name
+            .iter()
+            .filter(|(_, entry)| entry.fixed_on)
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        names
+    }
+
+    pub fn is_fixed_on(&self, canonical_name: &str) -> bool {
+        self.get(canonical_name).is_some_and(|entry| entry.fixed_on)
+    }
+
+    pub fn initial_core_names(&self) -> Vec<String> {
+        let mut names = self
+            .by_name
+            .iter()
+            .filter(|(_, entry)| entry.planner_visible && entry.planner_eager_load)
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        names
+    }
+
+    pub fn deferred_names(&self) -> Vec<String> {
+        let mut names = self
+            .by_name
+            .iter()
+            .filter(|(_, entry)| entry.planner_visible && !entry.planner_eager_load)
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        names
     }
 
     /// 该技能在 registry 中配置的 timeout（秒）；0 表示用全局默认
