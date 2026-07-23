@@ -30,6 +30,43 @@ fn successful_result_wraps_json_and_extra_as_untrusted_data() {
 }
 
 #[test]
+fn successful_result_promotes_generic_page_retry_and_verification_metadata() {
+    let extra = json!({
+        "action": "grep_text",
+        "page": {
+            "cursor": 20,
+            "next_cursor": 40,
+            "snapshot_sha256": "abc123"
+        },
+        "truncated": true,
+        "retryable": true,
+        "retry_class": "transient_io",
+        "retry_after_ms": 250,
+        "effect": "observe",
+        "verification": {"status": "passed"}
+    });
+    let envelope = super::successful_execution_envelope(
+        "fs_basic",
+        "step_page",
+        &json!({"action": "grep_text"}),
+        "bounded output",
+        Some(&extra),
+    );
+
+    envelope.validate().unwrap();
+    assert_eq!(envelope.page.as_ref().unwrap()["cursor"], 20);
+    assert!(envelope.truncated);
+    assert_eq!(envelope.provenance["source"], "runtime_step");
+    assert_eq!(
+        envelope.retry.as_ref().unwrap().class.as_deref(),
+        Some("transient_io")
+    );
+    assert_eq!(envelope.retry.as_ref().unwrap().after_ms, Some(250));
+    assert_eq!(envelope.effect.as_deref(), Some("observe"));
+    assert_eq!(envelope.verification["status"], "passed");
+}
+
+#[test]
 fn weather_result_preserves_structured_fields_for_generic_synthesis() {
     let output = json!({
         "text": "provider-localized fallback",

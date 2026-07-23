@@ -132,6 +132,16 @@ pub struct StructuredError {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RetryDirective {
+    #[serde(default)]
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityResultEnvelope {
     pub schema_version: u16,
     pub status: CapabilityResultStatus,
@@ -142,6 +152,18 @@ pub struct CapabilityResultEnvelope {
     pub data: JsonValue,
     #[serde(default)]
     pub artifacts: Vec<ArtifactRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<JsonValue>,
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default = "empty_object")]
+    pub provenance: JsonValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<RetryDirective>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect: Option<String>,
+    #[serde(default = "empty_object")]
+    pub verification: JsonValue,
     #[serde(default)]
     pub evidence: Vec<EvidenceRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,6 +183,12 @@ impl CapabilityResultEnvelope {
             action,
             data,
             artifacts: Vec::new(),
+            page: None,
+            truncated: false,
+            provenance: empty_object(),
+            retry: None,
+            effect: None,
+            verification: empty_object(),
             evidence: Vec::new(),
             error: None,
             continuation: None,
@@ -180,6 +208,16 @@ impl CapabilityResultEnvelope {
             action,
             data: JsonValue::Object(JsonMap::new()),
             artifacts: Vec::new(),
+            page: None,
+            truncated: false,
+            provenance: empty_object(),
+            retry: Some(RetryDirective {
+                retryable: error.retryable,
+                class: None,
+                after_ms: None,
+            }),
+            effect: None,
+            verification: empty_object(),
             evidence: Vec::new(),
             error: Some(error),
             continuation: None,
@@ -248,6 +286,30 @@ impl CapabilityResultEnvelope {
                 return Err(CapabilityResultValidationError::UnaddressableArtifact);
             }
         }
+        if self.page.as_ref().is_some_and(|page| !page.is_object()) {
+            return Err(CapabilityResultValidationError::InvalidPage);
+        }
+        if !self.provenance.is_object() {
+            return Err(CapabilityResultValidationError::InvalidProvenance);
+        }
+        if self
+            .retry
+            .as_ref()
+            .and_then(|retry| retry.class.as_deref())
+            .is_some_and(|class| !is_machine_ref(class))
+        {
+            return Err(CapabilityResultValidationError::InvalidRetryClass);
+        }
+        if self
+            .effect
+            .as_deref()
+            .is_some_and(|effect| !is_machine_ref(effect))
+        {
+            return Err(CapabilityResultValidationError::InvalidEffect);
+        }
+        if !self.verification.is_object() {
+            return Err(CapabilityResultValidationError::InvalidVerification);
+        }
         if !self.delivery.constraints.is_object() {
             return Err(CapabilityResultValidationError::InvalidDeliveryConstraints);
         }
@@ -279,8 +341,22 @@ pub enum CapabilityResultValidationError {
     DuplicateEvidenceRef,
     #[error("capability_result_artifact_unaddressable")]
     UnaddressableArtifact,
+    #[error("capability_result_page_invalid")]
+    InvalidPage,
+    #[error("capability_result_provenance_invalid")]
+    InvalidProvenance,
+    #[error("capability_result_retry_class_invalid")]
+    InvalidRetryClass,
+    #[error("capability_result_effect_invalid")]
+    InvalidEffect,
+    #[error("capability_result_verification_invalid")]
+    InvalidVerification,
     #[error("capability_result_delivery_constraints_invalid")]
     InvalidDeliveryConstraints,
+}
+
+fn empty_object() -> JsonValue {
+    JsonValue::Object(JsonMap::new())
 }
 
 pub fn is_machine_ref(value: &str) -> bool {
