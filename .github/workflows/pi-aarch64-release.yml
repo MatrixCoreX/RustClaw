@@ -10,7 +10,7 @@ name: Build Pi aarch64 Release
       prerelease:
         description: "Mark the GitHub Release as a prerelease."
         required: true
-        default: true
+        default: false
         type: boolean
   push:
     tags:
@@ -51,9 +51,9 @@ jobs:
             exit 1
           fi
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            prerelease="${INPUT_PRERELEASE:-true}"
+            prerelease="${INPUT_PRERELEASE:-false}"
           else
-            prerelease="true"
+            prerelease="false"
           fi
 
           case "${release_tag}" in
@@ -189,3 +189,12 @@ jobs:
               --notes-file release-notes.md \
               "${release_flags[@]}"
           fi
+
+      - name: Delete older Pi aarch64 releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ./scripts/cleanup-platform-releases.sh "pi-aarch64-"

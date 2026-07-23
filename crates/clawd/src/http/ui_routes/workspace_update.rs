@@ -1021,6 +1021,8 @@ with urllib.request.urlopen(req, timeout=30) as resp:
     releases = json.load(resp)
 
 for release in releases:
+    if release.get("draft") or release.get("prerelease"):
+        continue
     tag = str(release.get("tag_name") or "")
     if not tag.startswith(release_prefix):
         continue
@@ -1131,14 +1133,19 @@ if [[ -d "$package_dir/services/wa-web-bridge" ]]; then
   cp -a "$package_dir/services/wa-web-bridge" services/wa-web-bridge
 fi
 
-for file in README.md rustclaw install-rustclaw-cmd.sh start-all.sh start-all-bin.sh stop-rustclaw.sh; do
+for file in README.md rustclaw install-rustclaw-cmd.sh build-ui-nginx.sh start-all.sh start-all-bin.sh stop-rustclaw.sh; do
   if [[ -e "$package_dir/$file" ]]; then
     echo "deploying_file=$file"
     cp -a "$package_dir/$file" "$file"
   fi
 done
 
-chmod +x rustclaw install-rustclaw-cmd.sh start-all.sh start-all-bin.sh stop-rustclaw.sh 2>/dev/null || true
+chmod +x rustclaw install-rustclaw-cmd.sh build-ui-nginx.sh start-all.sh start-all-bin.sh stop-rustclaw.sh 2>/dev/null || true
+
+if [[ -x "./build-ui-nginx.sh" && -d "UI/dist" ]]; then
+  echo "deploying_existing_nginx_ui"
+  ./build-ui-nginx.sh --copy-if-configured
+fi
 
 echo "preserved_runtime_dirs=configs,data,logs,.pids"
 echo "deployed_release_tag=$TAG"

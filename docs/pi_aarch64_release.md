@@ -5,10 +5,16 @@ the Pi does not need to run `cargo build`.
 
 ## Build And Publish
 
-1. Open GitHub Actions.
-2. Run `Build Pi aarch64 Release`.
-3. Optional: set a release tag such as `pi-aarch64-20260621`.
-4. Keep `prerelease` enabled for test packages.
+Preferred release command:
+
+```bash
+./release-latest.sh --platform pi
+```
+
+It creates and pushes the next `pi-aarch64-YYYYMMDD[-N]` tag. The tag triggers
+`Build Pi aarch64 Release` and publishes a normal GitHub Release. The workflow
+can also be started manually; set `prerelease=true` only for a package that
+must not become the normal update source.
 
 The workflow builds:
 
@@ -20,6 +26,10 @@ The workflow builds:
 
 The archive is uploaded both as a workflow artifact and as a GitHub Release
 asset.
+
+After a successful publish, the workflow automatically keeps the newest
+`pi-aarch64-*` Release and deletes older Pi Releases and their associated tags.
+Ubuntu x86_64 Releases use a separate prefix and are not deleted.
 
 ## Pi Update Notes
 
@@ -37,3 +47,8 @@ defaults.
 After replacing files, restart the needed services. For a backend-only update,
 restart `clawd`; for a full runtime update, restart the selected channel
 adapters too.
+
+The admin Release update path verifies the checksum, preserves runtime
+directories, replaces prebuilt files, and restarts `clawd`. If an existing
+RustClaw nginx site is configured, packaged `UI/dist` is copied without a local
+UI build. A local Pi install without nginx is not configured for nginx.

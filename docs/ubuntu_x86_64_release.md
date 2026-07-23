@@ -5,10 +5,16 @@ Actions. This package is for regular 64-bit Ubuntu servers and PCs.
 
 ## Build And Publish
 
-1. Open GitHub Actions.
-2. Run `Build Ubuntu x86_64 Release`.
-3. Optional: set a release tag such as `ubuntu-x86_64-20260621`.
-4. Keep `prerelease` enabled for test packages.
+Preferred release command:
+
+```bash
+./release-latest.sh --platform ubuntu
+```
+
+It creates and pushes the next `ubuntu-x86_64-YYYYMMDD[-N]` tag. The tag
+triggers `Build Ubuntu x86_64 Release` and publishes a normal GitHub Release.
+The workflow can also be started manually; set `prerelease=true` only for a
+package that must not become the normal update source.
 
 The workflow builds:
 
@@ -20,6 +26,10 @@ The workflow builds:
 
 The archive is uploaded both as a workflow artifact and as a GitHub Release
 asset.
+
+After a successful publish, the workflow automatically keeps the newest
+`ubuntu-x86_64-*` Release and deletes older Ubuntu Releases and their associated
+tags. Raspberry Pi Releases use a separate prefix and are not deleted.
 
 ## Update Notes
 
@@ -33,3 +43,8 @@ When updating an existing install, keep runtime state:
 Use the package as a source of updated binaries, scripts, prompts, migrations,
 and `UI/dist`. Do not overwrite live secrets or channel settings with packaged
 defaults.
+
+The admin Release update path verifies the checksum, preserves runtime
+directories, replaces prebuilt files, and restarts `clawd`. If the host already
+has a RustClaw nginx site, it copies the packaged `UI/dist` into that site
+without rebuilding. A local install with no nginx site remains nginx-free.
