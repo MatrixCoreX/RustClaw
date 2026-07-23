@@ -47,6 +47,10 @@ and the resolver maps it to the current tool or skill implementation.
 semantic router. Recoverable errors return to the same loop as structured
 `RepairEnvelope` observations. `BudgetDecision` separately controls whether a
 healthy loop continues, checkpoints, waits for the user, finishes, or stops.
+The terminal `respond` contract supports model-authored free text, exact lists,
+and exact named-field objects whose JSON values are validated before the
+runtime materializes the payload. This preserves strict machine delivery
+without introducing localized runtime reply templates.
 
 `kind=run_skill` is intentionally separate. The caller supplies the exact skill
 and arguments, so the direct path bypasses planner selection and agent-loop

@@ -134,6 +134,7 @@ flowchart TD
 - `TurnBoundaryEnvelope`：根据已认证 task/session 状态、附件、显式 API 字段、locator 和 policy profile 确定性构建。它只是 planner 上下文，不是语义 route 结果。
 - `Planner prompt`：是普通 `ask` 的第一次语义 LLM 调用。resume 和 async-poll executor 可以恢复已经准入的机器 checkpoint，但不能引入新的 planner 前语义决策路径。
 - `call_capability`：推荐的 planner action，把 tool/skill 选择放到 registry metadata 与 resolver policy 后面。
+- `respond`：原生终止 action。普通回答使用模型生成的 `free_text`；严格列表使用 item 数组和精确计数；要求精确命名字段或 JSON 时，使用包含唯一字段名与已校验 JSON 值的 `object` 形态。Runtime 只物化 list/object 机器 payload，不解析多语言用户文本，也不追加固定 prose；单个标量、标识符、标题、token 或路径仍使用 `free_text`。
 - `Generated INTERFACE prompts`：来自 `crates/skills/*/INTERFACE.md`、`optional_skills/*/INTERFACE.md`、`external_skills/*/INTERFACE.md` 和 `prompts/layers/generated/skills/*`；新增技能应改这些契约，不改 `clawd` 主流程分支。
 - `Exact machine output`：planner 使用 `response_shape=strict` 和经过验证的 `structured_field_selector`（例如 `command_output`）提出精确输出要求；runtime 只从 `CapabilityResultEnvelope` 投影该字段。自由回答和一句话回答继续由模型合成。
 - `PlanVerifier`：执行前阻断不可用能力、缺必填字段、不安全 mutation，以及不符合输出/证据形状的计划。拒绝路径应携带稳定机器字段，不写固定用户可见回复模板。

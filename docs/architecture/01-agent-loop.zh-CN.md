@@ -40,4 +40,8 @@ flowchart TD
 
 优先使用 `call_capability`，让 planner 选择稳定能力，再由 resolver 映射到当前 tool 或 skill。`PlanVerifier` 只校验机器合同与策略，不承担第二层语义路由。可恢复错误通过结构化 `RepairEnvelope` 作为 observation 返回同一循环；`BudgetDecision` 则独立决定健康循环应该继续、建立 checkpoint、等待用户、完成还是终止。
 
+终止 `respond` 合同支持模型生成的自由文本、精确列表，以及由 runtime 在物化前
+校验 JSON 值的精确命名字段对象。这样既保留严格机器交付，也不需要在 runtime
+维护多语言固定回复模板。
+
 `kind=run_skill` 是明确分开的 API 路径。调用方已经给出技能与参数，因此该路径绕过 planner 选择和 agent loop 轮次决策，但继续使用鉴权、权限与变更检查、任务持久化、生命周期控制和共享技能协议。
