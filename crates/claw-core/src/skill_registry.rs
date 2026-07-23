@@ -727,9 +727,9 @@ fn normalize_planner_capabilities(
             credential_access: mapping
                 .credential_access
                 .or_else(|| mapping.effect.map(|_| false)),
-            subprocess: mapping.subprocess,
-            package_install: mapping.package_install,
-            privilege_escalation: mapping.privilege_escalation,
+            subprocess: mapping.subprocess.or(Some(false)),
+            package_install: mapping.package_install.or(Some(false)),
+            privilege_escalation: mapping.privilege_escalation.or(Some(false)),
             final_answer_shape: trim_optional_string(mapping.final_answer_shape.as_deref())
                 .map(|value| normalize_schema_token(&value)),
         });

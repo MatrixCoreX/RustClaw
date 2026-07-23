@@ -582,6 +582,9 @@ planner_capabilities = [
     assert_eq!(caps[0].filesystem_write, Some(false));
     assert_eq!(caps[0].external_publish, Some(false));
     assert_eq!(caps[0].credential_access, Some(false));
+    assert_eq!(caps[0].subprocess, Some(false));
+    assert_eq!(caps[0].package_install, Some(false));
+    assert_eq!(caps[0].privilege_escalation, Some(false));
     assert_eq!(
         caps[1].isolation_profile,
         Some(CapabilityIsolationProfile::LocalCurrentWorkspace)
@@ -589,6 +592,9 @@ planner_capabilities = [
     assert_eq!(caps[1].network_access, Some(false));
     assert_eq!(caps[1].filesystem_write, Some(true));
     assert_eq!(caps[1].external_publish, Some(false));
+    assert_eq!(caps[1].subprocess, Some(false));
+    assert_eq!(caps[1].package_install, Some(false));
+    assert_eq!(caps[1].privilege_escalation, Some(false));
     assert_eq!(
         caps[2].isolation_profile,
         Some(CapabilityIsolationProfile::RemoteExecutor)
@@ -596,6 +602,9 @@ planner_capabilities = [
     assert_eq!(caps[2].network_access, Some(true));
     assert_eq!(caps[2].filesystem_write, Some(false));
     assert_eq!(caps[2].external_publish, Some(true));
+    assert_eq!(caps[2].subprocess, Some(false));
+    assert_eq!(caps[2].package_install, Some(false));
+    assert_eq!(caps[2].privilege_escalation, Some(false));
 
     let _ = std::fs::remove_file(path);
 }

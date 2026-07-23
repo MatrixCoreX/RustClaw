@@ -2,6 +2,7 @@ use serde_json::{json, Value};
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::{
@@ -57,25 +58,37 @@ use skill_execution_subagent::{record_subagent_hook_stage, record_subagent_step_
 
 async fn run_with_tool_budget_timeout<F>(
     tool_timeout: Option<(u64, &'static str)>,
+    cancellation: Option<CancellationToken>,
     execute: F,
 ) -> Result<String, String>
 where
     F: Future<Output = Result<String, String>>,
 {
-    let Some((timeout_seconds, timeout_class)) = tool_timeout else {
-        return execute.await;
+    let bounded_execute = async move {
+        let Some((timeout_seconds, timeout_class)) = tool_timeout else {
+            return execute.await;
+        };
+        match tokio::time::timeout(Duration::from_secs(timeout_seconds), execute).await {
+            Ok(result) => result,
+            Err(_) => Err(json!({
+                "schema_version": 1,
+                "status_code": "agent_tool_timeout",
+                "error_code": "agent_tool_timeout",
+                "timeout_class": timeout_class,
+                "timeout_seconds": timeout_seconds,
+                "resumable": false,
+            })
+            .to_string()),
+        }
     };
-    match tokio::time::timeout(Duration::from_secs(timeout_seconds), execute).await {
-        Ok(result) => result,
-        Err(_) => Err(json!({
-            "schema_version": 1,
-            "status_code": "agent_tool_timeout",
-            "error_code": "agent_tool_timeout",
-            "timeout_class": timeout_class,
-            "timeout_seconds": timeout_seconds,
-            "resumable": false,
-        })
-        .to_string()),
+    if let Some(cancellation) = cancellation {
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(TASK_CANCELED_ERR.to_string()),
+            result = bounded_execute => result,
+        }
+    } else {
+        bounded_execute.await
     }
 }
 
@@ -1167,6 +1180,7 @@ pub(super) async fn execute_prepared_skill_action(
             slice.tool_timeout_class.as_str(),
         )
     });
+    let tool_cancellation = state.worker.task_cancellation_token(&task.task_id);
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || {
             let structured_validation_slot = Arc::clone(&structured_validation_slot);
@@ -1199,7 +1213,9 @@ pub(super) async fn execute_prepared_skill_action(
                 }
                 Ok(outcome.text)
             };
-            async move { run_with_tool_budget_timeout(tool_timeout, execute).await }
+            async move {
+                run_with_tool_budget_timeout(tool_timeout, tool_cancellation, execute).await
+            }
         })
         .await;
     invalidate_latest_validation_after_mutation_attempt(loop_state, raw_action_effect);

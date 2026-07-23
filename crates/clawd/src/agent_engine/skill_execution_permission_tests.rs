@@ -15,8 +15,9 @@ planner_kind = "tool"
 risk_level = "high"
 requires_confirmation = true
 side_effect = true
+timeout_seconds = 60
 planner_capabilities = [
-  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true },
 ]
 "#,
         &["run_cmd"],
@@ -97,6 +98,50 @@ planner_capabilities = [
             .pointer("/capability_policy/credential_access")
             .and_then(serde_json::Value::as_bool),
         Some(false)
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/execution_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("async_preferred")
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/timeout_class")
+            .and_then(serde_json::Value::as_str),
+        Some("long_tail")
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/timeout_seconds")
+            .and_then(serde_json::Value::as_u64),
+        Some(60)
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/cancellation_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("task_token_and_async_adapter")
+    );
+    assert_eq!(
+        permission.pointer("/capability_policy/permission_scopes"),
+        Some(&serde_json::json!([
+            "network",
+            "external_publish",
+            "subprocess"
+        ]))
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/evidence_contract")
+            .and_then(serde_json::Value::as_str),
+        Some("capability_result_envelope_v1")
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/hook_contract")
+            .and_then(serde_json::Value::as_str),
+        Some("pre_and_post_tool_use_v1")
     );
     assert_eq!(
         permission

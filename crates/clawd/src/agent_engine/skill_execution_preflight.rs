@@ -1,4 +1,6 @@
-use claw_core::skill_registry::SkillRiskLevel;
+use claw_core::skill_registry::{
+    CapabilityExecutionMode, PlannerCapabilityMapping, SkillRiskLevel,
+};
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -412,6 +414,52 @@ fn action_scoped_risk_level(
     })
 }
 
+fn capability_timeout_class(mode: Option<CapabilityExecutionMode>) -> &'static str {
+    match mode {
+        Some(CapabilityExecutionMode::SyncShort) => "short",
+        Some(CapabilityExecutionMode::AsyncPreferred) => "long_tail",
+        Some(CapabilityExecutionMode::AsyncRequired) => "background",
+        None => "standard",
+    }
+}
+
+fn capability_cancellation_mode(mapping: &PlannerCapabilityMapping) -> &'static str {
+    if mapping.async_adapter_kind.is_some() {
+        "task_token_and_async_adapter"
+    } else {
+        "task_token"
+    }
+}
+
+fn capability_permission_scopes(mapping: &PlannerCapabilityMapping) -> Vec<&'static str> {
+    let mut scopes = Vec::new();
+    if mapping.network_access == Some(true) {
+        scopes.push("network");
+    }
+    if mapping.filesystem_write == Some(true) {
+        scopes.push("workspace_write");
+    }
+    if mapping.external_publish == Some(true) {
+        scopes.push("external_publish");
+    }
+    if mapping.credential_access == Some(true) {
+        scopes.push("credentials");
+    }
+    if mapping.subprocess == Some(true) {
+        scopes.push("subprocess");
+    }
+    if mapping.package_install == Some(true) {
+        scopes.push("package_install");
+    }
+    if mapping.privilege_escalation == Some(true) {
+        scopes.push("privilege_escalation");
+    }
+    if scopes.is_empty() {
+        scopes.push("read_only");
+    }
+    scopes
+}
+
 fn action_scoped_capability_policy(
     state: &AppState,
     canonical_skill: &str,
@@ -427,6 +475,15 @@ fn action_scoped_capability_policy(
         )
         .map(|mapping| {
             json!({
+                "capability": mapping.name,
+                "execution_mode": mapping.execution_mode.map(|value| value.as_token()),
+                "async_adapter_kind": mapping.async_adapter_kind,
+                "timeout_class": capability_timeout_class(mapping.execution_mode),
+                "timeout_seconds": manifest.timeout_seconds,
+                "cancellation_mode": capability_cancellation_mode(mapping),
+                "permission_scopes": capability_permission_scopes(mapping),
+                "evidence_contract": "capability_result_envelope_v1",
+                "hook_contract": "pre_and_post_tool_use_v1",
                 "isolation_profile": mapping
                     .isolation_profile
                     .map(|value| value.as_token()),
@@ -717,6 +774,15 @@ pub(super) fn preflight_permission_decision(
         action_scoped_capability_policy(state, &canonical_skill, action.as_deref()).unwrap_or_else(
             || {
                 json!({
+                    "capability": null,
+                    "execution_mode": null,
+                    "async_adapter_kind": null,
+                    "timeout_class": "standard",
+                    "timeout_seconds": null,
+                    "cancellation_mode": "task_token",
+                    "permission_scopes": [],
+                    "evidence_contract": "capability_result_envelope_v1",
+                    "hook_contract": "pre_and_post_tool_use_v1",
                     "isolation_profile": null,
                     "network_access": null,
                     "filesystem_write": null,
