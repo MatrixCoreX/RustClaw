@@ -28,7 +28,11 @@ import ReactMarkdown, { type Components } from "react-markdown";
 
 import readmeEn from "../../../README.md?raw";
 import readmeZh from "../../../README.zh-CN.md?raw";
-import { classifyLearningLink, parseReadmeLearningPages } from "../lib/ai-learning";
+import {
+  classifyLearningLink,
+  parseReadmeLearningPages,
+  parseStandaloneLearningDocument,
+} from "../lib/ai-learning";
 import {
   fitDiagramScale,
   readDiagramSize,
@@ -44,6 +48,23 @@ export interface AiLearningPageProps {
   lang: UiLanguage;
   t: Translate;
 }
+
+const ARCHITECTURE_DOCUMENT_MODULES = import.meta.glob(
+  "../../../docs/architecture/[0-9][0-9]-*.md",
+  { eager: true, import: "default", query: "?raw" },
+) as Record<string, string>;
+
+function architectureDocuments(lang: UiLanguage): string[] {
+  return Object.entries(ARCHITECTURE_DOCUMENT_MODULES)
+    .filter(([file]) => file.endsWith(".zh-CN.md") === (lang === "zh"))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, markdown]) => markdown);
+}
+
+const ARCHITECTURE_DOCUMENTS = {
+  en: architectureDocuments("en"),
+  zh: architectureDocuments("zh"),
+} satisfies Record<UiLanguage, string[]>;
 
 function currentMermaidTheme(): "dark" | "neutral" {
   return document.documentElement.dataset.theme === "light" ? "neutral" : "dark";
@@ -335,10 +356,18 @@ function mermaidSource(children: ReactNode): string | null {
 }
 
 export function AiLearningPage({ lang, t }: AiLearningPageProps) {
-  const pages = useMemo(
-    () => parseReadmeLearningPages(lang === "zh" ? readmeZh : readmeEn),
-    [lang],
-  );
+  const pages = useMemo(() => {
+    const readmePages = parseReadmeLearningPages(lang === "zh" ? readmeZh : readmeEn);
+    const chapterTitle = lang === "zh" ? "架构指南" : "Architecture Guide";
+    const architecturePages = ARCHITECTURE_DOCUMENTS[lang].map((markdown, index) =>
+      parseStandaloneLearningDocument({
+        id: `architecture-guide-${index + 1}`,
+        chapterId: "architecture-guide",
+        chapterTitle,
+        markdown,
+      }));
+    return [...readmePages, ...architecturePages];
+  }, [lang]);
   const chapters = useMemo(() => {
     const grouped: Array<{
       id: string;
