@@ -90,6 +90,11 @@ jobs:
           cache: npm
           cache-dependency-path: UI/package-lock.json
 
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
       - name: Cache Cargo registry and git
         uses: actions/cache@v4
         with:
@@ -114,11 +119,6 @@ jobs:
         run: |
           set -euo pipefail
           ./build-all.sh no-ui
-
-      - name: Setup packaging Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
 
       - name: Package runtime
         shell: bash

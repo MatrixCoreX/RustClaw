@@ -92,6 +92,11 @@ jobs:
           cache: npm
           cache-dependency-path: UI/package-lock.json
 
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
       - name: Setup Rust target
         shell: bash
         run: |
@@ -122,11 +127,6 @@ jobs:
         run: |
           set -euo pipefail
           INSTALL_DEPS=0 ./cross-build-pi.sh --target pi64 --workspace --no-ui --skip-deps
-
-      - name: Setup packaging Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
 
       - name: Package runtime
         shell: bash
