@@ -679,6 +679,13 @@ Use the smallest affected NL set while code is still moving, then widen coverage
 4. Canary: 500 client-like cases before changing default authority or deleting old gates.
 5. Safe aggregate: compact equivalent coverage first, then full 2100+ coverage only for high-risk deletion gates or release hardening.
 
+Live NL runs should use `bash scripts/nl_tests/run_all_nl_with_server.sh`.
+It creates a random loopback listener, isolated task/audit databases, and a
+non-delivering `ui` channel by default, then removes that temporary state after
+the run. Reusing a development server is opt-in with `--reuse-server`. Use
+`--suite <name>` or `--category <name>` for a focused scope; numbered raw
+`LLM#1..N` request/return fields stay enabled unless explicitly disabled.
+
 Current `configs/agent_guard.toml` defaults keep verifier and registry guards enabled, including `answer_verifier_enforce_required_scope = "all"` and `registry_idempotency_guard_scope = "all"`. The old route-authority rollback/debug keys are no longer runtime configuration. If route boundary behavior changes, run the route-authority guard script and update replay/README flow descriptions instead of reintroducing semantic route switches.
 
 Before physically deleting remaining compatibility code paths, use the current deletion gate rather than a fixed seven-day wait: compact live NL for the affected class, release-gate equivalent live coverage (`scripts/nl_tests/build_release_gate_subset.py --check` currently selects 285 rows covering all 211 declared categories), loop-boundary/replay review with no unexplained mismatch, and the planner/runtime/repair/static guards. The subset generator treats the shared compact contract, release behavior tags, machine capability/action-family tags, and suite breadth as mandatory; source filenames and undeclared incidental tags do not become release contracts. Contract repair cleanup must pass `python3 scripts/check_contract_repair_loop_observation_boundary.py`, which keeps worker contract repair as loop-observation output instead of a pre-planner route mutator. Planner/output-contract cleanup must also pass `python3 scripts/check_planner_runtime_boundary.py`, `python3 scripts/check_route_reason_marker_facade.py`, and `python3 scripts/check_finalizer_architecture.py`; repair cleanup must pass `python3 scripts/check_repair_boundary_inventory_coverage.py` plus `python3 scripts/check_repair_no_user_text_fields.py`. A longer observation window is still reasonable for high-risk production rollout, but it is not required for normal development cleanup.

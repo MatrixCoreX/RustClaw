@@ -117,13 +117,14 @@ submit_task_with_options() {
     -d "$body"
 }
 
-build_client_like_telegram_submit_body() {
+build_client_like_submit_body() {
   local prompt="$1"
   local _legacy_loop_switch="${2:-}"
   local source="${3:-}"
   local external_user_id="${4:-$USER_ID}"
   local external_chat_id="${5:-$CHAT_ID}"
-  python3 - "$USER_ID" "$CHAT_ID" "$prompt" "$source" "$(normalized_user_key)" "$external_user_id" "$external_chat_id" <<'PY'
+  local channel="${6:-ui}"
+  python3 - "$USER_ID" "$CHAT_ID" "$prompt" "$source" "$(normalized_user_key)" "$external_user_id" "$external_chat_id" "$channel" <<'PY'
 import json
 import sys
 
@@ -134,6 +135,9 @@ source = (sys.argv[4] or "").strip()
 user_key = (sys.argv[5] or "").strip()
 external_user_id = (sys.argv[6] or str(user_id)).strip()
 external_chat_id = (sys.argv[7] or str(chat_id)).strip()
+channel = (sys.argv[8] or "ui").strip()
+if channel not in {"ui", "telegram"}:
+    raise SystemExit("client-like channel must be ui or telegram")
 payload = {
     "text": prompt,
 }
@@ -142,7 +146,7 @@ if source:
 body = {
     "user_id": user_id,
     "chat_id": chat_id,
-    "channel": "telegram",
+    "channel": channel,
     "external_user_id": external_user_id,
     "external_chat_id": external_chat_id,
     "kind": "ask",
@@ -154,20 +158,29 @@ print(json.dumps(body, ensure_ascii=False))
 PY
 }
 
-submit_client_like_telegram_task() {
+submit_client_like_task() {
   local prompt="$1"
   local legacy_loop_switch="${2:-}"
   local source="${3:-}"
   local external_user_id="${4:-$USER_ID}"
   local external_chat_id="${5:-$CHAT_ID}"
+  local channel="${6:-ui}"
   local body
   local -a auth_args=()
-  body="$(build_client_like_telegram_submit_body "$prompt" "$legacy_loop_switch" "$source" "$external_user_id" "$external_chat_id")"
+  body="$(build_client_like_submit_body "$prompt" "$legacy_loop_switch" "$source" "$external_user_id" "$external_chat_id" "$channel")"
   array_from_command_lines auth_args curl_auth_args
   curl -sS -X POST "${BASE_URL}/v1/tasks" \
     -H "Content-Type: application/json" \
     "${auth_args[@]}" \
     -d "$body"
+}
+
+build_client_like_telegram_submit_body() {
+  build_client_like_submit_body "$1" "${2:-}" "${3:-}" "${4:-$USER_ID}" "${5:-$CHAT_ID}" "telegram"
+}
+
+submit_client_like_telegram_task() {
+  submit_client_like_task "$1" "${2:-}" "${3:-}" "${4:-$USER_ID}" "${5:-$CHAT_ID}" "telegram"
 }
 
 build_submit_run_skill_body() {

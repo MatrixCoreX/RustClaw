@@ -549,6 +549,13 @@ below with LLM traces enabled, then feed that run directory into this gate.
 
 Client-like continuous regression:
 
+- Start live suites through the isolated wrapper:
+  `bash scripts/nl_tests/run_all_nl_with_server.sh --suite client_like_continuous -- --case-file <case-file> --skip-smoke --quality-guard`
+  The wrapper defaults to a random loopback listener, temporary task/audit
+  databases, and the non-delivering `ui` channel, then removes temporary state
+  on exit. Existing development state is reused only with `--reuse-server`.
+  Use `--suite` or `--category` for a focused scope. Numbered raw
+  `LLM#1..N` request/return fields remain enabled unless explicitly disabled.
 - Run the offline contract-matrix regression suite, including generator checks and attribution fixtures:
   `bash scripts/nl_tests/run_suite.sh contract_matrix_offline`
   This also verifies the multilingual contract-matrix generator path for zh-CN, en-US, ja-JP, ko-KR, fr-FR, and mixed-language variants.

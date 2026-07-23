@@ -4,8 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8787}"
+REQUESTED_BASE_URL="${BASE_URL:-}"
+BASE_URL=""
 CLAWD_BIN="${ROOT_DIR}/target/release/clawd"
+SOURCE_CONFIG="${ROOT_DIR}/configs/config.toml"
 RUNTIME_ENV_FILE="${ROOT_DIR}/../runtime_env_filled.sh"
 WAIT_SECONDS="600"
 POLL_SECONDS="1"
@@ -13,9 +15,10 @@ PROVIDER_RETRIES="0"
 PROMPT_REPLY_ONLY=1
 LOG_DIR="/tmp"
 START_TIMEOUT_SECONDS="80"
-REUSE_SERVER=1
+REUSE_SERVER=0
 BUILD_RELEASE=0
 EXTRA_SUITE_ARGS=()
+SUITE_SELECTION=(--category all)
 USER_KEY_VALUE="${USER_KEY:-${RUSTCLAW_USER_KEY:-}}"
 
 usage() {
@@ -25,15 +28,19 @@ Usage:
 
 What it does:
   1. Sources runtime_env_filled.sh when present.
-  2. Reuses an existing healthy clawd server, or starts target/release/clawd.
-  3. Runs the full NL suite:
-     scripts/nl_tests/run_suite.sh --category all --prompt-reply-only
+  2. By default creates an isolated config, task DB, audit DB, random local
+     port, and non-delivering UI-channel test server.
+  3. Runs the selected NL suite/category; the default is category all.
   4. Prints log paths, prompt count, and rate-limit/unavailable count.
   5. Stops only the server process started by this script.
 
 Options:
-  --base-url URL          clawd base URL. Default: http://127.0.0.1:8787
+  --base-url URL          isolated clawd URL. Default: random 127.0.0.1 port
   --clawd-bin PATH        clawd binary. Default: target/release/clawd
+  --source-config PATH    source config copied into the isolated runtime.
+                          Default: configs/config.toml
+  --suite NAME            run one named suite instead of category all
+  --category NAME         run one suite category instead of category all
   --runtime-env PATH      runtime env file. Default: ../runtime_env_filled.sh
   --no-runtime-env        do not source any runtime env file
   --wait-seconds N        max wait seconds per NL case. Default: 600
@@ -42,13 +49,15 @@ Options:
   --log-dir PATH          log output directory. Default: /tmp
   --start-timeout N       health wait timeout. Default: 80
   --no-prompt-reply-only  show full run_suite output instead of only prompt/reply
-  --no-reuse-server       fail if a healthy server is already running at base URL
+  --reuse-server          explicitly reuse an existing server and its databases
+  --no-reuse-server       retained compatibility spelling for the safe default
   --build-release         run cargo build -p clawd --release before starting
   -h, --help              show this help
 
 Examples:
   bash scripts/nl_tests/run_all_nl_with_server.sh
   bash scripts/nl_tests/run_all_nl_with_server.sh --build-release
+  bash scripts/nl_tests/run_all_nl_with_server.sh --suite client_like_continuous -- --case-limit 20
   bash scripts/nl_tests/run_all_nl_with_server.sh -- --no-llm-trace
 EOF
 }
@@ -56,11 +65,23 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-url)
-      BASE_URL="$2"
+      REQUESTED_BASE_URL="$2"
       shift 2
       ;;
     --clawd-bin)
       CLAWD_BIN="$2"
+      shift 2
+      ;;
+    --source-config)
+      SOURCE_CONFIG="$2"
+      shift 2
+      ;;
+    --suite)
+      SUITE_SELECTION=("$2")
+      shift 2
+      ;;
+    --category)
+      SUITE_SELECTION=(--category "$2")
       shift 2
       ;;
     --runtime-env)
@@ -97,6 +118,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-reuse-server)
       REUSE_SERVER=0
+      shift
+      ;;
+    --reuse-server)
+      REUSE_SERVER=1
       shift
       ;;
     --build-release)
@@ -137,19 +162,65 @@ curl_health() {
   curl -sS "${auth_args[@]}" "${health_url}" >/dev/null
 }
 
-health_url="${BASE_URL%/}/v1/health"
 started_pid=""
+ISOLATION_ROOT=""
 
 cleanup() {
   if [[ -n "${started_pid}" ]]; then
     kill "${started_pid}" >/dev/null 2>&1 || true
     wait "${started_pid}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${ISOLATION_ROOT}" && -d "${ISOLATION_ROOT}" ]]; then
+    rm -rf "${ISOLATION_ROOT}"
+  fi
 }
 trap cleanup EXIT
 
 cd "${ROOT_DIR}"
 mkdir -p "${LOG_DIR}"
+
+if [[ "${REUSE_SERVER}" -eq 0 ]]; then
+  BASE_URL="${REQUESTED_BASE_URL}"
+  if [[ -z "${BASE_URL}" ]]; then
+    isolated_port="$(python3 - <<'PY'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)"
+    BASE_URL="http://127.0.0.1:${isolated_port}"
+  fi
+  isolated_listen="$(python3 - "${BASE_URL}" <<'PY'
+import sys
+from urllib.parse import urlparse
+parsed = urlparse(sys.argv[1])
+if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"} or not parsed.port:
+    raise SystemExit("isolated base URL must be http://127.0.0.1:<port> or http://localhost:<port>")
+print(f"127.0.0.1:{parsed.port}")
+PY
+)"
+  ISOLATION_ROOT="$(mktemp -d "${LOG_DIR%/}/rustclaw-nl-isolated-XXXXXX")"
+  ISOLATED_CONFIG="${ISOLATION_ROOT}/config.toml"
+  ISOLATED_DB="${ISOLATION_ROOT}/tasks.sqlite"
+  ISOLATED_AUDIT_DB="${ISOLATION_ROOT}/audit.sqlite"
+  python3 "${SCRIPT_DIR}/create_isolated_config.py" \
+    --source "${SOURCE_CONFIG}" \
+    --output "${ISOLATED_CONFIG}" \
+    --sqlite-path "${ISOLATED_DB}" \
+    --audit-sqlite-path "${ISOLATED_AUDIT_DB}" \
+    --listen "${isolated_listen}"
+  echo "server_mode=isolated"
+  echo "base_url=${BASE_URL}"
+  echo "config_identity=isolated/config.toml"
+  echo "task_db_identity=isolated/tasks.sqlite"
+  echo "audit_db_identity=isolated/audit.sqlite"
+else
+  BASE_URL="${REQUESTED_BASE_URL:-http://127.0.0.1:8787}"
+  echo "server_mode=explicit_reuse"
+  echo "base_url=${BASE_URL}"
+fi
+SELECTED_BASE_URL="${BASE_URL}"
 
 if [[ -n "${RUNTIME_ENV_FILE}" && -f "${RUNTIME_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -158,6 +229,13 @@ if [[ -n "${RUNTIME_ENV_FILE}" && -f "${RUNTIME_ENV_FILE}" ]]; then
 elif [[ -n "${RUNTIME_ENV_FILE}" ]]; then
   echo "runtime_env=missing:${RUNTIME_ENV_FILE}"
 fi
+BASE_URL="${SELECTED_BASE_URL}"
+if [[ "${REUSE_SERVER}" -eq 0 ]]; then
+  export RUSTCLAW_CONFIG_PATH="${ISOLATED_CONFIG}"
+  export RUSTCLAW_DB_PATH="${ISOLATED_DB}"
+  export CLIENT_LIKE_CHANNEL="ui"
+fi
+health_url="${BASE_URL%/}/v1/health"
 USER_KEY_VALUE="${USER_KEY_VALUE:-${USER_KEY:-${RUSTCLAW_USER_KEY:-}}}"
 resolve_user_key
 if [[ -n "${USER_KEY_VALUE:-}" ]]; then
@@ -173,13 +251,16 @@ if [[ "${BUILD_RELEASE}" -eq 1 ]]; then
 fi
 
 if curl_health >/dev/null 2>&1; then
-  if [[ "${REUSE_SERVER}" -eq 1 ]]; then
-    echo "clawd_health=ok existing_server=${BASE_URL}"
-  else
-    echo "A healthy clawd server is already running at ${BASE_URL}" >&2
+  if [[ "${REUSE_SERVER}" -ne 1 ]]; then
+    echo "A healthy clawd server is already running at isolated URL ${BASE_URL}" >&2
     exit 2
   fi
+  echo "clawd_health=ok existing_server=${BASE_URL}"
 else
+  if [[ "${REUSE_SERVER}" -eq 1 ]]; then
+    echo "No healthy clawd server is available for explicit reuse at ${BASE_URL}" >&2
+    exit 2
+  fi
   if [[ ! -x "${CLAWD_BIN}" ]]; then
     echo "clawd binary not found or not executable: ${CLAWD_BIN}" >&2
     echo "Run: cargo build -p clawd --release" >&2
@@ -187,7 +268,7 @@ else
   fi
   stamp="$(date +%Y%m%d_%H%M%S)"
   SERVER_LOG="${LOG_DIR%/}/clawd_full_nl_${stamp}.log"
-  "${CLAWD_BIN}" >"${SERVER_LOG}" 2>&1 &
+  "${CLAWD_BIN}" --config "${ISOLATED_CONFIG}" >"${SERVER_LOG}" 2>&1 &
   started_pid=$!
   echo "server_log=${SERVER_LOG}"
   echo "server_pid=${started_pid}"
@@ -216,7 +297,7 @@ SUITE_LOG="${LOG_DIR%/}/rustclaw_full_nl_${stamp}.out"
 
 suite_cmd=(
   bash "${SCRIPT_DIR}/run_suite.sh"
-  --category all
+  "${SUITE_SELECTION[@]}"
   --base-url "${BASE_URL}"
   --wait-seconds "${WAIT_SECONDS}"
   --poll-seconds "${POLL_SECONDS}"
