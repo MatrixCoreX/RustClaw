@@ -10,7 +10,8 @@
 ## Capability Summary (from interface)
 - `fs_search` performs filesystem-level search by name, extension, text, or images.
 - For new planner-facing filesystem tasks, prefer the virtual `fs_basic` contract (`find_entries` / `grep_text`). `fs_search` remains the runtime backing and compatibility layer for bounded search actions.
-- It is intended for bounded queries with optional root scoping and result caps.
+- It is intended for bounded queries with optional root scoping and stable
+  cursor pages over a bounded, sorted result snapshot.
 - `find_name` can return directory names as well as file names; use `target_kind` to narrow when needed.
 - For locating likely filenames, prompt names, module names, or path fragments, use `find_name`.
 - `find_ext` may also take a name `pattern`/`patterns` filter when the request asks for files with a specific extension and a filename fragment.
@@ -42,22 +43,35 @@
 | `grep_text` | `query` | yes | string | - | Text query for content search. |
 | `grep_text` | `pattern` / `patterns` (or `name`/`filename`/`file_pattern`) | no | string or string[] | none | Optional filename/basename filter for content search; does not replace `query`. |
 | optional | `root` (or `path`/`dir`) | no | string(path) | workspace | Search root path. |
-| optional | `max_results` | no | number | impl default | Cap result volume. |
+| optional | `max_results` | no | number | 100 | Page size, clamped to 1..1000. |
+| optional | `cursor` (or `offset`) | no | number | 0 | Zero-based result/match offset returned by the prior page. |
 | optional | `max_depth` | no | number | env/default | Traversal depth cap. |
 | optional | `max_files` | no | number | env/default | Scanned-file cap. |
 | `grep_text` | `max_line_chars` | no | number | 240 | Cap each matched line snippet length. |
 
 ## Error Contract (from interface)
 - Missing required query key for selected action.
-- Invalid root path.
+- Invalid, missing, or workspace-external root path.
 - Unsupported action names.
 - Search runtime errors return readable filesystem/tool errors.
 - `find_name` may return both files and directories unless `target_kind` is provided.
-- Successful responses are returned as JSON text with stable top-level fields like `action`, `root`, `workspace_root`, `count`, and `results`.
-- For `find_name` / `find_ext` / candidate discovery, `results` is the authoritative observed candidate list and `count` is the authoritative observed count.
+- Successful responses are returned as JSON text with stable top-level fields
+  like `action`, `root`, `workspace_root`, `count`, `results`, `page`,
+  `truncated`, and `snapshot_sha256`.
+- Search never follows directory symlinks. Existing roots are canonicalized and
+  must remain inside the configured workspace.
+- For `find_name` / `find_ext` / candidate discovery, `results` is the
+  authoritative current-page candidate list, `count`/`returned_count` is its
+  size, and `total_count` is the complete count in the bounded snapshot.
 - If the caller asks to list or report candidates, the final answer should include every returned `results` item unless the user requested a top-N subset or the result is explicitly capped/truncated.
 - Do not replace a returned `results` array with only examples, a smaller sample, `etc.`, or inferred candidates.
-- `grep_text` also returns `patterns`, `match_count`, and `matches` items with `path`, `line`, and `text` so callers can answer content-check questions without reading whole files.
+- `grep_text` also returns `patterns`, page-local `match_count`,
+  `total_match_count`, and `matches` items with `path`, `line`, and `text` so
+  callers can answer content-check questions without reading whole files.
+- `page` contains `cursor`, `limit`, `returned_count`, `total_count`,
+  `has_more`, `next_cursor`, `previous_cursor`, `scan_truncated`, and
+  `snapshot_sha256`. A true `scan_truncated` means a scan/snapshot safety bound
+  was reached; it is not evidence that unseen entries do not exist.
 - Successful responses also mirror that parsed JSON into the optional `extra` field for machine-readable consumers.
 
 ## Structured Evidence Contract (from interface)
@@ -67,7 +81,11 @@
   - `root`: workspace-relative bounded search root; evidence role `path`.
   - `workspace_root`: absolute canonical workspace root used to resolve relative result paths; evidence role `path`.
   - `count`: integer number of returned results; evidence role `count`.
+  - `total_count`: integer number of matching results in the bounded snapshot;
+    evidence role `count`.
   - `results`: string array candidate paths; evidence roles `results`, `entries`, and `path`.
+  - `page`, `truncated`, and `snapshot_sha256`: machine pagination, bounded
+    completeness, and result provenance.
   - `ext`, `patterns`, `target_kind`, and cap fields when present; evidence role `field_value`.
 - `grep_text` success `extra` fields:
   - `action`: string, always `grep_text`; evidence role `status`.
@@ -75,6 +93,8 @@
   - `workspace_root`: absolute canonical workspace root used to resolve relative match paths; evidence role `path`.
   - `patterns`: string array filename filters; evidence role `entries`.
   - `match_count`: integer match count; evidence role `count`.
+  - `total_match_count`: integer total in the bounded match snapshot; evidence
+    role `count`.
   - `matches`: array of objects with `path`, `line`, and `text`; evidence roles `results`, `path`, `table_cell`, and `field_value`.
 - Sensitive fields: `matches[].text` may include user data. Provider-facing traces should prefer short excerpts, hashes, line numbers, and paths unless the user requested matched content.
 - Error responses include readable `error_text`; top-level `error_kind` should be used when available.

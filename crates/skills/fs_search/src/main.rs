@@ -1,11 +1,22 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod result_pagination;
+mod workspace_traversal;
+
+use result_pagination::{cursor_from_args, paginate};
+use workspace_traversal::{
+    path_kind, resolve_path, to_rel, walk_collect, walk_collect_dirs, walk_collect_nodes,
+    workspace_root, ScanLimits,
+};
+
 const SKILL_NAME: &str = "fs_search";
+const MAX_RESULT_SNAPSHOT_ITEMS: usize = 100_000;
+const MAX_GREP_SNAPSHOT_MATCHES: usize = 20_000;
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -20,12 +31,6 @@ struct Resp {
     text: String,
     extra: Option<Value>,
     error_text: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ScanLimits {
-    max_depth: usize,
-    max_files: usize,
 }
 
 fn parse_env_usize(name: &str) -> Option<usize> {
@@ -65,16 +70,6 @@ fn scan_limits_from_args(obj: &serde_json::Map<String, Value>) -> ScanLimits {
         max_depth,
         max_files,
     }
-}
-
-fn skip_default_scan_dir(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    matches!(
-        name,
-        ".git" | "target" | "node_modules" | ".venv" | "venv" | "__pycache__"
-    )
 }
 
 fn normalize_locator_text(text: &str) -> String {
@@ -315,17 +310,17 @@ fn grep_text_name_fallback_matches(
     search_root: &Path,
     query: &str,
     scan_limits: ScanLimits,
-    max_results: usize,
-) -> Result<(Vec<String>, Vec<String>), String> {
+    snapshot_limit: usize,
+) -> Result<(Vec<String>, Vec<String>, bool), String> {
     let patterns = expand_name_pattern(query)
         .into_iter()
         .filter(|pattern| !pattern.is_empty())
         .collect::<Vec<_>>();
     if patterns.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok((Vec::new(), Vec::new(), false));
     }
     let mut results = Vec::new();
-    walk_collect_nodes(search_root, scan_limits, &mut |p| {
+    let stats = walk_collect_nodes(search_root, scan_limits, &mut |p| {
         let name = p
             .file_name()
             .map(|s| normalize_locator_text(&s.to_string_lossy()))
@@ -336,9 +331,17 @@ fn grep_text_name_fallback_matches(
         {
             results.push(to_rel(workspace_root, p));
         }
-        results.len() >= max_results
+        results.len() > snapshot_limit
     })?;
-    Ok((patterns, results))
+    let result_limit_reached = results.len() > snapshot_limit;
+    results.truncate(snapshot_limit);
+    results.sort();
+    results.dedup();
+    Ok((
+        patterns,
+        results,
+        stats.limit_reached || result_limit_reached,
+    ))
 }
 
 fn bool_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
@@ -487,6 +490,7 @@ fn execute(args: Value) -> Result<Value, String> {
         .and_then(|v| v.as_u64())
         .unwrap_or(100)
         .clamp(1, 1000) as usize;
+    let cursor = cursor_from_args(obj);
 
     let root = workspace_root();
     let search_root = resolve_path(
@@ -529,36 +533,41 @@ fn execute(args: Value) -> Result<Value, String> {
                 }) {
                     return false;
                 }
-                let kind = if p.is_dir() {
-                    "dir"
-                } else if p.is_file() {
-                    "file"
-                } else {
-                    "other"
-                };
+                let kind = path_kind(p);
                 if target_kind == "any" || target_kind == kind {
                     results.push(to_rel(&root, p));
                 }
-                results.len() > max_results
+                results.len() > MAX_RESULT_SNAPSHOT_ITEMS
             };
-            if target_kind == "dir" {
-                walk_collect_dirs(&search_root, scan_limits, &mut collect)?;
+            let stats = if target_kind == "dir" {
+                walk_collect_dirs(&search_root, scan_limits, &mut collect)?
             } else {
-                walk_collect_nodes(&search_root, scan_limits, &mut collect)?;
-            }
-            let truncated = results.len() > max_results;
-            results.truncate(max_results);
+                walk_collect_nodes(&search_root, scan_limits, &mut collect)?
+            };
+            let result_limit_reached = results.len() > MAX_RESULT_SNAPSHOT_ITEMS;
+            results.truncate(MAX_RESULT_SNAPSHOT_ITEMS);
+            results.sort();
+            results.dedup();
+            let page = paginate(
+                &results,
+                cursor,
+                max_results,
+                stats.limit_reached || result_limit_reached,
+            );
             Ok(json!({
                 "action": "find_name",
                 "root": to_rel(&root, &search_root),
                 "workspace_root": root.display().to_string(),
                 "patterns": pattern_norms,
                 "exact": exact_name,
-                "count": results.len(),
-                "returned_count": results.len(),
+                "count": page.returned_count,
+                "returned_count": page.returned_count,
+                "total_count": page.total_count,
                 "result_limit": max_results,
-                "truncated": truncated,
-                "results": results,
+                "truncated": page.has_more,
+                "snapshot_sha256": page.snapshot_sha256,
+                "page": page.metadata,
+                "results": page.items,
             }))
         }
         "find_ext" => {
@@ -577,7 +586,7 @@ fn execute(args: Value) -> Result<Value, String> {
                 return Err("ext is required".to_string());
             }
             let pattern_norms = optional_name_patterns_from_args(obj);
-            walk_collect(&search_root, scan_limits, &mut |p| {
+            let stats = walk_collect(&search_root, scan_limits, &mut |p| {
                 let got = p
                     .extension()
                     .map(|s| s.to_string_lossy().to_ascii_lowercase())
@@ -593,10 +602,18 @@ fn execute(args: Value) -> Result<Value, String> {
                 if exts.iter().any(|ext| ext == &got) && name_matches {
                     results.push(to_rel(&root, p));
                 }
-                results.len() > max_results
+                results.len() > MAX_RESULT_SNAPSHOT_ITEMS
             })?;
-            let truncated = results.len() > max_results;
-            results.truncate(max_results);
+            let result_limit_reached = results.len() > MAX_RESULT_SNAPSHOT_ITEMS;
+            results.truncate(MAX_RESULT_SNAPSHOT_ITEMS);
+            results.sort();
+            results.dedup();
+            let page = paginate(
+                &results,
+                cursor,
+                max_results,
+                stats.limit_reached || result_limit_reached,
+            );
             let ext = exts.first().cloned().unwrap_or_default();
             Ok(json!({
                 "action": "find_ext",
@@ -605,11 +622,14 @@ fn execute(args: Value) -> Result<Value, String> {
                 "ext": ext,
                 "exts": exts,
                 "patterns": pattern_norms,
-                "count": results.len(),
-                "returned_count": results.len(),
+                "count": page.returned_count,
+                "returned_count": page.returned_count,
+                "total_count": page.total_count,
                 "result_limit": max_results,
-                "truncated": truncated,
-                "results": results,
+                "truncated": page.has_more,
+                "snapshot_sha256": page.snapshot_sha256,
+                "page": page.metadata,
+                "results": page.items,
             }))
         }
         "grep_text" => {
@@ -626,7 +646,7 @@ fn execute(args: Value) -> Result<Value, String> {
                 .unwrap_or(240)
                 .clamp(40, 2000) as usize;
             let mut matches = Vec::new();
-            walk_collect(&search_root, scan_limits, &mut |p| {
+            let stats = walk_collect(&search_root, scan_limits, &mut |p| {
                 if !pattern_norms.is_empty() {
                     let name = p
                         .file_name()
@@ -652,24 +672,68 @@ fn execute(args: Value) -> Result<Value, String> {
                                 "line": idx + 1,
                                 "text": truncate_chars(line.trim(), max_line_chars),
                             }));
-                            if matches.len() >= max_results {
+                            if matches.len() > MAX_GREP_SNAPSHOT_MATCHES {
                                 return true;
                             }
                         }
                     }
                 }
-                matches.len() >= max_results
+                matches.len() > MAX_GREP_SNAPSHOT_MATCHES
             })?;
-            let (name_patterns, name_results) = if results.is_empty() {
+            let match_limit_reached = matches.len() > MAX_GREP_SNAPSHOT_MATCHES;
+            matches.truncate(MAX_GREP_SNAPSHOT_MATCHES);
+            matches.sort_by(|left, right| {
+                let left_path = left.get("path").and_then(Value::as_str).unwrap_or_default();
+                let right_path = right
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                left_path.cmp(right_path).then_with(|| {
+                    left.get("line")
+                        .and_then(Value::as_u64)
+                        .cmp(&right.get("line").and_then(Value::as_u64))
+                })
+            });
+            results.sort();
+            results.dedup();
+            let content_scan_truncated = stats.limit_reached || match_limit_reached;
+            let (name_patterns, name_results, name_scan_truncated) = if results.is_empty() {
                 grep_text_name_fallback_matches(
                     &root,
                     &search_root,
                     query,
                     scan_limits,
-                    max_results,
+                    MAX_RESULT_SNAPSHOT_ITEMS,
                 )?
             } else {
-                (Vec::new(), Vec::new())
+                (Vec::new(), Vec::new(), false)
+            };
+            let match_page = paginate(&matches, cursor, max_results, content_scan_truncated);
+            let name_page = paginate(&name_results, cursor, max_results, name_scan_truncated);
+            let page_result_paths = match_page
+                .items
+                .iter()
+                .filter_map(|item| item.get("path").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let mut page_result_paths = page_result_paths;
+            page_result_paths.sort();
+            page_result_paths.dedup();
+            let use_name_page = matches.is_empty();
+            let page_metadata = if use_name_page {
+                name_page.metadata
+            } else {
+                match_page.metadata
+            };
+            let truncated = if use_name_page {
+                name_page.has_more
+            } else {
+                match_page.has_more
+            };
+            let snapshot_sha256 = if use_name_page {
+                name_page.snapshot_sha256
+            } else {
+                match_page.snapshot_sha256
             };
             Ok(json!({
                 "action": "grep_text",
@@ -678,13 +742,20 @@ fn execute(args: Value) -> Result<Value, String> {
                 "query": query,
                 "case_insensitive": case_insensitive,
                 "patterns": pattern_norms,
-                "count": results.len(),
-                "match_count": matches.len(),
-                "results": results,
-                "matches": matches,
+                "count": page_result_paths.len(),
+                "total_file_count": results.len(),
+                "match_count": match_page.returned_count,
+                "total_match_count": match_page.total_count,
+                "results": page_result_paths,
+                "matches": match_page.items,
                 "name_patterns": name_patterns,
-                "name_count": name_results.len(),
-                "name_results": name_results,
+                "name_count": name_page.returned_count,
+                "total_name_count": name_page.total_count,
+                "name_results": name_page.items,
+                "result_limit": max_results,
+                "truncated": truncated,
+                "snapshot_sha256": snapshot_sha256,
+                "page": page_metadata,
             }))
         }
         "find_images" | "images" | "image_search" => {
@@ -762,240 +833,6 @@ fn execute(args: Value) -> Result<Value, String> {
             )
         }
     }
-}
-
-fn walk_collect(
-    path: &Path,
-    limits: ScanLimits,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    let mut scanned_files = 0usize;
-    let mut stop = false;
-    walk_collect_inner(path, 0, limits, &mut scanned_files, &mut stop, f)
-}
-
-fn walk_collect_inner(
-    path: &Path,
-    depth: usize,
-    limits: ScanLimits,
-    scanned_files: &mut usize,
-    stop: &mut bool,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    if *stop {
-        return Ok(());
-    }
-    if path.is_file() {
-        if *scanned_files >= limits.max_files {
-            return Ok(());
-        }
-        *scanned_files += 1;
-        if f(path) {
-            *stop = true;
-        }
-        return Ok(());
-    }
-    if depth > limits.max_depth {
-        return Ok(());
-    }
-    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-    let mut files = Vec::new();
-    let mut dirs = Vec::new();
-    for entry in iter {
-        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-        let p = entry.path();
-        if p.is_dir() {
-            if skip_default_scan_dir(&p) {
-                continue;
-            }
-            dirs.push(p);
-        } else {
-            files.push(p);
-        }
-    }
-    files.sort();
-    dirs.sort();
-    for p in files {
-        if *scanned_files >= limits.max_files {
-            return Ok(());
-        }
-        *scanned_files += 1;
-        if f(&p) {
-            *stop = true;
-            return Ok(());
-        }
-    }
-    for p in dirs {
-        if *stop {
-            return Ok(());
-        }
-        if depth < limits.max_depth {
-            walk_collect_inner(&p, depth + 1, limits, scanned_files, stop, f)?;
-        }
-    }
-    Ok(())
-}
-
-fn walk_collect_nodes(
-    path: &Path,
-    limits: ScanLimits,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    let mut scanned_files = 0usize;
-    let mut stop = false;
-    walk_collect_nodes_inner(path, 0, limits, &mut scanned_files, &mut stop, f)
-}
-
-fn walk_collect_dirs(
-    path: &Path,
-    limits: ScanLimits,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    let mut scanned_dirs = 0usize;
-    let mut stop = false;
-    walk_collect_dirs_inner(path, 0, limits, &mut scanned_dirs, &mut stop, f)
-}
-
-fn walk_collect_dirs_inner(
-    path: &Path,
-    depth: usize,
-    limits: ScanLimits,
-    scanned_dirs: &mut usize,
-    stop: &mut bool,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    if *stop || !path.is_dir() {
-        return Ok(());
-    }
-    if *scanned_dirs >= limits.max_files {
-        return Ok(());
-    }
-    *scanned_dirs += 1;
-    if f(path) {
-        *stop = true;
-        return Ok(());
-    }
-    if depth >= limits.max_depth {
-        return Ok(());
-    }
-    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-    let mut dirs = Vec::new();
-    for entry in iter {
-        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-        let p = entry.path();
-        if p.is_dir() {
-            if skip_default_scan_dir(&p) {
-                continue;
-            }
-            dirs.push(p);
-        }
-    }
-    dirs.sort();
-    for p in dirs {
-        if *stop {
-            return Ok(());
-        }
-        walk_collect_dirs_inner(&p, depth + 1, limits, scanned_dirs, stop, f)?;
-    }
-    Ok(())
-}
-
-fn walk_collect_nodes_inner(
-    path: &Path,
-    depth: usize,
-    limits: ScanLimits,
-    scanned_files: &mut usize,
-    stop: &mut bool,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    if *stop {
-        return Ok(());
-    }
-    if path.is_file() {
-        if *scanned_files >= limits.max_files {
-            return Ok(());
-        }
-        *scanned_files += 1;
-        if f(path) {
-            *stop = true;
-        }
-        return Ok(());
-    }
-    if path.is_dir() && f(path) {
-        *stop = true;
-        return Ok(());
-    }
-    if depth > limits.max_depth {
-        return Ok(());
-    }
-    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-    let mut files = Vec::new();
-    let mut dirs = Vec::new();
-    for entry in iter {
-        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-        let p = entry.path();
-        if p.is_dir() {
-            if skip_default_scan_dir(&p) {
-                continue;
-            }
-            dirs.push(p);
-        } else {
-            files.push(p);
-        }
-    }
-    files.sort();
-    dirs.sort();
-    for p in files {
-        if *scanned_files >= limits.max_files {
-            return Ok(());
-        }
-        *scanned_files += 1;
-        if f(&p) {
-            *stop = true;
-            return Ok(());
-        }
-    }
-    for p in dirs {
-        if *stop {
-            return Ok(());
-        }
-        if depth < limits.max_depth {
-            walk_collect_nodes_inner(&p, depth + 1, limits, scanned_files, stop, f)?;
-        }
-    }
-    Ok(())
-}
-
-fn to_rel(root: &Path, p: &Path) -> String {
-    p.strip_prefix(root)
-        .unwrap_or(p)
-        .to_string_lossy()
-        .to_string()
-}
-
-fn workspace_root() -> PathBuf {
-    std::env::var("WORKSPACE_ROOT")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        .canonicalize()
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-}
-
-fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
-    let raw = Path::new(input);
-    let mut normalized = PathBuf::new();
-    for comp in raw.components() {
-        match comp {
-            Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
-            Component::CurDir => {}
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    if raw.is_absolute() {
-        return Ok(normalized);
-    }
-    Ok(workspace_root.join(normalized))
 }
 
 #[cfg(test)]

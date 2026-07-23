@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 
 #[test]
 fn error_extra_exposes_machine_contract() {
@@ -639,4 +640,111 @@ fn find_name_pattern_with_extension_filters_extension() {
     assert!(results[0].ends_with("execution_intent_routing_repair_plan_20260509.md"));
 
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_returns_stable_cursor_pages_and_snapshot_hash() {
+    let root = unique_temp_dir("find-name-pages");
+    std::fs::create_dir_all(&root).expect("create root");
+    for name in ["match-c.txt", "match-a.txt", "match-d.txt", "match-b.txt"] {
+        std::fs::write(root.join(name), "fixture\n").expect("write fixture");
+    }
+    let args = json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy().to_string(),
+        "max_results": 2
+    });
+
+    let first = execute(args.clone()).expect("first page");
+    let cursor = first["page"]["next_cursor"].as_u64().expect("next cursor");
+    let mut second_args = args;
+    second_args["cursor"] = json!(cursor);
+    let second = execute(second_args).expect("second page");
+
+    assert_eq!(first["total_count"], 4);
+    assert_eq!(first["returned_count"], 2);
+    assert_eq!(first["page"]["cursor"], 0);
+    assert_eq!(first["page"]["has_more"], true);
+    assert_eq!(second["returned_count"], 2);
+    assert_eq!(second["page"]["cursor"], 2);
+    assert_eq!(second["page"]["previous_cursor"], 0);
+    assert_eq!(second["page"]["has_more"], false);
+    assert_eq!(first["snapshot_sha256"], second["snapshot_sha256"]);
+    assert_ne!(first["results"], second["results"]);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn grep_text_pages_matching_lines_without_losing_total_counts() {
+    let root = unique_temp_dir("grep-pages");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::write(
+        root.join("events.log"),
+        "hit one\nskip\nhit two\nhit three\n",
+    )
+    .expect("write fixture");
+    let args = json!({
+        "action": "grep_text",
+        "query": "hit",
+        "root": root.to_string_lossy().to_string(),
+        "max_results": 2
+    });
+
+    let first = execute(args.clone()).expect("first page");
+    let mut second_args = args;
+    second_args["cursor"] = first["page"]["next_cursor"].clone();
+    let second = execute(second_args).expect("second page");
+
+    assert_eq!(first["match_count"], 2);
+    assert_eq!(first["total_match_count"], 3);
+    assert_eq!(first["page"]["has_more"], true);
+    assert_eq!(second["match_count"], 1);
+    assert_eq!(second["total_match_count"], 3);
+    assert_eq!(second["matches"][0]["line"], 4);
+    assert_eq!(first["snapshot_sha256"], second["snapshot_sha256"]);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn resolve_path_rejects_existing_paths_outside_workspace() {
+    let parent = unique_temp_dir("workspace-fence");
+    let workspace = parent.join("workspace");
+    let outside = parent.join("outside");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+    std::fs::create_dir_all(&outside).expect("create outside");
+
+    let error = resolve_path(&workspace, outside.to_string_lossy().as_ref())
+        .expect_err("outside path must be rejected");
+
+    assert!(error.contains("outside workspace"), "error={error:?}");
+    let _ = std::fs::remove_dir_all(parent);
+}
+
+#[cfg(unix)]
+#[test]
+fn grep_text_does_not_follow_directory_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let root = unique_temp_dir("symlink-fence");
+    let outside = unique_temp_dir("symlink-outside");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&outside).expect("create outside");
+    std::fs::write(outside.join("secret.txt"), "needle\n").expect("write outside fixture");
+    symlink(&outside, root.join("linked")).expect("create directory symlink");
+
+    let out = execute(json!({
+        "action": "grep_text",
+        "query": "needle",
+        "root": root.to_string_lossy().to_string(),
+        "max_results": 10
+    }))
+    .expect("grep succeeds");
+
+    assert_eq!(out["total_match_count"], 0);
+    assert_eq!(out["matches"], json!([]));
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(outside);
 }
