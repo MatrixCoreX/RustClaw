@@ -38,6 +38,9 @@ pub(crate) fn task_status_lines(
     if let Some(next_action) = task_next_action_token(task) {
         lines.push(format!("next_action: {next_action}"));
     }
+    if let Some(budget) = task_budget_status_line(task) {
+        lines.push(budget);
+    }
     let lifecycle_tokens = task.lifecycle_summary_tokens();
     if !lifecycle_tokens.is_empty() {
         lines.push(format!("lifecycle: {}", lifecycle_tokens.join(" ")));
@@ -51,6 +54,120 @@ pub(crate) fn task_status_lines(
         }
     }
     lines
+}
+
+fn task_budget_status_line(task: &task::TaskStatusView) -> Option<String> {
+    let budget = [
+        "/task_budget_slice",
+        "/task_lifecycle/task_budget_slice",
+        "/lifecycle/task_budget_slice",
+        "/result_json/task_budget_slice",
+        "/result_json/task_lifecycle/task_budget_slice",
+        "/result_json/task_checkpoint/boundary_context/task_budget_slice",
+    ]
+    .into_iter()
+    .find_map(|pointer| task.raw_data.pointer(pointer));
+    let latest_event = task
+        .events
+        .iter()
+        .rev()
+        .find(|event| event.event_type == "budget_decision");
+    if budget.is_none() && latest_event.is_none() {
+        return None;
+    }
+
+    let fields = [
+        ("profile", "/profile", "profile"),
+        ("soft_slice_ms", "/soft_slice_ms", "soft_slice_ms"),
+        (
+            "continuation_index",
+            "/continuation_index",
+            "continuation_index",
+        ),
+        (
+            "model_turns",
+            "/cumulative_model_turns",
+            "cumulative_model_turns",
+        ),
+        (
+            "tool_calls",
+            "/cumulative_tool_calls",
+            "cumulative_tool_calls",
+        ),
+        (
+            "elapsed_ms",
+            "/cumulative_elapsed_ms",
+            "cumulative_elapsed_ms",
+        ),
+        (
+            "input_tokens",
+            "/cumulative_input_tokens",
+            "cumulative_input_tokens",
+        ),
+        (
+            "output_tokens",
+            "/cumulative_output_tokens",
+            "cumulative_output_tokens",
+        ),
+        (
+            "cost_usd_nanos",
+            "/cumulative_cost_usd_nanos",
+            "cumulative_cost_usd_nanos",
+        ),
+        ("last_decision", "/last_decision", "decision"),
+        (
+            "hard_model_turns",
+            "/hard_ceilings/model_turns",
+            "hard_model_turns",
+        ),
+        (
+            "hard_tool_calls",
+            "/hard_ceilings/tool_calls",
+            "hard_tool_calls",
+        ),
+        (
+            "hard_total_tokens",
+            "/hard_ceilings/total_tokens",
+            "hard_total_tokens",
+        ),
+        (
+            "hard_elapsed_ms",
+            "/hard_ceilings/elapsed_ms",
+            "hard_elapsed_ms",
+        ),
+        (
+            "hard_cost_usd_nanos",
+            "/hard_ceilings/cost_usd_nanos",
+            "hard_cost_usd_nanos",
+        ),
+        (
+            "hard_continuations",
+            "/hard_ceilings/continuations",
+            "hard_continuations",
+        ),
+        (
+            "hard_non_resumable_tool_runtime_ms",
+            "/hard_ceilings/non_resumable_tool_runtime_ms",
+            "hard_non_resumable_tool_runtime_ms",
+        ),
+        (
+            "next_resumable_action",
+            "/next_resumable_action",
+            "next_resumable_action",
+        ),
+    ];
+    let tokens = fields
+        .into_iter()
+        .filter_map(|(label, pointer, event_key)| {
+            budget
+                .and_then(|value| value.pointer(pointer))
+                .map(|value| value_token(Some(value)))
+                .filter(|value| !value.is_empty())
+                .or_else(|| latest_event.and_then(|event| event.fields.get(event_key).cloned()))
+                .map(|value| format!("{label}={value}"))
+        })
+        .collect::<Vec<_>>();
+    (!tokens.is_empty()).then(|| format!("task_budget: {}", tokens.join(" ")))
 }
 
 fn task_next_action_token(task: &task::TaskStatusView) -> Option<String> {

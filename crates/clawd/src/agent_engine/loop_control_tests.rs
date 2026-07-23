@@ -1,9 +1,10 @@
 use super::{
     answer_contract_for_reply, answer_verifier_retry_summary,
-    apply_structured_respond_clarify_to_loop_state, child_loop_budget_limits,
+    apply_structured_respond_clarify_to_loop_state, budget_replan_cause, child_loop_budget_limits,
     coding_workflow_ready_for_model_finalization, commit_answer_verifier_retry_answer,
     forced_boundary_observation_clarify_intent, initial_execution_recipe_spec,
-    observe_only_round_should_continue, post_write_content_evidence_recovery_policy,
+    next_resumable_budget_action, observe_only_round_should_continue,
+    post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
@@ -96,6 +97,39 @@ fn zero_action_observation_ready_round_is_not_model_finished() {
     };
 
     assert!(!round_model_finished(Some(&outcome)));
+}
+
+#[test]
+fn budget_telemetry_uses_machine_replan_and_resume_tokens() {
+    use crate::task_budget_contract::BudgetDecision;
+
+    let outcome = RoundOutcome {
+        executed_actions: 1,
+        had_error: false,
+        stop_signal: Some("post_write_validation_reserve".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    };
+    assert_eq!(
+        budget_replan_cause(BudgetDecision::Continue, Some(&outcome)),
+        Some("post_write_validation_reserve")
+    );
+    assert_eq!(
+        budget_replan_cause(BudgetDecision::Finish, Some(&outcome)),
+        None
+    );
+    assert_eq!(
+        next_resumable_budget_action(BudgetDecision::CheckpointRequeue, None),
+        Some("resume_checkpoint")
+    );
+    assert_eq!(
+        next_resumable_budget_action(BudgetDecision::Waiting, Some("background")),
+        Some("poll_async_job")
+    );
+    assert_eq!(
+        next_resumable_budget_action(BudgetDecision::NeedsUser, Some("needs_user")),
+        Some("await_user_input")
+    );
 }
 
 #[test]

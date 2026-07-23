@@ -130,7 +130,20 @@ fn compact_budget_decision_event_exposes_machine_progress_fields() {
             "tool_timeout_class": "long_tail",
             "observed_progress": true,
             "soft_slice_exhausted": true,
-            "resumable": true
+            "resumable": true,
+            "planned_action_count": 3,
+            "independently_batchable_count": 0,
+            "executed_action_count": 1,
+            "round_stop_signal": "post_write_validation_reserve",
+            "replan_cause": "post_write_validation_reserve",
+            "next_resumable_action": "resume_checkpoint",
+            "hard_model_turns": 256,
+            "hard_tool_calls": 512,
+            "hard_total_tokens": 100000000,
+            "hard_cost_usd_nanos": 100000000000_u64,
+            "hard_elapsed_ms": 86400000,
+            "hard_continuations": 64,
+            "hard_non_resumable_tool_runtime_ms": 3600000
         }
     });
 
@@ -147,6 +160,13 @@ fn compact_budget_decision_event_exposes_machine_progress_fields() {
     assert!(line.contains("continuation_index=2"));
     assert!(line.contains("soft_slice_exhausted=true"));
     assert!(line.contains("resumable=true"));
+    assert!(line.contains("planned_action_count=3"));
+    assert!(line.contains("executed_action_count=1"));
+    assert!(line.contains("replan_cause=post_write_validation_reserve"));
+    assert!(line.contains("hard_model_turns=256"));
+    assert!(line.contains("hard_tool_calls=512"));
+    assert!(line.contains("hard_non_resumable_tool_runtime_ms=3600000"));
+    assert!(line.contains("next_resumable_action=resume_checkpoint"));
 }
 
 #[test]
