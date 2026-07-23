@@ -1,0 +1,55 @@
+name: Cleanup old platform releases
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "release-cleanup-*"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep only the newest release for each platform
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          for prefix in ubuntu-x86_64- pi-aarch64-; do
+            mapfile -t releases < <(
+              gh api --paginate "repos/${GH_REPO}/releases?per_page=100" \
+                --jq ".[] | select(.tag_name | startswith(\"${prefix}\")) | [.created_at, .tag_name] | @tsv" \
+                | sort -r
+            )
+
+            if (( ${#releases[@]} == 0 )); then
+              echo "No ${prefix} release exists; skipping cleanup."
+              continue
+            fi
+
+            keep_tag="${releases[0]#*$'\t'}"
+            echo "Keeping ${keep_tag}."
+            for release in "${releases[@]:1}"; do
+              old_tag="${release#*$'\t'}"
+              echo "Deleting release and tag ${old_tag}."
+              gh release delete "${old_tag}" --cleanup-tag --yes
+            done
+
+            mapfile -t platform_refs < <(
+              gh api "repos/${GH_REPO}/git/matching-refs/tags/${prefix}" --jq '.[].ref'
+            )
+            for ref in "${platform_refs[@]}"; do
+              tag="${ref#refs/tags/}"
+              if [[ "${tag}" == "${keep_tag}" ]]; then
+                continue
+              fi
+              echo "Deleting stale tag ${tag}."
+              gh api --method DELETE "repos/${GH_REPO}/git/refs/tags/${tag}"
+            done
+          done
