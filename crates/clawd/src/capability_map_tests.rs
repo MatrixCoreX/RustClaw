@@ -173,10 +173,16 @@ fn native_capability_groups_expose_distinct_registry_tools() {
     assert_eq!(doc_parse.tool_name, "call_doc_parse");
     assert!(doc_parse.description.contains("document_summary"));
     assert_ne!(doc_parse.tool_name, filesystem.tool_name);
-    assert_eq!(filesystem.capability_names.len(), 17);
+    assert_eq!(filesystem.capability_names.len(), 18);
     assert!(filesystem
         .capability_names
         .contains(&"filesystem.read_text_range".to_string()));
+    assert!(filesystem
+        .capability_names
+        .contains(&"filesystem.count_entries".to_string()));
+    assert!(!filesystem
+        .capability_names
+        .contains(&"fs.count_entries".to_string()));
     assert!(!filesystem
         .capability_names
         .contains(&"filesystem.read_file".to_string()));
@@ -213,7 +219,17 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
         planner_disclosed_native_capability_groups_for_task(&state, &task, &BTreeSet::new());
     let loadable =
         planner_loadable_capability_group_names_for_task(&state, &task, &BTreeSet::new());
-    assert!(initial.len() < full.len());
+    assert_eq!(full.len(), 34);
+    assert_eq!(initial.len(), 7);
+    assert_eq!(
+        initial
+            .iter()
+            .map(|group| group.capability_names.len())
+            .sum::<usize>(),
+        71
+    );
+    assert_eq!(loadable.len(), 27);
+    assert_eq!(full.len(), initial.len() + loadable.len());
     assert!(initial
         .iter()
         .any(|group| group.tool_name == "call_fs_basic"));
@@ -225,6 +241,13 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
         .cloned()
         .expect("fixture must expose an on-demand group");
     assert!(!initial.iter().any(|group| group.skill_name == domain_group));
+    assert!(initial.iter().all(|group| {
+        group.capability_names.iter().all(|capability| {
+            state.get_skills_registry().is_some_and(|registry| {
+                registry.canonical_planner_capability_name(capability) == Some(capability.as_str())
+            })
+        })
+    }));
 
     let loaded = BTreeSet::from([domain_group.clone()]);
     let expanded = planner_disclosed_native_capability_groups_for_task(&state, &task, &loaded);
