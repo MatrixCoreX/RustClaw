@@ -150,7 +150,11 @@ export function SkillStoreCatalog({
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5 text-[10px]">
           <span className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white/45">
-            {item.source_kind === "third_party" ? t("第三方", "Third party") : t("内建", "Bundled")}
+            {item.source_kind === "third_party"
+              ? t("第三方", "Third party")
+              : item.source_kind === "bundled_optional"
+                ? t("可选内建", "Optional bundled")
+                : t("核心内建", "Core bundled")}
           </span>
           {item.group ? (
             <span className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white/45">{item.group}</span>

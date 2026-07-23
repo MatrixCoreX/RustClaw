@@ -386,7 +386,7 @@ export interface SkillStoreItem {
   group?: string | null;
   catalog_section?: string | null;
   kind: string;
-  source_kind: "bundled" | "third_party";
+  source_kind: "bundled_core" | "bundled_optional" | "third_party";
   source?: string | null;
   installed: boolean;
   configured_installed?: boolean;

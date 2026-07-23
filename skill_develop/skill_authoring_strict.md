@@ -7,7 +7,9 @@
 
 ## 强约束
 - 默认实现为 `runner` 技能，不要实现成 `builtin`。
-- 仓内技能目录必须使用 `crates/skills/<skill_name>`；外部提交技能目录使用 `external_skills/<skill_name>`。
+- 固定/核心仓内技能使用 `crates/skills/<skill_name>`；Skill Store 按需
+  bundled 技能使用 `optional_skills/<skill_name>`；外部提交技能使用
+  `external_skills/<skill_name>`。
 - `<skill_name>` 只允许小写字母、数字、下划线。
 - 二进制名默认遵循约定：`foo_bar -> foo-bar-skill`。
 - 优先通过 `configs/skills_registry.toml`、`INTERFACE.md`、prompt 文件和配置文件完成接入。
@@ -15,10 +17,11 @@
 - 如果你发现自己要修改 `clawd`、`skill-runner`、`agent_engine`，先停止并重新检查：是否其实只需要改 registry、workspace、prompt、接口文档和技能 crate。
 
 ## 仓内 runner 必须完成的接入项
-0. 仅当目标是仓内 `crates/skills/<skill_name>` 时，优先先运行 `python3 skill_develop/create_skill.py <skill_name>` 生成基础脚手架，再在其结果上继续补全。
-1. 新建 `crates/skills/<skill_name>/Cargo.toml`。
-2. 新建 `crates/skills/<skill_name>/src/main.rs`。
-3. 新建 `crates/skills/<skill_name>/INTERFACE.md`。
+0. 固定/核心技能先运行 `python3 skill_develop/create_skill.py <skill_name>`；
+   Skill Store 按需技能运行同一命令并增加 `--on-demand`。
+1. 在命令选择的 source root 下新建 `<skill_name>/Cargo.toml`。
+2. 新建 `<source-root>/<skill_name>/src/main.rs`。
+3. 新建 `<source-root>/<skill_name>/INTERFACE.md`。
 4. 将该 crate 加入根 `Cargo.toml` 的 `[workspace].members`。
 5. 在 `configs/skills_registry.toml` 中新增一个 `[[skills]]`。
 6. 如需别名，只在 registry 的 `aliases` 中配置，不要优先改主程序 fallback。
@@ -31,7 +34,8 @@
 13. 如需模型特化，只新增 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`，不要再维护旧的 vendor skill 全量副本。
 
 ## 外部提交技能必须完成的接入项
-0. 适用于用户上传、外部目录提交，或不希望把新能力放进 `crates/skills` 的场景。
+0. 适用于用户上传或外部目录提交；bundled 按需技能不属于外部技能，
+   应使用 `optional_skills`。
 1. 使用 `external_skills/<skill_name>`，目录内必须有 `Cargo.toml`、`README.md`、`INTERFACE.md`、`src/main.rs`。
 2. 优先通过 `extension_manager` 的 `scaffold_external_skill` / `implement_external_skill` 补全外部技能。
 3. `INTERFACE.md` 必须写清 action、参数、错误和请求/响应示例，供 LLM 判断和路由使用。

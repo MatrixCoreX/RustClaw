@@ -60,7 +60,7 @@ For a prompt at `prompts/layers/overlays/<name>.md`:
 | `run_cmd_suggestion.schema.json` | inline prompt `crates/clawd/src/skills/builtin.rs::build_run_cmd_nl_prompt` | `crates/clawd/src/skills/builtin.rs::RunCmdSuggestionPayload` (drift test: `run_cmd_suggestion_schema_drift`) |
 | `image_reference_resolver.schema.json` | `prompts/layers/overlays/image_reference_resolver_prompt.md` | `crates/skills/image_edit/src/main.rs::parse_llm_selected_index` |
 | `language_infer.schema.json` | `prompts/layers/overlays/language_infer_prompt.md` | `crates/skills/image_vision/src/main.rs::parse_language_choice_from_llm` |
-| `stock_alias_choice.schema.json` | inline JSON contract in `crates/skills/stock/src/main.rs::choose_candidate_via_llm` | `crates/skills/stock/src/main.rs::parse_llm_alias_response` |
+| `stock_alias_choice.schema.json` | inline JSON contract in `optional_skills/stock/src/main.rs::choose_candidate_via_llm` | `optional_skills/stock/src/main.rs::parse_llm_alias_response` |
 | `temporary_fix_plan.schema.json` | `prompts/layers/overlays/extension_manager_temporary_fix_system_prompt.md` | `crates/skills/extension_manager/src/main.rs::parse_temporary_fix_plan_from_text` |
 | `permanent_extension_plan.schema.json` | `prompts/layers/overlays/extension_manager_permanent_extension_system_prompt.md` | `crates/skills/extension_manager/src/main.rs::parse_permanent_extension_plan_from_text` |
 | `external_skill_implementation.schema.json` | `prompts/layers/overlays/extension_manager_skill_implementation_system_prompt.md` | `crates/skills/extension_manager/src/main.rs::parse_external_skill_implementation_from_text` |
@@ -89,7 +89,7 @@ Not every schema-backed parser lives inside `clawd`.
 - `language_infer.schema.json` is consumed directly by
   `crates/skills/image_vision/src/main.rs::parse_language_choice_from_llm`.
 - `stock_alias_choice.schema.json` is consumed directly by
-  `crates/skills/stock/src/main.rs::parse_llm_alias_response`.
+  `optional_skills/stock/src/main.rs::parse_llm_alias_response`.
 - `temporary_fix_plan.schema.json`,
   `permanent_extension_plan.schema.json`, and
   `external_skill_implementation.schema.json` are consumed directly by

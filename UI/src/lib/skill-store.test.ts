@@ -17,7 +17,7 @@ const item = (name: string, installed: boolean, group: string): SkillStoreItem =
   group,
   catalog_section: "other",
   kind: "builtin",
-  source_kind: "bundled",
+  source_kind: "bundled_optional",
   skill: { name },
 });
 

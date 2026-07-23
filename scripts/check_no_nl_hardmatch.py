@@ -19,6 +19,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROOTS = (
     REPO_ROOT / "crates",
+    REPO_ROOT / "optional_skills",
     REPO_ROOT / "configs",
     REPO_ROOT / "docker" / "config",
 )

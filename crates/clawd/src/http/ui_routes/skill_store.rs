@@ -224,7 +224,13 @@ async fn get_skill_store_catalog(
                 "group": entry.group,
                 "catalog_section": "other",
                 "kind": skill_kind_token(entry.kind),
-                "source_kind": if entry.kind == SkillKind::External { "third_party" } else { "bundled" },
+                "source_kind": if entry.kind == SkillKind::External {
+                    "third_party"
+                } else if entry.install_mode.as_deref() == Some("on_demand") {
+                    "bundled_optional"
+                } else {
+                    "bundled_core"
+                },
                 "source": entry.external_source_url,
                 "installed": installed,
                 "configured_installed": configured_installed,

@@ -180,7 +180,7 @@ flowchart TD
 - `Planner prompt`: is the first semantic LLM call for an ordinary `ask`. Resume and async-poll executors may restore a previously admitted machine checkpoint, but they cannot introduce a new pre-planner semantic decision path.
 - `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
 - `respond`: is the native terminal action. Ordinary answers carry model-authored `free_text`; strict list answers carry only a structured item array and exact count. Runtime checks the contract and renders those items without parsing multilingual user text or allowing an extra preface/recap. A single scalar, identifier, title, token, or path stays `free_text` rather than becoming a one-item list.
-- `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
+- `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `optional_skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
 - `Exact machine output`: the planner requests `response_shape=strict` plus a validated `structured_field_selector` such as `command_output`; the runtime projects only that field from `CapabilityResultEnvelope`. Free-form and one-sentence contracts remain model-synthesized.
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
@@ -1035,7 +1035,8 @@ The same gate also writes `clawcli_session_tui_contracts.txt` and records `clawc
 - `crates/webd`: optional reverse proxy and login session bridge for public/browser access
 - `crates/telegramd`, `crates/wechatd`, `crates/feishud`, `crates/larkd`, `crates/whatsappd`, `crates/whatsapp_webd`: channel daemons
 - `services/wa-web-bridge`: local Node bridge used by the WhatsApp Web channel
-- `crates/skills/*`: skill implementations and `INTERFACE.md` specs
+- `crates/skills/*`: fixed/core built-in skill implementations and `INTERFACE.md` specs
+- `optional_skills/*`: bundled Skill Store skills compiled and installed on demand
 - `external_skills/*`: externally submitted skills and their required `INTERFACE.md` specs
 - `UI/`: Vite + React local console
 - `pi_app/`: small-screen desktop monitor and launcher scripts
@@ -1343,6 +1344,7 @@ Skill discovery and runtime behavior are driven by:
 - `configs/skills_registry.toml`
 - `[skills]` in `configs/config.toml`
 - `crates/skills/*/INTERFACE.md`
+- `optional_skills/*/INTERFACE.md`
 - `external_skills/*/INTERFACE.md`
 - `prompts/layers/generated/skills/*.md`
 

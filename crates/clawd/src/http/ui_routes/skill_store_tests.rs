@@ -341,6 +341,10 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(store_item(&initial, "weather")["installed"], false);
     assert_eq!(store_item(&initial, "weather")["catalog_section"], "other");
     assert_eq!(
+        store_item(&initial, "weather")["source_kind"],
+        "bundled_optional"
+    );
+    assert_eq!(
         store_item(&initial, "weather")["existing_config_files"][0],
         "configs/weather.toml"
     );

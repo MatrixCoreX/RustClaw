@@ -176,7 +176,7 @@ flowchart TD
 - `TurnBoundaryEnvelope`：根据已认证 task/session 状态、附件、显式 API 字段、locator 和 policy profile 确定性构建。它只是 planner 上下文，不是语义 route 结果。
 - `Planner prompt`：是普通 `ask` 的第一次语义 LLM 调用。resume 和 async-poll executor 可以恢复已经准入的机器 checkpoint，但不能引入新的 planner 前语义决策路径。
 - `call_capability`：推荐的 planner action，把 tool/skill 选择放到 registry metadata 与 resolver policy 后面。
-- `Generated INTERFACE prompts`：来自 `crates/skills/*/INTERFACE.md`、`external_skills/*/INTERFACE.md` 和 `prompts/layers/generated/skills/*`；新增技能应改这些契约，不改 `clawd` 主流程分支。
+- `Generated INTERFACE prompts`：来自 `crates/skills/*/INTERFACE.md`、`optional_skills/*/INTERFACE.md`、`external_skills/*/INTERFACE.md` 和 `prompts/layers/generated/skills/*`；新增技能应改这些契约，不改 `clawd` 主流程分支。
 - `Exact machine output`：planner 使用 `response_shape=strict` 和经过验证的 `structured_field_selector`（例如 `command_output`）提出精确输出要求；runtime 只从 `CapabilityResultEnvelope` 投影该字段。自由回答和一句话回答继续由模型合成。
 - `PlanVerifier`：执行前阻断不可用能力、缺必填字段、不安全 mutation，以及不符合输出/证据形状的计划。拒绝路径应携带稳定机器字段，不写固定用户可见回复模板。
 - `Pre-tool hooks + adapter preflight`：循环执行和有边界的恢复重试都必须经过同一套 hook、contract-argument、command-policy 与结构化错误检查，之后才允许真正执行有副作用的 adapter。
@@ -647,7 +647,8 @@ flowchart TD
 - `crates/webd`：可选的反向代理和登录会话桥接层
 - `crates/telegramd`、`crates/wechatd`、`crates/feishud`、`crates/larkd`、`crates/whatsappd`、`crates/whatsapp_webd`：通道守护进程
 - `services/wa-web-bridge`：WhatsApp Web 通道使用的本地 Node bridge
-- `crates/skills/*`：技能实现及其 `INTERFACE.md`
+- `crates/skills/*`：固定/核心内建技能实现及其 `INTERFACE.md`
+- `optional_skills/*`：由 Skill Store 按需编译和安装的内建技能
 - `external_skills/*`：外部提交技能及其必须提供的 `INTERFACE.md`
 - `UI/`：基于 Vite + React 的本地控制台
 - `pi_app/`：小屏桌面程序和启动脚本
@@ -1060,6 +1061,7 @@ RustClaw 当前内置的技能已经比较完整，按类别可大致分为：
 - `configs/skills_registry.toml`
 - `configs/config.toml` 里的 `[skills]`
 - `crates/skills/*/INTERFACE.md`
+- `optional_skills/*/INTERFACE.md`
 - `external_skills/*/INTERFACE.md`
 - `prompts/layers/generated/skills/*.md`
 

@@ -7,9 +7,12 @@ from pathlib import Path
 import re
 import sys
 
+from skill_store_packages import OPTIONAL_SKILLS_ROOT
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO_ROOT / "crates" / "skills"
+OPTIONAL_SKILLS_DIR = REPO_ROOT / OPTIONAL_SKILLS_ROOT
 EXTERNAL_SKILLS_DIR = REPO_ROOT / "external_skills"
 # Canonical generated skill prompt body. Vendor-specific behavior should stay in
 # prompts/layers/vendor_patches/<vendor>/skills/common.md or
@@ -54,13 +57,14 @@ MATRIX_EVIDENCE_ROLE_TOKENS = {
 class SkillEntry:
     name: str
     path: Path
-    source: str  # built_in | external
+    source: str  # built_in | optional | external
 
 
 def discover_skill_dirs() -> dict[str, SkillEntry]:
     # Order matters: prefer built-in crates/skills when name conflicts.
     roots = [
         (SKILLS_DIR, "built_in"),
+        (OPTIONAL_SKILLS_DIR, "optional"),
         (EXTERNAL_SKILLS_DIR, "external"),
     ]
     out: dict[str, SkillEntry] = {}
@@ -70,7 +74,7 @@ def discover_skill_dirs() -> dict[str, SkillEntry]:
         for child in sorted(root.iterdir()):
             if not child.is_dir():
                 continue
-            if source == "built_in":
+            if source != "external":
                 if not (child / "Cargo.toml").exists():
                     continue
             else:
@@ -488,7 +492,7 @@ def main() -> int:
             return 1
         if skill not in skill_set:
             print(
-                f"--adopt skill not found under crates/skills or external_skills: {skill}",
+                f"--adopt skill not found under crates/skills, optional_skills, or external_skills: {skill}",
                 file=sys.stderr,
             )
             return 1

@@ -4,7 +4,7 @@
 - Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
 
 ## Interface Source
-- Primary source: `crates/skills/weather/INTERFACE.md`
+- Primary source: `optional_skills/weather/INTERFACE.md`
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)

@@ -6,24 +6,48 @@ from __future__ import annotations
 import argparse
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 
-def on_demand_pairs(registry_path: Path) -> list[tuple[str, str]]:
+OPTIONAL_SKILLS_ROOT = Path("optional_skills")
+
+
+@dataclass(frozen=True)
+class OnDemandSkillSpec:
+    skill_name: str
+    package: str
+    runner: str
+    source_dir: Path
+
+
+def on_demand_specs(registry_path: Path) -> list[OnDemandSkillSpec]:
     registry = tomllib.loads(registry_path.read_text(encoding="utf-8"))
-    pairs: set[tuple[str, str]] = set()
+    specs: set[OnDemandSkillSpec] = set()
     for skill in registry.get("skills", []):
         if skill.get("install_mode") != "on_demand":
             continue
-        runner = str(skill.get("runner_name") or skill.get("name") or "").strip()
+        skill_name = str(skill.get("name") or "").strip()
+        runner = str(skill.get("runner_name") or skill_name).strip()
         runner = runner.replace("_", "-")
         if runner and not runner.endswith("-skill"):
             runner += "-skill"
         package = str(skill.get("install_package") or runner).strip()
-        if not package or not runner:
-            raise ValueError("on-demand skill must declare a package and runner")
-        pairs.add((package, runner))
-    return sorted(pairs)
+        if not skill_name or not package or not runner:
+            raise ValueError("on-demand skill must declare a name, package, and runner")
+        specs.add(
+            OnDemandSkillSpec(
+                skill_name=skill_name,
+                package=package,
+                runner=runner,
+                source_dir=OPTIONAL_SKILLS_ROOT / skill_name,
+            )
+        )
+    return sorted(specs, key=lambda item: (item.package, item.runner, item.skill_name))
+
+
+def on_demand_pairs(registry_path: Path) -> list[tuple[str, str]]:
+    return [(spec.package, spec.runner) for spec in on_demand_specs(registry_path)]
 
 
 def parse_args() -> argparse.Namespace:

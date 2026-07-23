@@ -22,7 +22,7 @@ from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ROOTS = (REPO_ROOT / "crates",)
+DEFAULT_ROOTS = (REPO_ROOT / "crates", REPO_ROOT / "optional_skills")
 
 NORMAL_STRING_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
 RAW_STRING_RE = re.compile(r'r(?P<hashes>#+)?"(?P<body>.*?)"(?P=hashes)', re.S)
@@ -73,7 +73,7 @@ UI_VISIBLE_HINTS = (
 
 DOMAIN_METADATA_HINTS = (
     "crates/skills/audio_synthesize/src/",
-    "crates/skills/photo_organize/src/",
+    "optional_skills/photo_organize/src/",
 )
 
 I18N_HINTS = (
@@ -332,7 +332,7 @@ def classify(path_rel: str, line: str, kind: str, literal: str) -> tuple[str, st
             "ui",
             "Stable console copy may live in i18n/resources; task-specific prose should still come from structured evidence and finalizer/model rendering.",
         )
-    if path_rel.startswith("crates/skills/"):
+    if path_rel.startswith(("crates/skills/", "optional_skills/")):
         if any(hint in path_rel for hint in DOMAIN_METADATA_HINTS):
             return (
                 "domain_metadata",
