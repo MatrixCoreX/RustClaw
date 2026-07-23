@@ -1,7 +1,95 @@
 use super::{
-    error_extra, git_success_extra, normalize_action, parse_branch_list, parse_git_log_commits,
-    parse_git_status_summary, parse_remote_list, SKILL_NAME,
+    error_extra, execute_with_workspace_root, git_success_extra, normalize_action,
+    parse_branch_list, parse_git_log_commits, parse_git_status_summary, parse_remote_list,
+    SKILL_NAME,
 };
+use serde_json::json;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static TEST_REPO_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+struct TestRepository {
+    workspace: PathBuf,
+    repository: PathBuf,
+}
+
+impl TestRepository {
+    fn new() -> Self {
+        let sequence = TEST_REPO_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!(
+            "rustclaw-git-basic-{}-{nonce}-{sequence}",
+            std::process::id()
+        ));
+        let repository = workspace.join("repository");
+        std::fs::create_dir_all(&repository).expect("create test repository");
+        run_git(&repository, &["init", "--quiet"]);
+        run_git(&repository, &["config", "user.name", "RustClaw Test"]);
+        run_git(
+            &repository,
+            &["config", "user.email", "rustclaw-test@example.invalid"],
+        );
+        Self {
+            workspace,
+            repository,
+        }
+    }
+
+    fn commit_file(&self, path: &str, content: &str, message: &str) -> String {
+        let file = self.repository.join(path);
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).expect("create fixture parent");
+        }
+        std::fs::write(&file, content).expect("write fixture");
+        run_git(&self.repository, &["add", "--", path]);
+        run_git(&self.repository, &["commit", "--quiet", "-m", message]);
+        git_stdout(&self.repository, &["rev-parse", "HEAD"])
+    }
+}
+
+impl Drop for TestRepository {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.workspace);
+    }
+}
+
+fn run_git(repository: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .current_dir(repository)
+        .args(args)
+        .output()
+        .expect("run git fixture command");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn git_stdout(repository: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(repository)
+        .args(args)
+        .output()
+        .expect("run git fixture query");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("git output is utf-8")
+        .trim()
+        .to_string()
+}
 
 #[test]
 fn error_extra_exposes_machine_contract() {
@@ -303,5 +391,179 @@ fn log_success_extra_exposes_subject_for_generic_consumers() {
             .and_then(|value| value.as_array())
             .map(Vec::len),
         Some(2)
+    );
+}
+
+#[test]
+fn execute_rejects_repository_and_file_paths_outside_workspace() {
+    let fixture = TestRepository::new();
+
+    let repository_error = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({"action": "status", "repo": "../outside"}),
+    )
+    .expect_err("repository traversal must fail");
+    assert!(matches!(
+        repository_error.code,
+        "git_path_outside_workspace" | "git_repository_outside_workspace"
+    ));
+
+    fixture.commit_file("README.md", "first\n", "first");
+    let file_error = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "show_file_at_rev",
+            "repo": "repository",
+            "target": "HEAD",
+            "path": "../outside"
+        }),
+    )
+    .expect_err("file traversal must fail");
+    assert_eq!(file_error.code, "git_path_outside_workspace");
+}
+
+#[test]
+fn execute_rejects_option_like_revision_tokens() {
+    let fixture = TestRepository::new();
+    fixture.commit_file("README.md", "first\n", "first");
+
+    let error = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "show",
+            "repo": "repository",
+            "target": "--help"
+        }),
+    )
+    .expect_err("option-like revision must fail");
+
+    assert_eq!(error.code, "git_revision_invalid");
+}
+
+#[test]
+fn rev_parse_honors_requested_ref_and_returns_exact_revision() {
+    let fixture = TestRepository::new();
+    let first = fixture.commit_file("README.md", "first\n", "first");
+    fixture.commit_file("README.md", "second\n", "second");
+
+    let (_, extra) = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "rev_parse",
+            "repo": "repository",
+            "ref": "HEAD~1"
+        }),
+    )
+    .expect("resolve prior revision");
+
+    assert_eq!(
+        extra.get("revision").and_then(|value| value.as_str()),
+        Some(first.as_str())
+    );
+    assert_eq!(
+        extra
+            .pointer("/provenance/source")
+            .and_then(|value| value.as_str()),
+        Some("git_cli")
+    );
+}
+
+#[test]
+fn show_file_at_rev_uses_resolved_revision_and_preserves_full_output() {
+    let fixture = TestRepository::new();
+    let content = "0123456789abcdef\n".repeat(1024);
+    let revision = fixture.commit_file("large.txt", &content, "large file");
+
+    let (text, extra) = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "show_file_at_rev",
+            "repo": "repository",
+            "target": "HEAD",
+            "path": "large.txt"
+        }),
+    )
+    .expect("read file at revision");
+
+    assert!(text.contains(&content));
+    assert!(!text.contains("...(truncated)"));
+    assert_eq!(
+        extra.get("revision").and_then(|value| value.as_str()),
+        Some(revision.as_str())
+    );
+    assert_eq!(
+        extra.get("content_bytes").and_then(|value| value.as_u64()),
+        Some(content.len() as u64)
+    );
+    assert!(extra
+        .get("output_sha256")
+        .and_then(|value| value.as_str())
+        .is_some_and(|value| value.starts_with("sha256:")));
+    assert_eq!(
+        extra.get("truncated").and_then(|value| value.as_bool()),
+        Some(false)
+    );
+}
+
+#[test]
+fn log_cursor_pages_are_stable_and_non_overlapping() {
+    let fixture = TestRepository::new();
+    fixture.commit_file("counter.txt", "one\n", "commit one");
+    fixture.commit_file("counter.txt", "two\n", "commit two");
+    fixture.commit_file("counter.txt", "three\n", "commit three");
+
+    let (_, first_page) = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "log",
+            "repo": "repository",
+            "cursor": 0,
+            "limit": 1
+        }),
+    )
+    .expect("first log page");
+    let next_cursor = first_page
+        .pointer("/page/next_cursor")
+        .and_then(|value| value.as_u64())
+        .expect("next cursor");
+    let first_sha = first_page
+        .pointer("/commits/0/sha")
+        .and_then(|value| value.as_str())
+        .expect("first sha")
+        .to_string();
+
+    let (_, second_page) = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "log",
+            "repo": "repository",
+            "cursor": next_cursor,
+            "limit": 1
+        }),
+    )
+    .expect("second log page");
+    let second_sha = second_page
+        .pointer("/commits/0/sha")
+        .and_then(|value| value.as_str())
+        .expect("second sha");
+
+    assert_ne!(first_sha, second_sha);
+    assert_eq!(
+        first_page
+            .pointer("/page/returned_count")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        first_page
+            .pointer("/page/has_more")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        second_page
+            .pointer("/page/previous_cursor")
+            .and_then(|value| value.as_u64()),
+        Some(0)
     );
 }

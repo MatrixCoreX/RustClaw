@@ -1,15 +1,43 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use toml::Value as TomlValue;
 
 static I18N: OnceLock<TextCatalog> = OnceLock::new();
 const SKILL_NAME: &str = "git_basic";
+const DEFAULT_PAGE_LIMIT: usize = 20;
+const MAX_PAGE_LIMIT: usize = 200;
+const MAX_REVISION_BYTES: usize = 512;
+const MAX_REPO_PATH_BYTES: usize = 4096;
+
+#[derive(Debug)]
+struct GitBasicError {
+    code: &'static str,
+    detail: String,
+    extra: Option<Value>,
+}
+
+impl GitBasicError {
+    fn new(code: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            code,
+            detail: detail.into(),
+            extra: None,
+        }
+    }
+
+    fn with_extra(mut self, extra: Value) -> Self {
+        self.extra = Some(extra);
+        self
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -158,8 +186,8 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
-                    error_text: Some(err),
+                    extra: Some(error_extra_with_detail(err.code, err.extra)),
+                    error_text: Some(err.detail),
                 },
             },
             Err(err) => Resp {
@@ -180,42 +208,48 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn error_extra(error_kind: &str) -> Value {
-    json!({
+    error_extra_with_detail(error_kind, None)
+}
+
+fn error_extra_with_detail(error_kind: &str, detail: Option<Value>) -> Value {
+    let mut value = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
-    })
+    });
+    if let (Some(root), Some(detail)) = (value.as_object_mut(), detail) {
+        root.insert("detail".to_string(), detail);
+    }
+    value
 }
 
-fn execute(args: Value) -> Result<(String, Value), String> {
-    let obj = args
-        .as_object()
-        .ok_or_else(|| tr("git_basic.err.args_object"))?;
-    let raw_action = obj
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("status");
-    let action = normalize_action(raw_action);
-    let root = std::env::var("WORKSPACE_ROOT")
+fn execute(args: Value) -> Result<(String, Value), GitBasicError> {
+    let workspace_root = std::env::var("WORKSPACE_ROOT")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    execute_with_workspace_root(&workspace_root, args)
+}
 
-    if !is_git_repo(&root) {
-        return Err(tr("git_basic.msg.not_git_repo"));
-    }
-
-    let log_n = obj
-        .get("n")
-        .or_else(|| obj.get("limit"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(20)
-        .min(100);
+fn execute_with_workspace_root(
+    workspace_root: &Path,
+    args: Value,
+) -> Result<(String, Value), GitBasicError> {
+    let obj = args
+        .as_object()
+        .ok_or_else(|| GitBasicError::new("invalid_args", tr("git_basic.err.args_object")))?;
+    let raw_action = optional_string(obj, "action", "git_action_invalid")?.unwrap_or("status");
+    let action = normalize_action(raw_action);
+    let root = resolve_repository_root(workspace_root, obj.get("repo"))?;
+    let page = page_spec(obj)?;
 
     let mut input_meta = Map::new();
+    input_meta.insert("cursor".to_string(), json!(page.cursor));
+    input_meta.insert("limit".to_string(), json!(page.limit));
     let (subcmd, mut extra): (&str, Vec<String>) = match action.as_str() {
         "status" => (
             "status",
@@ -223,43 +257,78 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         ),
         "log" => (
             "log",
-            vec!["--oneline".to_string(), "-n".to_string(), log_n.to_string()],
+            vec![
+                "--oneline".to_string(),
+                "--skip".to_string(),
+                page.cursor.to_string(),
+                "-n".to_string(),
+                page.limit.saturating_add(1).to_string(),
+            ],
         ),
-        "diff" => ("diff", vec![]),
-        "diff_cached" => ("diff", vec!["--cached".to_string()]),
+        "diff" => ("diff", validated_pathspec_args(obj.get("path"))?),
+        "diff_cached" => {
+            let mut args = vec!["--cached".to_string()];
+            args.extend(validated_pathspec_args(obj.get("path"))?);
+            ("diff", args)
+        }
         "branch" => ("branch", vec!["--all".to_string()]),
         "current_branch" => (
             "rev-parse",
             vec!["--abbrev-ref".to_string(), "HEAD".to_string()],
         ),
         "remote" => ("remote", vec!["-v".to_string()]),
-        "changed_files" => ("diff", vec!["--name-only".to_string(), "HEAD".to_string()]),
+        "changed_files" => {
+            let mut args = vec!["--name-only".to_string(), "HEAD".to_string()];
+            args.extend(validated_pathspec_args(obj.get("path"))?);
+            ("diff", args)
+        }
         "show" => {
-            let target = obj.get("target").and_then(|v| v.as_str()).unwrap_or("HEAD");
-            input_meta.insert("target".to_string(), json!(target));
-            ("show", vec!["--stat".to_string(), target.to_string()])
+            let requested =
+                optional_string(obj, "target", "git_revision_invalid")?.unwrap_or("HEAD");
+            let revision = resolve_revision(&root, requested)?;
+            input_meta.insert("target".to_string(), json!(requested));
+            input_meta.insert("revision".to_string(), json!(revision));
+            ("show", vec!["--stat".to_string(), revision])
         }
         "show_file_at_rev" => {
-            let target = obj.get("target").and_then(|v| v.as_str()).unwrap_or("HEAD");
-            let path = obj.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            if path.is_empty() {
-                return Err("show_file_at_rev requires path".to_string());
+            let requested =
+                optional_string(obj, "target", "git_revision_invalid")?.unwrap_or("HEAD");
+            let revision = resolve_revision(&root, requested)?;
+            let path = normalize_repo_relative_path(
+                optional_string(obj, "path", "git_path_invalid")?.ok_or_else(|| {
+                    GitBasicError::new("git_path_missing", "git_basic.path_required")
+                })?,
+            )?;
+            if path == "." {
+                return Err(GitBasicError::new(
+                    "git_path_invalid",
+                    "git_basic.file_path_required",
+                ));
             }
-            input_meta.insert("target".to_string(), json!(target));
-            input_meta.insert("revision".to_string(), json!(target));
+            input_meta.insert("target".to_string(), json!(requested));
+            input_meta.insert("revision".to_string(), json!(revision));
             input_meta.insert("path".to_string(), json!(path));
             input_meta.insert("source".to_string(), json!("git_show_file_at_rev"));
             input_meta.insert("source_kind".to_string(), json!("git_revision_file"));
-            ("show", vec![format!("{}:{}", target, path)])
+            ("show", vec![format!("{revision}:{path}")])
         }
-        "rev_parse" => ("rev-parse", vec!["HEAD".to_string()]),
+        "rev_parse" => {
+            let requested = optional_string(obj, "ref", "git_revision_invalid")?.unwrap_or("HEAD");
+            let revision = resolve_revision(&root, requested)?;
+            input_meta.insert("target".to_string(), json!(requested));
+            input_meta.insert("revision".to_string(), json!(revision));
+            ("rev-parse", vec![revision])
+        }
         _ => {
-            return Err(tr("git_basic.err.unsupported_action"));
+            return Err(GitBasicError::new(
+                "unsupported_action",
+                tr("git_basic.err.unsupported_action"),
+            ));
         }
     };
 
     let mut cmd = Command::new("git");
-    cmd.current_dir(root)
+    cmd.current_dir(&root)
         .arg(subcmd)
         .args(extra.drain(..))
         .stdin(std::process::Stdio::null())
@@ -267,9 +336,12 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .stderr(std::process::Stdio::piped());
 
     let out = cmd.output().map_err(|err| {
-        tr_with(
-            "git_basic.err.run_git_failed",
-            &[("error", &err.to_string())],
+        GitBasicError::new(
+            "git_spawn_failed",
+            tr_with(
+                "git_basic.err.run_git_failed",
+                &[("error", &err.to_string())],
+            ),
         )
     })?;
 
@@ -281,25 +353,17 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         }
         text.push_str(&String::from_utf8_lossy(&out.stderr));
     }
-    const MAX_LEN: usize = 12000;
-    let marker = "\n...(truncated)";
-    let max_bytes = MAX_LEN.saturating_sub(marker.len());
-    if text.len() > MAX_LEN {
-        let mut boundary = 0usize;
-        for (i, c) in text.char_indices() {
-            if i + c.len_utf8() > max_bytes {
-                break;
-            }
-            boundary = i + c.len_utf8();
-        }
-        text.truncate(boundary);
-        text.push_str(marker);
-    }
 
     let exit_code = out.status.code().unwrap_or(-1);
     if out.status.success() {
+        if action == "log" {
+            let (bounded, page_value) = bound_text_lines(&text, page);
+            text = bounded;
+            input_meta.insert("page".to_string(), page_value);
+            input_meta.insert("page_prebounded".to_string(), json!(true));
+        }
         let output = format!("exit={exit_code}\n{text}");
-        let extra = git_success_extra(
+        let mut extra = git_success_extra(
             action.as_str(),
             raw_action,
             subcmd,
@@ -308,9 +372,352 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             &output,
             Some(&input_meta),
         );
-        Ok((output.clone(), extra))
+        append_repository_provenance(&mut extra, &root, &output);
+        apply_structured_page(action.as_str(), &mut extra, page);
+        Ok((output, extra))
     } else {
-        Err(format!("git command failed: exit={exit_code}\n{text}"))
+        Err(GitBasicError::new(
+            "git_command_failed",
+            format!("git command failed: exit={exit_code}\n{text}"),
+        )
+        .with_extra(json!({
+            "exit_code": exit_code,
+            "action": action,
+            "subcommand": subcmd,
+        })))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PageSpec {
+    cursor: usize,
+    limit: usize,
+}
+
+fn page_spec(obj: &Map<String, Value>) -> Result<PageSpec, GitBasicError> {
+    let cursor = bounded_usize(obj.get("cursor"), 0, usize::MAX, "git_cursor_invalid")?;
+    let limit = bounded_usize(
+        obj.get("limit").or_else(|| obj.get("n")),
+        DEFAULT_PAGE_LIMIT,
+        MAX_PAGE_LIMIT,
+        "git_limit_invalid",
+    )?;
+    if limit == 0 {
+        return Err(GitBasicError::new(
+            "git_limit_invalid",
+            "git_basic.limit_must_be_positive",
+        ));
+    }
+    Ok(PageSpec { cursor, limit })
+}
+
+fn bounded_usize(
+    value: Option<&Value>,
+    default: usize,
+    maximum: usize,
+    error_code: &'static str,
+) -> Result<usize, GitBasicError> {
+    let Some(value) = value else {
+        return Ok(default);
+    };
+    let parsed = value
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| GitBasicError::new(error_code, error_code))?;
+    if parsed > maximum {
+        return Err(GitBasicError::new(error_code, error_code));
+    }
+    Ok(parsed)
+}
+
+fn optional_string<'a>(
+    obj: &'a Map<String, Value>,
+    key: &str,
+    error_code: &'static str,
+) -> Result<Option<&'a str>, GitBasicError> {
+    let Some(value) = obj.get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let value = value
+        .as_str()
+        .ok_or_else(|| GitBasicError::new(error_code, error_code))?
+        .trim();
+    Ok((!value.is_empty()).then_some(value))
+}
+
+fn resolve_repository_root(
+    workspace_root: &Path,
+    repo: Option<&Value>,
+) -> Result<PathBuf, GitBasicError> {
+    let workspace = workspace_root
+        .canonicalize()
+        .map_err(|error| GitBasicError::new("workspace_canonicalize_failed", error.to_string()))?;
+    let requested = match repo {
+        None | Some(Value::Null) => ".",
+        Some(Value::String(value)) if value.trim().is_empty() => ".",
+        Some(Value::String(value)) => value.trim(),
+        Some(_) => {
+            return Err(GitBasicError::new(
+                "git_repository_path_invalid",
+                "git_basic.repository_path_invalid",
+            ));
+        }
+    };
+    let relative = normalize_repo_relative_path(requested)?;
+    let candidate = workspace
+        .join(relative)
+        .canonicalize()
+        .map_err(|error| GitBasicError::new("git_repository_path_invalid", error.to_string()))?;
+    if !candidate.starts_with(&workspace) {
+        return Err(GitBasicError::new(
+            "git_repository_outside_workspace",
+            "git_basic.repository_outside_workspace",
+        ));
+    }
+    let output = Command::new("git")
+        .current_dir(&candidate)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|error| GitBasicError::new("git_spawn_failed", error.to_string()))?;
+    if !output.status.success() {
+        return Err(GitBasicError::new(
+            "not_git_repository",
+            tr("git_basic.msg.not_git_repo"),
+        ));
+    }
+    let root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let root = root
+        .canonicalize()
+        .map_err(|error| GitBasicError::new("git_repository_path_invalid", error.to_string()))?;
+    if !root.starts_with(&workspace) {
+        return Err(GitBasicError::new(
+            "git_repository_outside_workspace",
+            "git_basic.repository_outside_workspace",
+        ));
+    }
+    Ok(root)
+}
+
+fn normalize_repo_relative_path(value: &str) -> Result<String, GitBasicError> {
+    if value.is_empty() || value.len() > MAX_REPO_PATH_BYTES {
+        return Err(GitBasicError::new(
+            "git_path_invalid",
+            "git_basic.path_invalid",
+        ));
+    }
+    let path = Path::new(value);
+    if path.is_absolute() {
+        return Err(GitBasicError::new(
+            "git_path_outside_workspace",
+            "git_basic.absolute_path_rejected",
+        ));
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(GitBasicError::new(
+                    "git_path_outside_workspace",
+                    "git_basic.path_traversal_rejected",
+                ));
+            }
+        }
+    }
+    let normalized = normalized.to_string_lossy().replace('\\', "/");
+    if normalized.is_empty() {
+        Ok(".".to_string())
+    } else {
+        Ok(normalized)
+    }
+}
+
+fn validated_pathspec_args(value: Option<&Value>) -> Result<Vec<String>, GitBasicError> {
+    let path = match value {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::String(path)) => path.trim(),
+        Some(_) => {
+            return Err(GitBasicError::new(
+                "git_path_invalid",
+                "git_basic.path_invalid",
+            ));
+        }
+    };
+    if path.is_empty() {
+        return Ok(Vec::new());
+    }
+    let path = normalize_repo_relative_path(path)?;
+    Ok(vec!["--".to_string(), path])
+}
+
+fn resolve_revision(root: &Path, requested: &str) -> Result<String, GitBasicError> {
+    let requested = requested.trim();
+    if requested.is_empty()
+        || requested.len() > MAX_REVISION_BYTES
+        || requested.starts_with('-')
+        || requested.chars().any(char::is_control)
+    {
+        return Err(GitBasicError::new(
+            "git_revision_invalid",
+            "git_basic.revision_invalid",
+        ));
+    }
+    let revision_arg = format!("{requested}^{{object}}");
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--verify", &revision_arg])
+        .output()
+        .map_err(|error| GitBasicError::new("git_spawn_failed", error.to_string()))?;
+    let revision = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success()
+        || !matches!(revision.len(), 40 | 64)
+        || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(
+            GitBasicError::new("git_revision_not_found", "git_basic.revision_not_found")
+                .with_extra(json!({"target": requested})),
+        );
+    }
+    Ok(revision)
+}
+
+fn bound_text_lines(text: &str, page: PageSpec) -> (String, Value) {
+    let lines = text.lines().collect::<Vec<_>>();
+    let has_more = lines.len() > page.limit;
+    let returned = lines.len().min(page.limit);
+    let mut bounded = lines[..returned].join("\n");
+    if returned > 0 && text.ends_with('\n') {
+        bounded.push('\n');
+    }
+    (
+        bounded,
+        json!({
+            "cursor": page.cursor,
+            "limit": page.limit,
+            "returned_count": returned,
+            "total_count": Value::Null,
+            "has_more": has_more,
+            "next_cursor": has_more.then_some(page.cursor.saturating_add(returned)),
+            "previous_cursor": (page.cursor > 0)
+                .then_some(page.cursor.saturating_sub(page.limit)),
+        }),
+    )
+}
+
+fn append_repository_provenance(extra: &mut Value, root: &Path, output: &str) {
+    let Some(fields) = extra.as_object_mut() else {
+        return;
+    };
+    let observed_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    let head_revision = resolve_revision(root, "HEAD").ok();
+    let digest = Sha256::digest(output.as_bytes());
+    fields.insert("output_bytes".to_string(), json!(output.len()));
+    fields.insert(
+        "output_sha256".to_string(),
+        json!(format!("sha256:{digest:x}")),
+    );
+    fields.insert("truncated".to_string(), json!(false));
+    fields.insert(
+        "provenance".to_string(),
+        json!({
+            "source": "git_cli",
+            "repository_root": root,
+            "head_revision": head_revision,
+            "observed_at": observed_at,
+            "operation_class": "read_only",
+        }),
+    );
+}
+
+fn apply_structured_page(action: &str, extra: &mut Value, page: PageSpec) {
+    let Some(root) = extra.as_object_mut() else {
+        return;
+    };
+    if root
+        .remove("page_prebounded")
+        .and_then(|value| value.as_bool())
+        == Some(true)
+    {
+        let page_value = root.get("page").cloned().unwrap_or(Value::Null);
+        let has_more = page_value
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        root.insert("truncated".to_string(), json!(has_more));
+        if let Some(field_value) = root.get_mut("field_value").and_then(Value::as_object_mut) {
+            field_value.remove("page_prebounded");
+            field_value.insert("page".to_string(), page_value);
+        }
+        return;
+    }
+
+    let list_key = match action {
+        "status" | "changed_files" => "changed_files",
+        "branch" => "branches",
+        "remote" => "remotes",
+        _ => return,
+    };
+    let Some(all_items) = root.get(list_key).and_then(Value::as_array).cloned() else {
+        return;
+    };
+    let total = all_items.len();
+    let start = page.cursor.min(total);
+    let end = start.saturating_add(page.limit).min(total);
+    let selected = all_items[start..end].to_vec();
+    let has_more = end < total;
+    let page_value = json!({
+        "cursor": page.cursor,
+        "limit": page.limit,
+        "returned_count": selected.len(),
+        "total_count": total,
+        "has_more": has_more,
+        "next_cursor": has_more.then_some(end),
+        "previous_cursor": (page.cursor > 0)
+            .then_some(page.cursor.saturating_sub(page.limit)),
+    });
+    root.insert(list_key.to_string(), json!(selected));
+    root.insert("page".to_string(), page_value.clone());
+    root.insert("truncated".to_string(), json!(has_more));
+
+    match action {
+        "status" | "changed_files" => {
+            let paths = root.get(list_key).cloned().unwrap_or_else(|| json!([]));
+            root.insert("paths".to_string(), paths.clone());
+            if let Some(field_value) = root.get_mut("field_value").and_then(Value::as_object_mut) {
+                field_value.insert("paths".to_string(), paths);
+                field_value.insert("page".to_string(), page_value);
+            }
+        }
+        "branch" => {
+            if let Some(field_value) = root.get_mut("field_value").and_then(Value::as_object_mut) {
+                field_value.insert("page".to_string(), page_value);
+            }
+        }
+        "remote" => {
+            let remotes = root
+                .get("remotes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let remote_names = unique_remote_names(&remotes);
+            let remote_urls = unique_remote_urls(&remotes);
+            root.insert("remote_names".to_string(), json!(remote_names.clone()));
+            root.insert("remote_urls".to_string(), json!(remote_urls.clone()));
+            if let Some(field_value) = root.get_mut("field_value").and_then(Value::as_object_mut) {
+                field_value.insert("remotes".to_string(), json!(remote_names.clone()));
+                field_value.insert("remote_names".to_string(), json!(remote_names));
+                field_value.insert("remote_urls".to_string(), json!(remote_urls));
+                field_value.insert("page".to_string(), page_value);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -641,20 +1048,19 @@ fn append_show_file_at_rev_extra(
     root: &mut Map<String, Value>,
     field_value: &mut Map<String, Value>,
 ) {
-    let content = text.trim_end_matches(['\r', '\n']);
-    let content_excerpt = bounded_single_line_excerpt(content, 240);
+    let content_excerpt = bounded_single_line_excerpt(text, 240);
     root.insert("content_excerpt".to_string(), json!(content_excerpt));
     root.insert(
         "content_line_count".to_string(),
-        json!(content.lines().count()),
+        json!(text.lines().count()),
     );
-    root.insert("content_bytes".to_string(), json!(content.len()));
+    root.insert("content_bytes".to_string(), json!(text.len()));
     field_value.insert("content_excerpt".to_string(), json!(content_excerpt));
     field_value.insert(
         "content_line_count".to_string(),
-        json!(content.lines().count()),
+        json!(text.lines().count()),
     );
-    field_value.insert("content_bytes".to_string(), json!(content.len()));
+    field_value.insert("content_bytes".to_string(), json!(text.len()));
 }
 
 fn bounded_single_line_excerpt(text: &str, limit: usize) -> String {
@@ -748,23 +1154,6 @@ fn normalize_action(raw: &str) -> String {
         _ => normalized.as_str(),
     }
     .to_string()
-}
-
-/// 使用 `git rev-parse --is-inside-work-tree` 可靠识别仓库根、子目录与 worktree。
-fn is_git_repo(root: &PathBuf) -> bool {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root.as_os_str())
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output();
-    let Ok(out) = out else {
-        return false;
-    };
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    out.status.success() && s == "true"
 }
 
 #[cfg(test)]
