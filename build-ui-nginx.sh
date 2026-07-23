@@ -13,6 +13,7 @@ UI_DIR="$SCRIPT_DIR/UI"
 # npm run build 在 UI 下的默认输出目录（Vite 默认 dist）
 DIST_DIR="$UI_DIR/dist"
 BUILD_STAMP_FILE="$DIST_DIR/.rustclaw-ui-build-fingerprint"
+DEPS_STAMP_FILE="$UI_DIR/node_modules/.rustclaw-ui-dependency-fingerprint"
 HOST_OS="$(detect_host_os || printf '%s' "unknown")"
 HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
 HOST_TARGET="$(host_rust_target 2>/dev/null || true)"
@@ -41,19 +42,64 @@ ui_deps_healthy() {
 
   [[ -f "$vite_pkg_bin" ]] || return 1
   [[ -f "$vite_cli" ]] || return 1
+
+  node - "$UI_DIR" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const uiDir = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync(path.join(uiDir, "package.json"), "utf8"));
+const dependencies = {
+  ...(manifest.dependencies || {}),
+  ...(manifest.devDependencies || {}),
+};
+
+for (const name of Object.keys(dependencies)) {
+  if (!fs.existsSync(path.join(uiDir, "node_modules", name, "package.json"))) {
+    process.exit(1);
+  }
+}
+NODE
+}
+
+ui_dependency_fingerprint() {
+  local package_hash lock_hash
+  package_hash="$(hash_file "$UI_DIR/package.json")"
+  lock_hash="missing"
+  if [[ -f "$UI_DIR/package-lock.json" ]]; then
+    lock_hash="$(hash_file "$UI_DIR/package-lock.json")"
+  fi
+  printf 'package=%s\nlock=%s\n' "$package_hash" "$lock_hash"
 }
 
 ensure_ui_deps() {
+  local install_reason=""
   if [[ ! -d "$UI_DIR/node_modules" ]]; then
-    echo "Installing UI dependencies..."
+    install_reason="node_modules is missing"
+  elif ! ui_deps_healthy; then
+    install_reason="installed dependency set is incomplete"
+  else
+    local current_fingerprint last_fingerprint=""
+    current_fingerprint="$(ui_dependency_fingerprint)"
+    if [[ -f "$DEPS_STAMP_FILE" ]]; then
+      last_fingerprint="$(cat "$DEPS_STAMP_FILE")"
+    fi
+    if [[ "$current_fingerprint" != "$last_fingerprint" ]]; then
+      install_reason="package manifest or lock file changed"
+    fi
+  fi
+
+  if [[ -n "$install_reason" ]]; then
+    echo "Synchronizing UI dependencies: $install_reason."
     (cd "$UI_DIR" && npm install --prefer-offline --no-audit --no-fund)
-    return
   fi
 
   if ! ui_deps_healthy; then
-    echo "UI dependencies look inconsistent; reinstalling..."
-    (cd "$UI_DIR" && npm install --prefer-offline --no-audit --no-fund)
+    echo "Error: UI dependencies remain incomplete after npm install." >&2
+    return 1
   fi
+
+  ui_dependency_fingerprint > "$DEPS_STAMP_FILE"
 }
 
 path_writable_or_creatable() {
