@@ -1,11 +1,13 @@
 # 编码与可观测性
 
+<!-- ai-learning-navigation:start -->
 上一页：[任务状态与上下文](03-task-state-context.zh-CN.md) |
 [架构索引](README.md) |
 下一页：[技能、多媒体与模型](05-skills-media-models.zh-CN.md)
 
-编码修改使用明确的路径所有权、patch 前置条件、补偿快照和真实观测到的验证结果。
-检查失败会成为结构化 loop observation，而不是固定写死的用户回复。
+<!-- ai-learning-navigation:end -->
+
+编码修改使用明确的路径所有权、patch 前置条件、补偿快照和真实观测到的验证结果。检查失败会成为结构化 loop observation，而不会变成固定写死的用户回复。
 
 ```mermaid
 flowchart TD
@@ -47,15 +49,13 @@ flowchart TD
     H --> I
     I --> J{父任务接纳审查}
     J -->|过期 / 重叠 / dirty / 失败| K[机器拒绝或修复]
-    J -->|可接纳| L[父任务精确批准并应用]
+    J -->|可接纳| L[父任务审查 + 按策略批准应用]
     L --> M[父任务 diff + verification]
     K --> N[Subagent graph events]
     M --> N
 ```
 
-教学模式是持久化任务事件和 provider 事件的投影。选择某条用户或助手消息后，
-UI 根据对应 `task_id` 展示编号 LLM 调用、原始请求/响应字段、runtime stage、
-代码入口、策略决策、checkpoint、工具和 child-task 事件。
+教学模式投影持久化的任务事件和 provider 事件。点击同一轮对话中的用户提问或助手回复，UI 都会定位到对应 `task_id`，并展示编号 LLM 调用、原始请求/响应字段、runtime stage、代码入口、策略决策、checkpoint、工具和 child-task 事件。
 
 ```mermaid
 flowchart LR

@@ -25,7 +25,7 @@ Current repository highlights:
 
 RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. Before the first planner call, the front door only materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. It does not call a semantic router or decide whether an ordinary request should respond, clarify, or execute. Every ordinary `ask` enters the agent loop, which owns those semantic decisions. A native model turn selects either `call_capability` for another observation/effect or `respond` for the terminal model-authored answer; compatibility providers can still use the validated fallback plan protocol. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. The old intent normalizer, contract-repair judge, pre-agent semantic route switch, and route-selected rollback path have been physically removed.
 
-### Request And Agent Loop Flow
+### Request and Agent Loop Flow
 
 ```mermaid
 flowchart TD
@@ -96,7 +96,7 @@ flowchart TD
 - `worker_once recovery tick`: before claiming new queued work, the worker checks stale running tasks, protected paused checkpoints, due resume work, async poll results, and result projections.
 - `Task kind`: `kind=ask` enters the planner-owned natural-language path; `kind=run_skill` bypasses the planner loop, capability selection, and plan verifier, then calls the explicitly requested skill through the same shared skill dispatcher/protocol used by planner skill calls. Both task kinds persist results under the original `task_id`, so callers can still inspect final state through task query APIs.
 
-### Ask And Run Skill Boundary
+### Ask and Run Skill Boundary
 
 This boundary is intentionally explicit because `run_skill` is an API-level task kind, not a natural-language routing shortcut.
 
@@ -130,7 +130,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
 - `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `subagent_graph`, `subagent_node`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. Provider/context projections retain machine metrics such as `prompt_truncation_count` and `prompt_bytes_before_max`. CLI and UI render these fields directly, including the budget profile/decision, continuation index, cumulative model/tool/token/cost/elapsed counters, soft-slice state, goal and checkpoint fields, hook fields, coding verification fields, and persisted child-graph progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
 
-### Planner, LLM, And Capability Flow
+### Planner, LLM, and Capability Flow
 
 Detailed flow: [Agent loop and planning](docs/architecture/01-agent-loop.md).
 
@@ -150,7 +150,7 @@ Detailed flow: [Agent loop and planning](docs/architecture/01-agent-loop.md).
 - `RepairEnvelope`: verifier, executor, permission, provider, and checkpoint recovery paths expose structured repair context to the next loop round; user-visible fallback prose should come from i18n, finalizer, UI, or the model, not runtime templates.
 - `Output-contract finalization`: is a thin protocol boundary. It preserves exact validated machine fields and artifact transport, otherwise it publishes the model's evidence-grounded synthesis; it does not select skills or render domain-specific prose.
 
-### Permission Plane And Command Policy
+### Permission Plane and Command Policy
 
 The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, bundled evidence policy for non-capability output shapes, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose. Ordinary registry capability families are selected by planner `call_capability` plus resolver metadata, not by historical route markers or compatibility hints.
 
@@ -162,7 +162,7 @@ The permission plane is a structured execution boundary, not a second semantic r
 - Risky local coding or file-mutation capabilities should declare an isolation profile in registry metadata. `local_temp_workspace` is for disposable previews, dry runs, and generated artifacts that can be cleaned through artifact refs; `local_worktree` is for deliberate workspace edits that must be visible through task evidence, changed-file refs, and verification commands. UI and CLI surfaces read `permission_decision.steps[].sandbox`, `workspace_scope`, and `registry_policy` instead of interpreting localized text.
 - Confirmation decisions use the closed machine protocol `approve_once|always_for_scope|deny`. `always_for_scope` is exposed only for registry-declared local workspace mutations with an exact capability/effect/resource scope; it excludes `run_cmd`, network access, external publish, credential access, package installation, and privilege escalation. Grants are HMAC-signed, bound to the authenticated actor plus channel/chat session, expire after at most one hour, and are stored, matched, listed, and revoked by `clawd`. CLI/UI state never grants permission by itself.
 
-### Sandbox And Cross-Platform Execution
+### Sandbox and Cross-Platform Execution
 
 `[tools].sandbox_backend` is independent from `sandbox_mode`. The default
 backend is `auto`: it resolves to Bubblewrap on Linux and macOS Seatbelt
@@ -257,7 +257,7 @@ Long-term summary refresh still exists as a fallback summary path, but durable k
 
 Memory writes are intentionally after-answer work. The user-visible response is saved first; then background memory refresh can run when configured. This prevents memory extraction latency from blocking normal replies and makes memory write failures non-fatal to the already completed task.
 
-### Recall And Use Policy
+### Recall and Use Policy
 
 Memory recall is built as structured context and then filtered by the current consumer's memory use policy:
 
@@ -324,7 +324,7 @@ POST   /v1/memory/settings
 
 Recent records with safety flags are hidden by default in the UI. Fact-card details such as reason, source, and conflict group are available in a secondary details view instead of being shown as raw JSON first.
 
-### Trace And Troubleshooting
+### Trace and Troubleshooting
 
 Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace, `clawcli llm-trace`, and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts, structured memory/KB policy, `model_catalog_trace`, `model_catalog_trace.readiness`, and `resume_trace` next to raw request/response details. Each browser chat turn keeps a lightweight task/trace index. When teaching mode is selected, clicking either the user's question or the assistant's reply selects that turn and shows the corresponding task id, status, LLM call count, stage count, verifier/finalizer counts, goal/context/team/coding/checkpoint event timeline, model/provider capability decision, selected-model readiness decision, resume/checkpoint decision, and numbered raw LLM request/response details. When teaching mode is not selected, message clicks do not change the teaching trace.
 
@@ -351,7 +351,7 @@ Useful code and config entry points:
 - `crates/clawd/src/memory/indexing.rs`
 - `crates/clawd/src/memory/api.rs`
 
-### Background, Resume, And Memory Flow
+### Background, Resume, and Memory Flow
 
 Detailed flow: [Task state and context](docs/architecture/03-task-state-context.md).
 
@@ -403,9 +403,12 @@ CLI lifecycle and its persisted teaching evidence are documented in [Task state 
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 - Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; every foreground and resume-executor write is fenced by the exact task-row `(lease_owner, claim_attempt)`. Heartbeat only renews that claim, checkpoint recovery advances the generation, and stale workers cannot publish claimed process events or terminal results.
 
-### Detailed Architecture Guide
+<!-- ai-learning-exclude:start -->
+## Detailed Architecture Guide
 
-GitHub README pages do not support true pagination. Detailed diagrams are maintained as an ordered guide so each page stays focused and the UI can render the same source documents:
+GitHub README pages do not support true pagination. Detailed diagrams are
+maintained as an ordered guide so that each page stays focused. The AI Learning
+UI renders these same Markdown sources instead of maintaining a second copy:
 
 1. [Agent loop and planning](docs/architecture/01-agent-loop.md)
 2. [Security and execution](docs/architecture/02-security-execution.md)
@@ -415,6 +418,7 @@ GitHub README pages do not support true pagination. Detailed diagrams are mainta
 6. [Release validation](docs/architecture/06-release-validation.md)
 
 Use the [architecture index](docs/architecture/README.md) for language selection and previous/next navigation.
+<!-- ai-learning-exclude:end -->
 
 ## Main Components
 
@@ -601,7 +605,7 @@ rustclaw -stop
 rustclaw -key list
 ```
 
-## Identity And Access
+## Identity and Access
 
 RustClaw uses `user_key` as the main identity across the UI and messaging channels.
 
@@ -620,7 +624,7 @@ rustclaw -key add rk-xxxx admin
 rustclaw -key disable rk-xxxx
 ```
 
-## UI, API, And `webd`
+## UI, API, and `webd`
 
 The main API still comes from `clawd`, but the current script flow prefers exposing the stack like this:
 

@@ -1,12 +1,15 @@
-# Coding And Observability
+# Coding and Observability
 
+<!-- ai-learning-navigation:start -->
 Previous: [Task state and context](03-task-state-context.md) |
 [Architecture index](README.md) |
 Next: [Skills, media, and models](05-skills-media-models.md)
 
+<!-- ai-learning-navigation:end -->
+
 Coding changes use explicit path ownership, patch preconditions, compensation
 snapshots, and observed verification. A failed check becomes a structured loop
-observation instead of a hardcoded user reply.
+observation, not a hardcoded user reply.
 
 ```mermaid
 flowchart TD
@@ -49,16 +52,16 @@ flowchart TD
     H --> I
     I --> J{Parent admission review}
     J -->|stale / overlap / dirty / failed| K[Machine rejection or repair]
-    J -->|admissible| L[Exact parent approval and apply]
+    J -->|admissible| L[Parent review + policy-approved apply]
     L --> M[Parent diff + verification]
     K --> N[Subagent graph events]
     M --> N
 ```
 
-Teaching mode is a projection of persisted task and provider events. Selecting
-one user or assistant message resolves its `task_id`, then displays numbered
-LLM calls, raw request/response fields, runtime stages, code entry points,
-policy decisions, checkpoints, tools, and child-task events.
+Teaching mode projects persisted task and provider events. Selecting either
+side of a conversation turn resolves the corresponding `task_id`, then shows
+numbered LLM calls, raw request/response fields, runtime stages, code entry
+points, policy decisions, checkpoints, tools, and child-task events.
 
 ```mermaid
 flowchart LR

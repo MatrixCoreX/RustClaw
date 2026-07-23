@@ -1,9 +1,11 @@
 # Agent Loop 与规划
 
+<!-- ai-learning-navigation:start -->
 [架构索引](README.md) | 下一页：[安全与执行](02-security-execution.zh-CN.md)
 
-普通自然语言任务统一进入由 planner 掌握语义决策权的循环。前门只负责物化输入并
-构造机器边界信封，不提前判断请求应该直答、澄清还是执行。
+<!-- ai-learning-navigation:end -->
+
+所有普通自然语言任务都进入由 planner 掌握语义决策权的同一循环。第一次模型调用之前，前门只物化输入并构造由运行时持有的 `TurnBoundaryEnvelope`，不会提前判断请求应该直答、澄清还是执行。
 
 ```mermaid
 flowchart TD
@@ -20,20 +22,22 @@ flowchart TD
     K --> L[PlanVerifier<br/>Schema + effect + permission]
     L --> M[工具 / 技能适配器]
     M --> N[CapabilityResultEnvelope<br/>证据 + 产物 + continuation]
-    N --> O{BudgetDecision}
-    O -->|继续或修复| I
-    O -->|checkpoint 或等待| P[持久化 checkpoint<br/>释放 worker claim]
-    O -->|完成| Q[模型生成有依据的回复]
+    N --> O[证据覆盖与 repair 状态]
+    O -->|需要修复| I
+    O --> P{BudgetDecision}
+    P -->|continue| I
+    P -->|checkpoint_requeue / waiting / needs_user| U[保存 checkpoint 或等待用户状态<br/>释放 worker claim]
+    P -->|finish| Q[模型生成有依据的回复]
+    P -->|terminal| V[结构化终止结果]
     J -->|respond| Q
     E -->|run_skill| R[显式技能派发<br/>不做语义选择]
-    R --> N
+    R --> W[直接权限/变更检查<br/>+ 共享技能协议]
+    W --> T
     Q --> S[输出合同守卫]
-    S --> T[保存结果 + 交付 + journal]
+    S --> T[保存结果 + 交付 + 写入 journal]
+    V --> T
 ```
 
-优先使用 `call_capability`，让 planner 选择稳定能力，再由 resolver 映射到当前
-tool 或 skill。`PlanVerifier` 只校验机器合同与策略，不承担第二层语义路由。
-可恢复错误通过结构化 `RepairEnvelope` 作为 observation 返回同一循环。
+优先使用 `call_capability`，让 planner 选择稳定能力，再由 resolver 映射到当前 tool 或 skill。`PlanVerifier` 只校验机器合同与策略，不承担第二层语义路由。可恢复错误通过结构化 `RepairEnvelope` 作为 observation 返回同一循环；`BudgetDecision` 则独立决定健康循环应该继续、建立 checkpoint、等待用户、完成还是终止。
 
-`kind=run_skill` 是明确分开的 API 路径。调用方已经给出技能与参数，因此它绕过
-planner 选择，但继续使用任务持久化、鉴权、生命周期和共享技能协议。
+`kind=run_skill` 是明确分开的 API 路径。调用方已经给出技能与参数，因此该路径绕过 planner 选择和 agent loop 轮次决策，但继续使用鉴权、权限与变更检查、任务持久化、生命周期控制和共享技能协议。

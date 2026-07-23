@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   classifyLearningLink,
+  insertAfterFirstDiagramChapter,
   parseReadmeLearningPages,
   parseStandaloneLearningDocument,
 } from "./ai-learning";
@@ -67,6 +68,25 @@ Run it.
   assert.equal(pages[0].chapterTitle, "Runtime");
 });
 
+test("omits repository-only navigation blocks from the learning sequence", () => {
+  const pages = parseReadmeLearningPages(`## Runtime
+
+Details.
+
+<!-- ai-learning-exclude:start -->
+## Architecture Index
+
+Repository links.
+<!-- ai-learning-exclude:end -->
+
+## Setup
+
+Steps.
+`);
+
+  assert.deepEqual(pages.map((page) => page.title), ["Runtime", "Setup"]);
+});
+
 test("classifies only web URLs and page anchors as interactive links", () => {
   assert.equal(classifyLearningLink("https://example.com/docs"), "external");
   assert.equal(classifyLearningLink("http://example.com"), "external");
@@ -83,7 +103,11 @@ test("keeps one architecture document as one learning page", () => {
     chapterTitle: "Architecture Guide",
     markdown: `# Agent Loop
 
+<!-- ai-learning-navigation:start -->
 Navigation.
+<!-- ai-learning-navigation:end -->
+
+Introduction.
 
 ## Runtime
 
@@ -103,5 +127,44 @@ Details.
   assert.equal(page.chapterTitle, "Architecture Guide");
   assert.equal(page.kind, "section");
   assert.equal(page.diagramCount, 1);
+  assert.doesNotMatch(page.markdown, /Navigation/);
+  assert.match(page.markdown, /Introduction/);
   assert.match(page.markdown, /## Planning/);
+});
+
+test("inserts standalone documents after the first diagram chapter", () => {
+  const pages = parseReadmeLearningPages(`## Overview
+
+Intro.
+
+## Runtime
+
+### Main flow
+
+\`\`\`mermaid
+flowchart LR
+  A --> B
+\`\`\`
+
+### Boundary
+
+Details.
+
+## Setup
+
+Steps.
+`);
+  const inserted = parseStandaloneLearningDocument({
+    id: "architecture-security",
+    chapterId: "architecture-guide",
+    chapterTitle: "Architecture Guide",
+    markdown: "# Security\n\nDetails.",
+  });
+
+  const result = insertAfterFirstDiagramChapter(pages, [inserted]);
+
+  assert.deepEqual(
+    result.map((page) => page.id),
+    ["overview", "runtime--main-flow", "runtime--boundary", "architecture-security", "setup"],
+  );
 });

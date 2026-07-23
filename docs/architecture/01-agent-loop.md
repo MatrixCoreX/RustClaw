@@ -1,10 +1,14 @@
-# Agent Loop And Planning
+# Agent Loop and Planning
 
+<!-- ai-learning-navigation:start -->
 [Architecture index](README.md) | Next: [Security and execution](02-security-execution.md)
 
-Ordinary natural-language tasks enter one planner-owned loop. The front door
-only materializes inputs and builds a machine-owned boundary envelope. It does
-not decide whether the request should answer, clarify, or execute.
+<!-- ai-learning-navigation:end -->
+
+Every ordinary natural-language task enters one planner-owned loop. Before the
+first model turn, the front door only materializes inputs and builds a
+machine-owned `TurnBoundaryEnvelope`; it does not decide whether the request
+should be answered, clarified, or executed.
 
 ```mermaid
 flowchart TD
@@ -21,23 +25,30 @@ flowchart TD
     K --> L[PlanVerifier<br/>schema + effect + permission]
     L --> M[Tool / skill adapter]
     M --> N[CapabilityResultEnvelope<br/>evidence + artifacts + continuation]
-    N --> O{BudgetDecision}
-    O -->|continue or repair| I
-    O -->|checkpoint or wait| P[Persist checkpoint<br/>release worker claim]
-    O -->|finish| Q[Model-authored grounded response]
+    N --> O[Evidence coverage + repair state]
+    O -->|repair needed| I
+    O --> P{BudgetDecision}
+    P -->|continue| I
+    P -->|checkpoint_requeue / waiting / needs_user| U[Persist checkpoint or user-input state<br/>release worker claim]
+    P -->|finish| Q[Model-authored grounded response]
+    P -->|terminal| V[Structured terminal result]
     J -->|respond| Q
     E -->|run_skill| R[Explicit skill dispatch<br/>no semantic selection]
-    R --> N
+    R --> W[Direct permission/mutation checks<br/>+ shared skill protocol]
+    W --> T
     Q --> S[Output contract guard]
     S --> T[Persist result + deliver + journal]
+    V --> T
 ```
 
 `call_capability` is preferred because the planner chooses a stable capability,
-while the resolver maps it to the current tool or skill implementation.
-`PlanVerifier` validates machine contracts and policy; it is not another
+and the resolver maps it to the current tool or skill implementation.
+`PlanVerifier` validates machine contracts and policy; it is not a second
 semantic router. Recoverable errors return to the same loop as structured
-`RepairEnvelope` observations.
+`RepairEnvelope` observations. `BudgetDecision` separately controls whether a
+healthy loop continues, checkpoints, waits for the user, finishes, or stops.
 
 `kind=run_skill` is intentionally separate. The caller supplies the exact skill
-and arguments, so this path bypasses planner selection while retaining task
-persistence, authentication, lifecycle, and the shared skill protocol.
+and arguments, so the direct path bypasses planner selection and agent-loop
+round decisions while retaining authentication, permission and mutation
+checks, task persistence, lifecycle controls, and the shared skill protocol.

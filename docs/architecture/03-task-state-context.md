@@ -1,12 +1,15 @@
-# Task State And Context
+# Task State and Context
 
+<!-- ai-learning-navigation:start -->
 Previous: [Security and execution](02-security-execution.md) |
 [Architecture index](README.md) |
 Next: [Coding and observability](04-coding-observability.md)
 
-Foreground request timeout does not terminate a persisted task. The worker uses
-leases and heartbeats, while resumable work is represented by checkpoints and
-machine lifecycle fields.
+<!-- ai-learning-navigation:end -->
+
+A client or HTTP timeout does not by itself terminate a persisted task. Workers
+use fenced leases and heartbeats, while resumable work is represented by
+checkpoints and machine lifecycle fields.
 
 ```mermaid
 flowchart TD
@@ -16,14 +19,16 @@ flowchart TD
     D --> E[Agent loop or explicit skill]
     E --> F{Budget / provider / async state}
     F -->|continue| E
-    F -->|waiting or background| G[Persist TaskBudgetSlice + checkpoint]
+    F -->|waiting / background / checkpoint_requeue| G[Persist TaskBudgetSlice + checkpoint]
     G --> H[Release exact worker claim]
     H --> I{Resume due?}
     I -->|no| J[Caller polls same task_id]
     I -->|yes| K[Recovery claims new generation]
     K --> L[Restore observations, artifacts,<br/>side effects, and counters]
     L --> E
-    F -->|terminal| M[Persist final result]
+    F -->|needs_user| N[Persist user-input state]
+    N --> J
+    F -->|terminal or finished| M[Persist final result]
     M --> J
 ```
 
@@ -45,8 +50,10 @@ flowchart TD
     I -->|no| K[Excluded refs + deterministic compaction]
     J --> L[Planner context]
     K --> L
-    L --> M[context_budget / context_compaction / memory_trace events]
+    L --> M[Journal projections<br/>context_budget + context_compaction + memory_trace]
 ```
 
-Memory writes happen after the visible answer and use a structured intent
-schema. Users can inspect, expire, or delete stored preferences and facts.
+After a successful task result is persisted, RustClaw stores eligible short-term
+turn records and starts preference/fact extraction asynchronously. Durable
+preference and fact changes use a structured memory-intent schema. Users can
+inspect, expire, or delete the stored records.

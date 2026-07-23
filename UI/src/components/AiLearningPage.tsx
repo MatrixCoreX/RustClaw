@@ -30,6 +30,7 @@ import readmeEn from "../../../README.md?raw";
 import readmeZh from "../../../README.zh-CN.md?raw";
 import {
   classifyLearningLink,
+  insertAfterFirstDiagramChapter,
   parseReadmeLearningPages,
   parseStandaloneLearningDocument,
 } from "../lib/ai-learning";
@@ -366,7 +367,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
         chapterTitle,
         markdown,
       }));
-    return [...readmePages, ...architecturePages];
+    return insertAfterFirstDiagramChapter(readmePages, architecturePages);
   }, [lang]);
   const chapters = useMemo(() => {
     const grouped: Array<{
@@ -443,7 +444,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
                 {t("理解 RustClaw 的设计与运行流程", "Understand RustClaw design and runtime flows")}
               </h2>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--theme-text-muted)]">
-                {t("内容整理自项目说明，按主题与具体流程细分；流程图支持缩放和全屏查看。", "Project documentation is organized into focused topics and flows, with zoomable full-screen diagrams.")}
+                {t("内容与仓库文档保持同步，并按主题拆成连续页面；流程图支持缩放、拖动和全屏查看。", "Content stays synchronized with the repository documentation and is organized as a continuous learning sequence with zoomable, pannable, full-screen diagrams.")}
               </p>
             </div>
           </div>
@@ -555,7 +556,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
               onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
             >
               <ChevronLeft className="h-4 w-4" />
-              {t("上一章", "Previous")}
+              {t("上一页", "Previous page")}
             </button>
             <button
               type="button"
@@ -563,7 +564,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
               disabled={pageIndex >= pages.length - 1}
               onClick={() => setPageIndex((index) => Math.min(pages.length - 1, index + 1))}
             >
-              {t("下一章", "Next")}
+              {t("下一页", "Next page")}
               <ChevronRight className="h-4 w-4" />
             </button>
           </footer>

@@ -1,12 +1,15 @@
 # Release Validation
 
+<!-- ai-learning-navigation:start -->
 Previous: [Skills, media, and models](05-skills-media-models.md) |
 [Architecture index](README.md)
 
+<!-- ai-learning-navigation:end -->
+
 Release validation combines deterministic architecture contracts, focused
-component tests, UI checks, and compact natural-language acceptance. Each gate
-writes machine-readable evidence so a passing summary cannot hide a skipped or
-malformed nested check.
+component tests, UI checks, and compact natural-language (NL) acceptance. The
+release wrapper records machine-readable evidence for every gated check so a
+passing summary cannot hide a skipped or malformed nested result.
 
 ```mermaid
 flowchart TD
@@ -34,6 +37,7 @@ Important contract families include:
   cross-platform boundaries, and long-file limits;
 - CLI exec/replay/session/goal/TUI/LLM trace artifacts and UI lint/build/tests.
 
-Live provider tests are acceptance evidence, not an excuse to encode a failed
-sentence as a runtime branch. Failures must be repaired at the capability
-contract, registry metadata, prompt, verifier, adapter, or provider boundary.
+Live-provider tests are acceptance evidence, not an excuse to encode one failed
+sentence as a runtime branch. A failure should be repaired at the capability
+contract, registry metadata, prompt, verifier, adapter, or provider boundary
+that caused it.
