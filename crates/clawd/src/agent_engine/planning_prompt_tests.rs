@@ -87,10 +87,9 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("an unobserved project name"));
     assert!(prompt.contains("current repository"));
     assert!(prompt.contains("facts. Direct creative drafting"));
-    assert!(prompt.contains("combines list items with a"));
-    assert!(prompt.contains("sibling explanation, conclusion, comparison"));
-    assert!(prompt.contains("complete compound answer in `content`"));
-    assert!(prompt.contains("mix non-empty `content` with list `items`"));
+    assert!(prompt.contains("Use `shape=free_text` for prose, compound answers"));
+    assert!(prompt.contains("Use `shape=list` only for an exact payload-only list"));
+    assert!(prompt.contains("never mix payloads from different shapes"));
     assert!(prompt.contains("preserve each"));
     assert!(prompt.contains("scalar, object, or array shape"));
     assert!(prompt.contains("agent.subagent"));
@@ -125,17 +124,28 @@ fn planner_overlays_select_subagents_through_capabilities_only() {
 }
 
 #[test]
-fn planner_tool_spec_prefers_domain_capabilities_over_raw_primitives() {
+fn planner_tool_spec_is_domain_neutral_and_prefers_owned_capabilities() {
     let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../prompts/layers/overlays/agent_tool_spec.md");
     let prompt = std::fs::read_to_string(overlay).expect("read agent tool spec");
+    let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    assert!(prompt.contains("description and semantic tags own the requested"));
-    assert!(prompt.contains("Use raw filesystem, HTTP, database, or shell primitives"));
-    assert!(prompt.contains("Do not replace a catalog-owned domain operation"));
-    assert!(prompt.contains("it proves parse/schema syntax only"));
-    assert!(prompt.contains("Select it directly instead of reading raw config text"));
-    assert!(!prompt.contains("use `validation_profile`"));
+    assert!(normalized.contains("description and semantic tags own the requested"));
+    assert!(normalized.contains("Use raw filesystem, HTTP, database, or shell primitives"));
+    assert!(normalized.contains("Do not replace a catalog-owned domain operation"));
+    assert!(normalized.contains("A successful capability result is material evidence"));
+    assert!(normalized.contains("Batch only independent read-only actions"));
+    for retired_heading in [
+        "### image_vision",
+        "### config_basic",
+        "### photo_organize",
+        "Skill behavior notes",
+    ] {
+        assert!(
+            !prompt.contains(retired_heading),
+            "global tool protocol must not contain {retired_heading}"
+        );
+    }
 }
 
 #[test]
