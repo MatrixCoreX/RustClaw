@@ -1,8 +1,11 @@
-# Skills, Media, And Models
+# Skills, Media, and Models
 
+<!-- ai-learning-navigation:start -->
 Previous: [Coding and observability](04-coding-observability.md) |
 [Architecture index](README.md) |
 Next: [Release validation](06-release-validation.md)
+
+<!-- ai-learning-navigation:end -->
 
 The registry is the machine source for skill availability, capabilities,
 effects, risk, schema, install mode, and runner metadata. Natural-language
@@ -13,8 +16,8 @@ flowchart TD
     A{Task source} -->|ask| B[Planner call_capability]
     A -->|run_skill| C[Explicit skill_name]
     B --> D[CapabilityResolver]
-    C --> E[Canonical machine-token alias]
-    D --> E
+    C --> E[Canonical machine-token lookup]
+    D --> F
     E --> F[Skills registry<br/>enabled + kind + runner + policy]
     F --> G{Implementation}
     G -->|builtin| H[In-process adapter]
@@ -24,8 +27,14 @@ flowchart TD
     H --> L[Structured skill response]
     J --> L
     K --> L
-    L --> M[CapabilityResultEnvelope<br/>status codes + evidence + artifacts]
+    L --> M{Result consumer}
+    M -->|agent loop| N[CapabilityResultEnvelope<br/>evidence + artifacts + continuation]
+    M -->|direct run_skill| O[Persist direct task result]
 ```
+
+Fixed/core skills are part of the normal build. Bundled optional skills live
+under `optional_skills/` and are built or installed on demand; imported external
+skills must pass validation and registration before they become available.
 
 Long-tail media capabilities use start, poll, and cancel contracts. The
 foreground task can return a checkpoint while provider work continues.
@@ -49,9 +58,11 @@ flowchart TD
 ```
 
 Model capabilities are projected through a catalog rather than inferred from
-model-name phrases. Text planning, image/video understanding, generation,
-streaming, tool calling, context size, credentials, async support, and dry-run
-support are explicit fields used by UI, CLI, and runtime readiness checks.
+model-name phrases. The catalog exposes provider/model identity, API style,
+configured model choices, input/output modalities, context window, timeout,
+credential state, media understanding/generation flags, active text-provider
+state, and async/dry-run metadata. UI, CLI, and runtime readiness checks consume
+those fields directly.
 
 ```mermaid
 flowchart LR

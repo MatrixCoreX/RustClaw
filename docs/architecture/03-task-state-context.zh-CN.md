@@ -1,11 +1,13 @@
 # 任务状态与上下文
 
+<!-- ai-learning-navigation:start -->
 上一页：[安全与执行](02-security-execution.zh-CN.md) |
 [架构索引](README.md) |
 下一页：[编码与可观测性](04-coding-observability.zh-CN.md)
 
-前台请求超时不会终止已经持久化的任务。Worker 使用 lease 与 heartbeat；需要续跑
-的工作通过 checkpoint 和机器生命周期字段表达。
+<!-- ai-learning-navigation:end -->
+
+客户端或 HTTP 等待超时本身不会终止已经持久化的任务。Worker 使用带 fencing 语义的 lease 与 heartbeat；需要续跑的工作通过 checkpoint 和机器生命周期字段表达。
 
 ```mermaid
 flowchart TD
@@ -15,14 +17,16 @@ flowchart TD
     D --> E[Agent loop 或显式技能]
     E --> F{预算 / provider / async 状态}
     F -->|继续| E
-    F -->|waiting 或 background| G[保存 TaskBudgetSlice + checkpoint]
+    F -->|waiting / background / checkpoint_requeue| G[保存 TaskBudgetSlice + checkpoint]
     G --> H[释放精确 worker claim]
     H --> I{是否到恢复时间}
     I -->|否| J[调用方轮询同一 task_id]
     I -->|是| K[Recovery 认领新 generation]
     K --> L[恢复 observations、artifacts、<br/>side effects 与累计计数]
     L --> E
-    F -->|终态| M[保存最终结果]
+    F -->|needs_user| N[保存等待用户输入状态]
+    N --> J
+    F -->|终止或完成| M[保存最终结果]
     M --> J
 ```
 
@@ -43,8 +47,7 @@ flowchart TD
     I -->|否| K[Excluded refs + 确定性压缩]
     J --> L[Planner context]
     K --> L
-    L --> M[context_budget / context_compaction / memory_trace events]
+    L --> M[Journal 投影<br/>context_budget + context_compaction + memory_trace]
 ```
 
-记忆写入发生在用户可见回复之后，并使用结构化 intent schema。用户可以查看、
-过期或删除保存的偏好和事实。
+任务成功结果持久化后，RustClaw 会保存符合策略的短期轮次记录，并异步启动偏好/事实提取。长期偏好和事实的变更使用结构化 memory-intent schema；用户可以查看、设为过期或删除这些记录。

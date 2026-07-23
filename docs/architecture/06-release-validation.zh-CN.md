@@ -1,10 +1,12 @@
 # 发布验证
 
+<!-- ai-learning-navigation:start -->
 上一页：[技能、多媒体与模型](05-skills-media-models.zh-CN.md) |
 [架构索引](README.md)
 
-发布验证由确定性架构合同、聚焦组件测试、UI 检查和精简 NL 验收组成。每个 gate
-都写入机器可读证据，防止汇总显示通过但内部检查被跳过或产物格式损坏。
+<!-- ai-learning-navigation:end -->
+
+发布验证由确定性架构合同、聚焦组件测试、UI 检查和精简自然语言（NL）验收组成。发布 wrapper 会为每项门禁记录机器可读证据，防止汇总显示通过，但内部检查实际被跳过或嵌套产物已经损坏。
 
 ```mermaid
 flowchart TD
@@ -31,6 +33,4 @@ flowchart TD
 - 禁止自然语言硬匹配、禁止固定多语言 runtime 回复、密钥扫描、跨平台与长文件限制；
 - CLI exec/replay/session/goal/TUI/LLM trace 产物及 UI lint/build/test。
 
-Live provider 测试是验收证据，不能把失败句子编码成 runtime 分支。失败应在
-capability contract、registry metadata、prompt、verifier、adapter 或 provider
-边界修复。
+Live provider 测试是验收证据，不能把某个失败句子直接编码成 runtime 分支。应在真正导致问题的 capability contract、registry metadata、prompt、verifier、adapter 或 provider 边界完成修复。

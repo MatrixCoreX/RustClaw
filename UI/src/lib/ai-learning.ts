@@ -23,6 +23,13 @@ interface Heading {
   start: number;
 }
 
+function withoutLearningExcludedBlocks(markdown: string): string {
+  return markdown.replace(
+    /<!-- ai-learning-exclude:start -->[\s\S]*?<!-- ai-learning-exclude:end -->\s*/g,
+    "",
+  );
+}
+
 function pageId(title: string, index: number): string {
   const token = title
     .toLowerCase()
@@ -42,6 +49,12 @@ export function parseStandaloneLearningDocument(
   document: StandaloneLearningDocument,
 ): AiLearningPage {
   const normalized = document.markdown.replace(/\r\n/g, "\n").trim();
+  const markdown = normalized
+    .replace(
+      /<!-- ai-learning-navigation:start -->[\s\S]*?<!-- ai-learning-navigation:end -->\s*/g,
+      "",
+    )
+    .trim();
   const titleMatch = /^#\s+(.+?)\s*$/m.exec(normalized);
   const title = cleanTitle(titleMatch?.[1] ?? document.id);
 
@@ -51,9 +64,29 @@ export function parseStandaloneLearningDocument(
     chapterId: document.chapterId,
     chapterTitle: document.chapterTitle,
     kind: "section",
-    markdown: normalized,
-    ...pageMetrics(normalized),
+    markdown,
+    ...pageMetrics(markdown),
   };
+}
+
+export function insertAfterFirstDiagramChapter(
+  pages: AiLearningPage[],
+  insertedPages: AiLearningPage[],
+): AiLearningPage[] {
+  const anchor = pages.find((page) => page.diagramCount > 0);
+  if (!anchor) return [...pages, ...insertedPages];
+
+  let insertionIndex = pages.length;
+  for (let index = 0; index < pages.length; index += 1) {
+    if (pages[index].chapterId === anchor.chapterId) {
+      insertionIndex = index + 1;
+    }
+  }
+  return [
+    ...pages.slice(0, insertionIndex),
+    ...insertedPages,
+    ...pages.slice(insertionIndex),
+  ];
 }
 
 function markdownHeadings(lines: string[]): Heading[] {
@@ -109,7 +142,9 @@ export function classifyLearningLink(href?: string): LearningLinkKind {
 }
 
 export function parseReadmeLearningPages(markdown: string): AiLearningPage[] {
-  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const lines = withoutLearningExcludedBlocks(markdown)
+    .replace(/\r\n/g, "\n")
+    .split("\n");
   const headings = markdownHeadings(lines);
   const chapters = headings.filter((heading) => heading.level === 2);
 

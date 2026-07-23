@@ -343,9 +343,10 @@ clawcli goal clear task-123
 
 CLI 生命周期及其持久化教学证据见[任务状态与上下文](docs/architecture/03-task-state-context.zh-CN.md)和[编码与可观测性](docs/architecture/04-coding-observability.zh-CN.md)。
 
-### 详细架构指南
+<!-- ai-learning-exclude:start -->
+## 详细架构指南
 
-GitHub README 不支持真正的页内分页。详细流程图按顺序维护为独立页面，让每页只聚焦一个主题，并让 UI 直接渲染同一组源文档：
+GitHub README 不支持真正的页内分页。详细流程图按顺序维护为独立页面，让每页只聚焦一个主题；AI 学习页面直接渲染同一组 Markdown 源文件，不再维护第二份内容：
 
 1. [Agent Loop 与规划](docs/architecture/01-agent-loop.zh-CN.md)
 2. [安全与执行](docs/architecture/02-security-execution.zh-CN.md)
@@ -355,6 +356,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 6. [发布验证](docs/architecture/06-release-validation.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
+<!-- ai-learning-exclude:end -->
 
 ## 主要组件
 
