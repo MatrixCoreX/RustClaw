@@ -293,6 +293,7 @@ export interface ResolveChannelBindingResponse {
 export interface SkillListItem {
   name: string;
   description?: string | null;
+  semantic_tags?: string[] | null;
   kind?: string | null;
   planner_kind?: string | null;
   adapter_category?: string | null;
@@ -318,9 +319,20 @@ export interface SkillListItem {
   required_bins?: string[] | null;
   optional_bins?: string[] | null;
   platform_notes?: string[] | null;
+  config_files?: string[] | null;
   planner_capabilities?: string[] | null;
+  planner_capability_details?: PlannerCapabilityDisplayItem[] | null;
   planner_capability_policies?: PlannerCapabilityPolicyItem[] | null;
   capabilities?: string[] | null;
+}
+
+export interface PlannerCapabilityDisplayItem {
+  capability: string;
+  action?: string | null;
+  description?: string | null;
+  effect?: "observe" | "mutate" | "validate" | "external" | string | null;
+  required?: string[];
+  optional?: string[];
 }
 
 export interface PlannerCapabilityPolicyItem {

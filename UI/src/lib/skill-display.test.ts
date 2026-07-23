@@ -2,11 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  baseSkillNamesWithFallback,
+  baseSkillNamesFromRegistry,
   filterSkillNamesBySearch,
   formatCapabilityToken,
   groupSkillNames,
-  hasCuratedSkillUsageExamples,
   isUiHiddenSkill,
   isVisibleSkillName,
   normalizeSkillSearchQuery,
@@ -20,32 +19,15 @@ import {
   visibleSkillNames,
 } from "./skill-display.ts";
 
-const CURRENT_REGISTRY_SKILLS = [
-  "run_cmd", "read_file", "write_file", "workspace_patch", "list_dir", "make_dir", "remove_file", "fs_basic",
-  "code_index", "config_basic", "config_edit", "schedule", "subagent", "x", "system_basic", "http_basic", "git_basic",
-  "install_module", "process_basic", "package_manager", "archive_basic", "db_basic", "docker_basic", "fs_search",
-  "rss_fetch", "image_vision", "image_generate", "image_edit", "audio_transcribe", "audio_synthesize", "video_generate",
-  "music_generate", "health_check", "log_analyze", "service_control", "task_control", "config_guard", "crypto", "stock",
-  "weather", "map_merchant", "doc_parse", "transform", "invest_copy", "web_search_extract", "kb", "browser_web",
-  "photo_organize", "extension_manager",
-];
-
 test("filters hidden UI-only skills", () => {
   assert.equal(isUiHiddenSkill("chat"), true);
   assert.equal(isVisibleSkillName("chat"), false);
   assert.deepEqual(visibleSkillNames(["chat", "run_cmd", "image_generate"]), ["run_cmd", "image_generate"]);
 });
 
-test("uses fallback base skill names when backend data is empty", () => {
-  const fallback = baseSkillNamesWithFallback([]);
-  assert.ok(fallback.includes("run_cmd"));
-  assert.ok(fallback.includes("fs_basic"));
-  assert.ok(fallback.includes("schedule"));
-  assert.ok(fallback.includes("subagent"));
-  assert.ok(fallback.includes("extension_manager"));
-  assert.ok(fallback.includes("kb"));
-  assert.ok(fallback.includes("rss_fetch"));
-  assert.deepEqual(baseSkillNamesWithFallback(["custom_base", "chat"]), ["custom_base"]);
+test("uses only registry-projected base skill names", () => {
+  assert.deepEqual(baseSkillNamesFromRegistry([]), []);
+  assert.deepEqual(baseSkillNamesFromRegistry(["custom_base", "chat"]), ["custom_base"]);
 });
 
 test("groups managed skills by runtime metadata", () => {
@@ -75,7 +57,7 @@ test("keeps future video and music machine names in multimedia", () => {
 test("groups default workflow, knowledge, and feed skills as always-on base skills", () => {
   const groups = groupSkillNames(
     ["schedule", "subagent", "extension_manager", "kb", "rss_fetch", "crypto"],
-    new Set(baseSkillNamesWithFallback([])),
+    new Set(baseSkillNamesFromRegistry(["schedule", "subagent", "extension_manager", "kb", "rss_fetch"])),
     new Set(),
   );
   assert.deepEqual(groups.base, ["extension_manager", "kb", "rss_fetch", "schedule", "subagent"]);
@@ -90,43 +72,52 @@ test("normalizes and applies skill search text", () => {
 });
 
 test("formats skill descriptions and risk labels", () => {
-  assert.equal(skillDescription("image_generate", "en"), "Generate images from prompts.");
-  assert.equal(skillDescription("image_generate", "zh"), "根据描述生成图片。");
-  assert.equal(skillDescription("code_index", "zh"), "索引并搜索代码结构和符号。");
-  assert.equal(skillDescription("config_edit", "en"), "Preview, update, and validate configuration.");
-  assert.equal(
-    skillDescription("workspace_patch", "zh"),
-    "用可检查、可回退的补丁修改工作区文件。",
-  );
-  assert.equal(
-    skillDescription("workspace_patch", "zh", "English registry description"),
-    "用可检查、可回退的补丁修改工作区文件。",
-  );
-  assert.equal(skillDescription("unknown_skill", "en"), "No short description for this skill.");
-  assert.equal(skillDescription("unknown_skill", "en", " Registry text "), "Registry text");
+  assert.equal(skillDescription("en", "Generate images from prompts."), "Generate images from prompts.");
+  assert.equal(skillDescription("zh", " 根据描述生成图片。 "), "根据描述生成图片。");
+  assert.equal(skillDescription("en"), "No description is available for this skill.");
+  assert.equal(skillDescription("zh"), "该技能暂无说明。");
   assert.equal(skillRiskLabel("high", "en"), "High risk");
   assert.equal(skillRiskLabel(null, "zh"), "风险未声明");
 });
 
-test("provides three to five curated usage examples for every registry skill", () => {
-  for (const name of CURRENT_REGISTRY_SKILLS) {
-    assert.equal(hasCuratedSkillUsageExamples(name), true, `${name} should have curated examples`);
-    for (const lang of ["zh", "en"] as const) {
-      const examples = skillUsageExamples(name, lang);
-      assert.ok(examples.length >= 3 && examples.length <= 5, `${name}/${lang} should have 3-5 examples`);
-      assert.ok(examples.every((example) => example.trim().length > 0));
-    }
-  }
+test("generates localized instructional examples from capability metadata", () => {
+  const skill = {
+    name: "config_edit",
+    description: "Update structured configuration.",
+    planner_capability_details: [
+      {
+        capability: "config.validate",
+        effect: "validate",
+        required: ["path"],
+      },
+      {
+        capability: "config.apply",
+        effect: "mutate",
+        required: ["field_path", "value"],
+      },
+    ],
+  };
+  const zh = skillUsageExamples(skill, "zh");
+  const en = skillUsageExamples(skill, "en");
+  assert.equal(zh.length, 3);
+  assert.equal(en.length, 3);
+  assert.match(zh[0], /检查并验证/);
+  assert.match(zh[1], /需要授权时先让我确认/);
+  assert.match(en[0], /Check and validate/);
+  assert.match(en[1], /ask for confirmation/);
+  assert.ok(zh.every((example) => example.trim().length > 0));
+  assert.ok(en.every((example) => example.trim().length > 0));
 });
 
-test("uses localized curated examples and external-skill fallbacks", () => {
-  assert.equal(skillUsageExamples("schedule", "zh")[0], "先解析‘每周一上午九点提醒我开周会’，不要创建任务。");
-  assert.equal(skillUsageExamples("schedule", "en")[0], "Parse 'remind me every Monday at 9 AM' without creating it.");
-  assert.deepEqual(skillUsageExamples("custom_skill", "en", "Process custom records"), [
-    "Help me with this request: Process custom records",
-    "Check whether this can be completed without performing side effects: Process custom records",
-    "Complete this task and tell me the result and next step: Process custom records",
-  ]);
+test("uses metadata-based generic examples for external skills", () => {
+  assert.deepEqual(
+    skillUsageExamples({ name: "custom_skill", description: "Process custom records" }, "en"),
+    [
+      "Help me with this request: Process custom records",
+      "Check whether this capability is available and provide a read-only preview: Process custom records",
+      "Complete the task from observed execution results and tell me the next step: Process custom records",
+    ],
+  );
 });
 
 test("formats runtime and planner capabilities", () => {
