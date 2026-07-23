@@ -8,6 +8,8 @@ use crate::{AppState, ClaimedTask};
 mod builtin_child_task_patch;
 #[path = "builtin_code_index.rs"]
 mod builtin_code_index;
+#[path = "builtin_pty_session.rs"]
+mod builtin_pty_session;
 #[path = "builtin_run_cmd.rs"]
 mod builtin_run_cmd;
 #[path = "builtin_schedule.rs"]
@@ -24,9 +26,10 @@ pub(crate) use builtin_run_cmd::run_safe_command;
 pub(crate) use builtin_run_cmd::run_safe_command_with_sandbox;
 use builtin_run_cmd::{
     command_has_shell_background_operator, looks_detached_background_command,
-    run_cmd_checkpoint_claim_markers, run_cmd_claims_runtime_checkpoint_without_async_start,
-    run_safe_command_detailed, start_async_command, suggest_command_for_run_cmd,
-    suggested_command_from_args, RunSafeCommandError,
+    prepare_durable_pty_command, run_cmd_checkpoint_claim_markers,
+    run_cmd_claims_runtime_checkpoint_without_async_start, run_safe_command_detailed,
+    start_async_command, suggest_command_for_run_cmd, suggested_command_from_args,
+    RunSafeCommandError,
 };
 use builtin_schedule::execute_schedule_workflow_for_task;
 use builtin_workspace_mutation::{atomic_write_file, run_checkpointed_workspace_mutation};
@@ -468,6 +471,14 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     "async_start",
                     "poll_after_seconds",
                     "expires_in_seconds",
+                    "session_id",
+                    "data",
+                    "data_base64",
+                    "append_newline",
+                    "cursor",
+                    "rows",
+                    "cols",
+                    "signal",
                     "_clawd_async_job_id",
                     "_clawd_async_job_dir",
                     "_clawd_async_poll_after_seconds",
@@ -540,6 +551,24 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 return serde_json::to_string(&preview)
                     .map_err(|err| format!("background_preview_serialize_failed:{err}"));
             }
+            if builtin_pty_session::is_existing_session_action(action) {
+                return builtin_pty_session::execute_existing_session_action(
+                    &state.skill_rt.workspace_root,
+                    task,
+                    action,
+                    map,
+                )
+                .await
+                .map_err(|error| {
+                    super::structured_skill_error_from_parts(
+                        "run_cmd",
+                        error.kind,
+                        error.code,
+                        Some(std::env::consts::OS),
+                        Some(error.extra),
+                    )
+                });
+            }
             let cwd = optional_string(map, "cwd").unwrap_or(".");
             let cwd_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
@@ -609,6 +638,83 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 .get("async_start")
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false);
+            if action == "terminal_start" {
+                if async_start {
+                    return Err(builtin_error(
+                        "run_cmd",
+                        "invalid_input",
+                        "terminal_start_async_flag_conflict",
+                        None,
+                        None,
+                        Some(serde_json::json!({
+                            "error_code": "terminal_start_async_flag_conflict",
+                            "conflicting_arg": "async_start",
+                        })),
+                    ));
+                }
+                let prepared = prepare_durable_pty_command(
+                    &cwd_path,
+                    &sanitized_command,
+                    execution_policy.sandbox_mode,
+                    state.skill_rt.tools_policy.sandbox_backend,
+                    &state.skill_rt.workspace_root,
+                )
+                .map_err(|err| match err {
+                    RunSafeCommandError::Policy(text) => text,
+                    RunSafeCommandError::Command(failure) => {
+                        let extra = failure.extra(&sanitized_command, &cwd_path);
+                        super::structured_skill_error_from_parts(
+                            "run_cmd",
+                            failure.kind,
+                            &failure.message,
+                            Some(std::env::consts::OS),
+                            Some(extra),
+                        )
+                    }
+                })?;
+                let rows = map
+                    .get("rows")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u16::try_from(value).ok())
+                    .unwrap_or(24);
+                let cols = map
+                    .get("cols")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u16::try_from(value).ok())
+                    .unwrap_or(80);
+                let expires_in_seconds = map
+                    .get("expires_in_seconds")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(3_600);
+                let session_idle_timeout_seconds = map
+                    .get("idle_timeout_seconds")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1_800);
+                let session_max_output_bytes = map
+                    .get("max_output_bytes")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(64 * 1024 * 1024);
+                return builtin_pty_session::start_session(
+                    &state.skill_rt.workspace_root,
+                    task,
+                    &prepared,
+                    rows,
+                    cols,
+                    expires_in_seconds,
+                    session_idle_timeout_seconds,
+                    session_max_output_bytes,
+                )
+                .await
+                .map_err(|error| {
+                    super::structured_skill_error_from_parts(
+                        "run_cmd",
+                        error.kind,
+                        error.code,
+                        Some(std::env::consts::OS),
+                        Some(error.extra),
+                    )
+                });
+            }
             let unmanaged_detached_background =
                 looks_detached_background_command(&sanitized_command);
             let faked_runtime_checkpoint =

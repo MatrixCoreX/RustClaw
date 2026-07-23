@@ -863,6 +863,24 @@ fn prepare_durable_run_cmd_process(
     prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, sandbox_backend, workspace_root, true)
 }
 
+pub(super) fn prepare_durable_pty_command(
+    cwd: &Path,
+    command: &str,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
+    workspace_root: &Path,
+) -> Result<Command, RunSafeCommandError> {
+    let mut cmd =
+        prepare_durable_run_cmd_process(cwd, sandbox_mode, sandbox_backend, workspace_root)?;
+    crate::skills::apply_skill_runner_env_isolation(&mut cmd);
+    cmd.arg("-o")
+        .arg("pipefail")
+        .arg("-lc")
+        .arg(command)
+        .current_dir(cwd);
+    Ok(cmd)
+}
+
 fn prepare_run_cmd_process_for_lifetime(
     cwd: &Path,
     sandbox_mode: claw_core::config::ToolSandboxMode,

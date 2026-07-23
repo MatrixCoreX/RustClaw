@@ -84,6 +84,7 @@ WORKDIR /app
 RUN mkdir -p /app/target/release /app/UI/dist /app/docker/config /app/component_start
 
 COPY --from=builder /build/target/release/clawd /app/target/release/
+COPY --from=builder /build/target/release/pty-session-runner /app/target/release/
 COPY --from=builder /build/target/release/skill-runner /app/target/release/
 COPY --from=builder /build/target/release/webd /app/target/release/
 COPY --from=builder /build/target/release/telegramd /app/target/release/
@@ -110,6 +111,7 @@ RUN chmod +x \
     /app/docker/docker-entrypoint.sh \
     /app/scripts/auth-key.sh \
     /app/target/release/clawd \
+    /app/target/release/pty-session-runner \
     /app/target/release/skill-runner \
     /app/target/release/webd \
     /app/target/release/telegramd \

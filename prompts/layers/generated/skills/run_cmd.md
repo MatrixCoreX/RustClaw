@@ -4,6 +4,7 @@ Independent base skill for running shell commands. Use `{"type":"call_skill","sk
 
 ## Capability
 - Executes one shell command in workspace context.
+- Starts and resumes durable PTY-backed command sessions for genuinely interactive programs.
 - Use for: pwd, ls, grep, cat, scripts, any single command.
 
 ## Parameter contract
@@ -17,16 +18,24 @@ Independent base skill for running shell commands. Use `{"type":"call_skill","sk
 | `suggest_once` | no | bool | true | Compatibility field; current behavior does not trigger a second LLM request in run_cmd. |
 | `timeout_seconds` | no | integer | config default | Total wall-clock limit for this command. Use a bounded value for slow build/test/admin checks. |
 | `idle_timeout_seconds` | no | integer | config default | Kill the command if stdout/stderr has no new output for this many seconds. |
-| `max_output_bytes` | no | integer | config default | Stop and return truncated output after this many combined stdout/stderr bytes. |
+| `max_output_bytes` | no | integer | config default / 64 MiB PTY | Stop a one-shot command or terminate a PTY session after this many combined output bytes. |
 | `async_start` | no | bool | false | Start a long-running/background command through the runtime async job contract instead of blocking this task. |
 | `poll_after_seconds` | no | integer | runtime default | Suggested delay before polling a runtime async job. Use with `async_start=true`. |
 | `expires_in_seconds` | no | integer | runtime default | Runtime async job lease/expiry horizon. Use with `async_start=true`. |
+| `session_id` | conditional | string | - | Exact session identifier returned by `terminal_start`; required by every later terminal action. |
+| `data` / `data_base64` | conditional | string | - | UTF-8 or base64 input for `terminal_write`; set `append_newline=true` for line-oriented prompts. |
+| `cursor` / `max_bytes` | no | integer | `0` / `65536` | Exact bounded output page for `terminal_poll`; continue from `page.next_cursor`. |
+| `rows` / `cols` | no | integer | `24` / `80` | PTY dimensions for `terminal_start` or required new dimensions for `terminal_resize`. |
+| `signal` | conditional | string | - | Machine signal token for `terminal_signal`: `TERM|INT|HUP|KILL|WINCH|CONT|STOP`. |
 
 \* At least one of `command` or `request_text` is required.
 
 ## Output
 - stdout/stderr of the command, streamed and truncated with `...` if very long.
 - Interactive or endless commands must be bounded, for example `top -b -n 1`, `timeout 5s top -b`, `tail -n 200 file`, or `journalctl -n 200 --no-pager`.
+- Use `system.terminal_start` only when the command truly needs a controlling terminal or later stdin. It returns a durable `session_id` owned by the authenticated actor/chat, while an independent runner keeps the PTY alive across clawd restarts.
+- Continue an interactive session with `system.terminal_poll`, `system.terminal_write`, `system.terminal_resize`, `system.terminal_signal`, and `system.terminal_terminate`. Always reuse observed `session_id` and `page.next_cursor`; never invent either value.
+- A one-shot command or a long non-interactive command should continue using `system.run_command` with normal or `async_start=true` execution. Do not allocate PTY sessions for ordinary builds, tests, or file reads.
 - For a long-running/background operation that should be resumed or polled by RustClaw, set `async_start=true` and provide bounded `poll_after_seconds` / `expires_in_seconds` when useful. Do not synthesize `checkpoint_id`, `poll_ref`, `next_check_after`, or `status=background` inside shell output; those fields belong to the runtime async contract.
 - Do not use terminal shell detachment (`nohup ... &`, `... & disown`, or an equivalent command that returns while leaving an unmanaged child). The process sandbox cannot treat such a child as durable work; the runtime returns structured `async_start_required` instead.
 - For a bounded local-service check, keep service start, readiness retry, validation, and cleanup in one `run_cmd` command scope. Start the service in that shell, retain its PID, install a cleanup trap, probe it, and wait for the observed validation result before the shell exits. Use `async_start=true` only when the command itself is the long-running job whose eventual exit result should be polled.

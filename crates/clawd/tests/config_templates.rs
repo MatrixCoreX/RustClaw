@@ -215,6 +215,24 @@ fn docker_contract_matrix_template_stays_in_sync() {
     );
 }
 
+#[test]
+fn docker_image_packages_the_durable_pty_runner() {
+    let dockerfile =
+        fs::read_to_string(workspace_root().join("docker/Dockerfile")).expect("read Dockerfile");
+    assert!(
+        dockerfile.contains(
+            "COPY --from=builder /build/target/release/pty-session-runner /app/target/release/"
+        ),
+        "Docker runtime image must copy the durable PTY session runner"
+    );
+    assert!(
+        dockerfile.contains(
+            "/app/target/release/clawd \\\n    /app/target/release/pty-session-runner \\"
+        ),
+        "Docker runtime image must make the durable PTY session runner executable"
+    );
+}
+
 /// §3.5c-D14 守底：所有带“strict JSON / JSON only”输出约束的 overlay prompt
 /// 都必须被显式归类为：
 /// 1. 已有固定 schema 守底；或
