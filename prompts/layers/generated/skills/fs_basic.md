@@ -1,12 +1,13 @@
 ## fs_basic — planner-facing filesystem tool
 
-Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.make_dir`, and `filesystem.read_text_range` through `{"type":"call_capability","capability":"<leaf>","args":{...}}`. A lower-level `{"type":"call_tool","tool":"fs_basic","args":{"action":"<canonical-action>",...}}` remains available when the plan already owns an exact canonical action. `fs_basic` is a virtual planner tool: runtime maps its actions to stable backing tools such as `system_basic`, `fs_search`, and file builtins.
+Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.make_dir`, `filesystem.read_text_range`, and `artifact.read_range` through `{"type":"call_capability","capability":"<leaf>","args":{...}}`. A lower-level `{"type":"call_tool","tool":"fs_basic","args":{"action":"<canonical-action>",...}}` remains available when the plan already owns an exact canonical action. `fs_basic` is a virtual planner tool: runtime maps its actions to stable backing tools such as `system_basic`, `fs_search`, and file builtins.
 
 ## Capability
 - Inspect explicit path facts.
 - List directories with filters and caps.
 - Count directory entries with filters.
 - Read bounded text ranges from explicit files.
+- Resume bounded byte ranges from runtime-owned output artifacts.
 - Find filesystem entries by name or extension.
 - Search text content under a bounded root.
 - Compare explicit paths.
@@ -19,6 +20,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - `list_dir`
 - `count_entries`
 - `read_text_range`
+- `read_artifact_range`
 - `find_entries`
 - `grep_text`
 - `compare_paths`
@@ -52,6 +54,9 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `read_text_range` | `mode` | no | string | `head` | `head|tail|range|last_non_empty`; the final mode returns `line_number`, `line_text`, and `exists`. |
 | `read_text_range` | `n` / `start_line` / `end_line` | no | integer | action default | Bounded line controls. |
 | `read_text_range` | `field_selector` | no | string | - | Use machine token `title` when the requested scalar is the document/markdown heading; runtime returns `field_value` when observed. |
+| `read_artifact_range` | `path` | yes | string(path) | - | Runtime-owned file below `.rustclaw/artifacts`; regular workspace files are rejected. |
+| `read_artifact_range` | `start_byte` / `cursor` | no | integer | `0` | Exact byte offset returned by an artifact range handle or prior `page.next_cursor`. |
+| `read_artifact_range` | `max_bytes` | no | integer | `65536` | Bounded page size, clamped to `256..1048576`; binary pages return base64. |
 | `find_entries` | `root` | no | string(path) | workspace | Bounded search root. |
 | `find_entries` | `pattern` | conditional | string/string[] | - | Name/basename pattern for name search. |
 | `find_entries` | `ext` | conditional | string/string[] | - | Extension selector for extension search. |
@@ -82,6 +87,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
 - Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned `matches` lines rather than the full file excerpt.
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
+- Truncated tool/skill output: follow its `range_handles` with `artifact.read_range`; never route a runtime artifact through unrestricted file reads or guess byte offsets.
 - Last non-empty line of a known file: use `read_text_range` with `mode="last_non_empty"` and answer from observed `line_text`; do not replace this read-only operation with a shell pipeline.
 - Document heading/title scalar from a known text/markdown file: use `read_text_range` with `field_selector="title"` and a bounded head read, then answer from observed `field_value` when present.
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.

@@ -83,6 +83,7 @@ mod scheduled_run_contract;
 mod schema_contract;
 mod semantic_judge;
 mod skill_availability;
+mod skill_output_artifact;
 mod skills;
 mod system_health;
 mod task_admin_routes;

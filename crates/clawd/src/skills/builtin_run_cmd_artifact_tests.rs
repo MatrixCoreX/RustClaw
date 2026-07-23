@@ -52,7 +52,7 @@ fn large_output_is_streamed_to_artifacts_with_range_handles() {
     assert_eq!(summary.artifact_refs.len(), 2);
     assert_eq!(
         projection["range_handles"][0]["read_capability"],
-        "filesystem.read_text_range"
+        "artifact.read_range"
     );
     for artifact in &summary.artifact_refs {
         let path = temp

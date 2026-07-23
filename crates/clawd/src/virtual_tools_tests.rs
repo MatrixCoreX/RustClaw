@@ -204,6 +204,45 @@ fn fs_basic_read_text_range_field_selector_alias_normalizes_and_rewrites() {
 }
 
 #[test]
+fn fs_basic_read_artifact_range_rewrites_to_system_basic() {
+    let rewrite = rewrite_virtual_tool_call(
+        "fs_basic",
+        json!({
+            "action": "read_artifact_range",
+            "file_path": ".rustclaw/artifacts/skill-output/task/result.txt",
+            "cursor": 65536,
+            "max_bytes": 32768,
+        }),
+    )
+    .expect("rewrite")
+    .expect("virtual tool");
+
+    assert_eq!(rewrite.runtime_tool, "system_basic");
+    assert_eq!(rewrite.runtime_args["action"], "read_artifact_range");
+    assert_eq!(
+        rewrite.runtime_args["path"],
+        ".rustclaw/artifacts/skill-output/task/result.txt"
+    );
+    assert_eq!(rewrite.runtime_args["cursor"], 65536);
+    assert_eq!(rewrite.runtime_args["max_bytes"], 32768);
+}
+
+#[test]
+fn system_basic_read_artifact_range_canonicalizes_to_fs_basic() {
+    let canonical = canonicalize_legacy_tool_call(
+        "system_basic",
+        json!({
+            "action": "read_artifact_range",
+            "path": ".rustclaw/artifacts/tool-output/task/stdout.log",
+        }),
+    )
+    .expect("canonical call");
+
+    assert_eq!(canonical.tool, "fs_basic");
+    assert_eq!(canonical.args["action"], "read_artifact_range");
+}
+
+#[test]
 fn fs_basic_stat_paths_rewrites_to_system_basic_path_batch_facts() {
     let mut args = json!({"action":"stat", "path":"README.md"});
     assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));

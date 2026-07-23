@@ -1671,22 +1671,34 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                 builtin_success_extra(&execution_state.skill_rt.workspace_root, &skill_name, &args),
                 isolation_artifact_refs,
             );
-            return execute_builtin_skill_for_task(execution_state, task, &skill_name, &args)
-                .await
-                .map(|text| {
-                    if skill_name == "workspace_patch" {
-                        extra = append_extra_artifact_refs(
-                            serde_json::from_str::<Value>(&text).ok(),
-                            isolation_artifact_refs,
-                        );
-                    }
-                    SkillRunOutcome {
-                        text,
-                        notify: None,
-                        validation: None,
-                        extra,
-                    }
-                });
+            let mut text =
+                execute_builtin_skill_for_task(execution_state, task, &skill_name, &args).await?;
+            if skill_name == "workspace_patch" {
+                extra = append_extra_artifact_refs(
+                    serde_json::from_str::<Value>(&text).ok(),
+                    isolation_artifact_refs,
+                );
+            }
+            if let Err(err) = crate::skill_output_artifact::spill_skill_text_if_needed(
+                &execution_state.skill_rt.workspace_root,
+                &task.task_id,
+                &skill_name,
+                &mut text,
+                &mut extra,
+            ) {
+                tracing::warn!(
+                    event = "skill_output_artifact_spill_failed",
+                    task_id = %task.task_id,
+                    skill = %skill_name,
+                    error = %err
+                );
+            }
+            return Ok(SkillRunOutcome {
+                text,
+                notify: None,
+                validation: None,
+                extra,
+            });
         }
         SkillKind::External | SkillKind::Runner => {}
     }
@@ -1823,12 +1835,27 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             .and_then(|v| v.get("validation"))
             .cloned()
     });
-    let extra = append_extra_artifact_refs(value.get("extra").cloned(), isolation_artifact_refs);
-    let text = value
+    let mut extra =
+        append_extra_artifact_refs(value.get("extra").cloned(), isolation_artifact_refs);
+    let mut text = value
         .get("text")
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
+    if let Err(err) = crate::skill_output_artifact::spill_skill_text_if_needed(
+        &execution_state.skill_rt.workspace_root,
+        &task.task_id,
+        &skill_name,
+        &mut text,
+        &mut extra,
+    ) {
+        tracing::warn!(
+            event = "skill_output_artifact_spill_failed",
+            task_id = %task.task_id,
+            skill = %skill_name,
+            error = %err
+        );
+    }
     Ok(SkillRunOutcome {
         text,
         notify,
