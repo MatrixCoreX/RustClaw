@@ -1,6 +1,6 @@
 use claw_core::capability_result::{
     is_machine_ref, ArtifactRef, CapabilityResultEnvelope, CapabilityResultStatus, Continuation,
-    ContinuationKind, EvidenceRef, StructuredError,
+    ContinuationKind, EvidenceRef, RetryDirective, StructuredError,
 };
 use serde_json::{json, Map as JsonMap, Value};
 
@@ -14,6 +14,13 @@ pub(crate) fn successful_execution_envelope(
     let mut envelope =
         CapabilityResultEnvelope::ok(capability, machine_action(args), result_data(output, extra));
     envelope.artifacts = artifact_refs_from_sources(output, extra);
+    apply_result_metadata(
+        &mut envelope,
+        serde_json::from_str::<Value>(output.trim()).ok().as_ref(),
+        extra,
+        step_id,
+        "untrusted_tool_output",
+    );
     envelope.evidence.push(EvidenceRef {
         id: machine_evidence_id(step_id),
         source: capability.to_string(),
@@ -54,6 +61,15 @@ pub(crate) fn failed_execution_envelope(
     let structured = structured_error(error);
     let mut envelope =
         CapabilityResultEnvelope::failed(capability, machine_action(args), structured);
+    let parsed_error = serde_json::from_str::<Value>(error.trim()).ok();
+    envelope.artifacts = artifact_refs(parsed_error.as_ref());
+    apply_result_metadata(
+        &mut envelope,
+        parsed_error.as_ref(),
+        None,
+        step_id,
+        "untrusted_tool_error",
+    );
     envelope.evidence.push(EvidenceRef {
         id: machine_evidence_id(step_id),
         source: capability.to_string(),
@@ -314,28 +330,106 @@ fn evidence_locator(extra: Option<&Value>) -> Option<String> {
 }
 
 fn artifact_refs(extra: Option<&Value>) -> Vec<ArtifactRef> {
-    let Some(extra) = extra.and_then(Value::as_object) else {
+    let Some(root) = extra.and_then(Value::as_object) else {
         return Vec::new();
     };
     let mut refs = Vec::new();
-    for key in ["artifacts", "artifact_refs"] {
-        let Some(items) = extra.get(key).and_then(Value::as_array) else {
-            continue;
-        };
-        for item in items {
-            let Some(artifact) = artifact_ref(item) else {
+    for object in [Some(root), root.get("extra").and_then(Value::as_object)]
+        .into_iter()
+        .flatten()
+    {
+        for key in ["artifacts", "artifact_refs", "output_artifact_refs"] {
+            let Some(items) = object.get(key).and_then(Value::as_array) else {
                 continue;
             };
-            if !refs.iter().any(|existing: &ArtifactRef| {
-                existing.id == artifact.id
-                    && existing.path == artifact.path
-                    && existing.uri == artifact.uri
-            }) {
-                refs.push(artifact);
+            for item in items {
+                let Some(artifact) = artifact_ref(item) else {
+                    continue;
+                };
+                if !refs.iter().any(|existing: &ArtifactRef| {
+                    existing.id == artifact.id
+                        && existing.path == artifact.path
+                        && existing.uri == artifact.uri
+                }) {
+                    refs.push(artifact);
+                }
             }
         }
     }
     refs
+}
+
+fn apply_result_metadata(
+    envelope: &mut CapabilityResultEnvelope,
+    output: Option<&Value>,
+    extra: Option<&Value>,
+    step_id: &str,
+    content_trust: &str,
+) {
+    envelope.page = result_metadata_value(output, extra, "page")
+        .filter(|value| value.is_object())
+        .cloned()
+        .map(redact_for_model);
+    envelope.truncated = result_metadata_value(output, extra, "truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    envelope.effect = result_metadata_value(output, extra, "effect")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| is_machine_ref(value))
+        .map(str::to_string);
+    envelope.verification = result_metadata_value(output, extra, "verification")
+        .filter(|value| value.is_object())
+        .cloned()
+        .map(redact_for_model)
+        .unwrap_or_else(|| json!({}));
+    envelope.provenance = json!({
+        "source": "runtime_step",
+        "step_id": machine_evidence_id(step_id),
+        "content_trust": content_trust,
+    });
+
+    let retryable = result_metadata_value(output, extra, "retryable")
+        .and_then(Value::as_bool)
+        .or_else(|| envelope.error.as_ref().map(|error| error.retryable))
+        .unwrap_or(false);
+    let retry_class = result_metadata_value(output, extra, "retry_class")
+        .or_else(|| result_metadata_value(output, extra, "error_kind"))
+        .or_else(|| result_metadata_value(output, extra, "error_code"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| is_machine_ref(value))
+        .map(str::to_string);
+    let retry_after_ms = result_metadata_value(output, extra, "retry_after_ms")
+        .or_else(|| result_metadata_value(output, extra, "poll_after_ms"))
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            result_metadata_value(output, extra, "poll_after_seconds")
+                .and_then(Value::as_u64)
+                .map(|seconds| seconds.saturating_mul(1_000))
+        });
+    if retryable || retry_class.is_some() || retry_after_ms.is_some() {
+        envelope.retry = Some(RetryDirective {
+            retryable,
+            class: retry_class,
+            after_ms: retry_after_ms,
+        });
+    }
+}
+
+fn result_metadata_value<'a>(
+    output: Option<&'a Value>,
+    extra: Option<&'a Value>,
+    key: &str,
+) -> Option<&'a Value> {
+    extra
+        .and_then(|value| value.get(key))
+        .or_else(|| output.and_then(|value| value.get(key)))
+        .or_else(|| {
+            output
+                .and_then(|value| value.get("extra"))
+                .and_then(|value| value.get(key))
+        })
 }
 
 fn artifact_refs_from_sources(output: &str, extra: Option<&Value>) -> Vec<ArtifactRef> {

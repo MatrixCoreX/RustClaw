@@ -1282,12 +1282,32 @@ pub(super) async fn execute_prepared_skill_action(
         }
         (None, _) => true,
     };
-    let capability_result = crate::capability_result::envelope_for_step_execution(
+    let mut capability_result = crate::capability_result::envelope_for_step_execution(
         normalized_skill,
         classification_args,
         &step_execution,
         structured_extra.as_ref(),
     );
+    capability_result.effect = Some(
+        if raw_action_effect.validates {
+            "validate"
+        } else if raw_action_effect.mutates {
+            "mutate"
+        } else {
+            "observe"
+        }
+        .to_string(),
+    );
+    if raw_action_effect.validates {
+        capability_result.verification = serde_json::json!({
+            "status": match &validation_observation {
+                crate::execution_recipe::ValidationObservation::Passed => "passed",
+                crate::execution_recipe::ValidationObservation::Failed(_) => "failed",
+                crate::execution_recipe::ValidationObservation::Inconclusive => "inconclusive",
+            },
+        });
+    }
+    debug_assert!(capability_result.validate().is_ok());
     loop_state.capability_results.push(capability_result);
     match step_execution.output.as_ref() {
         Some(out) => {

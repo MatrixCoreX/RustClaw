@@ -2,8 +2,8 @@ use serde_json::json;
 
 use super::{
     ArtifactRef, CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus,
-    CapabilityResultValidationError, Continuation, ContinuationKind, EvidenceRef, StructuredError,
-    CAPABILITY_RESULT_SCHEMA_VERSION,
+    CapabilityResultValidationError, Continuation, ContinuationKind, EvidenceRef, RetryDirective,
+    StructuredError, CAPABILITY_RESULT_SCHEMA_VERSION,
 };
 
 #[test]
@@ -102,4 +102,61 @@ fn duplicate_evidence_ids_are_rejected() {
         envelope.validate(),
         Err(CapabilityResultValidationError::DuplicateEvidenceRef)
     );
+}
+
+#[test]
+fn extended_machine_metadata_is_versioned_and_validated() {
+    let mut envelope = CapabilityResultEnvelope::ok(
+        "filesystem.search",
+        Some("grep_text".to_string()),
+        json!({}),
+    );
+    envelope.page = Some(json!({
+        "cursor": 0,
+        "next_cursor": 20,
+        "snapshot_sha256": "abc123"
+    }));
+    envelope.truncated = true;
+    envelope.provenance = json!({
+        "source": "runtime_step",
+        "content_trust": "untrusted_tool_output"
+    });
+    envelope.retry = Some(RetryDirective {
+        retryable: true,
+        class: Some("rate_limited".to_string()),
+        after_ms: Some(1_000),
+    });
+    envelope.effect = Some("observe".to_string());
+    envelope.verification = json!({"status": "passed"});
+
+    envelope.validate().unwrap();
+    let encoded = serde_json::to_value(&envelope).unwrap();
+    assert_eq!(encoded["page"]["next_cursor"], 20);
+    assert_eq!(encoded["truncated"], true);
+    assert_eq!(encoded["retry"]["class"], "rate_limited");
+    assert_eq!(encoded["effect"], "observe");
+    assert_eq!(encoded["verification"]["status"], "passed");
+}
+
+#[test]
+fn legacy_envelopes_deserialize_with_empty_extended_metadata() {
+    let envelope: CapabilityResultEnvelope = serde_json::from_value(json!({
+        "schema_version": 1,
+        "status": "ok",
+        "capability": "filesystem.read",
+        "action": "read",
+        "data": {"path": "README.md"},
+        "artifacts": [],
+        "evidence": [],
+        "delivery": {"intent": "model_synthesis", "constraints": {}}
+    }))
+    .unwrap();
+
+    envelope.validate().unwrap();
+    assert!(envelope.page.is_none());
+    assert!(!envelope.truncated);
+    assert_eq!(envelope.provenance, json!({}));
+    assert!(envelope.retry.is_none());
+    assert!(envelope.effect.is_none());
+    assert_eq!(envelope.verification, json!({}));
 }
