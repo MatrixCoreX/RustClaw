@@ -629,7 +629,7 @@ fn native_planner_request(
     }
     tools.push(ModelToolDefinition {
         name: NATIVE_RESPOND_TOOL.to_string(),
-        description: "Submit the final user-visible response after required observations. This tool formats answers; it does not execute or simulate runtime capabilities. Runtime-owned provider/config/permission, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. Use free_text for prose/scalars, list for exact items, or object for exact named fields. Object field values are JSON encoded in value_json and are validated before delivery.".to_string(),
+        description: "Submit the final user-visible response after required observations. This tool formats answers; it does not execute or simulate runtime capabilities. Runtime-owned provider/config/permission, domain parse/normalize/validate/preview, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. A lower-level environment observation is supporting context, not a substitute for the disclosed domain capability that owns those fields. Use free_text for prose/scalars, list for exact items, or object for exact named fields. Each object value_json contains one complete serialized JSON value and is validated before delivery; JSON string values include their surrounding JSON quotes.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": [
@@ -673,7 +673,8 @@ fn native_planner_request(
                             "value_json": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 65536
+                                "maxLength": 65536,
+                                "description": "schema:complete_serialized_json_value_v1; json_string_requires_surrounding_quotes=true; malformed_json=rejected; example_json_string=\"\\\"text\\\"\"; scalar_and_composite_encoding=standard_json"
                             }
                         },
                         "additionalProperties": false
@@ -785,12 +786,24 @@ fn native_contract_repair_signal(error_code: &str) -> String {
             "retry_native_tool_call",
         )
     };
+    let argument_constraints = if error_code == "native_respond_object_field_json_invalid" {
+        json!({
+            "fields[].value_json": {
+                "encoding": "complete_serialized_json_value",
+                "json_string_requires_surrounding_quotes": true,
+                "malformed_json": "rejected"
+            }
+        })
+    } else {
+        json!({})
+    };
     json!({
         "protocol_observation": {
             "status": "error",
             "error_code": error_code,
             "tool_name": tool_name,
             "required_argument_fields": required_argument_fields,
+            "argument_constraints": argument_constraints,
             "capability_value_source": "RUNTIME_CAPABILITY_MAP",
             "next_action": next_action
         }

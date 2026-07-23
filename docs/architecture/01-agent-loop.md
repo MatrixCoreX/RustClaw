@@ -55,11 +55,16 @@ optimizations and cannot be the only path that preserves provider, artifact,
 async-job, or other structured result fields.
 The terminal `respond` contract supports model-authored free text, exact lists,
 and exact named-field objects whose JSON values are validated before the
-runtime materializes the payload. This preserves strict machine delivery
-without introducing localized runtime reply templates. It is a formatting
-boundary, not a capability simulator: runtime-owned provider, dry-run,
+runtime materializes the payload. Each object `value_json` is one complete
+serialized JSON value, including JSON quotes around string values. Invalid JSON
+receives a bounded structured repair observation and is not silently coerced.
+This preserves strict machine delivery without introducing localized runtime
+reply templates. It is a formatting boundary, not a capability simulator:
+runtime-owned provider, domain parse/normalize/validate/preview, dry-run,
 artifact/job, checkpoint, diff, verification, repair, and rewind fields require
-a prior matching capability observation.
+a prior matching capability observation. Lower-level environment facts may
+support that call but cannot replace the disclosed domain capability that owns
+the result.
 
 `kind=run_skill` is intentionally separate. The caller supplies the exact skill
 and arguments, so the direct path bypasses planner selection and agent-loop

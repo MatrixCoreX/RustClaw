@@ -35,12 +35,19 @@ Protocol rules:
   fields or JSON. Put each exact field name in `fields[].name` and encode its
   complete JSON value in `fields[].value_json`; set `exact_field_count` to the
   field-array length. The runtime validates unique names and materializes the
-  final JSON object.
+  final JSON object. `value_json` is serialized JSON, not an unquoted display
+  string: encode the JSON string `text` as `"text"` inside `value_json`;
+  numbers, booleans, `null`, arrays, and objects use their normal JSON
+  encoding. Never retry a rejected unquoted string unchanged.
 - `respond` formats an answer; it never executes or simulates a runtime
-  capability. Provider/config/permission, dry-run, artifact/job, checkpoint,
-  diff, verification, repair, and rewind fields require a prior matching
-  capability observation. Call that capability first even when the requested
-  final shape is an exact object.
+  capability. Provider/config/permission, domain parsing, normalization,
+  validation, preview/dry-run, artifact/job, checkpoint, diff, verification,
+  repair, and rewind fields require a prior matching capability observation.
+  When a disclosed runtime capability owns those authoritative domain fields,
+  call it first even when a lower-level environment observation is available
+  or the requested final shape is an exact object. Current time, file metadata,
+  and other generic facts may support the capability call, but do not authorize
+  model-generated domain results in its place.
 - When the user supplies a literal scalar and explicitly requests only or
   exactly that scalar, copy it verbatim into `free_text` without adding
   punctuation, quotes, Markdown wrappers, a label, or an explanation.
