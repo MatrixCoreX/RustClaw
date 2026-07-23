@@ -1,264 +1,155 @@
 # Agent Upgrade Rollout Guardrails
 
-Last updated: 2026-07-20
+Last updated: 2026-07-24
 
-This document is the P0 rollout guardrail for the agent generalization plan. It records what can be safely changed now, what is only planned, how to test each change, and how to roll it back.
+This document defines current rollout and rollback boundaries for changes to
+the agent loop, verifier, finalizer, registry, lifecycle, and natural-language
+execution.
 
-## Scope
+## Non-Negotiable Boundaries
 
-The current upgrade work touches the agent loop, verifier, finalizer, registry metadata, and natural-language execution paths. Ordinary semantic routing responsibility has moved into the agent loop; further changes must stay observable, reversible through code/config rollback where a wired control exists, and dry-run safe.
+- Ordinary semantic authority stays in the planner/agent loop.
+- Production runtime must not match user-language phrases.
+- Runtime, verifier, finalizer, policy and adapters must not add fixed
+  user-facing reply templates.
+- Deterministic code emits machine fields, status/reason codes, paths, counts,
+  `message_key`, evidence and artifact refs.
+- User prose is synthesized by the model or i18n renderer in the request
+  language.
+- Risk, permission, confirmation, dry-run, sandbox, side-effect reconciliation
+  and administrator ceilings cannot be bypassed by model output.
+- Real remote publication or mutation requires the declared policy and
+  confirmation. Broad NL uses dry-run/mock for destructive or paid media paths
+  unless the test explicitly owns a safe live scope.
 
-Non-negotiable boundaries:
+## Wired Runtime Controls
 
-- Runtime code must not add user natural-language phrase matching.
-- Runtime, finalizer, verifier, and execution adapters must not add hardcoded user-facing reply templates.
-- Deterministic paths may emit machine fields, status codes, paths, counts, `message_key`, or structured evidence.
-- User prose should be rendered by finalizer, LLM, or i18n according to the request language.
-- X API publish/fetch/delete and other remote side effects require dry run, mock, sandbox, or explicit confirmation.
-- Image and audio real calls are outside the current NL canary scope.
-
-## Rollout Controls
-
-### Wired Today
-
-These controls are read by current code and can be used for rollback after config change plus service restart.
-
-| Control | Location | Default / Current | Effect | Rollback |
-| --- | --- | --- | --- | --- |
-| `max_steps` | `configs/agent_guard.toml` `[agent.loop_guard]` | `32` | Per-plan action capacity; not a whole-task round/tool completion limit. | Restore the previous action capacity and restart `clawd`. |
-| `repeat_action_limit` | `[agent.loop_guard]` | `4` | Cross-round repeat-action guard. | Restore previous value and restart. |
-| `admin_max_*` | `[agent.task_budget]` | high emergency ceilings | Fail-closed cumulative model/tool/token/cost/elapsed/continuation/non-resumable runtime boundary. | Lower only as an administrator policy; model output cannot raise it. |
-| `profiles.*.soft_slice_seconds` | `[agent.task_budget.profiles.*]` | profile-specific | Wall-time checkpoint cadence for resumable interactive work. | Restore previous duration and restart. |
-| `profiles.*.stagnation_tolerance` | `[agent.task_budget.profiles.*]` | `2` to `4` | Structured consecutive non-progress tolerance. | Restore previous tolerance and restart. |
-| `profiles.*.provider_timeout_class` | `[agent.task_budget.profiles.*]` | `short` / `standard` | Provider timeout policy class and event attribution. | Restore the previous machine class and restart. |
-| `profiles.*.tool_timeout_class` | `[agent.task_budget.profiles.*]` | `short` / `standard` / `long_tail` | Tool timeout policy class and event attribution. | Restore the previous machine class and restart. |
-
-The old interactive `max_rounds`, `max_tool_calls`, `no_progress_limit`,
-`recoverable_failure_extra_rounds`, and `multi_round_enabled` controls were
-physically removed. Rollback is by reverting the coherent task-budget code
-change, not by retaining a dual runtime branch. Explicit caps remain available
-only in non-interactive and child-task machine request contracts.
-
-### Rollout Controls And Retired Route-Authority Keys
-
-These controls are read from `configs/agent_guard.toml` and logged as machine tokens / task-journal attribution where relevant. `registry_idempotency_guard_scope` and `answer_verifier_enforce_required_scope` are final machine-token scopes. Old route-authority, selected-contract, and bool names are ignored historical config keys.
-
-| Control | Current Default | Intended Effect | Required Before Behavior Use |
+| Control | Location | Meaning | Rollback |
 | --- | --- | --- | --- |
-| `answer_verifier_enforce_required_scope` | `all` | Convert high-confidence required-evidence verifier failures into structured block/retry outcomes. | Final always-on boundary; false verifier blocks must be fixed through evidence contracts, extractors, registry metadata, or planner prompts, not by disabling the guard. |
-| `answer_verifier_enforce_required` | ignored | Historical bool name; current runtime config load does not parse it. | Do not add it to new configs; use `answer_verifier_enforce_required_scope` instead. |
-| `semantic_route_authority` | retired | Historical route-authority key; current runtime config load must not parse it. | Do not add it to new configs; use static route-authority guard and replay/NL evidence instead of a semantic route switch. |
-| `agent_loop_canary_bucket` | retired | Historical canary bucket key; current runtime config load must not parse it. | Do not add it to new configs; use focused test subsets and replay diff artifacts for targeted debugging. |
-| `registry_idempotency_guard_scope` | `all` | Drive once/dedup/idempotency from registry metadata. | Final always-on boundary; false repeat blocks must be fixed through registry `effect`, `once_per_task`, `dedup_scope`, or verifier policy, not by disabling the guard. |
-| `registry_idempotency_guard` | ignored | Historical bool name; current runtime config load does not parse it. | Do not add it to new configs; use `registry_idempotency_guard_scope` instead. |
+| `max_steps` | `[agent.loop_guard]` | Per-plan action capacity, not a whole-task round/tool completion limit | Restore previous value and restart |
+| `repeat_action_limit` | `[agent.loop_guard]` | Cross-round repeat guard | Restore previous value and restart |
+| `repeat_same_action_limit` | `[agent.loop_guard]` | Compatibility repeat guard | Restore previous value and restart |
+| `admin_max_*` | `[agent.task_budget]` | Fail-closed cumulative model/tool/token/cost/elapsed/continuation/non-resumable ceilings | Administrator policy only; model cannot raise |
+| `profiles.*.soft_slice_seconds` | `[agent.task_budget.profiles.*]` | Resumable checkpoint cadence | Restore previous duration |
+| `profiles.*.stagnation_tolerance` | `[agent.task_budget.profiles.*]` | Consecutive structured non-progress tolerance | Restore previous tolerance |
+| `provider_timeout_class` | task-budget profile | Provider timeout class | Use `short`, `standard`, or `long_tail` |
+| `tool_timeout_class` | task-budget profile | Tool timeout class | Long-tail tools need async/checkpoint support |
+| `answer_verifier_enforce_required_scope` | `[agent.loop_guard]` | Final required-evidence scope, normalized to `all` | Fix evidence contract; do not disable |
+| `registry_idempotency_guard_scope` | `[agent.loop_guard]` | Final registry repeat/idempotency scope, normalized to `all` | Fix registry policy; do not disable |
+
+Removed interactive controls must not return:
+
+- `max_rounds`
+- `max_tool_calls`
+- `no_progress_limit`
+- `recoverable_failure_extra_rounds`
+- `multi_round_enabled`
+- route-authority, canary, `agent_decides_*`, selected-contract, or bool guard
+  compatibility switches
+
+Rollback for a coherent task-budget/runtime migration is a code revert, not a
+dual runtime branch. Explicit caps remain valid only in non-interactive or
+child-task request contracts.
 
 ## Attribution Requirements
 
-Use the existing `TaskJournal` path first. Do not create a separate opaque log path unless a stable export is needed.
+Use TaskJournal and versioned task events. Current rollout evidence should
+include:
 
-Required fields for rollout comparison:
+- planner round/action and decision envelope;
+- capability request, resolution and concrete tool/skill;
+- verifier/evidence coverage and missing fields;
+- permission/policy/risk/confirmation decisions;
+- budget profile, decision, cumulative usage and checkpoint;
+- tool/capability result status, artifacts and evidence refs;
+- mutation receipt, reconciliation and idempotency state;
+- final status, failure attribution and delivery consistency;
+- LLM call/retry/truncation/token/cost fields when available.
 
-- `rollout_switches_enabled`
-- `rollout_attribution[]`
-- `route_result.route_gate_kind`
-- `route_result.initial_gate_ref`
-- `route_result.initial_hint_ref`
-- `route_result.legacy_first_layer_decision` only as legacy compatibility attribution
-- `route_result.route_reason`
-- `final_answer_shape`
-- `final_answer_shape_class`
-- `output_contract.response_shape`
-- `output_contract.structured_field_selector`
-- `contract_matrix.contract_match`
-- `answer_verifier_summary.pass`
-- `answer_verifier_summary.missing_evidence_fields`
-- `final_failure_attribution`
-- `task_metrics.llm_calls_per_task`
-- `task_metrics.llm_elapsed_ms_per_task`
-- `task_metrics.by_prompt`
-- `evidence_coverage`
-- `ask_state_transitions`
+Historical normalizer, first-layer and route-gate fields may be present only
+when comparing archived artifacts. Do not copy them into new runtime
+attribution.
 
-When a shadow path is added, extend the journal with machine fields only:
+Never store raw secrets or unredacted private payloads. Raw prompt/provider data
+is allowed only in the dedicated access-controlled debug/teaching record with
+its existing redaction and retention policy.
 
-- `initial_gate_ref`
-- `initial_hint_ref`
-- `old_first_layer_decision`
-- `agent_decision`
-- `decision_delta`
-- `capability_delta`
-- `risk_delta`
-- `output_contract_delta`
-- `budget_profile`
-- `final_outcome`
-- `verifier_pass`
+## Development Gates
 
-Do not store full prompts, raw secret-bearing tool payloads, private user text, or API keys in rollout attribution.
-
-Current behavior-level rollout attribution:
-
-- `answer_verifier_enforce_required_scope` required-evidence blocks write `switch_name`, `event`, `outcome`, `reason_code`, `failure_attribution`, `missing_evidence_fields`, and `confidence`.
-- `registry_idempotency_guard_scope` action-level repeat blocks write `switch_name`, `event`, `outcome`, `reason_code`, `skill`, `action`, `dedup_scope`, `fingerprint`, `repeat_count`, and `limit`.
-- Retired route-authority fields may appear only in historical logs, guard self-tests, or regression fixtures. Current behavior attribution should use `route_gate_kind`, `initial_gate_ref`, `initial_hint_ref`, compatibility `old_first_layer_decision`, planner action, verifier issue, loop outcome, and capability/evidence deltas.
-
-## Test Gates
-
-Run these before and after changing finalizer, verifier, planner boundaries, registry metadata, or loop budgets.
-
-Minimum local gate:
+Minimum:
 
 ```bash
 python3 scripts/check_no_nl_hardmatch.py
+python3 scripts/check_no_runtime_hard_reply.py
+python3 scripts/check_long_files.py
+git diff --check
 cargo check -p clawd -p claw-core
-bash scripts/nl_tests/run_suite.sh evidence_policy_offline
 ```
 
-Targeted Rust tests by area:
+Run area-specific contract tests for the modified resolver, verifier, budget,
+lifecycle, replay, policy, registry, finalizer, CLI or UI boundary. During
+active development, use the smallest affected NL set.
+
+Before release-sensitive deletion or runtime behavior release:
 
 ```bash
-cargo test -p clawd answer_verifier -- --nocapture
-cargo test -p clawd loop_control -- --nocapture
-cargo test -p clawd execution_loop -- --nocapture
-cargo test -p clawd task_journal -- --nocapture
-cargo test -p clawd support -- --nocapture
-cargo test -p claw-core skill_registry -- --nocapture
+python3 scripts/nl_tests/build_release_gate_subset.py --check
+bash scripts/nl_tests/run_suite.sh agent_parity_gate
 ```
 
-Release and service gate when runtime behavior changes:
-
-```bash
-cargo build --release -p clawd -p skill-runner
-setsid -f bash -lc 'set -a; source /home/guagua/runtime_env_filled.sh; set +a; exec /home/guagua/rustclaw/target/release/clawd --config /home/guagua/rustclaw/configs/config.toml >> /home/guagua/rustclaw/clawd-runtime.log 2>&1'
-```
-
-NL gates:
-
-```bash
-bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --case-limit 20 --skip-smoke --quality-guard --verbose-turn-output
-bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --case-limit 500 --prompt-reply-only --quality-guard
-bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard
-```
-
-Use the printed `RESUME_HINT` after interruption; do not restart a large aggregate from the beginning unless the goal is to measure a fresh baseline.
-
-After each client-like NL run, persist rollout metrics:
-
-```bash
-python3 scripts/nl_tests/summarize_rollout_metrics.py <RUN_DIR> --provider minimax-openai-compat --vendor minimax --budget-profile default
-```
-
-The metrics JSON is written to `logs/agent_rollout_metrics/` and aggregates only counts, enums, timings, switch names, and reason codes. It must not contain prompts, final replies, full tool JSON, or secrets.
+The generated subset is the source of truth for row/category counts. Do not
+hardcode an old count in rollout policy.
 
 ## Rollback Thresholds
 
-Rollback the changed switch or code path when any of these occur during focused smoke, canary, or safe aggregate:
+Stop and revert the responsible coherent change when evidence shows:
 
-- NL pass rate drops by more than 2% from the latest comparable baseline.
-- Clarification rate rises by more than 5%.
-- Verifier block rate rises by more than 3% and manual sampling shows more than 1% false blocks.
-- Average LLM call count rises by more than 15%.
-- Average task elapsed time rises by more than 20%.
-- Retry/no-progress/repeat-action stops noticeably increase.
-- Any real side-effect action bypasses confirmation or dry-run.
-- `python3 scripts/check_no_nl_hardmatch.py` reports unknown production hard matches.
+- any confirmation, permission, sandbox or dry-run bypass;
+- any non-idempotent side effect replay without reconciliation;
+- new unknown production NL hard match or fixed runtime reply;
+- unexplained route/plan/permission/verifier/final-status replay mismatch;
+- statistically meaningful pass-rate, verifier false-block, LLM amplification
+  or latency regression against a comparable baseline;
+- lost checkpoint, lease fencing failure, or inability to resume safely.
 
 Rollback procedure:
 
-1. Disable or restore the relevant config value when a wired switch exists.
-2. Restart `clawd` with the known-good config and environment.
-3. Re-run the focused NL cases that failed.
-4. If rollback requires code, revert only the responsible change set; do not reset unrelated user work.
-5. Record the failed run directory, changed control, reason code, and follow-up plan.
+1. Restore a wired policy value only when that value is the true behavior
+   owner.
+2. Otherwise revert the responsible coherent code change without resetting
+   unrelated user work.
+3. Restart with known-good config/environment.
+4. Re-run the smallest failing cases and affected deterministic gates.
+5. Record run refs, machine reason/status, changed owner and follow-up.
 
-## Current Known Risks
+## Current Risk Areas
 
-- `answer_verifier_enforce_required_scope` is now a final `all` boundary. The required-evidence failure payload is structured and behavior attribution is available in `rollout_attribution[]`; if false blocks appear, fix the evidence contract, extractor, registry metadata, or planner prompt that produced the mismatch.
-- Route-authority runtime rollback switches are retired. Remaining compatibility deletion work is still release-gated: do not remove a residual ordinary semantic fallback until focused tests, compressed release-gate-equivalent NL coverage, and route-delta/replay review show no unexplained mismatch.
-- Some finalizer paths still emit structured machine fields directly. This is allowed for exact machine contracts, but directory/user-summary classes need continued audit under P1/P5.
-- Directory summary requests have a focused repair for non-explicit command-output routes with machine `directory_purpose` repair markers, and `system_basic.inventory_dir` now exposes `size_summary`. Composite directory requests can still straddle `directory_entry_groups` and `directory_purpose_summary`; keep this boundary under P1/P2 review before expanding directory-summary canaries.
-- The `prompts/schemas` focused case now passes by emitting structured `largest.*`, `size_bytes`, `content_excerpt`, and `directory_purpose_summary` evidence when model synthesis conflicts with observed file sizes. This is safer than a wrong prose answer, but user-facing readability remains a P1/P5 follow-up; do not solve it with runtime zh/en fixed templates.
-- Registry `effect`, `once_per_task`, `dedup_scope`, and `idempotent` parse through `claw-core`; both main and docker registries explicitly declare those action-level governance fields for existing `planner_capabilities`. Execution-loop consumption now uses the final `registry_idempotency_guard_scope=all` boundary and records rollout attribution when it blocks action-level repeats; if false repeat blocks appear, fix the registry policy metadata or verifier policy that produced the mismatch.
-- `execution_recipe::classify_skill_action_effect()` remains registry-first for `planner_capabilities[].effect`; it now also uses registry `side_effect=false` as a read-only fallback before legacy skill-name compatibility branches. Keep `run_cmd` / `http_basic` / `service_control` protocol-specific effect detection until equivalent registry metadata and tests exist.
-- Stale `configs/agent_guard.toml` domain action lists, dedup compatibility
-  fields, dynamic prompt text, fixed messages, and trace prose were physically
-  removed after reader audit. `check_agent_loop_guard_final_scope.py` prevents
-  those legacy sections from returning.
-- Crypto account access failures now prefer skill-provided structured fields (`extra.error_kind`, `message_key`, `exchange`, `detail`, `status_code`) and deterministic runtime output uses machine fields instead of fixed English reply templates. Legacy sentinel parsing remains only as compatibility fallback.
-- Contract-matrix preflight action/argument rejections now carry stable machine `reason_code` values in `extra` (`contract_action_rejected`, `contract_arg_rejected`), with focused `contract_matrix_preflight` tests covering both paths. P4 still needs a full allow/block/repair reason-code audit before enabling broader behavior changes.
-- Verifier issues now expose stable `verify_*` reason codes in task journal summary/trace; the human-readable `blocked_reason` remains secondary context and must not be parsed for control flow.
-- Verifier unresolved-template and unresolved-capability fallback responses now emit `message_key` + `reason_code` machine payloads instead of zh/en fixed user-facing templates. A renderer/i18n layer should turn these into prose when product UX needs it.
-- Memory alias acknowledgements and runtime approval-wait status direct responses now emit `message_key` + `reason_code` machine payloads (`clawd.msg.memory.alias_*`, `clawd.msg.runtime.approval_wait_status`) instead of fixed zh/en prose. Keep renderer/i18n responsible for final user-language prose.
-- Policy-block default delivery and normalized skill errors now emit `clawd.msg.policy.<reason_code>` + `reason_code` + `observed_facts` machine payloads. Policy boundary prose remains only contract guidance for synthesis, not deterministic user-facing fallback text.
-- Ask runtime failure default delivery now emits `clawd.msg.ask_runtime_failure` + `ask_runtime_failure` machine payload. The fallback contract still carries user-request context and safety boundaries for synthesis.
-- Ordinary execution failures no longer use a dedicated failed-step semantic
-  route or deterministic domain renderer. The agent synthesizes the reply from
-  structured step/capability errors and journal evidence; the resume boundary
-  retains only keyed `message_key` / `reason_code` machine fallbacks for model
-  unavailability.
-- Direct config edit deterministic fallbacks now emit `clawd.msg.config_edit.*` + `config_edit_*` machine payloads with path/field/value/valid/risk fields instead of zh/en success, plan, validation, guard, or read-back prose.
-- The historical pre-loop self-extension response path and its locale templates are deleted. Explicit reusable-skill work now enters through the normal planner/resolver/verifier path via `extension_manager`.
-- Agent resume step failure defaults now emit `clawd.msg.execution.step_failed` / `clawd.msg.execution.step_error_missing` machine payloads instead of zh/en "step could not be completed" prose.
-- Dispatch support deterministic observed execution status uses the same `clawd.msg.execution.step_error_missing` machine payload for missing error text.
-- RustClaw config risk deterministic fallback now emits `clawd.msg.config_risk.summary` + `config_risk_*` machine payloads with path/risk_count/risks fields instead of fixed risk/no-risk prose.
-- Docker and main registry copies are now covered by `scripts/check_skill_registry_parity.py`; run `--mode p3 --strict` and `--mode all --strict` before registry-governed behavior changes.
+- `repo/tasks.rs` and `UI/src/App.tsx` are near the 2,000-line ceiling.
+- Exact-output finalization must remain zero-domain and independent of registry
+  skill names.
+- Provider usage/cost can be unknown; unknown cost records must not be treated
+  as zero cost.
+- Long-tail tools need heartbeat/checkpoint/async state before pause/resume is
+  considered safe.
+- Legacy route fields still present in historical fixtures must remain isolated
+  from current execution.
+- Registry main/Docker copies must remain in parity.
+- Paid multimedia and remote mutation tests need explicit safe live scope;
+  otherwise use dry-run/offline contracts.
 
-## Current Exclusions
+## Required Supporting Guards
 
-Do not run these as real external calls in the current NL canary:
+Use the guards relevant to the changed surface:
 
-- X API publish, fetch, delete, or remote write operations, except dry run / mock / sandbox.
-- Exchange order submission or remote mutation without explicit confirmation and dry run policy.
-- Image generation/editing and audio transcription/synthesis real calls.
-- Any skill requiring secrets that are not available through `/home/guagua/runtime_env_filled.sh`.
-
-## Recent Baseline References
-
-- `scripts/nl_suite_logs/contract_matrix_offline/20260604_130322`: contract matrix offline suite passed.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_125206`: aggregate case 1289 single passed after Git state language synthesis fix.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_125321`: aggregate cases 1289-1294 passed.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_125950`: aggregate cases 1286-1288 passed.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_131321`: default-off rollout switch smoke, aggregate case 1294 passed after release restart.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_132211`: default-off rollout switch smoke, aggregate case 1294 passed after release rebuild/restart; checked `clawd` PID `1045027`.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_132453`: focused smoke cases 1-17 passed; case 18 failed on schema directory summary completeness.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_134241`: aggregate case 18 passed after adding `system_basic.inventory_dir.size_summary`; count/list completeness remains a P1 risk.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_134518`: focused smoke cases 19-20 passed after release rebuild/restart; checked `clawd` PID `1061754`.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_135647`: aggregate case 18 passed after contract repair, using `fs_basic.list_dir` with `counts.files=22`; checked `clawd` PID `1069411`.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_151931`: aggregate case 1278 passed with structured `process_basic.port_list` evidence.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_152051`: aggregate case 1275 passed; no clarify regression, with high LLM cost noted.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_152643`: aggregate case 1276 passed using `config_basic.read_field`; earlier `run_20260604_152327` failed before business logic due provider/model connectivity.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_153430`: aggregate case 1278 passed after answer-verifier payload change and release restart; checked `clawd` PID `1080137`.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_162631`: focused case 9 passed after generic path content summary contract repair.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_162707`: focused cases 14-17 passed; case 18 failed due directory-purpose finalizer/verifier mismatch.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_164422`: aggregate case 18 failed because model synthesis still misreported largest file despite correct structured evidence.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_165156`: aggregate case 18 passed after finalizer required true file token + true `size_bytes` before reusing synthesis and otherwise emitted structured observed evidence.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_165428`: focused cases 19-20 passed after latest release restart; checked `clawd` PID `1132886`.
-- `scripts/nl_suite_logs/contract_matrix_offline/20260604_170148`: contract matrix offline suite passed after `git_basic` generated prompt sync.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_170223`: git status case 47 passed with `git_basic.structured_json_v1` and structured `extra.field_value` evidence.
-- `cargo test -p rss-fetch-skill -- --nocapture`: P1.1 long-text skill evidence scan passed with existing `extra.field_value/items` coverage.
-- `cargo test -p web-search-extract-skill -- --nocapture`: P1.1 long-text skill evidence scan passed after adding non-empty candidate evidence coverage.
-- `cargo test -p image-generate-skill -- --nocapture`, `cargo test -p image-edit-skill -- --nocapture`, `cargo test -p image-vision-skill -- --nocapture`: image skill contract checks passed offline; real image/audio NL calls remain excluded from aggregate canaries.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_171011`: RSS case 743 failed before fix because provider-safe evidence redacted `extra.field_value.titles[1]` as secret-like text.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_171916`: RSS case 743 passed after title-array evidence redaction fix.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_173318`: RSS case 743 failed after retry exhaustion because model synthesis mismatched `extra.items[].source_host`; final failure attribution was `contract_gap`.
-- `cargo test -p clawd loop_control -- --nocapture`: passed after adding RSS verifier-exhausted structured recovery and pass-after-verifier `source_host` fidelity fallback.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_172122`: browser_web case 744 passed; web_search_extract case 745 failed because no search backend env/API was configured.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_172534`: web_search_extract case 745 passed with `WEB_SEARCH_ALLOW_DDG=1`; result_count was zero, so backend quality remains a configuration/network risk rather than a routing/evidence regression.
-- `scripts/nl_suite_logs/contract_matrix_offline/20260604_172747`: contract matrix offline suite passed after RSS title-array evidence redaction fix.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_174614`: RSS case 743 passed, but trace showed final prose still omitted `source_host` machine tokens, so the pass-after-verifier fidelity guard was added before treating this as closed.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_175408`: RSS case 743 passed with final `title/source_host/date` field list; trace logged `rss_source_host_fidelity_recovered_with_structured_items count=3`.
-- `cargo test -p clawd finalize::task -- --nocapture`: passed after gating non-loop verifier forced failure behind `answer_verifier_enforce_required`.
-- `cargo test -p clawd agent_engine::support -- --nocapture`: passed after reusing `agent_guard.toml` rollout switch parsing for the non-loop gate.
-- `cargo build --release -p clawd -p skill-runner`: passed after non-loop verifier gate; latest restarted `clawd` PID `1167678`.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_180235`: focused cases 1-20 passed after non-loop verifier gate; `NL_ATTRIBUTION_OK finalizer_overwrite=2 pass=18`, `PROMPT_BUDGET_OK prompt_truncations=0`. Cost watch: heavy turns included cases 14, 15, 16, 18, 19 and case 1.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_221105`: missing-file clarify/path follow-up cases 128-129 passed after path-only language inheritance fix; final reply stayed Chinese and did not include execution summary.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260604_221226`: config-file clarify/path follow-up cases 112-113 passed after active-clarify fast path; case 113 used `llm_calls=0`, `steps=1`.
-- `logs/agent_rollout_metrics/run_20260604_221105_rollout_metrics.json` and `logs/agent_rollout_metrics/run_20260604_221226_rollout_metrics.json`: focused rollout metric summaries generated with provider/vendor/budget/language/semantic/capability buckets.
-- `scripts/check_skill_registry_parity.py --mode p3 --strict` and `--mode all --strict`: passed after syncing `docker/config/skills_registry.toml` to the main registry; latest P3 JSON report at `logs/agent_rollout_metrics/skill_registry_parity_p3_20260604_after_sync.json`.
-- `cargo test -p claw-core skill_registry -- --nocapture`: passed after adding registry action governance fields `once_per_task`, `dedup_scope`, and `idempotent`.
-- `python3 scripts/sync_registry_governance_fields.py`: passed with `missing=0` for both `configs/skills_registry.toml` and `docker/config/skills_registry.toml`.
-- `cargo test -p clawd registry_idempotency_guard -- --nocapture`, `cargo test -p clawd execution_loop -- --nocapture`, and `cargo test -p clawd rollout_attribution -- --nocapture`: passed after registry idempotency guard consumption and rollout attribution; this originally validated selected-scope canary behavior, and current config has since advanced to `registry_idempotency_guard_scope=all`.
-- `cargo test -p clawd support --quiet`, `cargo test -p clawd answer_verifier --quiet`, `cargo test -p clawd execution_loop --quiet`, and `cargo test -p clawd finalize --quiet`: historical canary tests passed before the verifier scope advanced to the final `answer_verifier_enforce_required_scope=all` boundary; current runtime normalizes non-`all` historical values to `all`.
-- `scripts/nl_suite_logs/client_like_continuous/run_20260617_223640` and `run_20260617_223838`: MiniMax verifier selected-scope canary passed 3/3; rollout metrics at `logs/agent_rollout_metrics/multi_2_run_20260617_223640_to_run_20260617_223838_rollout_metrics.json`, route-delta `unexplained_mismatch_count=0`, verifier pass count 3.
-- `cargo test -p clawd market_quote_scalar -- --nocapture`: passed after replacing the `crypto|stock` observed-output skill-name branch with registry `semantic_tags=["market_quote_scalar"]`.
-- `cargo test -p crypto-skill account_access -- --nocapture`, `cargo test -p clawd account_access -- --nocapture`, and `cargo test -p clawd crypto_account_error -- --nocapture`: passed after moving crypto account errors to structured `extra.error_kind/message_key` and machine-field deterministic output.
-- `cargo test -p clawd visible_text -- --nocapture`: passed after preserving allowed i18n `message_key` machine fields during user-visible sanitization.
+```bash
+python3 scripts/check_planner_runtime_boundary.py
+python3 scripts/check_pre_planner_exit_inventory.py
+python3 scripts/check_finalizer_architecture.py
+python3 scripts/check_repair_boundary_inventory_coverage.py
+python3 scripts/check_repair_no_user_text_fields.py
+python3 scripts/check_policy_decision_tokens.py
+python3 scripts/check_registry_policy_contracts.py
+python3 scripts/check_skill_registry_aliases.py
+python3 scripts/check_skill_registry_parity.py --mode all --strict
+python3 scripts/check_cross_platform_contracts.py
+```

@@ -359,6 +359,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 6. [发布验证](docs/architecture/06-release-validation.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
+完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。
 <!-- ai-learning-exclude:end -->
 
 ## 主要组件
@@ -659,7 +660,7 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 复用正在运行的开发服务器。可用 `--suite <name>` 或 `--category <name>` 选择
 最小受影响范围；除非明确关闭，仍会打印带编号的原始 `LLM#1..N` 请求/返回字段。
 
-当前不再用固定七天等待作为普通开发删除门槛。删除兼容路径前，应使用受影响 compact live NL、release-gate 等价覆盖、loop-boundary/replay 无 unexplained mismatch，以及静态门禁。Contract repair 清理必须通过 `python3 scripts/check_contract_repair_loop_observation_boundary.py`；planner/output-contract 清理应通过 `python3 scripts/check_planner_runtime_boundary.py`、`python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_finalizer_architecture.py`；repair 清理应通过 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
+当前不再用固定七天等待作为普通开发删除门槛。删除兼容路径前，应使用受影响 compact live NL、release-gate 等价覆盖（`scripts/nl_tests/build_release_gate_subset.py --check` 当前选择 285 行并覆盖全部 223 个声明类别）、loop-boundary/replay 无 unexplained mismatch，以及静态门禁。Contract repair 清理必须通过 `python3 scripts/check_contract_repair_loop_observation_boundary.py`；planner/output-contract 清理应通过 `python3 scripts/check_planner_runtime_boundary.py`、`python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_finalizer_architecture.py`；repair 清理应通过 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
 
 面向长尾闭环链路的常用入口：
 

@@ -1082,6 +1082,11 @@ fn workspace_update_release_selector_requires_matching_platform_asset() {
             "assets": [{"name": "RustClaw-pi-aarch64-20260724-2.tar.gz"}]
         }),
         json!({
+            "tag_name": "ubuntu-x86_64-20260724-prerelease",
+            "prerelease": true,
+            "assets": [{"name": "RustClaw-ubuntu-x86_64-20260724-prerelease.tar.gz"}]
+        }),
+        json!({
             "tag_name": "ubuntu-x86_64-20260724-1",
             "assets": [{"name": "RustClaw-ubuntu-x86_64-20260724-1.tar.gz"}]
         }),
@@ -1100,4 +1105,12 @@ fn workspace_update_release_selector_requires_matching_platform_asset() {
             .as_deref(),
         Some("pi-aarch64-20260724-2")
     );
+}
+
+#[test]
+fn workspace_update_release_deploy_uses_stable_release_and_prebuilt_ui() {
+    let script = release_deploy_script();
+    assert!(script.contains("release.get(\"draft\") or release.get(\"prerelease\")"));
+    assert!(script.contains("build-ui-nginx.sh --copy-if-configured"));
+    assert!(!script.contains("build-ui-nginx.sh --deploy-if-configured"));
 }
