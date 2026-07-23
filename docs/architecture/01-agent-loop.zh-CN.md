@@ -44,8 +44,10 @@ flowchart TD
 终止 `respond` 合同支持模型生成的自由文本、精确列表，以及由 runtime 在物化前
 校验 JSON 值的精确命名字段对象。每个对象 `value_json` 都是一份完整序列化
 JSON 值，字符串必须带 JSON 引号；无效 JSON 进入有界结构化 repair，不会被
-静默强制转换。这样既保留严格机器交付，也不需要在 runtime 维护多语言固定回复
-模板。它只是格式化边界，不是能力模拟器；runtime 拥有的
+静默强制转换。当前 shape 不使用的 payload 只允许规范化为空值/零；冗余 object
+content 只有在解析后的 JSON 与命名字段物化对象完全一致时才接受。这样既保留
+严格机器交付，也不需要在 runtime 维护多语言固定回复模板。它只是格式化边界，
+不是能力模拟器；runtime 拥有的
 provider、领域解析/归一化/校验/预演、dry-run、artifact/job、checkpoint、diff、
 verification、repair 和 rewind 字段必须先有对应 capability observation。低层
 环境事实只能辅助该调用，不能替代拥有结果的已披露领域能力。
