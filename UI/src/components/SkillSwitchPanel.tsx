@@ -117,14 +117,31 @@ export function SkillSwitchPanel({
     const isToolSkill = toolSkillNamesSet.has(name);
     const canRemove = removableSkillNamesSet.has(name);
     const isRemoving = skillStoreActionName === name;
-    const usageExamples = skillUsageExamples(name, lang, skillItem?.description);
+    const usageExamples = skillUsageExamples(skillItem ?? { name }, lang);
     const usageExamplesId = `skill-usage-examples-${name}`;
     const statusMeta = [
       isToolSkill ? t("系统工具", "Tool") : null,
       baseSkillNamesSet.has(name) && !isToolSkill ? t("系统基础能力", "Core capability") : null,
-      isLockedSkill ? t("固定开启", "Always on") : null,
+      skillItem?.fixed_on ? t("固定开启", "Always on") : null,
+      skillItem?.initial_core ? t("初始可见", "Initially visible") : null,
+      skillItem?.deferred ? t("按需加载", "Loaded on demand") : null,
       isExternalSkill ? t("外部导入", "Imported") : null,
       skillItem?.group ? `${t("分组", "Group")}: ${skillItem.group}` : null,
+    ].filter(Boolean) as string[];
+    const setupMeta = [
+      skillItem?.required_bins?.length
+        ? `${t("必需工具", "Required tools")}: ${skillItem.required_bins.join(", ")}`
+        : null,
+      skillItem?.optional_bins?.length
+        ? `${t("可选工具", "Optional tools")}: ${skillItem.optional_bins.join(", ")}`
+        : null,
+      skillItem?.config_files?.length
+        ? `${t("配置入口", "Configuration")}: ${skillItem.config_files.join(", ")}`
+        : null,
+      skillItem?.supported_os?.length
+        ? `${t("支持系统", "Supported systems")}: ${skillItem.supported_os.join(", ")}`
+        : null,
+      ...(skillItem?.platform_notes ?? []),
     ].filter(Boolean) as string[];
 
     return (
@@ -150,7 +167,7 @@ export function SkillSwitchPanel({
             </button>
           </span>
           <span className="mt-0.5 block break-words text-[11px] leading-4 text-white/50">
-            {skillDescription(name, lang, skillItem?.description)}
+            {skillDescription(lang, skillItem?.description)}
           </span>
           {statusMeta.length > 0 ? (
             <span className="mt-1 block text-[10px] leading-4 text-white/35">{statusMeta.join(" · ")}</span>
@@ -277,12 +294,26 @@ export function SkillSwitchPanel({
             {t("自然语言调用示例", "Natural-language examples")}
           </span>
           <span className="mt-1.5 block space-y-1 text-[11px] leading-4 text-white/65">
-            {usageExamples.map((example) => (
-              <span key={example} className="block before:mr-1.5 before:content-['•']">
+            {usageExamples.map((example, index) => (
+              <span key={`${index}-${example}`} className="block before:mr-1.5 before:content-['•']">
                 {example}
               </span>
             ))}
           </span>
+          {setupMeta.length > 0 ? (
+            <>
+              <span className="mt-2 block border-t border-white/10 pt-2 text-[11px] font-semibold text-white/85">
+                {t("安装与运行要求", "Setup and runtime requirements")}
+              </span>
+              <span className="mt-1 block space-y-1 text-[11px] leading-4 text-white/55">
+                {setupMeta.map((entry, index) => (
+                  <span key={`${index}-${entry}`} className="block before:mr-1.5 before:content-['•']">
+                    {entry}
+                  </span>
+                ))}
+              </span>
+            </>
+          ) : null}
         </span>
       </label>
     );

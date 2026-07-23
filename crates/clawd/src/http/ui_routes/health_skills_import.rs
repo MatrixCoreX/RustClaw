@@ -427,6 +427,10 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
     SkillListItem {
         name: skill_name.to_string(),
         description,
+        semantic_tags: registry_entry
+            .as_ref()
+            .map(|entry| entry.semantic_tags.clone())
+            .filter(|items| !items.is_empty()),
         kind: registry_entry
             .as_ref()
             .map(|entry| skill_kind_token(entry.kind).to_string()),
@@ -496,6 +500,10 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
             .as_ref()
             .map(|entry| entry.platform_notes.clone())
             .filter(|items| !items.is_empty()),
+        config_files: registry_entry
+            .as_ref()
+            .map(|entry| entry.config_files.clone())
+            .filter(|items| !items.is_empty()),
         planner_capabilities: registry_entry
             .as_ref()
             .map(|entry| {
@@ -503,6 +511,25 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
                     .planner_capabilities
                     .iter()
                     .map(|capability| capability.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|items| !items.is_empty()),
+        planner_capability_details: registry_entry
+            .as_ref()
+            .map(|entry| {
+                entry
+                    .planner_capabilities
+                    .iter()
+                    .map(|capability| PlannerCapabilityDisplayItem {
+                        capability: capability.name.clone(),
+                        action: capability.action.clone(),
+                        description: capability.description.clone(),
+                        effect: capability
+                            .effect
+                            .map(|value| value.as_token().to_string()),
+                        required: capability.required.clone(),
+                        optional: capability.optional.clone(),
+                    })
                     .collect::<Vec<_>>()
             })
             .filter(|items| !items.is_empty()),

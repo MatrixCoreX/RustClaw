@@ -1148,9 +1148,26 @@ struct PlannerCapabilityPolicyItem {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct PlannerCapabilityDisplayItem {
+    capability: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effect: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    required: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    optional: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct SkillListItem {
     name: String,
     description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    semantic_tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1202,7 +1219,11 @@ struct SkillListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     platform_notes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    config_files: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     planner_capabilities: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    planner_capability_details: Option<Vec<PlannerCapabilityDisplayItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     planner_capability_policies: Option<Vec<PlannerCapabilityPolicyItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]

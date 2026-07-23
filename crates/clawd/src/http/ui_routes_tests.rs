@@ -730,6 +730,7 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
     let skill = SkillListItem {
         name: "video_generate".to_string(),
         description: None,
+        semantic_tags: None,
         kind: Some("builtin".to_string()),
         planner_kind: Some("capability".to_string()),
         adapter_category: Some("external_api_adapter".to_string()),
@@ -755,7 +756,9 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
         required_bins: None,
         optional_bins: None,
         platform_notes: None,
+        config_files: None,
         planner_capabilities: Some(vec!["video.generate".to_string()]),
+        planner_capability_details: None,
         planner_capability_policies: Some(vec![PlannerCapabilityPolicyItem {
             capability: "video.generate".to_string(),
             isolation_profile: Some("remote_executor".to_string()),
@@ -804,6 +807,7 @@ fn capability_items_include_disabled_machine_reason() {
     let skill = SkillListItem {
         name: "fs_basic".to_string(),
         description: None,
+        semantic_tags: None,
         kind: Some("builtin".to_string()),
         planner_kind: Some("tool".to_string()),
         adapter_category: Some("local_tool_adapter".to_string()),
@@ -829,7 +833,9 @@ fn capability_items_include_disabled_machine_reason() {
         required_bins: None,
         optional_bins: None,
         platform_notes: None,
+        config_files: None,
         planner_capabilities: Some(vec!["filesystem.list_entries".to_string()]),
+        planner_capability_details: None,
         planner_capability_policies: None,
         capabilities: None,
     };
@@ -849,6 +855,66 @@ fn capability_items_include_disabled_machine_reason() {
         items[0].unavailable_reason.as_deref(),
         Some("skill_disabled")
     );
+}
+
+#[test]
+fn skill_items_expose_registry_owned_instruction_metadata() {
+    let skill = SkillListItem {
+        name: "weather".to_string(),
+        description: Some("Query weather observations.".to_string()),
+        semantic_tags: Some(vec!["weather.current".to_string()]),
+        kind: Some("runner".to_string()),
+        planner_kind: Some("skill".to_string()),
+        adapter_category: Some("external_api_adapter".to_string()),
+        background_job_capable: None,
+        group: Some("news/web".to_string()),
+        risk_level: Some("low".to_string()),
+        auto_invocable: Some(true),
+        requires_confirmation: Some(false),
+        side_effect: Some(false),
+        retryable: Some(true),
+        output_kind: Some("text".to_string()),
+        enabled: Some(true),
+        fixed_on: Some(false),
+        initial_core: Some(false),
+        deferred: Some(true),
+        runtime_available: Some(true),
+        unavailable_reason: None,
+        current_os: Some("linux".to_string()),
+        unsupported_os: None,
+        missing_required_bins: None,
+        missing_optional_bins: None,
+        supported_os: Some(vec!["linux".to_string(), "macos".to_string()]),
+        required_bins: Some(vec!["curl".to_string()]),
+        optional_bins: None,
+        platform_notes: Some(vec!["Uses a public API.".to_string()]),
+        config_files: Some(vec!["configs/weather.toml".to_string()]),
+        planner_capabilities: Some(vec!["weather.current".to_string()]),
+        planner_capability_details: Some(vec![PlannerCapabilityDisplayItem {
+            capability: "weather.current".to_string(),
+            action: Some("query".to_string()),
+            description: Some("Read current weather.".to_string()),
+            effect: Some("observe".to_string()),
+            required: vec!["city|latitude+longitude".to_string()],
+            optional: vec!["locale".to_string()],
+        }]),
+        planner_capability_policies: None,
+        capabilities: Some(vec!["net".to_string()]),
+    };
+
+    let value = serde_json::to_value(skill).expect("serialize skill list item");
+
+    assert_eq!(value["description"], "Query weather observations.");
+    assert_eq!(value["config_files"][0], "configs/weather.toml");
+    assert_eq!(
+        value["planner_capability_details"][0]["capability"],
+        "weather.current"
+    );
+    assert_eq!(
+        value["planner_capability_details"][0]["required"][0],
+        "city|latitude+longitude"
+    );
+    assert_eq!(value["deferred"], true);
 }
 
 #[test]

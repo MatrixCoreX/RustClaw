@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  baseSkillNamesWithFallback,
+  baseSkillNamesFromRegistry,
   filterSkillNamesBySearch,
   groupSkillNames,
   isUiHiddenSkill,
@@ -151,7 +151,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   }, [skillsConfigData, skillSwitchDraft]);
 
   const baseSkillNamesSet = useMemo(() => {
-    return new Set<string>(baseSkillNamesWithFallback(skillsConfigData?.base_skill_names));
+    return new Set<string>(baseSkillNamesFromRegistry(skillsConfigData?.base_skill_names));
   }, [skillsConfigData?.base_skill_names]);
 
   const toolSkillNamesSet = useMemo(() => {

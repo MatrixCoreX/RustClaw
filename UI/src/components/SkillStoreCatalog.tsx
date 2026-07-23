@@ -145,7 +145,7 @@ export function SkillStoreCatalog({
         <div className="mt-3 min-w-0">
           <h3 className="break-words text-sm font-semibold text-white/90">{item.name}</h3>
           <p className="mt-1 min-h-10 text-xs leading-5 text-white/55">
-            {skillDescription(item.name, lang, item.description)}
+            {skillDescription(lang, item.description)}
           </p>
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5 text-[10px]">
