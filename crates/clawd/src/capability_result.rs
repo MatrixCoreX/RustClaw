@@ -113,12 +113,19 @@ pub(crate) fn selected_exact_machine_result(
         if result.status != CapabilityResultStatus::Ok {
             return None;
         }
-        selected_result_value(&result.data, selector).and_then(exact_value_text)
+        selected_result_value(result, selector).and_then(exact_value_text)
     })
 }
 
-fn selected_result_value<'a>(data: &'a Value, selector: &str) -> Option<&'a Value> {
-    structured_value_at_path(data, selector)
+pub(crate) fn selected_result_value<'a>(
+    result: &'a CapabilityResultEnvelope,
+    selector: &str,
+) -> Option<&'a Value> {
+    let data = &result.data;
+    let selector = selector.strip_prefix("data.").unwrap_or(selector);
+    (selector == "data")
+        .then_some(data)
+        .or_else(|| structured_value_at_path(data, selector))
         .or_else(|| {
             data.get("extra")
                 .and_then(|extra| structured_value_at_path(extra, selector))

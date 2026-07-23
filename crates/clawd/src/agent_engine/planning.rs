@@ -28,6 +28,7 @@ const NATIVE_RESPOND_TOOL: &str = "respond";
 const MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS: usize = 2;
 const MAX_NATIVE_RESPONSE_ITEMS: usize = 64;
 const MAX_NATIVE_RESPONSE_FIELDS: usize = 64;
+const MAX_NATIVE_RESPONSE_SOURCE_PATH: usize = 160;
 
 fn planner_last_observation(loop_state: &LoopState) -> String {
     super::observed_output::latest_structured_capability_observation(loop_state)
@@ -430,6 +431,7 @@ pub(super) async fn plan_round_actions(
                 &native_turn,
                 &native_callable_capability_names,
                 &native_capability_group_map,
+                Some(loop_state),
             ) {
                 Ok(_) => break,
                 Err(error_code) => {
@@ -469,6 +471,7 @@ pub(super) async fn plan_round_actions(
                 &native_turn,
                 &callable_capability_names,
                 &native_capability_group_map,
+                Some(loop_state),
             )?,
         );
         let raw_plan_text =
@@ -629,7 +632,7 @@ fn native_planner_request(
     }
     tools.push(ModelToolDefinition {
         name: NATIVE_RESPOND_TOOL.to_string(),
-        description: "Submit the final user-visible response after required observations. This tool formats answers; it does not execute or simulate runtime capabilities. Runtime-owned provider/config/permission, domain parse/normalize/validate/preview, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. A lower-level environment observation is supporting context, not a substitute for the disclosed domain capability that owns those fields. Use free_text for prose/scalars, list for exact items, or object for exact named fields. Each object value_json contains one complete serialized JSON value and is validated before delivery; JSON string values include their surrounding JSON quotes.".to_string(),
+        description: "Submit the final user-visible response after required observations. This tool formats answers; it does not execute or simulate runtime capabilities. Runtime-owned provider/config/permission, domain parse/normalize/validate/preview, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. A lower-level environment observation is supporting context, not a substitute for the disclosed domain capability that owns those fields. Use free_text for prose/scalars, list for exact items, object for model-authored exact named fields, or observed_object to copy selected JSON fields from successful capability results without re-serializing their values. Each object value_json contains one complete serialized JSON value and is validated before delivery; JSON string values include their surrounding JSON quotes.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": [
@@ -638,12 +641,13 @@ fn native_planner_request(
                 "items",
                 "exact_item_count",
                 "fields",
+                "observed_fields",
                 "exact_field_count"
             ],
             "properties": {
                 "shape": {
                     "type": "string",
-                    "enum": ["free_text", "list", "object"]
+                    "enum": ["free_text", "list", "object", "observed_object"]
                 },
                 "content": {
                     "type": "string",
@@ -675,6 +679,35 @@ fn native_planner_request(
                                 "minLength": 1,
                                 "maxLength": 65536,
                                 "description": "schema:complete_serialized_json_value_v1; json_string_requires_surrounding_quotes=true; malformed_json=rejected; example_json_string=\"\\\"text\\\"\"; scalar_and_composite_encoding=standard_json"
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "maxItems": MAX_NATIVE_RESPONSE_FIELDS
+                },
+                "observed_fields": {
+                    "type": "array",
+                    "description": "schema:successful_capability_result_field_references_v1; value_source=runtime_copy; model_value_copy=forbidden",
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "capability", "path"],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                            },
+                            "capability": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": MAX_NATIVE_RESPONSE_SOURCE_PATH,
+                                "description": "source=current_loop_success; selector=exact_capability_token"
+                            },
+                            "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": MAX_NATIVE_RESPONSE_SOURCE_PATH,
+                                "description": "selector=machine_dotted_json_path; roots=data,data.extra,data.output"
                             }
                         },
                         "additionalProperties": false
@@ -769,6 +802,7 @@ fn native_contract_repair_signal(error_code: &str) -> String {
                 "items",
                 "exact_item_count",
                 "fields",
+                "observed_fields",
                 "exact_field_count",
             ],
             "retry_native_respond_call",
@@ -856,19 +890,20 @@ fn actions_from_native_turn(
     turn: &ModelTurnResponse,
     callable_capability_names: &[String],
 ) -> Result<Vec<AgentAction>, String> {
-    actions_from_native_turn_with_groups(turn, callable_capability_names, &BTreeMap::new())
+    actions_from_native_turn_with_groups(turn, callable_capability_names, &BTreeMap::new(), None)
 }
 
 fn actions_from_native_turn_with_groups(
     turn: &ModelTurnResponse,
     callable_capability_names: &[String],
     native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
+    loop_state: Option<&LoopState>,
 ) -> Result<Vec<AgentAction>, String> {
     if !turn.tool_calls.is_empty() {
         let actions = turn
             .tool_calls
             .iter()
-            .map(|call| action_from_native_tool_call(call, native_capability_groups))
+            .map(|call| action_from_native_tool_call(call, native_capability_groups, loop_state))
             .collect::<Result<Vec<_>, _>>()?;
         if actions.iter().any(|action| {
             matches!(
@@ -898,10 +933,11 @@ fn actions_from_native_turn_with_groups(
 fn action_from_native_tool_call(
     call: &ModelToolCall,
     native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
+    loop_state: Option<&LoopState>,
 ) -> Result<AgentAction, String> {
     match call.name.as_str() {
         NATIVE_CALL_CAPABILITY_TOOL => action_from_native_capability_call(call),
-        NATIVE_RESPOND_TOOL => action_from_native_respond_call(call),
+        NATIVE_RESPOND_TOOL => action_from_native_respond_call(call, loop_state),
         super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL => {
             action_from_native_capability_group_load(call)
         }
@@ -970,7 +1006,10 @@ fn action_from_native_capability_call(call: &ModelToolCall) -> Result<AgentActio
     })
 }
 
-fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, String> {
+fn action_from_native_respond_call(
+    call: &ModelToolCall,
+    loop_state: Option<&LoopState>,
+) -> Result<AgentAction, String> {
     let arguments = call
         .arguments
         .as_object()
@@ -1009,6 +1048,13 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
             .ok_or_else(|| "native_respond_fields_not_array".to_string())?,
         None => &[],
     };
+    let observed_fields = match arguments.get("observed_fields") {
+        Some(value) => value
+            .as_array()
+            .map(Vec::as_slice)
+            .ok_or_else(|| "native_respond_observed_fields_not_array".to_string())?,
+        None => &[],
+    };
     let exact_field_count = match arguments.get("exact_field_count") {
         Some(value) => Some(
             value
@@ -1028,6 +1074,7 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
             if !items.is_empty()
                 || exact_item_count.unwrap_or(0) != 0
                 || !fields.is_empty()
+                || !observed_fields.is_empty()
                 || exact_field_count.unwrap_or(0) != 0
             {
                 return Err("native_respond_free_text_contract_mismatch".to_string());
@@ -1042,7 +1089,10 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
             if !content.trim().is_empty() {
                 return Err("native_respond_list_content_not_empty".to_string());
             }
-            if !fields.is_empty() || exact_field_count.unwrap_or(0) != 0 {
+            if !fields.is_empty()
+                || !observed_fields.is_empty()
+                || exact_field_count.unwrap_or(0) != 0
+            {
                 return Err("native_respond_list_fields_not_empty".to_string());
             }
             if exact_item_count == 0 || items.len() != exact_item_count {
@@ -1073,6 +1123,9 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
                 .ok_or_else(|| "native_respond_exact_field_count_invalid".to_string())?;
             if !items.is_empty() || exact_item_count.unwrap_or(0) != 0 {
                 return Err("native_respond_object_non_field_payload".to_string());
+            }
+            if !observed_fields.is_empty() {
+                return Err("native_respond_object_observed_fields_not_empty".to_string());
             }
             if exact_field_count == 0 || fields.len() != exact_field_count {
                 return Err("native_respond_object_count_mismatch".to_string());
@@ -1116,8 +1169,85 @@ fn action_from_native_respond_call(call: &ModelToolCall) -> Result<AgentAction, 
                 .map_err(|_| "native_respond_object_serialize_failed".to_string())?;
             Ok(AgentAction::Respond { content })
         }
+        "observed_object" => {
+            if !content.trim().is_empty()
+                || !items.is_empty()
+                || exact_item_count.unwrap_or(0) != 0
+                || !fields.is_empty()
+            {
+                return Err("native_respond_observed_object_non_reference_payload".to_string());
+            }
+            let exact_field_count = match exact_field_count {
+                None | Some(0) => observed_fields.len(),
+                Some(count) => count,
+            };
+            if exact_field_count == 0 || observed_fields.len() != exact_field_count {
+                return Err("native_respond_observed_object_count_mismatch".to_string());
+            }
+            let loop_state =
+                loop_state.ok_or_else(|| "native_respond_observation_state_missing".to_string())?;
+            let mut object = Map::new();
+            for field in observed_fields {
+                let field = field
+                    .as_object()
+                    .ok_or_else(|| "native_respond_observed_field_invalid".to_string())?;
+                let name = machine_response_field_name(field.get("name"))?;
+                let capability = machine_observation_reference(
+                    field.get("capability"),
+                    "native_respond_observed_capability_invalid",
+                )?;
+                let path = machine_observation_reference(
+                    field.get("path"),
+                    "native_respond_observed_path_invalid",
+                )?;
+                let result = loop_state
+                    .capability_results
+                    .iter()
+                    .rev()
+                    .find(|result| {
+                        result.status == claw_core::capability_result::CapabilityResultStatus::Ok
+                            && result.capability == capability
+                    })
+                    .ok_or_else(|| {
+                        "native_respond_observed_capability_result_missing".to_string()
+                    })?;
+                let value = crate::capability_result::selected_result_value(result, path)
+                    .cloned()
+                    .ok_or_else(|| "native_respond_observed_path_missing".to_string())?;
+                if object.insert(name.to_string(), value).is_some() {
+                    return Err("native_respond_object_field_duplicate".to_string());
+                }
+            }
+            let content = serde_json::to_string(&Value::Object(object))
+                .map_err(|_| "native_respond_object_serialize_failed".to_string())?;
+            Ok(AgentAction::Respond { content })
+        }
         _ => Err("native_respond_shape_unsupported".to_string()),
     }
+}
+
+fn machine_response_field_name(value: Option<&Value>) -> Result<&str, String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| {
+            !name.is_empty() && name.len() <= 128 && !name.contains('\r') && !name.contains('\n')
+        })
+        .ok_or_else(|| "native_respond_object_field_name_invalid".to_string())
+}
+
+fn machine_observation_reference<'a>(
+    value: Option<&'a Value>,
+    error_code: &str,
+) -> Result<&'a str, String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| {
+            value.len() <= MAX_NATIVE_RESPONSE_SOURCE_PATH
+                && claw_core::capability_result::is_machine_ref(value)
+        })
+        .ok_or_else(|| error_code.to_string())
 }
 
 fn log_plan_split(task: &ClaimedTask, loop_state: &LoopState, plan_result: &PlanResult) {
