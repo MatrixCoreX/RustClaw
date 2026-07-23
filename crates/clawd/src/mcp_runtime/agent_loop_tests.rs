@@ -257,6 +257,43 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
                 .and_then(Value::as_str)
                 == Some("mcp.fixture.lookup")
     }));
+    let replay = crate::task_event_transport::replay_events_after(&state, &task_id, 0)
+        .expect("persisted agent-loop event replay");
+    let prompt_budget = replay
+        .events
+        .iter()
+        .find(|event| event["event_type"] == "prompt_section_budget")
+        .expect("prompt section budget event");
+    assert!(prompt_budget
+        .pointer("/payload/sections")
+        .and_then(Value::as_array)
+        .is_some_and(|sections| !sections.is_empty()));
+    let tool_surface = replay
+        .events
+        .iter()
+        .find(|event| event["event_type"] == "model_tool_surface_budget")
+        .expect("model tool surface budget event");
+    assert!(tool_surface
+        .pointer("/payload/tool_count")
+        .and_then(Value::as_u64)
+        .is_some_and(|count| count > 0));
+    assert!(tool_surface
+        .pointer("/payload/serialized_token_estimate")
+        .and_then(Value::as_u64)
+        .is_some_and(|count| count > 0));
+    let budget_decision = replay
+        .events
+        .iter()
+        .find(|event| event["event_type"] == "budget_decision")
+        .expect("loop budget decision event");
+    assert_eq!(budget_decision["payload"]["planned_action_count"], 2);
+    assert_eq!(budget_decision["payload"]["executed_action_count"], 2);
+    assert!(budget_decision["payload"]["hard_model_turns"]
+        .as_u64()
+        .is_some_and(|count| count > 0));
+    let replay_json = serde_json::to_string(&replay.events).expect("serialize replay evidence");
+    assert!(!replay_json.contains("mcp-agent-loop-user"));
+    assert!(!replay_json.contains(user_request));
     let audit_count: u64 = state
         .core
         .audit_db
