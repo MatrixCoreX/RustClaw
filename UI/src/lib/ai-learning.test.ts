@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyLearningLink, parseReadmeLearningPages } from "./ai-learning";
+import {
+  classifyLearningLink,
+  parseReadmeLearningPages,
+  parseStandaloneLearningDocument,
+} from "./ai-learning";
 
 test("groups level-three sections under chapters and omits repository preamble", () => {
   const pages = parseReadmeLearningPages(`# Product
@@ -70,4 +74,34 @@ test("classifies only web URLs and page anchors as interactive links", () => {
   assert.equal(classifyLearningLink("docs/runtime.md"), "reference");
   assert.equal(classifyLearningLink("../README.md"), "reference");
   assert.equal(classifyLearningLink("javascript:alert(1)"), "reference");
+});
+
+test("keeps one architecture document as one learning page", () => {
+  const page = parseStandaloneLearningDocument({
+    id: "architecture-agent-loop",
+    chapterId: "architecture-guide",
+    chapterTitle: "Architecture Guide",
+    markdown: `# Agent Loop
+
+Navigation.
+
+## Runtime
+
+\`\`\`mermaid
+flowchart LR
+  A --> B
+\`\`\`
+
+## Planning
+
+Details.
+`,
+  });
+
+  assert.equal(page.id, "architecture-agent-loop");
+  assert.equal(page.title, "Agent Loop");
+  assert.equal(page.chapterTitle, "Architecture Guide");
+  assert.equal(page.kind, "section");
+  assert.equal(page.diagramCount, 1);
+  assert.match(page.markdown, /## Planning/);
 });

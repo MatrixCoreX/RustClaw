@@ -10,6 +10,13 @@ export interface AiLearningPage {
 
 export type LearningLinkKind = "external" | "internal" | "reference";
 
+export interface StandaloneLearningDocument {
+  id: string;
+  chapterId: string;
+  chapterTitle: string;
+  markdown: string;
+}
+
 interface Heading {
   level: 2 | 3;
   title: string;
@@ -28,6 +35,24 @@ function pageId(title: string, index: number): string {
 function pageMetrics(markdown: string): Pick<AiLearningPage, "diagramCount"> {
   return {
     diagramCount: (markdown.match(/^```mermaid\s*$/gm) ?? []).length,
+  };
+}
+
+export function parseStandaloneLearningDocument(
+  document: StandaloneLearningDocument,
+): AiLearningPage {
+  const normalized = document.markdown.replace(/\r\n/g, "\n").trim();
+  const titleMatch = /^#\s+(.+?)\s*$/m.exec(normalized);
+  const title = cleanTitle(titleMatch?.[1] ?? document.id);
+
+  return {
+    id: document.id,
+    title,
+    chapterId: document.chapterId,
+    chapterTitle: document.chapterTitle,
+    kind: "section",
+    markdown: normalized,
+    ...pageMetrics(normalized),
   };
 }
 
