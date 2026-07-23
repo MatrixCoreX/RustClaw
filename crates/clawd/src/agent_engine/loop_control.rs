@@ -792,6 +792,7 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
         matches!(
             signal,
             "recoverable_failure_continue_round"
+                | "capability_groups_loaded"
                 | "replan_from_verifier_signal"
                 | "post_write_validation_reserve"
                 | "repeat_action_limit"
