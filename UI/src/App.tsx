@@ -634,6 +634,8 @@ export default function App() {
     chatSending,
     chatRecording,
     chatVoiceRecordingSupported,
+    chatAudioInputDevices,
+    chatAudioInputDeviceId,
     chatError,
     chatAttachmentInputRef,
     setChatTeachingMode,
@@ -648,6 +650,7 @@ export default function App() {
     removeChatAttachment,
     startChatVoiceRecording,
     stopChatVoiceRecording,
+    setChatAudioInputDeviceId,
     sendChatMessage,
     queryChatTeachingLlmDebug,
   } = useChatRuntime({
@@ -1420,6 +1423,8 @@ export default function App() {
               chatSending={chatSending}
               chatRecording={chatRecording}
               chatVoiceRecordingSupported={chatVoiceRecordingSupported}
+              chatAudioInputDevices={chatAudioInputDevices}
+              chatAudioInputDeviceId={chatAudioInputDeviceId}
               chatError={chatError}
               chatAttachmentInputRef={chatAttachmentInputRef}
               toLocalTime={toLocalTime}
@@ -1435,6 +1440,7 @@ export default function App() {
               onRemoveAttachment={removeChatAttachment}
               onStartVoiceRecording={startChatVoiceRecording}
               onStopVoiceRecording={stopChatVoiceRecording}
+              onAudioInputDeviceChange={setChatAudioInputDeviceId}
               onSendMessage={sendChatMessage}
               onQueryChatTeachingLlmDebug={queryChatTeachingLlmDebug}
             />
