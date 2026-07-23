@@ -13,6 +13,12 @@ impl TempDirGuard {
         std::fs::create_dir_all(&path).expect("create temp dir");
         Self { path }
     }
+
+    fn root_job_dir(&self, job_id: &str) -> std::path::PathBuf {
+        let path = self.path.join(".rustclaw").join("async_jobs").join(job_id);
+        std::fs::create_dir_all(&path).expect("create job dir");
+        path
+    }
 }
 
 impl Drop for TempDirGuard {
@@ -112,10 +118,11 @@ fn async_poll_claimed_dispatch(
 
 #[test]
 fn async_poll_local_process_job_dir_becomes_terminal_result() {
-    let dir = TempDirGuard::new("async_poll_local_process");
-    std::fs::write(dir.path.join("exit_code"), "0\n").expect("write exit code");
-    std::fs::write(dir.path.join("stdout"), "async-ok\n").expect("write stdout");
-    std::fs::write(dir.path.join("stderr"), "").expect("write stderr");
+    let workspace = TempDirGuard::new("async_poll_local_process");
+    let job_dir = workspace.root_job_dir("test-job");
+    std::fs::write(job_dir.join("exit_code"), "0\n").expect("write exit code");
+    std::fs::write(job_dir.join("stdout"), "async-ok\n").expect("write stdout");
+    std::fs::write(job_dir.join("stderr"), "").expect("write stderr");
 
     let mut claimed = async_poll_claimed_dispatch(None);
     let job_id = "local_process:test-job";
@@ -123,7 +130,7 @@ fn async_poll_local_process_job_dir_becomes_terminal_result() {
     claimed.dispatch_payload["job_id"] = json!(job_id);
     if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
         job.job_id = job_id.to_string();
-        job.cancel_ref = format!("local_process:{}", dir.path.display());
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
     }
 
     let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
@@ -137,8 +144,55 @@ fn async_poll_local_process_job_dir_becomes_terminal_result() {
     );
     assert_eq!(payload["final_result_json"]["exit_code"], 0);
     assert_eq!(payload["final_result_json"]["stdout"], "async-ok\n");
+    assert_eq!(
+        payload["final_result_json"]["artifact_publish_status"],
+        "published"
+    );
+    assert_eq!(
+        payload["final_result_json"]["range_handles"][0]["read_capability"],
+        "artifact.read_range"
+    );
+    let artifact_path = workspace.path.join(
+        payload["final_result_json"]["artifact_refs"][0]["path"]
+            .as_str()
+            .unwrap(),
+    );
+    assert_eq!(
+        std::fs::read_to_string(artifact_path).unwrap(),
+        "async-ok\n"
+    );
     assert!(payload.get("text").is_none());
     assert!(payload.get("error_text").is_none());
+}
+
+#[test]
+fn async_poll_large_output_keeps_exact_artifact_and_bounded_preview() {
+    let workspace = TempDirGuard::new("async_poll_local_process_large");
+    let job_dir = workspace.root_job_dir("large-job");
+    let stdout = "large-中文-output\n".repeat(5000);
+    std::fs::write(job_dir.join("exit_code"), "0\n").unwrap();
+    std::fs::write(job_dir.join("stdout"), &stdout).unwrap();
+    std::fs::write(job_dir.join("stderr"), "").unwrap();
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:large-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
+    }
+
+    let payload =
+        super::execute_async_poll_dispatch_result(&claimed, 1_000, 30).expect("terminal payload");
+    let result = &payload["final_result_json"];
+    assert_eq!(result["output_truncated"], true);
+    assert_eq!(result["stdout_total_bytes"], stdout.len());
+    assert_eq!(result["stdout_preview_bytes"], 32 * 1024);
+    let artifact_path = workspace
+        .path
+        .join(result["artifact_refs"][0]["path"].as_str().unwrap());
+    assert_eq!(std::fs::read_to_string(artifact_path).unwrap(), stdout);
 }
 
 #[test]

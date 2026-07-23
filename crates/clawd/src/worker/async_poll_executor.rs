@@ -1,3 +1,6 @@
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
 use serde_json::{json, Value};
 
 use crate::{repo, AppState};
@@ -144,9 +147,10 @@ fn local_process_async_poll_adapter_result(
     }
     let exit_code_text = std::fs::read_to_string(&exit_code_path).ok()?;
     let exit_code = exit_code_text.trim().parse::<i32>().ok()?;
-    let stdout = read_bounded_utf8(&job_dir.join("stdout"), 32 * 1024);
-    let stderr = read_bounded_utf8(&job_dir.join("stderr"), 32 * 1024);
-    let output = combine_local_process_output(&stdout, &stderr);
+    let stdout = read_bounded_output(&job_dir.join("stdout"), 32 * 1024);
+    let stderr = read_bounded_output(&job_dir.join("stderr"), 32 * 1024);
+    let result_json =
+        local_process_terminal_result_json(claimed, job_id, job_dir, exit_code, &stdout, &stderr);
     if exit_code == 0 {
         Some(json!({
             "job_id": job_id,
@@ -155,15 +159,7 @@ fn local_process_async_poll_adapter_result(
             "poll_after_seconds": job.poll_after_seconds,
             "expires_at": expires_at,
             "message_key": job.message_key,
-            "final_result_json": {
-                "schema_version": 1,
-                "source": "local_process_async_job",
-                "job_id": job_id,
-                "exit_code": exit_code,
-                "stdout": stdout,
-                "stderr": stderr,
-                "output": output,
-            }
+            "final_result_json": result_json
         }))
     } else {
         Some(json!({
@@ -174,29 +170,128 @@ fn local_process_async_poll_adapter_result(
             "expires_at": expires_at,
             "error_code": "local_process_nonzero_exit",
             "message_key": "clawd.task.async_job_failed",
-            "failure_result_json": {
-                "schema_version": 1,
-                "source": "local_process_async_job",
-                "job_id": job_id,
-                "exit_code": exit_code,
-                "stdout": stdout,
-                "stderr": stderr,
-                "output": output,
-            }
+            "failure_result_json": result_json
         }))
     }
 }
 
-fn read_bounded_utf8(path: &std::path::Path, max_bytes: usize) -> String {
-    let Ok(bytes) = std::fs::read(path) else {
-        return String::new();
-    };
-    let limit = bytes.len().min(max_bytes);
-    let mut text = String::from_utf8_lossy(&bytes[..limit]).to_string();
-    if bytes.len() > limit {
-        text.push_str("...");
+struct BoundedProcessOutput {
+    text: String,
+    total_bytes: u64,
+    preview_bytes: usize,
+    truncated: bool,
+    encoding: &'static str,
+}
+
+fn read_bounded_output(path: &Path, max_bytes: usize) -> BoundedProcessOutput {
+    let total_bytes = std::fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let mut bytes = Vec::with_capacity(max_bytes.min(total_bytes as usize));
+    if let Ok(file) = std::fs::File::open(path) {
+        let _ = file.take(max_bytes as u64).read_to_end(&mut bytes);
     }
-    text
+    let encoding = if std::str::from_utf8(&bytes).is_ok() {
+        "utf-8"
+    } else {
+        "utf-8-lossy"
+    };
+    BoundedProcessOutput {
+        text: String::from_utf8_lossy(&bytes).to_string(),
+        total_bytes,
+        preview_bytes: bytes.len(),
+        truncated: total_bytes > bytes.len() as u64,
+        encoding,
+    }
+}
+
+fn local_process_terminal_result_json(
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    job_id: &str,
+    job_dir: &Path,
+    exit_code: i32,
+    stdout: &BoundedProcessOutput,
+    stderr: &BoundedProcessOutput,
+) -> Value {
+    let output = combine_local_process_output(&stdout.text, &stderr.text);
+    let (artifact_refs, range_handles, artifact_publish_status) =
+        publish_local_process_artifacts(claimed, job_id, job_dir);
+    json!({
+        "schema_version": 1,
+        "source": "local_process_async_job",
+        "job_id": job_id,
+        "exit_code": exit_code,
+        "stdout": stdout.text,
+        "stderr": stderr.text,
+        "output": output,
+        "stdout_total_bytes": stdout.total_bytes,
+        "stderr_total_bytes": stderr.total_bytes,
+        "stdout_preview_bytes": stdout.preview_bytes,
+        "stderr_preview_bytes": stderr.preview_bytes,
+        "stdout_encoding": stdout.encoding,
+        "stderr_encoding": stderr.encoding,
+        "output_truncated": stdout.truncated || stderr.truncated,
+        "truncated": stdout.truncated || stderr.truncated,
+        "artifact_refs": artifact_refs,
+        "artifacts": artifact_refs,
+        "range_handles": range_handles,
+        "artifact_publish_status": artifact_publish_status,
+    })
+}
+
+fn publish_local_process_artifacts(
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    job_id: &str,
+    job_dir: &Path,
+) -> (Vec<Value>, Vec<Value>, &'static str) {
+    let Some(workspace_root) = workspace_root_from_local_job_dir(job_dir) else {
+        return (Vec::new(), Vec::new(), "workspace_root_unavailable");
+    };
+    let mut artifact_refs = Vec::new();
+    let mut range_handles = Vec::new();
+    let mut failed = false;
+    for stream in ["stdout", "stderr"] {
+        match crate::skill_output_artifact::publish_existing_task_artifact(
+            &workspace_root,
+            &claimed.task_id,
+            "async-process",
+            &job_dir.join(stream),
+            &format!("{stream}.log"),
+            "text/plain; charset=utf-8",
+            json!({
+                "stream": stream,
+                "job_id": job_id,
+                "adapter_kind": "local_process_poll",
+            }),
+        ) {
+            Ok(Some(published)) => {
+                artifact_refs.push(published.artifact_ref);
+                range_handles.push(published.range_handle);
+            }
+            Ok(None) => {}
+            Err(_) => failed = true,
+        }
+    }
+    let status = if failed {
+        "partial"
+    } else if artifact_refs.is_empty() {
+        "empty"
+    } else {
+        "published"
+    };
+    (artifact_refs, range_handles, status)
+}
+
+fn workspace_root_from_local_job_dir(job_dir: &Path) -> Option<PathBuf> {
+    let async_jobs = job_dir.parent()?;
+    if async_jobs.file_name()?.to_str()? != "async_jobs" {
+        return None;
+    }
+    let rustclaw_dir = async_jobs.parent()?;
+    if rustclaw_dir.file_name()?.to_str()? != ".rustclaw" {
+        return None;
+    }
+    rustclaw_dir.parent().map(Path::to_path_buf)
 }
 
 fn combine_local_process_output(stdout: &str, stderr: &str) -> String {

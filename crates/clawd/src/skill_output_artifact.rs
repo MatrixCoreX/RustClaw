@@ -9,6 +9,11 @@ const DEFAULT_PREVIEW_BYTES: usize = 32 * 1024;
 const MIN_PREVIEW_BYTES: usize = 4 * 1024;
 const MAX_PREVIEW_BYTES: usize = 1024 * 1024;
 
+pub(crate) struct PublishedArtifact {
+    pub(crate) artifact_ref: Value,
+    pub(crate) range_handle: Value,
+}
+
 pub(crate) fn spill_skill_text_if_needed(
     workspace_root: &Path,
     task_id: &str,
@@ -106,6 +111,60 @@ pub(crate) fn spill_skill_text_if_needed(
     Ok(true)
 }
 
+pub(crate) fn publish_existing_task_artifact(
+    workspace_root: &Path,
+    task_id: &str,
+    namespace: &str,
+    source_path: &Path,
+    suffix: &str,
+    media_type: &str,
+    metadata: Value,
+) -> io::Result<Option<PublishedArtifact>> {
+    let source_metadata = fs::metadata(source_path)?;
+    if !source_metadata.is_file() || source_metadata.len() == 0 {
+        return Ok(None);
+    }
+
+    let artifact_id = uuid::Uuid::new_v4().to_string();
+    let namespace_key = machine_path_component(namespace, "output");
+    let task_key = machine_path_component(task_id, "task");
+    let suffix_key = machine_path_component(suffix, "data");
+    let relative_path = PathBuf::from(".rustclaw")
+        .join("artifacts")
+        .join(&namespace_key)
+        .join(task_key)
+        .join(format!("{artifact_id}.{suffix_key}"));
+    let artifact_path = workspace_root.join(&relative_path);
+    atomic_publish_existing(source_path, &artifact_path)?;
+    let sha256 = sha256_file(source_path)?;
+    let relative_path = relative_path.to_string_lossy().replace('\\', "/");
+    let mut artifact_metadata = metadata.as_object().cloned().unwrap_or_default();
+    artifact_metadata.insert("size_bytes".to_string(), json!(source_metadata.len()));
+    artifact_metadata.insert("task_id".to_string(), Value::String(task_id.to_string()));
+    artifact_metadata.insert(
+        "provenance".to_string(),
+        Value::String(namespace_key.clone()),
+    );
+    let artifact_ref = json!({
+        "id": format!("{namespace_key}:{artifact_id}"),
+        "path": relative_path,
+        "media_type": media_type,
+        "sha256": sha256,
+        "metadata": artifact_metadata,
+    });
+    let range_handle = json!({
+        "artifact_ref": artifact_ref["id"],
+        "path": artifact_ref["path"],
+        "start_byte": 0,
+        "end_byte": source_metadata.len(),
+        "read_capability": "artifact.read_range",
+    });
+    Ok(Some(PublishedArtifact {
+        artifact_ref,
+        range_handle,
+    }))
+}
+
 fn preview_limit_bytes() -> usize {
     std::env::var("RUSTCLAW_SKILL_OUTPUT_PREVIEW_BYTES")
         .ok()
@@ -144,7 +203,7 @@ fn machine_path_component(value: &str, fallback: &str) -> String {
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "artifact path has no parent")
+        io::Error::new(io::ErrorKind::InvalidInput, "artifact_path_parent_missing")
     })?;
     fs::create_dir_all(parent)?;
     let temp_path = parent.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
@@ -158,6 +217,41 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(&temp_path);
     }
     result
+}
+
+fn atomic_publish_existing(source: &Path, destination: &Path) -> io::Result<()> {
+    let parent = destination.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "artifact_path_parent_missing")
+    })?;
+    fs::create_dir_all(parent)?;
+    let temp_path = parent.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        if fs::hard_link(source, &temp_path).is_err() {
+            fs::copy(source, &temp_path)?;
+            File::open(&temp_path)?.sync_all()?;
+        }
+        fs::rename(&temp_path, destination)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
+}
+
+fn sha256_file(path: &Path) -> io::Result<String> {
+    use std::io::Read;
+
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn extra_object(extra: &mut Option<Value>) -> &mut Map<String, Value> {
