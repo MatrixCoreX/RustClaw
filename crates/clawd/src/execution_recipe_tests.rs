@@ -716,6 +716,48 @@ fn structured_validation_result_from_skill_output_takes_precedence() {
 }
 
 #[test]
+fn structured_validation_accepts_root_and_extra_machine_booleans() {
+    let state = test_state();
+    let args = json!({"action": "guard_config"});
+
+    assert_eq!(
+        assess_validation_output(
+            &state,
+            "config_edit",
+            &args,
+            r#"{"action":"guard_config","valid":true,"risk_count":0}"#,
+        ),
+        ValidationObservation::Passed
+    );
+    assert_eq!(
+        assess_validation_output(
+            &state,
+            "config_edit",
+            &args,
+            r#"{"status":"ok","extra":{"valid":true,"risk_count":0}}"#,
+        ),
+        ValidationObservation::Passed
+    );
+}
+
+#[test]
+fn structured_validation_boolean_failure_overrides_generic_ok_status() {
+    let state = test_state();
+    let args = json!({"action": "guard_config"});
+    let observation = assess_validation_output(
+        &state,
+        "config_edit",
+        &args,
+        r#"{"status":"ok","valid":false,"reason":"unsafe_config"}"#,
+    );
+
+    assert_eq!(
+        observation,
+        ValidationObservation::Failed("unsafe_config".to_string())
+    );
+}
+
+#[test]
 fn split_combined_run_cmd_into_mutate_and_validate_parts() {
     let command = "cd /tmp/demo && nohup python3 -m http.server 65429 --bind 127.0.0.1 > /tmp/http.log 2>&1 & sleep 2 && curl -s http://127.0.0.1:65429/ | grep -q ops-demo-ok && echo VALIDATION_PASSED || echo VALIDATION_FAILED";
     let (mutate_part, validate_part) =
