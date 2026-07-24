@@ -155,6 +155,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_crypto_credentials).post(upsert_crypto_credentials),
         )
         .route("/health", get(health))
+        .route("/system/host-summary", get(host_system_summary))
         .route("/skills", get(list_skills))
         .route("/capabilities", get(list_capabilities))
         .route(
@@ -317,6 +318,7 @@ struct NniDeviceActionRequest {
 }
 
 include!("ui_routes/config_helpers.rs");
+include!("ui_routes/host_system.rs");
 include!("ui_routes/nni_internal_llm.rs");
 include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_join.rs");
@@ -356,3 +358,7 @@ mod skill_store_tests;
 #[cfg(test)]
 #[path = "ui_routes/crypto_credentials_tests.rs"]
 mod crypto_credentials_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/host_system_tests.rs"]
+mod host_system_tests;

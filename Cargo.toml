@@ -71,6 +71,7 @@ base64 = "0.22"
 config = "0.15"
 hmac = "0.12"
 hex = "0.4"
+libc = "0.2"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 portable-pty = "0.9"
 regex = "1"

@@ -873,6 +873,9 @@ export default function App() {
   const {
     systemRestarting,
     systemRestartMessage,
+    hostSystemSummary,
+    hostSystemLoading,
+    hostSystemErrorCode,
     piAppStatus,
     piAppRestarting,
     piAppRestartMessage,
@@ -885,6 +888,7 @@ export default function App() {
     cancelWorkspaceUpdate,
     restartSystem,
     restartPiApp,
+    fetchHostSystemSummary,
   } = useSystemRuntime({
     apiFetch,
     t,
@@ -1370,6 +1374,9 @@ export default function App() {
               t={t}
               onboardingSteps={onboardingSteps}
               dashboardOverviewItems={dashboardOverviewItems}
+              hostSystemSummary={hostSystemSummary}
+              hostSystemLoading={hostSystemLoading}
+              hostSystemErrorCode={hostSystemErrorCode}
               isAdminIdentity={isAdminIdentity}
               workspaceUpdateLoading={workspaceUpdateLoading}
               workspaceUpdateRunning={workspaceUpdateRunning}
@@ -1402,6 +1409,7 @@ export default function App() {
               onCancelWorkspaceUpdate={cancelWorkspaceUpdate}
               onRestartSystem={restartSystem}
               onRestartPiApp={restartPiApp}
+              onFetchHostSystemSummary={fetchHostSystemSummary}
               workspaceUpdateStepLabel={workspaceUpdateStepLabel}
               workspaceUpdateStatusLabel={workspaceUpdateStatusLabel}
               workspaceUpdateTimeLabel={workspaceUpdateTimeLabel}

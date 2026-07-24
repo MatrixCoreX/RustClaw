@@ -9,6 +9,7 @@ import type {
   ApiResponse,
   ConsolePage,
   HealthResponse,
+  HostSystemSummary,
   PiAppStatusResponse,
   WorkspaceUpdateMode,
   WorkspaceUpdateStatus,
@@ -58,6 +59,9 @@ export function useSystemRuntime({
   const workspaceUpdateReloadScheduledRef = useRef(false);
   const [systemRestarting, setSystemRestarting] = useState(false);
   const [systemRestartMessage, setSystemRestartMessage] = useState<string | null>(null);
+  const [hostSystemSummary, setHostSystemSummary] = useState<HostSystemSummary | null>(null);
+  const [hostSystemLoading, setHostSystemLoading] = useState(false);
+  const [hostSystemErrorCode, setHostSystemErrorCode] = useState<string | null>(null);
   const [piAppStatus, setPiAppStatus] = useState<PiAppStatusResponse | null>(null);
   const [piAppRestarting, setPiAppRestarting] = useState(false);
   const [piAppRestartMessage, setPiAppRestartMessage] = useState<string | null>(null);
@@ -68,6 +72,24 @@ export function useSystemRuntime({
   const workspaceUpdateUiLang = (): "zh" | "en" => (t("__zh__", "__en__") === "__zh__" ? "zh" : "en");
   const workspaceUpdateApiErrorMessage = (error: string | null | undefined): string =>
     formatWorkspaceUpdateApiError(error, workspaceUpdateUiLang());
+
+  const fetchHostSystemSummary = async () => {
+    setHostSystemLoading(true);
+    setHostSystemErrorCode(null);
+    try {
+      const res = await apiFetch("/v1/system/host-summary");
+      const body = (await res.json()) as ApiResponse<HostSystemSummary>;
+      if (!res.ok || !body.ok || !body.data) {
+        setHostSystemErrorCode(res.status === 401 || res.status === 403 ? "permission_denied" : "unavailable");
+        return;
+      }
+      setHostSystemSummary(body.data);
+    } catch {
+      setHostSystemErrorCode("disconnected");
+    } finally {
+      setHostSystemLoading(false);
+    }
+  };
 
   const fetchWorkspaceUpdateStatus = async (silent = false): Promise<WorkspaceUpdateStatus | null> => {
     if (!silent) {
@@ -290,9 +312,12 @@ export function useSystemRuntime({
   };
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity || currentPage !== "dashboard") return;
-    void fetchWorkspaceUpdateStatus(true);
-    void fetchPiAppStatus();
+    if (!uiAuthReady || currentPage !== "dashboard") return;
+    void fetchHostSystemSummary();
+    if (isAdminIdentity) {
+      void fetchWorkspaceUpdateStatus(true);
+      void fetchPiAppStatus();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady, isAdminIdentity, currentPage]);
 
@@ -349,6 +374,9 @@ export function useSystemRuntime({
   return {
     systemRestarting,
     systemRestartMessage,
+    hostSystemSummary,
+    hostSystemLoading,
+    hostSystemErrorCode,
     piAppStatus,
     piAppRestarting,
     piAppRestartMessage,
@@ -361,5 +389,6 @@ export function useSystemRuntime({
     cancelWorkspaceUpdate,
     restartSystem,
     restartPiApp,
+    fetchHostSystemSummary,
   };
 }

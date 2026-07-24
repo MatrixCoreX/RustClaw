@@ -11,9 +11,11 @@ import {
 
 import type { DashboardOverviewItem, DashboardStepStatus } from "../lib/dashboard-home";
 import type { WorkspaceUpdateNotice } from "../lib/workspace-update";
+import { HostSystemSummaryPanel } from "./HostSystemSummaryPanel";
 import type {
   ConsolePage,
   DashboardCommunicationRow,
+  HostSystemSummary,
   PiAppStatusResponse,
   WorkspaceUpdateMode,
   WorkspaceUpdateStatus,
@@ -34,6 +36,9 @@ export interface DashboardPageProps {
   t: Translate;
   onboardingSteps: DashboardOnboardingStep[];
   dashboardOverviewItems: DashboardOverviewItem[];
+  hostSystemSummary: HostSystemSummary | null;
+  hostSystemLoading: boolean;
+  hostSystemErrorCode: string | null;
   isAdminIdentity: boolean;
   workspaceUpdateLoading: boolean;
   workspaceUpdateRunning: boolean;
@@ -66,6 +71,7 @@ export interface DashboardPageProps {
   onCancelWorkspaceUpdate: () => unknown | Promise<unknown>;
   onRestartSystem: () => unknown | Promise<unknown>;
   onRestartPiApp: () => unknown | Promise<unknown>;
+  onFetchHostSystemSummary: () => unknown | Promise<unknown>;
   workspaceUpdateStepLabel: (step?: string) => string;
   workspaceUpdateStatusLabel: (status?: string) => string;
   workspaceUpdateTimeLabel: (ts?: number | null) => string;
@@ -75,6 +81,9 @@ export function DashboardPage({
   t,
   onboardingSteps,
   dashboardOverviewItems,
+  hostSystemSummary,
+  hostSystemLoading,
+  hostSystemErrorCode,
   isAdminIdentity,
   workspaceUpdateLoading,
   workspaceUpdateRunning,
@@ -107,6 +116,7 @@ export function DashboardPage({
   onCancelWorkspaceUpdate,
   onRestartSystem,
   onRestartPiApp,
+  onFetchHostSystemSummary,
   workspaceUpdateStepLabel,
   workspaceUpdateStatusLabel,
   workspaceUpdateTimeLabel,
@@ -182,6 +192,14 @@ export function DashboardPage({
           ))}
         </div>
       </section>
+
+      <HostSystemSummaryPanel
+        t={t}
+        summary={hostSystemSummary}
+        loading={hostSystemLoading}
+        errorCode={hostSystemErrorCode}
+        onRefresh={onFetchHostSystemSummary}
+      />
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
