@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -20,6 +21,7 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_REDIRECTS: usize = 5;
 const MAX_REDIRECTS: usize = 10;
 const PREVIEW_CHARS: usize = 8_000;
+const SYNTHETIC_DNS_PROBE_HOST: &str = "example.com";
 
 #[derive(Debug)]
 struct HttpBasicError {
@@ -525,8 +527,9 @@ fn validate_target_url(
         .ok_or_else(|| HttpBasicError::new("url_port_invalid", "URL port is unavailable"))?;
     let rustclaw_local = allow_rustclaw_local && should_inject_rustclaw_key(url.as_str());
     let resolved = resolve_host(&host, port)?;
-    let proxy_mediated =
-        host.parse::<IpAddr>().is_err() && proxy_applies_to_host(url.scheme(), &host);
+    let proxy_mediated = host.parse::<IpAddr>().is_err()
+        && !host_matches_no_proxy(&host, no_proxy_value().as_deref())
+        && (proxy_configured(url.scheme()) || proxy_synthetic_dns_active());
     if !rustclaw_local
         && resolved.iter().any(|address| {
             !is_public_ip(address.ip()) && !(proxy_mediated && is_proxy_synthetic_ip(address.ip()))
@@ -646,14 +649,33 @@ fn is_proxy_synthetic_ip(ip: IpAddr) -> bool {
     )
 }
 
-fn proxy_applies_to_host(scheme: &str, host: &str) -> bool {
-    let configured = match scheme {
+fn proxy_configured(scheme: &str) -> bool {
+    match scheme {
         "https" => first_non_empty_env(&["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]),
         "http" => first_non_empty_env(&["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"]),
         _ => None,
     }
-    .is_some();
-    configured && !host_matches_no_proxy(host, no_proxy_value().as_deref())
+    .is_some()
+}
+
+fn proxy_synthetic_dns_active() -> bool {
+    static ACTIVE: OnceLock<bool> = OnceLock::new();
+    *ACTIVE.get_or_init(|| {
+        let addresses = (SYNTHETIC_DNS_PROBE_HOST, 443)
+            .to_socket_addrs()
+            .map(|resolved| resolved.map(|address| address.ip()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        detects_proxy_synthetic_dns(&addresses)
+    })
+}
+
+fn detects_proxy_synthetic_dns(addresses: &[IpAddr]) -> bool {
+    addresses
+        .iter()
+        .any(|address| is_proxy_synthetic_ip(*address))
+        && addresses
+            .iter()
+            .all(|address| is_public_ip(*address) || is_proxy_synthetic_ip(*address))
 }
 
 fn first_non_empty_env(names: &[&str]) -> Option<String> {
