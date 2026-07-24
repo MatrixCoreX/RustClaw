@@ -13,6 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 RUN_SUITE = ROOT / "scripts/nl_tests/run_suite.sh"
 RUN_MULTI_TURN_SUITE = ROOT / "scripts/nl_tests/run_multi_turn_suite.sh"
+RUN_ALL_WITH_SERVER = ROOT / "scripts/nl_tests/run_all_nl_with_server.sh"
 SUITE_ARTIFACT_CONTRACT = ROOT / "scripts/nl_tests/check_suite_artifact_contract.py"
 
 RUN_SUITE_REQUIRED_SNIPPETS = {
@@ -97,6 +98,18 @@ RUN_MULTI_TURN_FORBIDDEN_SNIPPETS = {
     "multi_turn_provider_reply_blob_matcher": "provider_like_blob",
     "multi_turn_provider_final_reply_matcher": "provider_like_final_text",
     "multi_turn_provider_reply_marker_list": "strong_markers =",
+}
+
+RUN_ALL_WITH_SERVER_REQUIRED_SNIPPETS = {
+    "authenticated_health_requires_key": 'if [[ -z "${USER_KEY_VALUE:-}" ]]; then',
+    "authenticated_health_fails_http_errors": "curl -fsS --max-time 5",
+    "isolated_key_does_not_reuse_host_key": 'USER_KEY_VALUE=""',
+    "isolated_key_is_resolved_after_start": "auth_key=resolved_from_isolated_db",
+    "auth_list_failure_is_bounded": 'auth_output="$("${ROOT_DIR}/scripts/auth-key.sh" list 2>/dev/null || true)"',
+    "suite_process_is_tracked": "suite_pid=$!",
+    "server_liveness_is_monitored": 'while kill -0 "${suite_pid}" >/dev/null 2>&1; do',
+    "server_exit_fails_fast": "clawd exited while NL suite was running",
+    "suite_cleanup_is_registered": 'if [[ -n "${suite_pid}" ]]; then',
 }
 
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
@@ -269,6 +282,11 @@ def build_report() -> dict[str, Any]:
         (RUN_SUITE, RUN_SUITE_REQUIRED_SNIPPETS, "run_suite"),
         (RUN_MULTI_TURN_SUITE, RUN_MULTI_TURN_REQUIRED_SNIPPETS, "run_multi_turn_suite"),
         (
+            RUN_ALL_WITH_SERVER,
+            RUN_ALL_WITH_SERVER_REQUIRED_SNIPPETS,
+            "run_all_nl_with_server",
+        ),
+        (
             SUITE_ARTIFACT_CONTRACT,
             SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS,
             "suite_artifact_contract",
@@ -304,6 +322,7 @@ def build_report() -> dict[str, Any]:
         "paths": [
             str(RUN_SUITE.relative_to(ROOT)),
             str(RUN_MULTI_TURN_SUITE.relative_to(ROOT)),
+            str(RUN_ALL_WITH_SERVER.relative_to(ROOT)),
             str(SUITE_ARTIFACT_CONTRACT.relative_to(ROOT)),
         ],
         "checked_count": checked_count,

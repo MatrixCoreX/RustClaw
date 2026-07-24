@@ -226,6 +226,7 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "LONG_FILE_CHECK ok",
         "CROSS_PLATFORM_CONTRACT_SELF_TEST ok",
         "CROSS_PLATFORM_CONTRACT_CHECK findings=0",
+        "STARTUP_PREFLIGHT_CONTRACT ok",
         "OK: all",
         "registry skills have a generated layered prompt body",
         "REGISTRY_PARITY mode=all",
