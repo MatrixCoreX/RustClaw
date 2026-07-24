@@ -20,7 +20,7 @@ REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
         '"kind": "tool_output_artifact"',
         '"artifact_refs"',
         '"range_handles"',
-        '"read_capability": "filesystem.read_text_range"',
+        '"read_capability": "artifact.read_range"',
         '"size_bytes"',
         '"sha256"',
     ),

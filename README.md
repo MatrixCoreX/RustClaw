@@ -698,7 +698,99 @@ the run. Reusing a development server is opt-in with `--reuse-server`. Use
 
 Current `configs/agent_guard.toml` defaults keep verifier and registry guards enabled, including `answer_verifier_enforce_required_scope = "all"` and `registry_idempotency_guard_scope = "all"`. The old route-authority rollback/debug keys are no longer runtime configuration. If route boundary behavior changes, run the route-authority guard script and update replay/README flow descriptions instead of reintroducing semantic route switches.
 
+The agent parity gate writes portable release evidence rather than trusting a
+single successful command. `agent_loop_static_contracts.txt` contains the
+self-tested legacy-route, pre-planner, NL hard-match, historical hardcoded
+language, and frontdoor boundary guards. In particular,
+`scripts/check_frontdoor_boundary_dispatch.py --self-test` and its main check
+must produce `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`, proving that the
+ask front door only prepares the turn boundary and does not decide whether an
+ordinary request should answer, clarify, or execute.
+
+The same gate writes `planner_runtime_boundary_contracts.txt` and requires
+`PLANNER_RUNTIME_BOUNDARY_CHECK findings=0`,
+`CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`,
+`ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`, and
+`FINALIZER_ARCHITECTURE_SELF_TEST ok`. These checks keep semantic decisions in
+the planner-owned loop, repair on structured loop observations, route reasons
+as machine markers, and final delivery model-led rather than domain-template
+driven. The related artifacts are
+`runtime_hard_reply_baseline.txt`, `policy_boundary_hard_reply.txt`,
+`repair_no_user_text_fields.txt`, `policy_decision_tokens.txt`,
+`agent_loop_guard_final_scope.txt`, `registry_policy_contracts.txt`,
+`skill_registry_aliases.txt`, `long_tail_skill_contracts.txt`,
+`no_agent_mode_payload.txt`, and `evidence_extractor_contracts.txt`.
+The evidence extractor is itself verified with
+`check_evidence_extractor_contracts.py --self-test`.
+
+Task continuity and operator surfaces are also release-gated:
+`task_lifecycle_contracts.txt` covers background execution, checkpoint/resume,
+async polling, and cancellation, while `task_event_context_team_contracts.txt`
+covers goals, context compaction, coding evidence, and child-task lifecycle
+events. Wrapped runs validate `suite_artifact_contract.json`,
+`suite_artifact_contract_self_test.txt`, `chinese_model_catalog_self_test.txt`,
+`runner_path_ref_contract.json`, and `llm_raw_trace_runner_contract.txt`.
+The nested report must record `agent_parity_gate_contract.checked=true`; report
+generation uses `--validate-contract-report-content` and
+`--require-contract-report-content-checked`, and records
+`contract_report_content_checked=true`.
+
+Gate summaries use portable `out_dir_ref`, `run_dir_ref`, and `run_log_ref`
+values. `live_metrics=0|1` distinguishes whether a live run directory was
+supplied: `metrics=1` means the metrics gate is enabled, while
+`live_metrics=1` proves that live rollout metrics were generated and validated.
+NL runners retain the task id and model-I/O log offset so
+`llm_raw_trace_runner_contract.txt` can verify numbered `LLM#1..N` raw request
+and response fields without exposing secrets.
+
 The agent parity gate writes `clawcli_exec_replay_contracts.txt` and records `clawcli_exec_replay_contracts=1`. The artifact must contain `CLAWCLI_EXEC_REPLAY_CONTRACT_SELF_TEST ok` and `CLAWCLI_EXEC_REPLAY_CONTRACT_CHECK findings=0`, proving that `clawcli exec` artifacts and `recorded_only` replay coverage/view/diff behavior remain machine-field contracts in the release gate.
+
+The same gate writes `clawcli_session_tui_contracts.txt` and records
+`clawcli_session_tui_contracts=1`. The artifact is produced by
+`scripts/check_clawcli_session_tui_contracts.py --self-test` plus its main
+check and must contain `CLAWCLI_SESSION_TUI_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_SESSION_TUI_CONTRACT_CHECK findings=0`. It release-gates `clawcli
+session list/show/resume/archive/delete/fork`, local session-store metadata,
+the `clawcli tui` selected-task snapshot, `selected_progress`,
+`selected_summary`, operator key tokens, and TUI report/review/subagents/
+permission projections as machine-field contracts.
+
+The same gate writes `clawcli_goal_contracts.txt` and records
+`clawcli_goal_contracts=1`. The artifact comes from
+`scripts/check_clawcli_goal_contracts.py --self-test` plus its main check and
+must contain `CLAWCLI_GOAL_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_GOAL_CONTRACT_CHECK findings=0`. It keeps `clawcli goal
+start/status/pause/resume/edit/clear`, done conditions, verification commands,
+constraints, checkpoint/resume control summaries, and sensitive-field
+redaction on structured machine contracts.
+
+The same gate writes `clawcli_llm_trace_contracts.txt` and records
+`clawcli_llm_trace_contracts=1`. The artifact comes from
+`scripts/check_clawcli_llm_trace_contracts.py --self-test` plus its main check
+and must contain `CLAWCLI_LLM_TRACE_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_LLM_TRACE_CONTRACT_CHECK findings=0`. It release-gates `clawcli
+llm-trace`, `llm_call_ref=LLM#1..N`, flow/code attribution,
+provider/model/status/usage tokens, raw request/response fields,
+`llm_trace_model_readiness`, and the UI teaching-trace helpers.
+
+The same gate writes `clawcli_models_catalog_contracts.txt` and records
+`clawcli_models_catalog_contracts=1`. The artifact comes from
+`scripts/check_clawcli_models_catalog_contracts.py --self-test` plus its main
+check and must contain `CLAWCLI_MODELS_CATALOG_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_MODELS_CATALOG_CONTRACT_CHECK findings=0`. It keeps
+`clawcli models catalog`, `model_catalog_summary`, `model_catalog_entry`, provider filtering,
+`credential_state`, modalities, capability flags, async/dry-run metadata, and
+the UI model catalog on secret-free machine fields.
+
+The same gate writes `clawcli_models_readiness_contracts.txt` and records
+`clawcli_models_readiness_contracts=1`. The artifact comes from
+`scripts/check_clawcli_models_readiness_contracts.py --self-test` plus its main
+check and must contain `CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0`. It keeps
+`clawcli models readiness`, `clawcli llm-trace`, `model_readiness_summary`,
+`model_catalog_trace.readiness`, selected provider/model matching,
+`selected_entry_status`, readiness/capability flags, and missing-selection
+behavior on secret-free machine contracts.
 
 Before physically deleting remaining compatibility code paths, use the current deletion gate rather than a fixed seven-day wait: compact live NL for the affected class, release-gate equivalent live coverage (`scripts/nl_tests/build_release_gate_subset.py --check` currently selects 285 rows covering all 223 declared categories), loop-boundary/replay review with no unexplained mismatch, and the planner/runtime/repair/static guards. The subset generator treats the shared compact contract, release behavior tags, machine capability/action-family tags, and suite breadth as mandatory; source filenames and undeclared incidental tags do not become release contracts. Contract repair cleanup must pass `python3 scripts/check_contract_repair_loop_observation_boundary.py`, which keeps worker contract repair as loop-observation output instead of a pre-planner route mutator. Planner/output-contract cleanup must also pass `python3 scripts/check_planner_runtime_boundary.py`, `python3 scripts/check_route_reason_marker_facade.py`, and `python3 scripts/check_finalizer_architecture.py`; repair cleanup must pass `python3 scripts/check_repair_boundary_inventory_coverage.py` plus `python3 scripts/check_repair_no_user_text_fields.py`. A longer observation window is still reasonable for high-risk production rollout, but it is not required for normal development cleanup.
 

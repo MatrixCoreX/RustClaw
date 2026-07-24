@@ -178,15 +178,6 @@ BRANCH_INVENTORY: tuple[BranchInventoryEntry, ...] = (
         reads_model_answer_text=True,
     ),
     BranchInventoryEntry(
-        name="finalizer_requested_machine_kv_summary",
-        path="crates/clawd/src/finalize/loop_reply.rs",
-        category="evidence_projection",
-        input_fields=("state_patch", "observed_values", "output_contract"),
-        output_fields=("requested_machine_kv_summary",),
-        tokens=("requested_machine_kv_summary", "log_deterministic_delivery_record"),
-        reads_model_answer_text=True,
-    ),
-    BranchInventoryEntry(
         name="finalizer_verifier_failure_message_key",
         path="crates/clawd/src/finalize/task_answer_verifier_failure.rs",
         category="contract_boundary",
