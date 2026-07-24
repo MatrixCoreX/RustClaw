@@ -12,10 +12,10 @@
 - It is intended for lightweight API calls with explicit URL and optional headers/body.
 - Use it for raw HTTP/API observations, status validation, response preview checks, and downloads.
 - Do not use it as the primary page-reading capability when the task needs browser-rendered page titles, readable article/page text, page summaries, screenshots, or extraction artifacts; those belong to `browser.open_extract`.
-- When called inside RustClaw with a valid `user_key`, requests to local RustClaw API endpoints on `http://127.0.0.1:8787/` automatically include `X-RustClaw-Key`.
+- When called inside RustClaw with a valid `user_key`, requests to the configured loopback `CLAWD_BASE_URL` origin automatically include `X-RustClaw-Key`.
 - Every redirect hop is validated independently. Public fetches reject private, loopback, link-local, reserved, and documentation addresses after DNS resolution.
 - Administrator-configured HTTP(S) egress proxies are supported without exposing proxy credentials. Proxy-only synthetic `198.18.0.0/15` DNS answers are accepted only for proxied domain targets that do not match `NO_PROXY`; literal and direct private targets remain blocked.
-- A credentialed local RustClaw request may access only `http://127.0.0.1:8787`, `localhost:8787`, or `[::1]:8787`; public redirects cannot pivot into that exception.
+- A credentialed local RustClaw request may access only the configured loopback `CLAWD_BASE_URL` port through `127.0.0.1`, `localhost`, or `[::1]`; public redirects cannot pivot into that exception.
 - Any received HTTP response is returned as an untrusted observation, including non-2xx statuses; network/timeout/protocol failures remain skill errors.
 
 ## Config Entry Points (from interface)

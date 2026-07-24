@@ -147,12 +147,38 @@ fn request_ui_key(req: &Req) -> Option<String> {
         })
 }
 
-fn should_inject_rustclaw_key(url: &str) -> bool {
-    Url::parse(url).ok().is_some_and(|url| {
-        url.scheme() == "http"
-            && url.port_or_known_default() == Some(8787)
-            && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
+fn is_loopback_url(url: &Url) -> bool {
+    url.host_str().is_some_and(|host| {
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
     })
+}
+
+fn should_inject_rustclaw_key_for_base(url: &str, configured_base_url: Option<&str>) -> bool {
+    let Ok(target) = Url::parse(url) else {
+        return false;
+    };
+    let configured_base_url = configured_base_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("http://127.0.0.1:8787");
+    let Ok(configured) = Url::parse(configured_base_url) else {
+        return false;
+    };
+
+    target.scheme() == "http"
+        && configured.scheme() == "http"
+        && is_loopback_url(&target)
+        && is_loopback_url(&configured)
+        && target.port_or_known_default() == configured.port_or_known_default()
+}
+
+fn should_inject_rustclaw_key(url: &str) -> bool {
+    let configured_base_url = std::env::var("CLAWD_BASE_URL").ok();
+    should_inject_rustclaw_key_for_base(url, configured_base_url.as_deref())
 }
 
 #[derive(Debug, Clone)]

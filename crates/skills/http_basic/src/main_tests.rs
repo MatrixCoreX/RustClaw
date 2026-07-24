@@ -1,8 +1,9 @@
 use super::{
     bounded_preview, domain_matches, error_extra, execute, host_matches_no_proxy, http_observation,
     is_proxy_synthetic_ip, is_public_ip, is_sensitive_header, is_textual_content, read_limited,
-    redirect_switches_to_get, resolve_output_path, should_forward_header, validate_target_url,
-    FetchPolicy, HttpArtifact, HttpObservationInput, RequestMethod, SKILL_NAME,
+    redirect_switches_to_get, resolve_output_path, should_forward_header,
+    should_inject_rustclaw_key_for_base, validate_target_url, FetchPolicy, HttpArtifact,
+    HttpObservationInput, RequestMethod, SKILL_NAME,
 };
 use reqwest::StatusCode;
 use serde_json::json;
@@ -221,6 +222,30 @@ fn local_rustclaw_endpoint_requires_an_authenticated_key_context() {
     let other_port = validate_target_url("http://127.0.0.1:8788/", &policy, true)
         .expect_err("other local services remain blocked");
     assert_eq!(other_port.code, "private_network_blocked");
+}
+
+#[test]
+fn local_rustclaw_endpoint_uses_the_configured_loopback_origin() {
+    assert!(should_inject_rustclaw_key_for_base(
+        "http://127.0.0.1:49557/v1/health",
+        Some("http://localhost:49557")
+    ));
+    assert!(should_inject_rustclaw_key_for_base(
+        "http://[::1]:49557/v1/health",
+        Some("http://127.0.0.1:49557")
+    ));
+    assert!(!should_inject_rustclaw_key_for_base(
+        "http://127.0.0.1:49558/v1/health",
+        Some("http://127.0.0.1:49557")
+    ));
+    assert!(!should_inject_rustclaw_key_for_base(
+        "http://127.0.0.1:49557/v1/health",
+        Some("https://127.0.0.1:49557")
+    ));
+    assert!(!should_inject_rustclaw_key_for_base(
+        "http://127.0.0.1:49557/v1/health",
+        Some("http://example.com:49557")
+    ));
 }
 
 #[test]

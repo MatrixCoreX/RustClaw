@@ -717,6 +717,10 @@ check and does not require live provider generation. After running
   a zero-tool direct answer, but still rejects execution through an unrelated
   tool. This tag changes test attribution only; runtime routing never consumes
   it.
+- Case prompts may use the machine token `__RUSTCLAW_TEST_BASE_URL__` when they
+  must call the same isolated server used by the suite. The continuous runner
+  materializes it from `--base-url` immediately before submission. Do not put a
+  fixed local port into an isolation-sensitive HTTP case.
 
 Before running live compact NL, check the metadata coverage:
 
