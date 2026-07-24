@@ -947,6 +947,90 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
 }
 
 #[test]
+fn native_request_expands_multi_capability_groups_into_direct_leaf_tools() {
+    let group = crate::capability_map::PlannerNativeCapabilityGroup {
+        skill_name: "fs_basic".to_string(),
+        tool_name: "call_fs_basic".to_string(),
+        description: "runtime_capability_group_v1; semantic_tags=filesystem".to_string(),
+        capability_names: vec![
+            "filesystem.list_entries".to_string(),
+            "filesystem.read_text_range".to_string(),
+        ],
+        capability_argument_schemas: BTreeMap::from([
+            (
+                "filesystem.list_entries".to_string(),
+                json!({
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                    "additionalProperties": false
+                }),
+            ),
+            (
+                "filesystem.read_text_range".to_string(),
+                json!({
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "start_line": {"type": "integer"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+        ]),
+    };
+    let groups = vec![group.clone()];
+    let callable = group.capability_names.clone();
+    let request = native_planner_request(
+        "protocol",
+        "current turn",
+        None,
+        &callable,
+        &BTreeMap::new(),
+        &groups,
+        &groups,
+        &[],
+    );
+    let list_tool_name = native_capability_leaf_tool_name("filesystem.list_entries");
+    let read_tool_name = native_capability_leaf_tool_name("filesystem.read_text_range");
+
+    assert_ne!(list_tool_name, read_tool_name);
+    assert!(list_tool_name.len() <= MAX_NATIVE_TOOL_NAME_BYTES);
+    assert!(read_tool_name.len() <= MAX_NATIVE_TOOL_NAME_BYTES);
+    assert_eq!(request.tools.len(), 3);
+    assert_eq!(request.tools[0].name, list_tool_name);
+    assert_eq!(request.tools[0].input_schema["required"], json!(["path"]));
+    assert!(request.tools[0].input_schema.get("oneOf").is_none());
+    assert_eq!(request.tools[1].name, read_tool_name);
+    assert_eq!(request.tools[1].input_schema["required"], json!(["path"]));
+    assert!(request.tools[1].input_schema.get("oneOf").is_none());
+    assert_eq!(request.tools[2].name, "respond");
+
+    let tool_map = native_capability_tool_map(&groups);
+    let actions = actions_from_native_turn_with_groups(
+        &turn(
+            vec![ModelToolCall {
+                id: "read-fixture".to_string(),
+                name: read_tool_name,
+                arguments: json!({"path": "README.md", "start_line": 1}),
+            }],
+            "",
+        ),
+        &callable,
+        &tool_map,
+        None,
+    )
+    .expect("direct leaf action");
+    assert!(matches!(
+        &actions[0],
+        AgentAction::CallCapability { capability, args }
+            if capability == "filesystem.read_text_range"
+                && args == &json!({"path": "README.md", "start_line": 1})
+    ));
+}
+
+#[test]
 fn native_single_capability_group_accepts_direct_empty_leaf_arguments() {
     let group_map = BTreeMap::from([(
         "call_log_analyze".to_string(),
@@ -1086,28 +1170,39 @@ fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
 }
 
 #[test]
-fn native_group_rejects_capability_from_another_group() {
-    let callable = vec!["doc_parse".to_string(), "filesystem.read_text".to_string()];
+fn native_leaf_rejects_missing_direct_required_arguments() {
+    let capability = "filesystem.read_text_range";
+    let callable = vec![capability.to_string()];
     let group_map = BTreeMap::from([(
-        "call_doc_parse".to_string(),
-        BTreeSet::from(["doc_parse".to_string()]),
+        "call_filesystem_read_text_range".to_string(),
+        BTreeSet::from([capability.to_string()]),
     )]);
-    let error = actions_from_native_turn_with_groups(
+    let schemas = BTreeMap::from([(
+        capability.to_string(),
+        json!({
+            "type": "object",
+            "required": ["path"],
+            "properties": {"path": {"type": "string"}},
+            "additionalProperties": false
+        }),
+    )]);
+    let error = actions_from_native_turn_with_schemas(
         &turn(
             vec![ModelToolCall {
-                id: "wrong-group-call".to_string(),
-                name: "call_doc_parse".to_string(),
-                arguments: json!({"capability": "filesystem.read_text", "args": {"path": "README.md"}}),
+                id: "missing-path".to_string(),
+                name: "call_filesystem_read_text_range".to_string(),
+                arguments: json!({}),
             }],
             "",
         ),
         &callable,
         &group_map,
+        &schemas,
         None,
     )
-    .expect_err("cross-group capability rejected");
+    .expect_err("missing direct leaf argument rejected");
 
-    assert_eq!(error, "native_plan_capability_not_in_selected_group");
+    assert_eq!(error, "native_plan_required_args_missing");
 }
 
 #[test]
@@ -1263,19 +1358,14 @@ fn native_contract_repair_supports_two_bounded_protocol_transitions() {
 }
 
 #[test]
-fn native_contract_repair_preserves_failed_group_tool_and_leaf_schema() {
-    let tool_name = "call_task_control";
-    let capability = "coding_workflow.preview_repair";
+fn native_contract_repair_reports_direct_leaf_required_fields() {
+    let tool_name = native_capability_leaf_tool_name("filesystem.read_text_range");
     let leaf_schema = json!({
         "type": "object",
-        "required": ["capability", "args"],
+        "required": ["path"],
         "properties": {
-            "capability": {"type": "string", "enum": [capability]},
-            "args": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }
+            "path": {"type": "string"},
+            "start_line": {"type": "integer"}
         },
         "additionalProperties": false
     });
@@ -1284,23 +1374,12 @@ fn native_contract_repair_preserves_failed_group_tool_and_leaf_schema() {
             ModelMessage::text(ModelRole::System, "protocol"),
             ModelMessage::text(ModelRole::User, "current turn"),
         ],
-        tools: vec![
-            ModelToolDefinition {
-                name: tool_name.to_string(),
-                description: "task control".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "oneOf": [leaf_schema.clone()]
-                }),
-                strict: true,
-            },
-            ModelToolDefinition {
-                name: "respond".to_string(),
-                description: "respond".to_string(),
-                input_schema: json!({"type": "object"}),
-                strict: true,
-            },
-        ],
+        tools: vec![ModelToolDefinition {
+            name: tool_name.clone(),
+            description: "filesystem read".to_string(),
+            input_schema: leaf_schema.clone(),
+            strict: true,
+        }],
         tool_choice: ModelToolChoice::Auto,
         response_schema: None,
         stream: true,
@@ -1308,47 +1387,39 @@ fn native_contract_repair_preserves_failed_group_tool_and_leaf_schema() {
     };
     let malformed = turn(
         vec![ModelToolCall {
-            id: "call-1".to_string(),
-            name: tool_name.to_string(),
-            arguments: json!({
-                "capability": capability,
-                "args": ""
-            }),
+            id: "read-empty".to_string(),
+            name: tool_name.clone(),
+            arguments: json!({}),
         }],
         "",
     );
-    let groups = BTreeMap::from([(
-        tool_name.to_string(),
-        BTreeSet::from([capability.to_string()]),
+    let tool_map = BTreeMap::from([(
+        tool_name.clone(),
+        BTreeSet::from(["filesystem.read_text_range".to_string()]),
     )]);
     let signal = native_contract_repair_signal_for_turn(
-        "native_plan_args_not_object",
+        "native_plan_required_args_missing",
         &malformed,
         &request,
-        &groups,
+        &tool_map,
+        &BTreeMap::from([(
+            "filesystem.read_text_range".to_string(),
+            leaf_schema.clone(),
+        )]),
         Some(&LoopState::default()),
-        &[capability.to_string()],
+        &["filesystem.read_text_range".to_string()],
     );
     let observation: Value = serde_json::from_str(&signal).expect("repair observation");
 
     assert_eq!(observation["protocol_observation"]["tool_name"], tool_name);
     assert_eq!(
-        observation["protocol_observation"]["exact_failed_tool"],
-        true
-    );
-    assert_eq!(
-        observation["protocol_observation"]["argument_constraints"]["args"]["type"],
-        "object"
+        observation["protocol_observation"]["required_argument_fields"],
+        json!(["path"])
     );
     assert_eq!(
         observation["protocol_observation"]["argument_constraints"]["exact_call_schema"],
         leaf_schema
     );
-
-    let retry = native_contract_retry_request(&request, &signal);
-    assert_eq!(retry.tools.len(), 1);
-    assert_eq!(retry.tools[0].name, tool_name);
-    assert_eq!(retry.tool_choice, ModelToolChoice::Required);
 }
 
 #[test]
