@@ -995,6 +995,8 @@ fn native_request_expands_multi_capability_groups_into_direct_leaf_tools() {
     let list_tool_name = native_capability_leaf_tool_name("filesystem.list_entries");
     let read_tool_name = native_capability_leaf_tool_name("filesystem.read_text_range");
 
+    assert_eq!(list_tool_name, "call_filesystem_list_entries");
+    assert_eq!(read_tool_name, "call_filesystem_read_text_range");
     assert_ne!(list_tool_name, read_tool_name);
     assert!(list_tool_name.len() <= MAX_NATIVE_TOOL_NAME_BYTES);
     assert!(read_tool_name.len() <= MAX_NATIVE_TOOL_NAME_BYTES);
@@ -1028,6 +1030,18 @@ fn native_request_expands_multi_capability_groups_into_direct_leaf_tools() {
             if capability == "filesystem.read_text_range"
                 && args == &json!({"path": "README.md", "start_line": 1})
     ));
+}
+
+#[test]
+fn native_leaf_overlong_name_is_bounded_and_hash_stable() {
+    let capability = format!("filesystem.{}", "very_long_capability_segment_".repeat(4));
+    let first = native_capability_leaf_tool_name(&capability);
+    let second = native_capability_leaf_tool_name(&capability);
+
+    assert_eq!(first, second);
+    assert_eq!(first.len(), MAX_NATIVE_TOOL_NAME_BYTES);
+    assert!(first.starts_with("call_filesystem_very_long"));
+    assert!(first.contains("__"));
 }
 
 #[test]
@@ -1238,6 +1252,79 @@ fn native_contract_retry_scopes_required_tool_and_adds_machine_observation() {
         repaired.messages[2].content,
         vec![ModelContentPart::Text { text: signal }]
     );
+}
+
+#[test]
+fn native_unknown_tool_retry_preserves_current_exact_tool_catalog() {
+    let capability = "filesystem.read_text_range";
+    let tool_name = native_capability_leaf_tool_name(capability);
+    let schema = json!({
+        "type": "object",
+        "required": ["path"],
+        "properties": {"path": {"type": "string"}},
+        "additionalProperties": false
+    });
+    let request = ModelTurnRequest {
+        messages: vec![
+            ModelMessage::text(ModelRole::System, "protocol"),
+            ModelMessage::text(ModelRole::User, "current turn"),
+        ],
+        tools: vec![
+            ModelToolDefinition {
+                name: tool_name.clone(),
+                description: "filesystem read".to_string(),
+                input_schema: schema.clone(),
+                strict: true,
+            },
+            ModelToolDefinition {
+                name: "respond".to_string(),
+                description: "respond".to_string(),
+                input_schema: json!({"type": "object"}),
+                strict: true,
+            },
+        ],
+        tool_choice: ModelToolChoice::Auto,
+        response_schema: None,
+        stream: true,
+        metadata: BTreeMap::new(),
+    };
+    let unknown_name = format!("{tool_name}__obsolete");
+    let malformed = turn(
+        vec![ModelToolCall {
+            id: "unknown-tool".to_string(),
+            name: unknown_name.clone(),
+            arguments: json!({"path": "README.md"}),
+        }],
+        "",
+    );
+    let tool_map = BTreeMap::from([(tool_name.clone(), BTreeSet::from([capability.to_string()]))]);
+    let signal = native_contract_repair_signal_for_turn(
+        "native_plan_unknown_tool",
+        &malformed,
+        &request,
+        &tool_map,
+        &BTreeMap::from([(capability.to_string(), schema)]),
+        Some(&LoopState::default()),
+        &[capability.to_string()],
+    );
+    let observation: Value = serde_json::from_str(&signal).expect("repair observation");
+    let repaired = native_contract_retry_request(&request, &signal);
+
+    assert_eq!(
+        observation["protocol_observation"]["failed_tool_name"],
+        unknown_name
+    );
+    assert_eq!(
+        observation["protocol_observation"]["available_tool_names"],
+        json!([tool_name, "respond"])
+    );
+    assert_eq!(
+        observation["protocol_observation"]["exact_failed_tool"],
+        false
+    );
+    assert!(observation["protocol_observation"]["tool_name"].is_null());
+    assert_eq!(repaired.tools, request.tools);
+    assert_eq!(repaired.tool_choice, ModelToolChoice::Required);
 }
 
 #[test]
