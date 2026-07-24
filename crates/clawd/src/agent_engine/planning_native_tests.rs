@@ -893,16 +893,12 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
     );
     assert_eq!(request.tools[1].name, "call_doc_parse");
     assert!(request.tools[1].description.contains("document_summary"));
+    assert!(request.tools[1]
+        .description
+        .contains("direct_runtime_capability_arguments_v1"));
+    assert_eq!(request.tools[1].input_schema["required"], json!(["path"]));
     assert_eq!(
-        request.tools[1].input_schema["oneOf"][0]["properties"]["capability"]["enum"],
-        json!(["doc_parse"])
-    );
-    assert_eq!(
-        request.tools[1].input_schema["oneOf"][0]["properties"]["args"]["required"],
-        json!(["path"])
-    );
-    assert_eq!(
-        request.tools[1].input_schema["oneOf"][0]["properties"]["args"]["additionalProperties"],
+        request.tools[1].input_schema["additionalProperties"],
         json!(false)
     );
     assert_eq!(request.tools[2].name, "respond");
@@ -934,7 +930,7 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
             vec![ModelToolCall {
                 id: "group-call".to_string(),
                 name: "call_doc_parse".to_string(),
-                arguments: json!({"capability": "doc_parse", "args": {"path": "README.md"}}),
+                arguments: json!({"path": "README.md"}),
             }],
             "",
         ),
@@ -945,7 +941,36 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
     .expect("group action");
     assert!(matches!(
         &actions[0],
-        AgentAction::CallCapability { capability, .. } if capability == "doc_parse"
+        AgentAction::CallCapability { capability, args }
+            if capability == "doc_parse" && args == &json!({"path": "README.md"})
+    ));
+}
+
+#[test]
+fn native_single_capability_group_accepts_direct_empty_leaf_arguments() {
+    let group_map = BTreeMap::from([(
+        "call_log_analyze".to_string(),
+        BTreeSet::from(["log_analyze".to_string()]),
+    )]);
+    let actions = actions_from_native_turn_with_groups(
+        &turn(
+            vec![ModelToolCall {
+                id: "analyze-default-log".to_string(),
+                name: "call_log_analyze".to_string(),
+                arguments: json!({}),
+            }],
+            "",
+        ),
+        &["log_analyze".to_string()],
+        &group_map,
+        None,
+    )
+    .expect("single capability direct arguments");
+
+    assert!(matches!(
+        &actions[0],
+        AgentAction::CallCapability { capability, args }
+            if capability == "log_analyze" && args == &json!({})
     ));
 }
 

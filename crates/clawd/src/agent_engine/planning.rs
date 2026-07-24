@@ -804,6 +804,20 @@ fn native_capability_tool_definition(
     capability_names: &[String],
     capability_argument_schemas: &BTreeMap<String, Value>,
 ) -> ModelToolDefinition {
+    if tool_name != NATIVE_CALL_CAPABILITY_TOOL {
+        if let [capability] = capability_names {
+            if let Some(input_schema) = capability_argument_schemas.get(capability) {
+                return ModelToolDefinition {
+                    name: tool_name.to_string(),
+                    description: format!(
+                        "{description}; schema:direct_runtime_capability_arguments_v1; capability={capability}"
+                    ),
+                    input_schema: input_schema.clone(),
+                    strict: true,
+                };
+            }
+        }
+    }
     let input_schema = if !capability_names.is_empty()
         && capability_names
             .iter()
@@ -1146,14 +1160,28 @@ fn action_from_native_tool_call_with_schemas(
             action_from_native_capability_group_load(call)
         }
         tool_name if native_capability_groups.contains_key(tool_name) => {
-            let action = action_from_native_capability_call(call, capability_argument_schemas)?;
+            let allowed = &native_capability_groups[tool_name];
+            let uses_discriminated_wrapper = call.arguments.as_object().is_some_and(|arguments| {
+                arguments.contains_key("capability") || arguments.contains_key("args")
+            });
+            let action = if allowed.len() == 1 && !uses_discriminated_wrapper {
+                let Some(capability) = allowed.iter().next() else {
+                    return Err("native_plan_group_action_invalid".to_string());
+                };
+                if !call.arguments.is_object() {
+                    return Err("native_plan_args_not_object".to_string());
+                }
+                AgentAction::CallCapability {
+                    capability: capability.clone(),
+                    args: call.arguments.clone(),
+                }
+            } else {
+                action_from_native_capability_call(call, capability_argument_schemas)?
+            };
             let AgentAction::CallCapability { capability, .. } = &action else {
                 return Err("native_plan_group_action_invalid".to_string());
             };
-            if native_capability_groups
-                .get(tool_name)
-                .is_some_and(|allowed| allowed.contains(capability))
-            {
+            if allowed.contains(capability) {
                 Ok(action)
             } else {
                 Err("native_plan_capability_not_in_selected_group".to_string())
