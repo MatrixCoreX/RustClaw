@@ -357,6 +357,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 4. [编码与可观测性](docs/architecture/04-coding-observability.zh-CN.md)
 5. [技能、多媒体与模型](docs/architecture/05-skills-media-models.zh-CN.md)
 6. [发布验证](docs/architecture/06-release-validation.zh-CN.md)
+7. [Office 工件工作区](docs/architecture/07-office-artifacts.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
 完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。

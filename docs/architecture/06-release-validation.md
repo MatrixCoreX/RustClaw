@@ -2,7 +2,8 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [Skills, media, and models](05-skills-media-models.md) |
-[Architecture index](README.md)
+[Architecture index](README.md) |
+Next: [Office artifact workspace](07-office-artifacts.md)
 
 <!-- ai-learning-navigation:end -->
 

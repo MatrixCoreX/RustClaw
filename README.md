@@ -418,6 +418,7 @@ UI renders these same Markdown sources instead of maintaining a second copy:
 4. [Coding and observability](docs/architecture/04-coding-observability.md)
 5. [Skills, media, and models](docs/architecture/05-skills-media-models.md)
 6. [Release validation](docs/architecture/06-release-validation.md)
+7. [Office artifact workspace](docs/architecture/07-office-artifacts.md)
 
 Use the [architecture index](docs/architecture/README.md) for language selection and previous/next navigation.
 The [full documentation index](docs/README.md) links every engineering document in English and Simplified Chinese.

@@ -14,6 +14,7 @@ GitHub 的 README 不支持真正的页内分页。RustClaw 因此只在仓库 R
 | 4 | [Coding and observability](04-coding-observability.md) | [编码与可观测性](04-coding-observability.zh-CN.md) |
 | 5 | [Skills, media, and models](05-skills-media-models.md) | [技能、多媒体与模型](05-skills-media-models.zh-CN.md) |
 | 6 | [Release validation](06-release-validation.md) | [发布验证](06-release-validation.zh-CN.md) |
+| 7 | [Office artifact workspace](07-office-artifacts.md) | [Office 工件工作区](07-office-artifacts.zh-CN.md) |
 
 These files are also the source documents rendered by the UI's AI Learning
 page. Edit a diagram here instead of copying it into UI source.

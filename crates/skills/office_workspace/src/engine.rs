@@ -68,6 +68,7 @@ fn inspect_action(action: &str, object: &Map<String, Value>) -> OfficeResult<Val
             envelope.presentation = Some(read_presentation(&package)?);
         }
     }
+    mark_untrusted_content_warnings(&mut envelope);
 
     if action == "word.find" {
         select_word_matches(&mut envelope, object)?;
@@ -84,6 +85,51 @@ fn inspect_action(action: &str, object: &Map<String, Value>) -> OfficeResult<Val
             json!({}),
         )
     })?)
+}
+
+fn mark_untrusted_content_warnings(envelope: &mut OfficeArtifactEnvelope) {
+    let comments = envelope
+        .document_blocks
+        .iter()
+        .filter(|block| block.kind == "comment")
+        .count()
+        + envelope
+            .workbook
+            .iter()
+            .flat_map(|workbook| workbook.sheets.iter())
+            .flat_map(|sheet| sheet.cells.iter())
+            .filter(|cell| cell.comment.is_some())
+            .count();
+    let formulas = envelope
+        .workbook
+        .iter()
+        .flat_map(|workbook| workbook.sheets.iter())
+        .flat_map(|sheet| sheet.cells.iter())
+        .filter(|cell| cell.formula.is_some())
+        .count();
+    let hidden_sheets = envelope
+        .workbook
+        .iter()
+        .flat_map(|workbook| workbook.sheets.iter())
+        .filter(|sheet| sheet.state != "visible")
+        .count();
+    let hidden_slides = envelope
+        .presentation
+        .iter()
+        .flat_map(|presentation| presentation.slides.iter())
+        .filter(|slide| slide.hidden)
+        .count();
+    let mut add = |code: &str, count: usize| {
+        if count > 0 && !envelope.warnings.iter().any(|warning| warning.code == code) {
+            envelope
+                .warnings
+                .push(OfficeWarning::new(code, None, json!({"count": count})));
+        }
+    };
+    add("comment_content_present", comments);
+    add("formula_content_present", formulas);
+    add("hidden_worksheet_content_present", hidden_sheets);
+    add("hidden_slide_content_present", hidden_slides);
 }
 
 pub fn inspect_output(path: &std::path::Path, format: OfficeFormat) -> OfficeResult<Value> {
@@ -130,6 +176,27 @@ fn select_word_matches(
 }
 
 fn base_envelope(package: &OfficePackage) -> OfficeArtifactEnvelope {
+    let mut artifacts = vec![json!({
+        "kind": "office_source",
+        "path": package.source.path,
+        "sha256": package.source.sha256,
+        "size_bytes": package.source.size_bytes,
+        "format": package.format.as_str(),
+    })];
+    artifacts.extend(package.evidence.artifact_members.iter().map(|member| {
+        json!({
+            "kind": "office_package_member",
+            "container_path": package.source.path,
+            "container_sha256": package.source.sha256,
+            "member_id": member.id,
+            "package_member": member.package_member,
+            "sha256": member.sha256,
+            "size_bytes": member.size_bytes,
+            "storage_kind": member.storage_kind,
+            "content_inline": member.content_inline,
+            "untrusted": member.untrusted,
+        })
+    }));
     OfficeArtifactEnvelope {
         schema_version: ENVELOPE_SCHEMA_VERSION,
         format: package.format,
@@ -160,13 +227,7 @@ fn base_envelope(package: &OfficePackage) -> OfficeArtifactEnvelope {
             checks: Vec::new(),
             errors: Vec::new(),
         },
-        artifacts: vec![json!({
-            "kind": "office_source",
-            "path": package.source.path,
-            "sha256": package.source.sha256,
-            "size_bytes": package.source.size_bytes,
-            "format": package.format.as_str(),
-        })],
+        artifacts,
     }
 }
 

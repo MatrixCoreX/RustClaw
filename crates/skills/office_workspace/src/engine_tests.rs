@@ -17,6 +17,12 @@ fn reads_a_bounded_spreadsheet_range() {
         .expect("cells");
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0]["reference"], "B2");
+    assert_eq!(cells[0]["untrusted"], true);
+    assert!(value["warnings"]
+        .as_array()
+        .expect("warnings")
+        .iter()
+        .any(|warning| warning["code"] == "formula_content_present"));
     std::fs::remove_file(path).ok();
 }
 

@@ -16,6 +16,9 @@
 ## Config Entry Points (from interface)
 - `WORKSPACE_ROOT`: base directory for relative input and output paths.
 - `OFFICE_MAX_ZIP_ENTRIES`, `OFFICE_MAX_MEMBER_BYTES`, `OFFICE_MAX_TOTAL_BYTES`, and `OFFICE_MAX_EXPANSION_RATIO`: optional package safety limits.
+- `OFFICE_LARGE_MEMBER_REF_BYTES`: minimum package-member size represented as an artifact reference instead of inline model evidence; defaults to 262144 bytes.
+- `OFFICE_MAX_ARTIFACT_REFS`: maximum media and large-member artifact references retained per inspection; defaults to 1000 and is clamped to 1..10000.
+- `OFFICE_TEMP_MAX_AGE_SECONDS`: stale transaction-package cleanup age; defaults to 86400 seconds and is clamped to at least 3600 seconds.
 - Optional rendering/export uses a separately detected adapter. Structural read/write does not require LibreOffice or a platform-native Office application.
 
 ## Actions (from interface)
@@ -43,6 +46,82 @@ Operation objects use an `op` machine token and format-specific fields. Plain
 spreadsheet text remains text even when it begins with `=`, `+`, `-`, or `@`;
 only `value_type=formula` creates a formula. Object selectors use stable block,
 table, cell/range, slide, or shape identifiers from a matching source revision.
+## Structured Operation Contract (from interface)
+All indices and positions are integers. Use object IDs returned by the matching
+source revision. Do not infer IDs from visible text.
+
+### Word operations
+
+- Package/section: `set_properties(title?,subject?,creator?)`,
+  `set_section(orientation=portrait|landscape)`, `set_header(text)`,
+  `set_footer(text)`, `add_page_break`, `add_section_break`.
+- Content creation: `add_heading(text,level?)`, `add_paragraph(text,style?)`,
+  `add_list_item(text,level?,style?)`, `add_table(rows)`,
+  `add_image(path,alt?,caption?,width_emu?,height_emu?)`,
+  `add_hyperlink(text,url)`, `add_bookmark(name,text,bookmark_id?)`,
+  `add_footnote(text)`, `add_endnote(text)`,
+  `add_comment(text,comment)`.
+- Paragraph edits: `replace_block(block_id,text)`,
+  `delete_block(block_id)`, `set_block_style(block_id,style)`,
+  `replace_match(block_id,expected_text,text)`,
+  `insert_block_before(block_id,text,style?)`,
+  `insert_block_after(block_id,text,style?)`,
+  `move_block(block_id,target_block_id,position=before|after)`.
+- Run edits: `replace_run(block_id,run,text,expected_text?)`,
+  `insert_run(block_id,index,text,style?)`,
+  `delete_run(block_id,run)`,
+  `move_run(block_id,run,target_index)`. Returned run selectors are
+  one-based for `run`; insertion/target indices are zero-based.
+- Table/media edits: `table_set_cell(table_id,row,column,text)`,
+  `table_add_row(table_id,values,index?)`,
+  `table_delete_row(table_id,row)`,
+  `table_add_column(table_id,values,column?)`,
+  `table_delete_column(table_id,column)`,
+  `replace_image(media_id,path)`.
+
+### Spreadsheet operations
+
+- Sheet lifecycle: `add_sheet(name)`, `copy_sheet(sheet,new_name)`,
+  `rename_sheet(sheet,new_name)`, `reorder_sheet(sheet,index)`,
+  `hide_sheet(sheet,hidden?)`, `delete_sheet(sheet)`.
+- Cells/ranges: `set_cell(sheet,cell,value,value_type?,style_id?)`,
+  `clear_cell(sheet,cell)`,
+  `set_range(sheet,range,values,value_type?,style_id?)`,
+  `fill_range(sheet,range,value,value_type?,style_id?)`,
+  `move_range(sheet,range,target_cell,target_sheet?)`.
+  `value_type` is `text|string|number|boolean|date|formula`; only `formula`
+  creates executable workbook formula syntax.
+- Layout: `merge_cells(sheet,range)`, `unmerge_cells(sheet,range)`,
+  `freeze_panes(sheet,cell)`, `set_auto_filter(sheet,range)`,
+  `set_column_width(sheet,column,width)`,
+  `set_row_height(sheet,row,height)`.
+- Objects/rules: `add_table(sheet,range,name)`,
+  `add_chart(sheet,range,title?,chart_type?)`,
+  `add_comment(sheet,cell,text)`, `add_hyperlink(sheet,cell,url)`,
+  `add_image(sheet,path,cell?,alt?)`,
+  `add_named_range(name,reference)`,
+  `add_data_validation(sheet,range,validation_type?,formula1?,allow_blank?)`,
+  `add_conditional_format(sheet,range,formula?)`.
+
+### Presentation operations
+
+- Slide lifecycle: `add_slide(title?,body?,notes?,layout?,position?,hidden?)`,
+  `duplicate_slide(slide_id,position?)`, `move_slide(slide_id,position)`,
+  `hide_slide(slide_id,hidden?)`, `delete_slide(slide_id)`,
+  `set_slide_layout(slide_id,layout|layout_path)`.
+  Slide `position` values are one-based.
+- Content: `replace_slide_text(slide_id,match,text)`,
+  `add_text(slide_id,text)`, `add_notes(slide_id,text|notes)`,
+  `add_image(slide_id,path,alt?)`, `replace_image(media_id,path)`,
+  `add_table(slide_id,rows)`,
+  `add_chart(slide_id,categories,values,title?,chart_type?)`,
+  `add_shape(slide_id,shape?,text?)`,
+  `add_link(slide_id,text,url)`,
+  `set_transition(slide_id,transition=fade|push|wipe)`.
+- Layout selectors are package paths or `slideLayoutN` machine tokens.
+  Duplication rejects notes-backed slides when a lossless relationship graph
+  cannot be proven. Visual fidelity is not claimed without render evidence.
+
 
 ## Error Contract (from interface)
 - `invalid_input`, `missing_argument`, `unsupported_action`, `unsupported_operation`.
@@ -60,6 +139,8 @@ table, cell/range, slide, or shape identifiers from a matching source revision.
 - `warnings`: untrusted or preservation observations with machine codes.
 - `cursor`: returned/total counts and an optional source-bound next cursor.
 - `operation_log`, source/output hashes, changed refs, preservation report, validation, and artifacts describe mutation results.
+- `revision_lineage` identifies template/parent and verified output revisions;
+  `continuation` provides bounded machine arguments for a later edit turn.
 - `text` is only a compact fallback and must not drive routing, retry, success, or final delivery.
 
 ## Request/Response Examples (from interface)

@@ -40,7 +40,7 @@ pub fn execute_mutation(action: &str, object: &Map<String, Value>) -> OfficeResu
         ));
     }
 
-    let (source, build) = if editing {
+    let (source, source_kind, build) = if editing {
         let source_path = resolve_input_path(required_string(object, "source_path")?)?;
         let expected_hash = required_string(object, "source_sha256")?.to_ascii_lowercase();
         let source = OfficePackage::open(&source_path, Some(format))?;
@@ -66,14 +66,14 @@ pub fn execute_mutation(action: &str, object: &Map<String, Value>) -> OfficeResu
             ));
         }
         let build = edit_package(format, &source, &operations)?;
-        (Some(source), build)
+        (Some(source), "revision", build)
     } else if let Some(template_path) = object.get("template_path").and_then(Value::as_str) {
         let template_path = resolve_input_path(template_path)?;
         let template = OfficePackage::open(&template_path, Some(format))?;
         let build = edit_package(format, &template, &operations)?;
-        (Some(template), build)
+        (Some(template), "template", build)
     } else {
-        (None, create_package(format, &operations)?)
+        (None, "empty", create_package(format, &operations)?)
     };
 
     if preview {
@@ -83,6 +83,7 @@ pub fn execute_mutation(action: &str, object: &Map<String, Value>) -> OfficeResu
             &output_path,
             overwrite,
             in_place,
+            source_kind,
             source.as_ref(),
             &operations,
             &build,
@@ -104,6 +105,7 @@ pub fn execute_mutation(action: &str, object: &Map<String, Value>) -> OfficeResu
         &mut value,
         action,
         source.as_ref(),
+        source_kind,
         &operations,
         &build,
         &publish,
@@ -165,6 +167,7 @@ fn preview_value(
     output_path: &Path,
     overwrite: bool,
     in_place: bool,
+    source_kind: &str,
     source: Option<&OfficePackage>,
     operations: &[NormalizedOperation],
     build: &MutationBuild,
@@ -179,6 +182,9 @@ fn preview_value(
         "expected_output_path": output_path.display().to_string(),
         "overwrite": overwrite,
         "in_place": in_place,
+        "source_kind": source_kind,
+        "template_read_only": source_kind == "template",
+        "template_sha256": (source_kind == "template").then(|| source.map(|source| source.source.sha256.clone())).flatten(),
         "normalized_operations": operations.iter().map(NormalizedOperation::as_value).collect::<Vec<_>>(),
         "operation_log": operations.iter().map(|operation| operation.record("validated")).collect::<Vec<_>>(),
         "changed_object_refs": build.changed_refs,
@@ -203,6 +209,7 @@ fn attach_mutation_evidence(
     value: &mut Value,
     action: &str,
     source: Option<&OfficePackage>,
+    source_kind: &str,
     operations: &[NormalizedOperation],
     build: &MutationBuild,
     publish: &crate::package_write::PublishEvidence,
@@ -229,10 +236,26 @@ fn attach_mutation_evidence(
     object.insert(
         "revision_lineage".to_string(),
         json!({
-            "parent_sha256": source.map(|source| source.source.sha256.clone()),
+            "source_kind": source_kind,
+            "parent_sha256": (source_kind == "revision").then(|| source.map(|source| source.source.sha256.clone())).flatten(),
+            "template_sha256": (source_kind == "template").then(|| source.map(|source| source.source.sha256.clone())).flatten(),
+            "template_read_only": source_kind == "template",
             "output_sha256": publish.output_sha256,
             "in_place": in_place,
             "backup_path": publish.backup_path.as_ref().map(|path| path.display().to_string()),
+        }),
+    );
+    let (preview_capability, edit_capability) = revision_capabilities(action);
+    object.insert(
+        "continuation".to_string(),
+        json!({
+            "kind": "office_revision",
+            "status": "ready",
+            "source_path": publish.output_path.display().to_string(),
+            "source_sha256": publish.output_sha256,
+            "preview_capability": preview_capability,
+            "edit_capability": edit_capability,
+            "requires_operations": true,
         }),
     );
     object.insert(
@@ -245,8 +268,9 @@ fn attach_mutation_evidence(
     if let Some(source_object) = object.get_mut("source").and_then(Value::as_object_mut) {
         source_object.insert(
             "parent_sha256".to_string(),
-            source
-                .map(|source| Value::String(source.source.sha256.clone()))
+            (source_kind == "revision")
+                .then(|| source.map(|source| Value::String(source.source.sha256.clone())))
+                .flatten()
                 .unwrap_or(Value::Null),
         );
     }
@@ -258,6 +282,10 @@ fn attach_mutation_evidence(
             "kind": "office_output",
             "path": publish.output_path.display().to_string(),
             "sha256": publish.output_sha256,
+            "revision": format!("sha256:{}", publish.output_sha256),
+            "parent_sha256": (source_kind == "revision").then(|| source.map(|source| source.source.sha256.clone())).flatten(),
+            "template_sha256": (source_kind == "template").then(|| source.map(|source| source.source.sha256.clone())).flatten(),
+            "source_kind": source_kind,
         }));
         if let Some(backup) = &publish.backup_path {
             artifacts.push(json!({
@@ -276,6 +304,16 @@ fn attach_mutation_evidence(
                 Value::String("atomic_publish_complete".to_string()),
             ]);
         }
+    }
+}
+
+fn revision_capabilities(action: &str) -> (&'static str, &'static str) {
+    if action.starts_with("word.") {
+        ("word.preview_edit", "word.edit")
+    } else if action.starts_with("spreadsheet.") {
+        ("spreadsheet.preview_edit", "spreadsheet.edit")
+    } else {
+        ("presentation.preview_edit", "presentation.edit")
     }
 }
 

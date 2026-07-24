@@ -2,7 +2,8 @@
 
 <!-- ai-learning-navigation:start -->
 上一页：[技能、多媒体与模型](05-skills-media-models.zh-CN.md) |
-[架构索引](README.md)
+[架构索引](README.md) |
+下一页：[Office 工件工作区](07-office-artifacts.zh-CN.md)
 
 <!-- ai-learning-navigation:end -->
 
