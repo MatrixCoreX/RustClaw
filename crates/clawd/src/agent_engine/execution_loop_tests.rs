@@ -3,7 +3,7 @@ use super::{
     capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
     prior_structured_observation_satisfies_read_only_action,
     successful_structured_observation_satisfies_selector,
-    terminal_synthesis_can_skip_remaining_actions,
+    terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
 };
 use crate::agent_engine::action_fingerprint_for_policy;
 use crate::agent_engine::support::{
@@ -14,7 +14,7 @@ use std::sync::{Arc, RwLock};
 
 fn test_policy(registry_idempotency_guard_enabled: bool) -> super::AgentLoopGuardPolicy {
     super::AgentLoopGuardPolicy {
-        max_steps: 8,
+        max_actions_per_turn: 8,
         repeat_action_limit: 1,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: if registry_idempotency_guard_enabled {
@@ -131,6 +131,51 @@ fn explicit_user_visible_output_marks_plan_exhausted() {
         outcome.stop_signal.as_deref(),
         Some("plan_exhausted_user_visible")
     );
+}
+
+fn step_result(step_id: &str, output: &str) -> crate::executor::StepExecutionResult {
+    crate::executor::StepExecutionResult {
+        step_id: step_id.to_string(),
+        skill: "fixture_observer".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(output.to_string()),
+        error: None,
+        started_at: 10,
+        finished_at: 20,
+    }
+}
+
+#[test]
+fn duplicate_machine_output_does_not_count_as_round_progress() {
+    let mut loop_state = super::LoopState::new();
+    loop_state
+        .executed_step_results
+        .push(step_result("step_1", r#"{"state":"same"}"#));
+    let snapshot = capture_round_progress_snapshot(&loop_state);
+    loop_state
+        .executed_step_results
+        .push(step_result("step_2", r#"{"state":"same"}"#));
+    loop_state.progress_messages.push("2/3".to_string());
+
+    let outcome = finalize_execute_round_outcome(&loop_state, &snapshot, 1, 1, false, None);
+
+    assert!(outcome.no_progress);
+}
+
+#[test]
+fn changed_machine_output_counts_as_round_progress() {
+    let mut loop_state = super::LoopState::new();
+    loop_state
+        .executed_step_results
+        .push(step_result("step_1", r#"{"state":"pending"}"#));
+    let snapshot = capture_round_progress_snapshot(&loop_state);
+    loop_state
+        .executed_step_results
+        .push(step_result("step_2", r#"{"state":"complete"}"#));
+
+    let outcome = finalize_execute_round_outcome(&loop_state, &snapshot, 1, 1, false, None);
+
+    assert!(!outcome.no_progress);
 }
 
 #[test]
@@ -434,6 +479,63 @@ fn done_recipe_does_not_allow_repeating_successful_observe_effect() {
         recipe,
         crate::execution_recipe::ActionEffect::observe(),
     ));
+}
+
+#[test]
+fn waiting_task_allows_repeated_observation_without_active_recipe() {
+    let mut loop_state = super::LoopState::new();
+    loop_state.task_lifecycle = Some(serde_json::json!({"state": "waiting"}));
+
+    assert!(waiting_task_allows_repeated_observation(
+        &loop_state,
+        crate::execution_recipe::ActionEffect::observe(),
+    ));
+    assert!(!waiting_task_allows_repeated_observation(
+        &loop_state,
+        crate::execution_recipe::ActionEffect::mutate(),
+    ));
+}
+
+#[test]
+fn waiting_repeat_guard_relies_on_stagnation_instead_of_repeat_limit() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture("task-waiting-repeat-observe");
+    let mut loop_state = super::LoopState::new();
+    loop_state.task_lifecycle = Some(serde_json::json!({"state": "background"}));
+    let action = crate::AgentAction::CallSkill {
+        skill: "git_basic".to_string(),
+        args: serde_json::json!({"action": "status"}),
+    };
+    let policy = test_policy(false);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            1,
+        ),
+        None
+    );
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            2,
+        ),
+        None
+    );
 }
 
 #[test]

@@ -205,12 +205,12 @@ fn code_mutation_unresolved_test_status_creates_retry_gap() {
 fn post_write_readback_recovery_reserves_bounded_plan_capacity() {
     let policy = test_policy();
     let recovery = post_write_content_evidence_recovery_policy(&policy, 2);
-    assert_eq!(recovery.max_steps, policy.max_steps);
+    assert_eq!(recovery.max_actions_per_turn, policy.max_actions_per_turn);
 
     let mut narrow_policy = policy.clone();
-    narrow_policy.max_steps = 1;
+    narrow_policy.max_actions_per_turn = 1;
     let expanded = post_write_content_evidence_recovery_policy(&narrow_policy, 3);
-    assert_eq!(expanded.max_steps, 3);
+    assert_eq!(expanded.max_actions_per_turn, 3);
 }
 
 #[test]

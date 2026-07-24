@@ -61,33 +61,33 @@ fn checkpoint_continuation_keeps_only_unexecuted_verified_actions() {
 
 fn base_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
-        max_steps: 32,
+        max_actions_per_turn: 32,
         repeat_action_limit: 4,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         fast_read: LoopRecipeOverrides {
-            max_steps: Some(16),
+            max_actions_per_turn: Some(16),
             repeat_action_limit: Some(3),
             max_repairs: None,
             run_cmd_timeout_seconds: None,
             run_cmd_validation_timeout_seconds: None,
         },
         grounded_summary: LoopRecipeOverrides {
-            max_steps: Some(40),
+            max_actions_per_turn: Some(40),
             repeat_action_limit: Some(5),
             max_repairs: None,
             run_cmd_timeout_seconds: None,
             run_cmd_validation_timeout_seconds: None,
         },
         multi_step_workspace: LoopRecipeOverrides {
-            max_steps: Some(56),
+            max_actions_per_turn: Some(56),
             repeat_action_limit: Some(6),
             max_repairs: None,
             run_cmd_timeout_seconds: None,
             run_cmd_validation_timeout_seconds: None,
         },
         ops_closed_loop: LoopRecipeOverrides {
-            max_steps: Some(48),
+            max_actions_per_turn: Some(48),
             repeat_action_limit: Some(6),
             max_repairs: Some(3),
             run_cmd_timeout_seconds: Some(180),
@@ -1437,6 +1437,35 @@ registry_idempotency_guard_scope = "all"
 }
 
 #[test]
+fn action_limit_prefers_current_key_and_accepts_one_release_legacy_key() {
+    for (name, body, expected) in [
+        (
+            "current",
+            "max_actions_per_turn = 19\nmax_steps = 7",
+            19usize,
+        ),
+        ("legacy", "max_steps = 7", 7usize),
+    ] {
+        let root = temp_support_workspace(&format!("action-limit-{name}"));
+        let config_dir = root.join("configs");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        std::fs::write(
+            config_dir.join("agent_guard.toml"),
+            format!("[agent.loop_guard]\n{body}\n"),
+        )
+        .expect("write agent guard config");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root.clone();
+
+        assert_eq!(
+            load_agent_loop_guard_policy(&state).max_actions_per_turn,
+            expected
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
 fn answer_verifier_required_scope_legacy_token_normalizes_to_all() {
     let root = temp_support_workspace("answer-verifier-scope-config");
     let config_dir = root.join("configs");
@@ -1642,7 +1671,7 @@ fn ops_closed_loop_policy_uses_override_budget() {
         ..Default::default()
     });
     let adjusted = policy.adjusted_for_context(recipe, None);
-    assert_eq!(adjusted.max_steps, 48);
+    assert_eq!(adjusted.max_actions_per_turn, 48);
     assert_eq!(adjusted.repeat_action_limit, 6);
     assert_eq!(
         adjusted.run_cmd_timeout_override(recipe, crate::execution_recipe::ActionEffect::mutate()),
@@ -1666,7 +1695,7 @@ fn planner_contract_selects_grounded_summary_budget() {
         LoopBudgetProfile::GroundedSummary
     );
     let adjusted = policy.adjusted_for_context(recipe, Some(&route));
-    assert_eq!(adjusted.max_steps, 40);
+    assert_eq!(adjusted.max_actions_per_turn, 40);
 }
 
 #[test]
@@ -1694,24 +1723,24 @@ fn workspace_delivery_contract_selects_multi_step_budget() {
         LoopBudgetProfile::MultiStepWorkspace
     );
     let adjusted = policy.adjusted_for_context(recipe, Some(&route));
-    assert_eq!(adjusted.max_steps, 56);
+    assert_eq!(adjusted.max_actions_per_turn, 56);
 }
 
 #[test]
 fn verified_plan_budget_profile_can_raise_guard_budget() {
     let policy = base_policy()
         .adjusted_for_task_budget_profile(crate::task_budget_contract::TaskBudgetProfile::FastRead);
-    assert_eq!(policy.max_steps, 16);
+    assert_eq!(policy.max_actions_per_turn, 16);
 
     let policy = policy.adjusted_for_task_budget_profile(
         crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
     );
-    assert_eq!(policy.max_steps, 56);
+    assert_eq!(policy.max_actions_per_turn, 56);
 
     let selected = crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace
         .widen_with(crate::task_budget_contract::TaskBudgetProfile::FastRead);
     let policy = policy.adjusted_for_task_budget_profile(selected);
-    assert_eq!(policy.max_steps, 56);
+    assert_eq!(policy.max_actions_per_turn, 56);
 }
 
 #[test]

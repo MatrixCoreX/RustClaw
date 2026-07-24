@@ -243,6 +243,8 @@ impl TaskBudgetPolicy {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct BudgetProgress {
     pub(crate) evidence_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) machine_progress_digest: Option<String>,
     pub(crate) artifact_count: u64,
     pub(crate) completed_plan_nodes: u64,
     pub(crate) verified_state_transitions: u64,
@@ -253,6 +255,7 @@ pub(crate) struct BudgetProgress {
 impl BudgetProgress {
     pub(crate) fn observed_progress(&self) -> bool {
         self.evidence_count > 0
+            || self.machine_progress_digest.is_some()
             || self.artifact_count > 0
             || self.completed_plan_nodes > 0
             || self.verified_state_transitions > 0
@@ -261,6 +264,11 @@ impl BudgetProgress {
 
     fn advanced_from(&self, previous: &Self) -> bool {
         self.evidence_count > previous.evidence_count
+            || self
+                .machine_progress_digest
+                .as_deref()
+                .filter(|digest| !digest.is_empty())
+                .is_some_and(|digest| previous.machine_progress_digest.as_deref() != Some(digest))
             || self.artifact_count > previous.artifact_count
             || self.completed_plan_nodes > previous.completed_plan_nodes
             || self.verified_state_transitions > previous.verified_state_transitions

@@ -6,18 +6,19 @@ use super::{
 };
 use crate::{AgentAction, AppState, ClaimedTask};
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 struct RoundProgressSnapshot {
     delivery_count: usize,
-    progress_count: usize,
-    subtask_count: usize,
+    machine_progress_fingerprints: BTreeSet<String>,
 }
 
 fn capture_round_progress_snapshot(loop_state: &LoopState) -> RoundProgressSnapshot {
     RoundProgressSnapshot {
         delivery_count: loop_state.delivery_messages.len(),
-        progress_count: loop_state.progress_messages.len(),
-        subtask_count: loop_state.subtask_results.len(),
+        machine_progress_fingerprints: super::progress_contract::machine_progress_fingerprints(
+            loop_state,
+        ),
     }
 }
 
@@ -36,9 +37,9 @@ fn finalize_execute_round_outcome(
         stop_signal = Some("plan_exhausted_user_visible".to_string());
     }
     let delivery_grew = loop_state.delivery_messages.len() > snapshot.delivery_count;
-    let progress_grew = loop_state.progress_messages.len() > snapshot.progress_count;
-    let step_output_grew = loop_state.subtask_results.len() > snapshot.subtask_count;
-    let no_progress = !delivery_grew && !progress_grew && !step_output_grew;
+    let machine_progress = super::progress_contract::machine_progress_fingerprints(loop_state);
+    let no_progress =
+        !delivery_grew && machine_progress.is_subset(&snapshot.machine_progress_fingerprints);
     RoundOutcome {
         executed_actions,
         had_error: false,
@@ -57,6 +58,7 @@ fn repeated_successful_action_is_allowed_for_active_recipe(
         return false;
     };
     action_effect_is_repeatable_for_active_recipe(loop_state.execution_recipe, effect)
+        || waiting_task_allows_repeated_observation(loop_state, effect)
 }
 
 fn action_effect_for_repeat_guard(
@@ -100,6 +102,26 @@ fn action_effect_is_repeatable_for_active_recipe(
         && (effect.observes || effect.validates)
 }
 
+fn waiting_task_allows_repeated_observation(
+    loop_state: &LoopState,
+    effect: crate::execution_recipe::ActionEffect,
+) -> bool {
+    if effect.mutates || !(effect.observes || effect.validates) {
+        return false;
+    }
+    loop_state
+        .task_lifecycle
+        .as_ref()
+        .and_then(|value| value.get("state"))
+        .and_then(Value::as_str)
+        .is_some_and(|state| matches!(state, "waiting" | "background"))
+        || loop_state
+            .task_checkpoint
+            .as_ref()
+            .and_then(|value| value.get("pending_async_job"))
+            .is_some_and(|job| !job.is_null())
+}
+
 fn check_repeat_action_guard(
     state: &AppState,
     task: &ClaimedTask,
@@ -112,12 +134,14 @@ fn check_repeat_action_guard(
     if matches!(action, AgentAction::Respond { .. }) {
         return None;
     }
+    let repeatable_observation =
+        repeated_successful_action_is_allowed_for_active_recipe(state, loop_state, action);
     let repeat_count = loop_state
         .repeat_action_counts
         .entry(fingerprint.to_string())
         .or_insert(0);
     *repeat_count += 1;
-    if *repeat_count > policy.repeat_action_limit {
+    if *repeat_count > policy.repeat_action_limit && !repeatable_observation {
         if let Some(attribution) = super::registry_idempotency_guard_attribution(
             state,
             policy,
@@ -144,7 +168,7 @@ fn check_repeat_action_guard(
         return Some("repeat_action_limit".to_string());
     }
     if let Some(success_count) = loop_state.successful_action_fingerprints.get(fingerprint) {
-        if repeated_successful_action_is_allowed_for_active_recipe(state, loop_state, action) {
+        if repeatable_observation {
             return None;
         }
         let repeated_observation_ready = action_effect_for_repeat_guard(state, loop_state, action)
@@ -346,6 +370,117 @@ fn prior_structured_observation_satisfies_read_only_action(
         && latest_successful_output_satisfies_structured_selector(agent_run_context, loop_state)
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn try_execute_independent_read_batch(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    user_text: &str,
+    actions: &[AgentAction],
+    round_steps: &[String],
+    loop_state: &mut LoopState,
+    policy: &AgentLoopGuardPolicy,
+    agent_run_context: Option<&AgentRunContext>,
+    snapshot: &RoundProgressSnapshot,
+    actionable_count: usize,
+) -> Result<Option<RoundOutcome>, String> {
+    if loop_state.execution_recipe.is_active()
+        || loop_state.task_lifecycle.is_some()
+        || loop_state.task_checkpoint.is_some()
+        || loop_state.pending_user_input_required
+    {
+        return Ok(None);
+    }
+    let batch_len = super::action_batch_contract::independent_read_batch_prefix_len(
+        state,
+        actions,
+        policy.max_actions_per_turn.max(1),
+    );
+    if batch_len == 0 {
+        return Ok(None);
+    }
+    if loop_state.task_budget_slice.as_ref().is_some_and(|slice| {
+        (loop_state.tool_calls_total as u64).saturating_add(batch_len as u64)
+            > slice.hard_ceilings.tool_calls
+    }) {
+        return Ok(None);
+    }
+    if actions[..batch_len].iter().any(|action| {
+        prior_structured_observation_satisfies_read_only_action(
+            state,
+            agent_run_context,
+            loop_state,
+            action,
+        )
+    }) {
+        return Ok(None);
+    }
+
+    let fingerprints = actions[..batch_len]
+        .iter()
+        .map(|action| super::action_fingerprint_for_policy(state, policy, action))
+        .collect::<Vec<_>>();
+    for (idx, (action, fingerprint)) in actions[..batch_len].iter().zip(&fingerprints).enumerate() {
+        if let Some(reason) = check_repeat_action_guard(
+            state,
+            task,
+            loop_state,
+            policy,
+            action,
+            fingerprint,
+            idx + 1,
+        ) {
+            return Ok(Some(finalize_execute_round_outcome(
+                loop_state,
+                snapshot,
+                actionable_count,
+                0,
+                false,
+                Some(reason),
+            )));
+        }
+        info!(
+            "executor_parallel_read_start task_id={} round={} step={} action={}",
+            task.task_id,
+            loop_state.round_no,
+            idx + 1,
+            plan_step_label(action)
+        );
+    }
+
+    let batch = super::parallel_read_batch::dispatch_independent_read_batch(
+        state,
+        task,
+        goal,
+        user_text,
+        actions,
+        round_steps,
+        loop_state,
+        policy,
+        &fingerprints,
+        batch_len,
+        agent_run_context,
+    )
+    .await?;
+    crate::task_event_transport::publish_loop_state_snapshot(state, task, user_text, loop_state);
+    info!(
+        "executor_parallel_read_complete task_id={} round={} batch_size={} executed={} stop_signal={}",
+        task.task_id,
+        loop_state.round_no,
+        batch_len,
+        batch.executed_actions,
+        batch.stop_signal
+    );
+    Ok(Some(finalize_execute_round_outcome(
+        loop_state,
+        snapshot,
+        actionable_count,
+        batch.executed_actions,
+        batch.ended_with_user_visible_output,
+        Some(batch.stop_signal),
+    )))
+}
+
 pub(super) async fn execute_actions_once(
     state: &AppState,
     task: &ClaimedTask,
@@ -359,11 +494,35 @@ pub(super) async fn execute_actions_once(
     ensure_task_running(state, task)?;
     let mut executed_actions = 0usize;
     let mut stop_signal: Option<String> = None;
-    let actionable_count = actions.iter().take(policy.max_steps.max(1)).count();
+    let actionable_count = actions
+        .iter()
+        .take(policy.max_actions_per_turn.max(1))
+        .count();
     let snapshot = capture_round_progress_snapshot(loop_state);
     let mut ended_with_user_visible_output = false;
     let round_steps: Vec<String> = actions.iter().map(plan_step_label).collect();
-    for (idx, action) in actions.iter().take(policy.max_steps.max(1)).enumerate() {
+    if let Some(outcome) = try_execute_independent_read_batch(
+        state,
+        task,
+        goal,
+        user_text,
+        actions,
+        &round_steps,
+        loop_state,
+        policy,
+        agent_run_context,
+        &snapshot,
+        actionable_count,
+    )
+    .await?
+    {
+        return Ok(outcome);
+    }
+    for (idx, action) in actions
+        .iter()
+        .take(policy.max_actions_per_turn.max(1))
+        .enumerate()
+    {
         ensure_task_running(state, task)?;
         let step_in_round = idx + 1;
         let global_step = loop_state.total_steps_executed + 1;
@@ -444,8 +603,32 @@ pub(super) async fn execute_actions_once(
         crate::task_event_transport::publish_loop_state_snapshot(
             state, task, user_text, loop_state,
         );
-        let executed_limit = policy.max_steps.max(1);
+        let executed_limit = policy.max_actions_per_turn.max(1);
         let remaining_actions = &actions[idx + 1..actions.len().min(executed_limit)];
+        if matches!(
+            decision,
+            ActionLoopDecision::NextAction | ActionLoopDecision::ContinueRound
+        ) {
+            if let Some(reason_code) =
+                super::action_batch_contract::return_control_boundary_after_action(
+                    state,
+                    actions,
+                    idx,
+                    executed_limit,
+                )
+            {
+                info!(
+                    "executor_action_batch_boundary task_id={} round={} step={} reason_code={} remaining={}",
+                    task.task_id,
+                    loop_state.round_no,
+                    step_in_round,
+                    reason_code,
+                    remaining_actions.len()
+                );
+                stop_signal = Some(reason_code.to_string());
+                break;
+            }
+        }
         if matches!(
             decision,
             ActionLoopDecision::NextAction | ActionLoopDecision::ContinueRound
