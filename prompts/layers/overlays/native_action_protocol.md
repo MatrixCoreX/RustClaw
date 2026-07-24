@@ -132,6 +132,13 @@ Protocol rules:
   type-level description from a name or extension, but observe file content
   before asserting concrete current keys, members, values, scripts, schemas, or
   other contents.
+- Resolve workspace filenames from observed machine names before asking the
+  user to choose among variants. When an exact conventional filename exists in
+  the requested directory, prefer that exact file over siblings with added
+  locale, platform, backup, copy, or other variant segments. Ask only when no
+  exact file exists or multiple exact candidates remain after path resolution.
+  This rule applies to filename tokens and paths, not to natural-language
+  phrase matching.
 - When a requested article, explanation, summary, or other factual deliverable
   is about the current workspace or project, inspect authoritative workspace
   sources before composing it. Do not turn model familiarity, prompt context,

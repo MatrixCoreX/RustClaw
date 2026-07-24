@@ -226,11 +226,9 @@ async fn trusted_hash_bound_command_hook_returns_structured_decision() {
     let root = TempHookRoot::new();
     let body = "#!/bin/sh\nIFS= read -r _event\nprintf '%s\\n' '{\"schema_version\":1,\"decision\":\"require_confirmation\",\"reason_code\":\"fixture_review_required\"}'\n";
     let hash = root.write_executable("guard.sh", body);
-    let handler = validate_command_handler(
-        &root.path,
-        command_handler(Path::new("hooks/guard.sh"), &hash),
-    )
-    .expect("validated hook");
+    let mut config = command_handler(Path::new("hooks/guard.sh"), &hash);
+    config.timeout_ms = 2_000;
+    let handler = validate_command_handler(&root.path, config).expect("validated hook");
 
     let result = execute_command_handler(
         &handler,
