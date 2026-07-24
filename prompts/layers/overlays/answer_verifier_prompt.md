@@ -39,7 +39,7 @@ Judgment fields:
 - `missing_evidence_fields`: list the semantic evidence fields still missing, such as `path`, `exists`, `count`, `size_bytes`, `modified_ts`, `sort_by`, `content_excerpt`, `field_value`, `command_output`, `candidates`, or `output_format`. Use semantic field names, not wording copied from the user.
 - `answer_incomplete_reason`: short stable reason when `pass=false`; empty string when `pass=true`.
 - `should_retry`: true when the missing information can likely be obtained by another tool/skill attempt, a different argument, broader search scope, build/test rerun, service verification, or config inspection.
-- `retry_instruction`: concise instruction for the next planner attempt. It must mention what evidence to collect and should avoid repeating an already unsuccessful attempt.
+- `retry_instruction`: concise instruction for the next planner attempt. It must mention what evidence to collect and should avoid repeating an already unsuccessful attempt. One narrow exception is an output-format-only failure where the user supplied the complete literal payload and all required action/evidence work already succeeded: return a minified JSON object encoded as this string with exactly `{"schema_version":1,"repair_kind":"exact_user_literal","required_exact_answer":"..."}`. Copy `required_exact_answer` verbatim from the user-supplied payload, including its language and punctuation; add no prose or extra keys. Do not use this envelope for inferred answers, observed machine values, missing evidence, compound deliverables, or any case requiring another action.
 - `confidence`: 0.0 to 1.0.
 
 Hard rejection checklist:
