@@ -120,9 +120,8 @@ pub(crate) fn executable_unknown_argument_violations(
             .required
             .iter()
             .chain(&mapping.optional)
-            .flat_map(|field| field.split('|'))
-            .map(str::trim)
-            .filter(|field| !field.is_empty())
+            .flat_map(|field| claw_core::skill_registry::planner_requirement_alternatives(field))
+            .flatten()
             .collect::<std::collections::HashSet<_>>()
     })
     .unwrap_or_default();

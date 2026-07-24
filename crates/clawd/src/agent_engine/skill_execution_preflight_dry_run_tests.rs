@@ -15,6 +15,7 @@ planner_kind = "tool"
 risk_level = "high"
 requires_confirmation = true
 side_effect = true
+input_schema = { type = "object", properties = { prompt = { type = "string" }, dry_run = { type = "boolean" }, output_path = { type = "string" } } }
 planner_capabilities = [
   { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["dry_run", "output_path"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]

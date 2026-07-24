@@ -70,6 +70,64 @@ fn native_request_maps_messages_and_function_tools() {
 }
 
 #[test]
+fn native_request_preserves_discriminated_capability_argument_schemas() {
+    let mut request = native_request();
+    request.tools[0].input_schema = json!({
+        "type": "object",
+        "oneOf": [
+            {
+                "type": "object",
+                "required": ["capability", "args"],
+                "properties": {
+                    "capability": {
+                        "type": "string",
+                        "enum": ["weather.current"]
+                    },
+                    "args": {
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string"},
+                            "latitude": {"type": "number"},
+                            "longitude": {"type": "number"}
+                        },
+                        "allOf": [{
+                            "anyOf": [
+                                {"required": ["city"]},
+                                {"required": ["latitude", "longitude"]}
+                            ]
+                        }],
+                        "additionalProperties": false
+                    }
+                },
+                "additionalProperties": false
+            }
+        ]
+    });
+
+    let body = build_openai_request(&provider(), &request, &ChatRequestHints::default())
+        .expect("build request");
+    let parameters = &body["tools"][0]["function"]["parameters"];
+
+    assert_eq!(
+        parameters["oneOf"][0]["properties"]["capability"]["enum"],
+        json!(["weather.current"])
+    );
+    assert_eq!(
+        parameters["oneOf"][0]["properties"]["args"]["allOf"][0]["anyOf"][1]["required"],
+        json!(["latitude", "longitude"])
+    );
+    assert_eq!(
+        parameters["oneOf"][0]["properties"]["args"]["properties"]["latitude"]["type"],
+        "number"
+    );
+    assert_eq!(
+        parameters["oneOf"][0]["properties"]["args"]["additionalProperties"],
+        false
+    );
+    assert_eq!(body["tools"][0]["function"]["strict"], true);
+}
+
+#[test]
 fn native_request_maps_required_tool_choice() {
     let mut request = native_request();
     request.tool_choice = ModelToolChoice::Required;

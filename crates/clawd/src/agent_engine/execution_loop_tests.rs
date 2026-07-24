@@ -81,6 +81,7 @@ fn filesystem_write_registry_fixture() -> &'static str {
 name = "fs_basic"
 enabled = true
 kind = "runner"
+input_schema = { type = "object", properties = { path = { type = "string" }, content = { type = "string" } } }
 planner_capabilities = [
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", once_per_task = true, dedup_scope = "args", idempotent = false },
 ]
@@ -106,6 +107,7 @@ fn resource_dedup_registry_fixture() -> &'static str {
 name = "preview_tool"
 enabled = true
 kind = "runner"
+input_schema = { type = "object", properties = { prompt = { type = "string" }, output_path = { type = "string" } } }
 planner_capabilities = [
   { name = "preview.inspect", action = "inspect", effect = "observe", required = ["prompt"], optional = ["output_path"], risk_level = "low", idempotent = true, dedup_scope = "resource", dedup_fields = ["output_path"] },
 ]

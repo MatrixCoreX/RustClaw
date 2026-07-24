@@ -594,6 +594,7 @@ planner_kind = "tool"
 risk_level = "high"
 requires_confirmation = true
 side_effect = true
+input_schema = { type = "object", properties = { path = { type = "string" }, content = { type = "string" } } }
 planner_capabilities = [
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_temp_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
 ]
@@ -657,6 +658,7 @@ planner_kind = "tool"
 risk_level = "high"
 requires_confirmation = true
 side_effect = true
+input_schema = { type = "object", properties = { path = { type = "string" }, content = { type = "string" } } }
 planner_capabilities = [
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_worktree", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
 ]
@@ -716,6 +718,7 @@ planner_kind = "tool"
 risk_level = "high"
 requires_confirmation = true
 side_effect = true
+input_schema = { type = "object", properties = { path = { type = "string" }, content = { type = "string" } } }
 planner_capabilities = [
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_worktree", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
 ]
@@ -782,6 +785,7 @@ planner_kind = "tool"
 risk_level = "high"
 requires_confirmation = true
 side_effect = true
+input_schema = { type = "object", properties = { path = { type = "string" }, content = { type = "string" } } }
 planner_capabilities = [
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_worktree", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
 ]
@@ -827,6 +831,7 @@ planner_kind = "tool"
 risk_level = "high"
 requires_confirmation = true
 side_effect = true
+input_schema = { type = "object", properties = { command = { type = "string" }, cwd = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" } } }
 planner_capabilities = [
   { name = "system.run_command", effect = "external", required = ["command"], optional = ["cwd"], risk_level = "high", isolation_profile = "local_temp_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
 ]

@@ -37,6 +37,7 @@ kind = "builtin"
 planner_kind = "tool"
 risk_level = "low"
 side_effect = false
+input_schema = { type = "object", properties = { path = { type = "string" }, content = { type = "string" } } }
 planner_capability_aliases = { "filesystem.read_file" = "filesystem.read_text_range" }
 planner_capabilities = [
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"], risk_level = "low", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },

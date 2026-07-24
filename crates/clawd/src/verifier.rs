@@ -465,11 +465,13 @@ fn required_arg_satisfied(
     obj: &serde_json::Map<String, serde_json::Value>,
     required: &str,
 ) -> bool {
-    required
-        .split('|')
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .any(|key| obj.get(key).is_some_and(arg_value_is_present))
+    claw_core::skill_registry::planner_requirement_alternatives(required)
+        .into_iter()
+        .any(|alternative| {
+            alternative
+                .iter()
+                .all(|key| obj.get(key).is_some_and(arg_value_is_present))
+        })
 }
 
 fn push_group_conflict_issues(

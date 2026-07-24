@@ -81,7 +81,7 @@ planner_kind = "tool"
 output_kind = "text"
 side_effect = true
 auto_invocable = true
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "count_entries", "read_text_range", "write_text", "make_dir", "remove_path", "apply_patch"] }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } }, patch = { type = "string" }, precondition_hashes = { type = "object" }, recursive = { type = "boolean" }, include_hidden = { type = "boolean" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, start_line = { type = "integer" }, end_line = { type = "integer" } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "count_entries", "read_text_range", "write_text", "make_dir", "remove_path", "apply_patch"] }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } }, content = { type = "string" }, patch = { type = "string" }, precondition_hashes = { type = "object" }, recursive = { type = "boolean" }, include_hidden = { type = "boolean" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, start_line = { type = "integer" }, end_line = { type = "integer" } } }
 planner_capabilities = [
   { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"] },
   { name = "filesystem.count_entries", action = "count_entries", effect = "observe", required = ["path"], optional = ["recursive", "include_hidden", "files_only", "dirs_only", "kind_filter", "count_files", "count_dirs", "ext_filter"] },
@@ -204,6 +204,17 @@ planner_capabilities = [
 ]
 
 [[skills]]
+name = "weather"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+output_kind = "text"
+input_schema = { type = "object", properties = { city = { type = "string" }, latitude = { type = "number" }, longitude = { type = "number" } } }
+planner_capabilities = [
+  { name = "weather.current", action = "query", effect = "observe", required = ["city|latitude+longitude"], risk_level = "low" },
+]
+
+[[skills]]
 name = "primary_reader"
 enabled = true
 kind = "runner"
@@ -261,6 +272,7 @@ pub(super) fn test_state() -> AppState {
             "audio_synthesize",
             "image_generate",
             "image_edit",
+            "weather",
             "primary_reader",
             "fallback_reader",
             "photo_organize",
@@ -904,6 +916,50 @@ fn enforce_mode_accepts_action_scoped_alternative_arg() {
         .issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+}
+
+#[test]
+fn enforce_mode_requires_complete_conjunctive_alternative() {
+    let state = test_state();
+    let task = test_task();
+    let verify = |args| {
+        verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                output_contract: Some(&route_result()),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "weather".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "weather".to_string(),
+                    args,
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        )
+    };
+
+    let latitude_only = verify(json!({"action": "query", "latitude": 31.2}));
+    assert!(!latitude_only.approved);
+    assert!(latitude_only
+        .issues
+        .iter()
+        .any(|issue| issue.kind == VerifyIssueKind::MissingRequiredArg));
+
+    let coordinates = verify(json!({
+        "action": "query",
+        "latitude": 31.2,
+        "longitude": 121.5
+    }));
+    assert!(coordinates.approved, "issues: {:?}", coordinates.issues);
+
+    let city = verify(json!({"action": "query", "city": "Shanghai"}));
+    assert!(city.approved, "issues: {:?}", city.issues);
 }
 
 #[test]

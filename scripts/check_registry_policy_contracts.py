@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -84,6 +85,35 @@ def capability_ref(skill: dict[str, Any], index: int, capability: dict[str, Any]
     return cap_name or f"{skill_name}.planner_capabilities[{index}]"
 
 
+def planner_argument_tokens(capability: dict[str, Any]) -> set[str]:
+    return {
+        token.strip()
+        for expression in [
+            *(capability.get("required") or []),
+            *(capability.get("optional") or []),
+        ]
+        for alternative in str(expression).split("|")
+        for token in alternative.split("+")
+        if token.strip()
+    }
+
+
+def invalid_planner_argument_expressions(capability: dict[str, Any]) -> list[str]:
+    return [
+        str(expression)
+        for expression in [
+            *(capability.get("required") or []),
+            *(capability.get("optional") or []),
+        ]
+        if not str(expression).strip()
+        or any(
+            not re.fullmatch(r"[a-z0-9_]+", token.strip())
+            for alternative in str(expression).split("|")
+            for token in alternative.split("+")
+        )
+    ]
+
+
 def check_capability(
     registry_path: Path,
     skill: dict[str, Any],
@@ -101,6 +131,12 @@ def check_capability(
     dedup_fields = capability.get("dedup_fields")
     once_per_task = capability.get("once_per_task")
 
+    invalid_argument_expressions = invalid_planner_argument_expressions(capability)
+    if invalid_argument_expressions:
+        findings.append(
+            f"{prefix}: invalid_planner_argument_expressions="
+            + ",".join(repr(expression) for expression in invalid_argument_expressions)
+        )
     if effect not in ALLOWED_EFFECTS:
         findings.append(f"{prefix}: invalid_or_missing_effect={effect!r}")
     if risk_level not in ALLOWED_RISK_LEVELS:
@@ -110,11 +146,7 @@ def check_capability(
     if dedup_scope not in ALLOWED_DEDUP_SCOPES:
         findings.append(f"{prefix}: invalid_or_missing_dedup_scope={dedup_scope!r}")
     if dedup_scope == "resource":
-        declared_args = {
-            token
-            for raw in [*(capability.get("required") or []), *(capability.get("optional") or [])]
-            for token in str(raw).split("|")
-        }
+        declared_args = planner_argument_tokens(capability)
         if not isinstance(dedup_fields, list) or not dedup_fields:
             findings.append(f"{prefix}: resource_dedup_requires_fields")
         elif any(
@@ -179,6 +211,33 @@ def check_capability(
     ):
         findings.append(f"{prefix}: privilege_escalation_requires_subprocess")
 
+    return findings
+
+
+def check_skill_argument_schema(
+    registry_path: Path, skill: dict[str, Any]
+) -> list[str]:
+    skill_name = str(skill.get("name") or "unknown_skill").strip() or "unknown_skill"
+    prefix = f"{registry_path.relative_to(ROOT)}:{skill_name}"
+    input_schema = skill.get("input_schema") or {}
+    properties = input_schema.get("properties")
+    findings: list[str] = []
+    for index, capability in enumerate(skill.get("planner_capabilities") or []):
+        declared = planner_argument_tokens(capability)
+        if not declared:
+            continue
+        ref = capability_ref(skill, index, capability)
+        if not isinstance(properties, dict):
+            findings.append(
+                f"{prefix}:{ref}: planner_arguments_require_input_schema_properties"
+            )
+            continue
+        missing = sorted(declared - set(properties))
+        if missing:
+            findings.append(
+                f"{prefix}:{ref}: planner_arguments_absent_from_input_schema="
+                + ",".join(missing)
+            )
     return findings
 
 
@@ -379,6 +438,7 @@ def scan_registries(registries: list[Path]) -> tuple[list[str], int, int]:
         for skill in skills:
             findings.extend(check_core_skill_contract(registry_path, skill))
             findings.extend(check_skill_capability_surface(registry_path, skill))
+            findings.extend(check_skill_argument_schema(registry_path, skill))
             alias_findings, skill_alias_count = check_skill_capability_aliases(
                 registry_path, skill
             )
@@ -434,7 +494,29 @@ def run_self_test() -> int:
         "execution_mode": "async_preferred",
         "async_adapter_kind": "unknown_adapter",
     }
+    bad_argument_expression_capability = {
+        "name": "bad.arguments",
+        "effect": "observe",
+        "risk_level": "low",
+        "idempotent": True,
+        "dedup_scope": "args",
+        "execution_mode": "sync_short",
+        "required": ["city||latitude+longitude"],
+    }
     missing_surface = {"name": "visible_without_capabilities"}
+    missing_argument_schema = {
+        "name": "schema_drift",
+        "input_schema": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+        },
+        "planner_capabilities": [
+            {
+                "name": "weather.current",
+                "required": ["city|latitude+longitude"],
+            }
+        ],
+    }
     if check_capability(registry_path, good_skill, 0, good_skill["planner_capabilities"][0]):
         print("SELF_TEST_FAIL good_policy_metadata_false_positive", file=sys.stderr)
         return 1
@@ -468,9 +550,36 @@ def run_self_test() -> int:
     ):
         print(f"SELF_TEST_FAIL missing_async_adapter_finding:{async_findings}", file=sys.stderr)
         return 1
+    argument_findings = check_capability(
+        registry_path,
+        {"name": "bad_argument_skill"},
+        0,
+        bad_argument_expression_capability,
+    )
+    if not any(
+        "invalid_planner_argument_expressions" in finding
+        for finding in argument_findings
+    ):
+        print(
+            f"SELF_TEST_FAIL missing_argument_expression_finding:{argument_findings}",
+            file=sys.stderr,
+        )
+        return 1
     surface_findings = check_skill_capability_surface(registry_path, missing_surface)
     if not any("planner_visible_enabled_skill_missing_planner_capabilities" in finding for finding in surface_findings):
         print(f"SELF_TEST_FAIL missing_surface_finding:{surface_findings}", file=sys.stderr)
+        return 1
+    schema_findings = check_skill_argument_schema(
+        registry_path, missing_argument_schema
+    )
+    if not any(
+        "planner_arguments_absent_from_input_schema=latitude,longitude" in finding
+        for finding in schema_findings
+    ):
+        print(
+            f"SELF_TEST_FAIL missing_argument_schema_finding:{schema_findings}",
+            file=sys.stderr,
+        )
         return 1
     alias_findings, alias_count = check_skill_capability_aliases(
         registry_path,

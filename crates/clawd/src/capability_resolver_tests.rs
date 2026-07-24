@@ -849,7 +849,7 @@ fn filesystem_apply_patch_alias_resolves_to_canonical_workspace_patch() {
     assert_eq!(record.capability_ref, "filesystem.apply_patch");
     assert_eq!(
         record.canonical_capability_ref.as_deref(),
-        Some("filesystem.apply_patch")
+        Some("workspace.apply_patch")
     );
     assert_eq!(
         record.reason_code,
@@ -1134,6 +1134,7 @@ kind = "runner"
 planner_kind = "skill"
 aliases = ["translate"]
 capabilities = ["llm"]
+input_schema = { type = "object", properties = { text = { type = "string" }, target_locale = { type = "string" } } }
 planner_capabilities = [
   { name = "text.translate", action = "translate", effect = "external", required = ["text"], optional = ["target_locale"], risk_level = "medium", preferred = true }
 ]

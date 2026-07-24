@@ -179,6 +179,143 @@ pub struct PlannerCapabilityMapping {
     pub final_answer_shape: Option<String>,
 }
 
+pub fn planner_requirement_alternatives(requirement: &str) -> Vec<Vec<String>> {
+    requirement
+        .split('|')
+        .filter_map(|alternative| {
+            let fields = alternative
+                .split('+')
+                .map(str::trim)
+                .filter(|field| !field.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            (!fields.is_empty()).then_some(fields)
+        })
+        .collect()
+}
+
+fn planner_requirement_expression_is_valid(requirement: &str) -> bool {
+    !requirement.trim().is_empty()
+        && requirement.split('|').all(|alternative| {
+            !alternative.trim().is_empty()
+                && alternative.split('+').all(|field| {
+                    let field = field.trim();
+                    !field.is_empty()
+                        && field
+                            .chars()
+                            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+                })
+        })
+}
+
+pub fn planner_capability_argument_schema(
+    input_schema: Option<&JsonValue>,
+    mapping: &PlannerCapabilityMapping,
+) -> Result<JsonValue, String> {
+    let requirements = mapping
+        .required
+        .iter()
+        .map(|requirement| {
+            if !planner_requirement_expression_is_valid(requirement) {
+                return Err(format!(
+                    "planner capability `{}` has invalid required expression `{requirement}`",
+                    mapping.name
+                ));
+            }
+            let alternatives = planner_requirement_alternatives(requirement);
+            Ok(alternatives)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(invalid) = mapping
+        .optional
+        .iter()
+        .find(|field| !planner_requirement_expression_is_valid(field))
+    {
+        return Err(format!(
+            "planner capability `{}` has invalid optional expression `{invalid}`",
+            mapping.name
+        ));
+    }
+    let optional_fields = mapping
+        .optional
+        .iter()
+        .flat_map(|field| planner_requirement_alternatives(field))
+        .flatten()
+        .collect::<Vec<_>>();
+    let declared_fields = requirements
+        .iter()
+        .flatten()
+        .flatten()
+        .chain(optional_fields.iter())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+
+    let source_properties = input_schema
+        .and_then(JsonValue::as_object)
+        .and_then(|schema| schema.get("properties"))
+        .and_then(JsonValue::as_object);
+    if !declared_fields.is_empty() && source_properties.is_none() {
+        return Err(format!(
+            "planner capability `{}` declares arguments but its skill input_schema has no properties",
+            mapping.name
+        ));
+    }
+
+    let mut properties = serde_json::Map::new();
+    for field in declared_fields {
+        let field_schema = source_properties
+            .and_then(|source| source.get(&field))
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "planner capability `{}` argument `{field}` is absent from skill input_schema",
+                    mapping.name
+                )
+            })?;
+        properties.insert(field, field_schema);
+    }
+
+    let mut required = std::collections::BTreeSet::new();
+    let mut conditional_requirements = Vec::new();
+    for alternatives in requirements {
+        if alternatives.len() == 1 {
+            required.extend(alternatives.into_iter().next().unwrap_or_default());
+            continue;
+        }
+        conditional_requirements.push(serde_json::json!({
+            "anyOf": alternatives
+                .into_iter()
+                .map(|fields| serde_json::json!({"required": fields}))
+                .collect::<Vec<_>>()
+        }));
+    }
+
+    let mut schema = serde_json::Map::new();
+    schema.insert("type".to_string(), JsonValue::String("object".to_string()));
+    schema.insert(
+        "description".to_string(),
+        JsonValue::String(format!(
+            "schema:planner_capability_arguments_v1; capability={}",
+            mapping.name
+        )),
+    );
+    schema.insert("properties".to_string(), JsonValue::Object(properties));
+    if !required.is_empty() {
+        schema.insert(
+            "required".to_string(),
+            JsonValue::Array(required.into_iter().map(JsonValue::String).collect()),
+        );
+    }
+    if !conditional_requirements.is_empty() {
+        schema.insert(
+            "allOf".to_string(),
+            JsonValue::Array(conditional_requirements),
+        );
+    }
+    schema.insert("additionalProperties".to_string(), JsonValue::Bool(false));
+    Ok(JsonValue::Object(schema))
+}
+
 /// Selects an exact action policy, or the preferred/unique policy for an
 /// actionless direct invocation. An explicit unknown action never falls back.
 pub fn select_planner_capability_mapping<'a>(
@@ -888,6 +1025,18 @@ fn validate_global_planner_capability_aliases(
     Ok(())
 }
 
+fn validate_planner_capability_schemas(
+    entry: &SkillRegistryEntry,
+    path: &Path,
+) -> Result<(), String> {
+    let input_schema = entry.input_schema.as_ref().and_then(toml_value_to_json);
+    for mapping in &entry.planner_capabilities {
+        planner_capability_argument_schema(input_schema.as_ref(), mapping)
+            .map_err(|error| format!("{error} for skill `{}` in {}", entry.name, path.display()))?;
+    }
+    Ok(())
+}
+
 fn default_isolation_profile_for_effect(
     effect: Option<PlannerCapabilityEffect>,
 ) -> Option<CapabilityIsolationProfile> {
@@ -1232,6 +1381,7 @@ impl SkillsRegistry {
             entry.platform_notes = normalize_metadata_lines(&entry.platform_notes);
             entry.planner_capabilities =
                 normalize_planner_capabilities(&entry.planner_capabilities);
+            validate_planner_capability_schemas(&entry, path)?;
             entry.planner_capability_aliases = normalize_planner_capability_aliases(
                 &entry.planner_capability_aliases,
                 &canonical,

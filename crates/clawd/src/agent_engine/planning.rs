@@ -83,6 +83,17 @@ impl<'a> PlannerToolLibrary<'a> {
         )
     }
 
+    fn mcp_capability_argument_schemas(&self, loop_state: &LoopState) -> BTreeMap<String, Value> {
+        crate::capability_map::planner_mcp_tools_for_task(
+            self.state,
+            self.task,
+            &loop_state.loaded_mcp_capabilities,
+        )
+        .into_iter()
+        .map(|tool| (tool.capability, tool.input_schema))
+        .collect()
+    }
+
     fn all_native_capability_groups(
         &self,
     ) -> Vec<crate::capability_map::PlannerNativeCapabilityGroup> {
@@ -362,6 +373,8 @@ pub(super) async fn plan_round_actions(
         .as_ref()
         .map(crate::task_budget_contract::TaskBudgetSlice::provider_call_timeout_seconds);
     let callable_capability_names = planner_tool_library.callable_capability_names(loop_state);
+    let mcp_capability_argument_schemas =
+        planner_tool_library.mcp_capability_argument_schemas(loop_state);
     let all_native_capability_groups = planner_tool_library.all_native_capability_groups();
     let native_capability_groups =
         planner_tool_library.disclosed_native_capability_groups(loop_state);
@@ -401,6 +414,7 @@ pub(super) async fn plan_round_actions(
         &native_user_prompt,
         provider_timeout_seconds,
         &callable_capability_names,
+        &mcp_capability_argument_schemas,
         &all_native_capability_groups,
         &native_capability_groups,
         &loadable_capability_group_names,
@@ -590,6 +604,7 @@ fn native_planner_request(
     user_prompt: &str,
     provider_timeout_seconds: Option<u64>,
     callable_capability_names: &[String],
+    ungrouped_capability_argument_schemas: &BTreeMap<String, Value>,
     all_native_capability_groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
     native_capability_groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
     loadable_capability_group_names: &[String],
@@ -616,6 +631,7 @@ fn native_planner_request(
             NATIVE_CALL_CAPABILITY_TOOL,
             "schema:runtime_ungrouped_capability_catalog_v1",
             &ungrouped_capability_names,
+            ungrouped_capability_argument_schemas,
         ));
     }
     if !loadable_capability_group_names.is_empty() {
@@ -628,6 +644,7 @@ fn native_planner_request(
             &group.tool_name,
             &group.description,
             &group.capability_names,
+            &group.capability_argument_schemas,
         ));
     }
     tools.push(ModelToolDefinition {
@@ -765,11 +782,37 @@ fn native_capability_tool_definition(
     tool_name: &str,
     description: &str,
     capability_names: &[String],
+    capability_argument_schemas: &BTreeMap<String, Value>,
 ) -> ModelToolDefinition {
-    ModelToolDefinition {
-        name: tool_name.to_string(),
-        description: description.to_string(),
-        input_schema: json!({
+    let input_schema = if !capability_names.is_empty()
+        && capability_names
+            .iter()
+            .all(|name| capability_argument_schemas.contains_key(name))
+    {
+        let variants = capability_names
+            .iter()
+            .map(|capability| {
+                json!({
+                    "type": "object",
+                    "required": ["capability", "args"],
+                    "properties": {
+                        "capability": {
+                            "type": "string",
+                            "enum": [capability]
+                        },
+                        "args": &capability_argument_schemas[capability]
+                    },
+                    "additionalProperties": false
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({
+            "type": "object",
+            "description": "schema:discriminated_runtime_capability_call_v1",
+            "oneOf": variants
+        })
+    } else {
+        json!({
             "type": "object",
             "required": ["capability", "args"],
             "properties": {
@@ -784,7 +827,12 @@ fn native_capability_tool_definition(
                 }
             },
             "additionalProperties": false
-        }),
+        })
+    };
+    ModelToolDefinition {
+        name: tool_name.to_string(),
+        description: description.to_string(),
+        input_schema,
         strict: true,
     }
 }

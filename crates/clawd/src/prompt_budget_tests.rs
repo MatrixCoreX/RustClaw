@@ -50,6 +50,29 @@ fn model_tool_surface_report_counts_tools_capabilities_and_schema_cost() {
             strict: true,
         },
         ModelToolDefinition {
+            name: "call_weather".to_string(),
+            description: "weather capability group".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "capability": {
+                                "type": "string",
+                                "enum": ["weather.current"]
+                            },
+                            "args": {
+                                "type": "object",
+                                "properties": {"city": {"type": "string"}}
+                            }
+                        }
+                    }
+                ]
+            }),
+            strict: true,
+        },
+        ModelToolDefinition {
             name: "respond".to_string(),
             description: "final response".to_string(),
             input_schema: json!({"type": "object"}),
@@ -67,12 +90,13 @@ fn model_tool_surface_report_counts_tools_capabilities_and_schema_cost() {
     );
 
     assert_eq!(report["schema_version"], 1);
-    assert_eq!(report["tool_count"], 2);
+    assert_eq!(report["tool_count"], 3);
     assert_eq!(report["callable_capability_count"], 250);
     assert_eq!(report["eager_group_count"], 41);
     assert_eq!(report["selected_group_count"], 1);
     assert_eq!(report["tools"][0]["capability_enum_count"], 2);
-    assert_eq!(report["tools"][1]["capability_enum_count"], 0);
+    assert_eq!(report["tools"][1]["capability_enum_count"], 1);
+    assert_eq!(report["tools"][2]["capability_enum_count"], 0);
     assert!(report["serialized_byte_count"].as_u64().unwrap_or(0) > 0);
     assert!(report["serialized_token_estimate"].as_u64().unwrap_or(0) > 0);
 }
