@@ -40,13 +40,14 @@ Protocol rules:
   `text` as `"text"` inside `value_json`; numbers, booleans, `null`, arrays,
   and objects use their normal JSON encoding. Never retry a rejected unquoted
   string unchanged.
-- Use `shape=observed_object` when every requested value already exists in one
-  or more successful current-loop capability results, especially for nested
-  arrays or objects. Put only the output `name`, exact observed `capability`,
-  and language-neutral dotted result `path` in `observed_fields`; keep
-  `fields` empty and set `exact_field_count` to the observed-field length. The
-  runtime copies the JSON values directly. Do not re-serialize or summarize
-  those values into `value_json`.
+- Use `shape=observed_object` when every requested value already exists under
+  the same named machine field in one or more successful current-loop
+  capability results; this is required rather than optional, especially for
+  nested arrays or objects. Put only the output `name`, exact observed
+  `capability`, and language-neutral dotted result `path` in
+  `observed_fields`; keep `fields` empty and set `exact_field_count` to the
+  observed-field length. The runtime copies the JSON values directly. Do not
+  re-serialize or summarize those values into `value_json`.
 - `respond` formats an answer; it never executes or simulates a runtime
   capability. Provider/config/permission, domain parsing, normalization,
   validation, preview/dry-run, artifact/job, checkpoint, diff, verification,
