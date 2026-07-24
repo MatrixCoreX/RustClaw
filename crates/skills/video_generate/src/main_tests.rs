@@ -76,6 +76,53 @@ fn dry_run_returns_request_payload_without_key() {
 }
 
 #[test]
+fn dry_run_ignores_blank_optional_image_aliases() {
+    let root = unique_temp_root("video-dry-run-blank-images");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "prompt": "A six second status dashboard",
+            "duration": 6,
+            "dry_run": true,
+            "first_frame_image": "",
+            "first_frame": " ",
+            "image": null,
+            "last_frame_image": {"path": ""},
+            "last_frame": {}
+        }),
+    )
+    .expect("blank optional image aliases should be absent");
+
+    assert_eq!(extra["dry_run"], true);
+    assert!(extra["request"].get("first_frame_image").is_none());
+    assert!(extra["request"].get("last_frame_image").is_none());
+    assert!(extra["pending_async_job_contract"].is_object());
+}
+
+#[test]
+fn image_alias_selection_skips_blank_preferred_alias() {
+    let root = unique_temp_root("video-dry-run-image-alias");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "prompt": "A six second status dashboard",
+            "duration": 6,
+            "dry_run": true,
+            "first_frame_image": "",
+            "image": "data:image/png;base64,ZmFrZQ=="
+        }),
+    )
+    .expect("non-empty fallback alias should be selected");
+
+    assert_eq!(
+        extra["request"]["first_frame_image"],
+        "data:image/png;base64,ZmFrZQ=="
+    );
+}
+
+#[test]
 fn preview_action_forces_dry_run_without_writing_file() {
     let root = unique_temp_root("video-preview");
     let (text, extra) = execute(
