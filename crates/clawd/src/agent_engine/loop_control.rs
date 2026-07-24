@@ -30,7 +30,8 @@ use loop_control_answer_recovery::*;
 use loop_control_finalization_gate::*;
 pub(in crate::agent_engine) use loop_control_observe_round::observation_round_needs_planner;
 use loop_control_observe_round::{
-    observe_only_round_should_continue, read_observe_round_should_continue,
+    observe_only_round_should_continue, planner_owned_observation_round_should_continue,
+    read_observe_round_should_continue,
 };
 pub(in crate::agent_engine) use loop_control_plan_verifier_recovery::plan_verifier_rejection_is_repairable;
 use loop_control_plan_verifier_recovery::*;
@@ -1177,14 +1178,16 @@ async fn run_agent_round(
             outcome.no_progress = false;
         }
     }
-    if outcome.stop_signal.is_none()
-        && prepared_round
-            .effective_output_contract
-            .as_ref()
-            .is_some_and(|contract| {
-                observe_only_round_should_continue(contract, loop_state, &actions)
-            })
-    {
+    let observation_round_requires_planner = prepared_round
+        .effective_output_contract
+        .as_ref()
+        .map_or_else(
+            || planner_owned_observation_round_should_continue(loop_state, &actions),
+            |contract| observe_only_round_should_continue(contract, loop_state, &actions),
+        );
+    let observation_boundary_can_continue = outcome.stop_signal.is_none()
+        || outcome.stop_signal.as_deref() == Some("independent_read_batch_observed");
+    if observation_boundary_can_continue && observation_round_requires_planner {
         loop_state.has_recoverable_failure_context = true;
         loop_state.output_vars.insert(
             "agent_loop.observe_only_continue".to_string(),

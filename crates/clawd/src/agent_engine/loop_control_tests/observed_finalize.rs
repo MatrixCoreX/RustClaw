@@ -170,6 +170,26 @@ fn capability_inventory_names_continue_to_incremental_planner() {
 }
 
 #[test]
+fn planner_owned_observation_without_legacy_contract_continues() {
+    let mut loop_state = LoopState::new();
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","path":"/workspace","names":["README.md","README.zh-CN.md"]}}"#,
+    ));
+    let actions = vec![AgentAction::CallCapability {
+        capability: "filesystem.list_entries".to_string(),
+        args: json!({"path":"/workspace","names_only":true}),
+    }];
+
+    assert!(planner_owned_observation_round_should_continue(
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
 fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_second_round() {
     let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;

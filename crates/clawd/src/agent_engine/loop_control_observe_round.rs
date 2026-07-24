@@ -24,6 +24,13 @@ pub(in crate::agent_engine) fn observe_only_round_should_continue(
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
+    planner_owned_observation_round_should_continue(loop_state, actions)
+}
+
+pub(in crate::agent_engine) fn planner_owned_observation_round_should_continue(
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
     !super::has_discussion_followup_action(actions)
         && !super::has_authoritative_delivery(loop_state)
         && actions_are_observe_only_machine_steps(actions)
