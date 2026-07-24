@@ -425,6 +425,7 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_long_files.py"
   python3 "${ROOT_DIR}/scripts/check_cross_platform_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_cross_platform_contracts.py"
+  python3 "${ROOT_DIR}/scripts/check_startup_preflight_contract.py"
   python3 "${ROOT_DIR}/scripts/check_skill_prompts.py"
   python3 "${ROOT_DIR}/scripts/check_skill_registry_parity.py" --mode all --strict
   python3 "${ROOT_DIR}/scripts/check_skill_storage_ownership.py" --self-test

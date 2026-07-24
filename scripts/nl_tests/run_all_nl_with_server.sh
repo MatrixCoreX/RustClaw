@@ -150,22 +150,30 @@ resolve_user_key() {
     return 0
   fi
   if [[ -x "${ROOT_DIR}/scripts/auth-key.sh" ]]; then
-    USER_KEY_VALUE="$("${ROOT_DIR}/scripts/auth-key.sh" list | awk '$2 == "admin" && $3 == "enabled" { print $1; exit }')"
+    local auth_output
+    auth_output="$("${ROOT_DIR}/scripts/auth-key.sh" list 2>/dev/null || true)"
+    USER_KEY_VALUE="$(awk '$2 == "admin" && $3 == "enabled" { print $1; exit }' <<<"${auth_output}")"
   fi
 }
 
 curl_health() {
-  local -a auth_args=()
-  if [[ -n "${USER_KEY_VALUE:-}" ]]; then
-    auth_args=(-H "X-RustClaw-Key: ${USER_KEY_VALUE}")
+  if [[ -z "${USER_KEY_VALUE:-}" ]]; then
+    return 1
   fi
-  curl -sS "${auth_args[@]}" "${health_url}" >/dev/null
+  local -a auth_args=()
+  auth_args=(-H "X-RustClaw-Key: ${USER_KEY_VALUE}")
+  curl -fsS --max-time 5 "${auth_args[@]}" "${health_url}" >/dev/null
 }
 
 started_pid=""
+suite_pid=""
 ISOLATION_ROOT=""
 
 cleanup() {
+  if [[ -n "${suite_pid}" ]]; then
+    kill "${suite_pid}" >/dev/null 2>&1 || true
+    wait "${suite_pid}" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${started_pid}" ]]; then
     kill "${started_pid}" >/dev/null 2>&1 || true
     wait "${started_pid}" >/dev/null 2>&1 || true
@@ -234,9 +242,14 @@ if [[ "${REUSE_SERVER}" -eq 0 ]]; then
   export RUSTCLAW_CONFIG_PATH="${ISOLATED_CONFIG}"
   export RUSTCLAW_DB_PATH="${ISOLATED_DB}"
   export CLIENT_LIKE_CHANNEL="ui"
+  # An isolated database gets its own generated admin key. Never reuse a key
+  # inherited from the developer's normal runtime against that database.
+  USER_KEY_VALUE=""
 fi
 health_url="${BASE_URL%/}/v1/health"
-USER_KEY_VALUE="${USER_KEY_VALUE:-${USER_KEY:-${RUSTCLAW_USER_KEY:-}}}"
+if [[ "${REUSE_SERVER}" -eq 1 ]]; then
+  USER_KEY_VALUE="${USER_KEY_VALUE:-${USER_KEY:-${RUSTCLAW_USER_KEY:-}}}"
+fi
 resolve_user_key
 if [[ -n "${USER_KEY_VALUE:-}" ]]; then
   export USER_KEY="${USER_KEY_VALUE}"
@@ -274,6 +287,14 @@ else
   echo "server_pid=${started_pid}"
 
   for second in $(seq 1 "${START_TIMEOUT_SECONDS}"); do
+    if [[ -z "${USER_KEY_VALUE:-}" ]]; then
+      resolve_user_key
+      if [[ -n "${USER_KEY_VALUE:-}" ]]; then
+        export USER_KEY="${USER_KEY_VALUE}"
+        export RUSTCLAW_USER_KEY="${USER_KEY_VALUE}"
+        echo "auth_key=resolved_from_isolated_db"
+      fi
+    fi
     if curl_health >/dev/null 2>&1; then
       echo "clawd_health=ok after ${second}s"
       break
@@ -314,8 +335,26 @@ echo "suite_log=${SUITE_LOG}"
 echo "suite_cmd=${suite_cmd[*]}"
 
 set +e
-"${suite_cmd[@]}" | tee "${SUITE_LOG}"
-suite_status=${PIPESTATUS[0]}
+"${suite_cmd[@]}" > >(tee "${SUITE_LOG}") 2>&1 &
+suite_pid=$!
+server_exit_status=""
+while kill -0 "${suite_pid}" >/dev/null 2>&1; do
+  if [[ -n "${started_pid}" ]] && ! kill -0 "${started_pid}" >/dev/null 2>&1; then
+    wait "${started_pid}"
+    server_exit_status=$?
+    started_pid=""
+    echo "clawd exited while NL suite was running (status=${server_exit_status})" >&2
+    kill "${suite_pid}" >/dev/null 2>&1 || true
+    break
+  fi
+  sleep 1
+done
+wait "${suite_pid}"
+suite_status=$?
+suite_pid=""
+if [[ -n "${server_exit_status}" ]]; then
+  suite_status=1
+fi
 set -e
 
 prompt_count="$(grep -Ec '^(\[PROMPT\]|PROMPT:)' "${SUITE_LOG}" 2>/dev/null || true)"

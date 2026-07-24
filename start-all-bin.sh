@@ -27,11 +27,6 @@ LOG_DIR="$SCRIPT_DIR/logs"
 PID_DIR="$SCRIPT_DIR/.pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
-# Stop any already running RustClaw processes before starting.
-if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
-  "$SCRIPT_DIR/stop-rustclaw.sh" || true
-fi
-
 # Usage:
 #   ./start-all-bin.sh [release]
 PROFILE="${1:-release}"
@@ -51,25 +46,78 @@ WHATSAPP_WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsapp_webd"
 WECHATD_BIN="$SCRIPT_DIR/target/$PROFILE/wechatd"
 FEISHUD_BIN="$SCRIPT_DIR/target/$PROFILE/feishud"
 WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/webd"
-
-if [[ ! -x "$CLAWD_BIN" ]]; then
-  echo "Binary not found or not executable: $CLAWD_BIN" # zh: 二进制不存在或不可执行：$CLAWD_BIN
-  echo "Please run: ./build-all.sh $PROFILE" # zh: 请先执行：./build-all.sh $PROFILE
-  exit 1
-fi
-
-if [[ ! -x "$TELEGRAMD_BIN" ]]; then
-  echo "Binary not found or not executable: $TELEGRAMD_BIN" # zh: 二进制不存在或不可执行：$TELEGRAMD_BIN
-  echo "Please run: ./build-all.sh $PROFILE" # zh: 请先执行：./build-all.sh $PROFILE
-  exit 1
-fi
-
-# Ensure skill-runner binary exists for run_skill tasks.
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
-if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
-  echo "skill-runner missing: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner
-  echo "Copy built binary to target/$PROFILE/ or run: ./build-all.sh $PROFILE"
+
+read_enabled() {
+  local config_path="$1"
+  local section="$2"
+  local default_value="$3"
+  python3 - "$config_path" "$section" "$default_value" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+path = Path(sys.argv[1])
+section = sys.argv[2]
+default = sys.argv[3] == "1"
+if not path.exists():
+    print("1" if default else "0")
+    raise SystemExit(0)
+cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+value = cfg.get(section, {})
+enabled = value.get("enabled", default) if isinstance(value, dict) else default
+print("1" if bool(enabled) else "0")
+PY
+}
+
+require_binary() {
+  local binary_path="$1"
+  local component="$2"
+  if [[ -x "$binary_path" ]]; then
+    return 0
+  fi
+  echo "Required binary is missing or not executable: ${binary_path} (${component})" >&2
+  return 1
+}
+
+WEBD_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/webd.toml" "webd" "0")"
+TELEGRAM_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/telegram.toml" "telegram_bot" "1")"
+WHATSAPP_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/whatsapp.toml" "whatsapp" "0")"
+WHATSAPP_WEB_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/whatsapp.toml" "whatsapp_web" "0")"
+WECHAT_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/wechat.toml" "wechat" "0")"
+FEISHU_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/feishu.toml" "feishu" "0")"
+
+preflight_failed=0
+require_binary "$CLAWD_BIN" "clawd" || preflight_failed=1
+require_binary "$SKILL_RUNNER_ABS" "skill-runner" || preflight_failed=1
+if [[ "$WEBD_ENABLED" == "1" ]]; then
+  require_binary "$WEBD_BIN" "webd" || preflight_failed=1
+fi
+if [[ "${RUSTCLAW_SKIP_TELEGRAMD:-0}" != "1" && "$TELEGRAM_ENABLED" == "1" ]]; then
+  require_binary "$TELEGRAMD_BIN" "telegramd" || preflight_failed=1
+fi
+if [[ "$WHATSAPP_ENABLED" == "1" ]]; then
+  require_binary "$WHATSAPPD_BIN" "whatsappd" || preflight_failed=1
+fi
+if [[ "$WHATSAPP_WEB_ENABLED" == "1" ]]; then
+  require_binary "$WHATSAPP_WEBD_BIN" "whatsapp_webd" || preflight_failed=1
+fi
+if [[ "$WECHAT_ENABLED" == "1" ]]; then
+  require_binary "$WECHATD_BIN" "wechatd" || preflight_failed=1
+fi
+if [[ "$FEISHU_ENABLED" == "1" ]]; then
+  require_binary "$FEISHUD_BIN" "feishud" || preflight_failed=1
+fi
+if [[ "$preflight_failed" -ne 0 ]]; then
+  echo "Startup preflight failed; existing RustClaw processes were left unchanged." >&2
+  echo "Run: ./build-all.sh $PROFILE" >&2
   exit 1
+fi
+
+# Stop managed RustClaw processes only after every enabled component passes
+# preflight. A partial build must never take a healthy deployment offline.
+if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
+  "$SCRIPT_DIR/stop-rustclaw.sh" || true
 fi
 
 start_clawd() {
@@ -89,19 +137,7 @@ start_clawd() {
 }
 
 start_webd() {
-  local webd_enabled
-  webd_enabled="$(
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-webd_cfg = Path("configs/channels/webd.toml")
-if webd_cfg.exists():
-    cfg.update(tomllib.loads(webd_cfg.read_text(encoding="utf-8")))
-print("1" if bool(cfg.get("webd", {}).get("enabled", False)) else "0")
-PY
-  )"
-  if [[ "$webd_enabled" != "1" ]]; then
+  if [[ "$WEBD_ENABLED" != "1" ]]; then
     echo "webd.enabled=false, skipping webd startup." # zh: webd.enabled=false，跳过 webd 启动。
     return 0
   fi
@@ -126,19 +162,7 @@ PY
 }
 
 start_telegramd() {
-  local tg_enabled
-  tg_enabled="$(
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-tg_cfg = Path("configs/channels/telegram.toml")
-if tg_cfg.exists():
-    cfg.update(tomllib.loads(tg_cfg.read_text(encoding="utf-8")))
-print("1" if bool(cfg.get("telegram_bot", {}).get("enabled", True)) else "0")
-PY
-  )"
-  if [[ "$tg_enabled" != "1" ]]; then
+  if [[ "$TELEGRAM_ENABLED" != "1" ]]; then
     echo "telegram_bot.enabled=false, skipping telegramd startup." # zh: telegram_bot.enabled=false，跳过 telegramd 启动。
     return 0
   fi
@@ -158,19 +182,7 @@ PY
 }
 
 start_whatsapp_webd() {
-  local wa_web_enabled
-  wa_web_enabled="$(
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-wa_cfg = Path("configs/channels/whatsapp.toml")
-if wa_cfg.exists():
-    cfg.update(tomllib.loads(wa_cfg.read_text(encoding="utf-8")))
-print("1" if bool(cfg.get("whatsapp_web", {}).get("enabled", False)) else "0")
-PY
-  )"
-  if [[ "$wa_web_enabled" != "1" ]]; then
+  if [[ "$WHATSAPP_WEB_ENABLED" != "1" ]]; then
     echo "whatsapp_web.enabled=false, skipping whatsapp_webd startup." # zh: whatsapp_web.enabled=false，跳过 whatsapp_webd 启动。
     return 0
   fi
@@ -195,19 +207,7 @@ PY
 }
 
 start_whatsappd() {
-  local wa_enabled
-  wa_enabled="$(
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-wa_cfg = Path("configs/channels/whatsapp.toml")
-if wa_cfg.exists():
-    cfg.update(tomllib.loads(wa_cfg.read_text(encoding="utf-8")))
-print("1" if bool(cfg.get("whatsapp", {}).get("enabled", False)) else "0")
-PY
-  )"
-  if [[ "$wa_enabled" != "1" ]]; then
+  if [[ "$WHATSAPP_ENABLED" != "1" ]]; then
     echo "whatsapp.enabled=false, skipping whatsappd startup." # zh: whatsapp.enabled=false，跳过 whatsappd 启动。
     return 0
   fi
@@ -232,21 +232,7 @@ PY
 }
 
 start_feishud() {
-  local feishu_enabled
-  feishu_enabled="$(
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-path = Path("configs/channels/feishu.toml")
-if not path.exists():
-    print("0")
-    raise SystemExit(0)
-cfg = tomllib.loads(path.read_text(encoding="utf-8"))
-feishu = cfg.get("feishu", {}) or {}
-print("1" if bool(feishu.get("enabled", False)) else "0")
-PY
-  )"
-  if [[ "$feishu_enabled" != "1" ]]; then
+  if [[ "$FEISHU_ENABLED" != "1" ]]; then
     echo "feishu.enabled=false, skipping feishud startup." # zh: feishu.enabled=false，跳过 feishud 启动。
     return 0
   fi
@@ -271,21 +257,7 @@ PY
 }
 
 start_wechatd() {
-  local wechat_enabled
-  wechat_enabled="$(
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-path = Path("configs/channels/wechat.toml")
-if not path.exists():
-    print("0")
-    raise SystemExit(0)
-cfg = tomllib.loads(path.read_text(encoding="utf-8"))
-wechat = cfg.get("wechat", {}) or {}
-print("1" if bool(wechat.get("enabled", False)) else "0")
-PY
-  )"
-  if [[ "$wechat_enabled" != "1" ]]; then
+  if [[ "$WECHAT_ENABLED" != "1" ]]; then
     echo "wechat.enabled=false, skipping wechatd startup."
     return 0
   fi
