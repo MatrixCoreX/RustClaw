@@ -408,6 +408,16 @@ fn execute_rejects_repository_and_file_paths_outside_workspace() {
         "git_path_outside_workspace" | "git_repository_outside_workspace"
     ));
 
+    let absolute_repository_error = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({"action": "status", "repo": std::env::temp_dir()}),
+    )
+    .expect_err("absolute repository outside workspace must fail");
+    assert_eq!(
+        absolute_repository_error.code,
+        "git_repository_outside_workspace"
+    );
+
     fixture.commit_file("README.md", "first\n", "first");
     let file_error = execute_with_workspace_root(
         &fixture.workspace,
@@ -420,6 +430,32 @@ fn execute_rejects_repository_and_file_paths_outside_workspace() {
     )
     .expect_err("file traversal must fail");
     assert_eq!(file_error.code, "git_path_outside_workspace");
+}
+
+#[test]
+fn execute_accepts_absolute_repository_path_inside_workspace() {
+    let fixture = TestRepository::new();
+
+    let (_, extra) = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({"action": "status", "repo": fixture.repository}),
+    )
+    .expect("absolute repository path inside workspace must be accepted");
+
+    assert_eq!(
+        extra.get("action").and_then(|value| value.as_str()),
+        Some("status")
+    );
+    assert_eq!(
+        extra
+            .pointer("/provenance/repository_root")
+            .and_then(|value| value.as_str()),
+        fixture
+            .repository
+            .canonicalize()
+            .expect("canonical repository")
+            .to_str()
+    );
 }
 
 #[test]
