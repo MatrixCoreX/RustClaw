@@ -1005,7 +1005,6 @@ requires_confirmation = true
 side_effect = true
 retryable = true
 	group = "shell"
-	primary_fallback_role = "primary"
 	supported_os = ["linux", "macos"]
 	required_bins = ["bash"]
 	optional_bins = ["sudo"]
@@ -1030,10 +1029,6 @@ output_schema = { type = "object", properties = { text = { type = "string" } } }
     assert_eq!(manifest.side_effect, Some(true));
     assert_eq!(manifest.retryable, Some(true));
     assert_eq!(manifest.group.as_deref(), Some("shell"));
-    assert_eq!(
-        manifest.primary_fallback_role,
-        Some(PrimaryFallbackRole::Primary)
-    );
     assert_eq!(
         manifest.supported_os,
         vec!["linux".to_string(), "macos".to_string()]

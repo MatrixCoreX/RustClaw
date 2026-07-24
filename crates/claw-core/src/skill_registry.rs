@@ -40,15 +40,6 @@ pub enum SkillRiskLevel {
     High,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PrimaryFallbackRole {
-    #[default]
-    None,
-    Primary,
-    Fallback,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlannerCapabilityEffect {
@@ -553,7 +544,6 @@ pub struct SkillManifest {
     pub timeout_seconds: Option<u64>,
     pub retryable: Option<bool>,
     pub group: Option<String>,
-    pub primary_fallback_role: Option<PrimaryFallbackRole>,
     pub once_per_task: Option<bool>,
     pub dedup_scope: Option<RegistryDedupScope>,
     pub idempotent: Option<bool>,
@@ -682,8 +672,6 @@ pub struct SkillRegistryEntry {
     /// declaration to disclose only the calling skill's storage descriptor.
     #[serde(default)]
     pub storage: Option<SkillStorageDeclaration>,
-    #[serde(default)]
-    pub primary_fallback_role: Option<PrimaryFallbackRole>,
     /// Host OS families where this skill/tool is expected to work, e.g.
     /// `linux`, `macos`, or `any`. This is planner/UI metadata, not a runtime
     /// permission.
@@ -1680,7 +1668,6 @@ impl SkillsRegistry {
             timeout_seconds,
             retryable: entry.retryable,
             group: trim_optional_string(entry.group.as_deref()),
-            primary_fallback_role: entry.primary_fallback_role,
             once_per_task: entry.once_per_task,
             dedup_scope: entry.dedup_scope,
             idempotent: entry.idempotent,

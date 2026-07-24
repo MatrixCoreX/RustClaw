@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use claw_core::skill_registry::{PlannerCapabilityEffect, PrimaryFallbackRole, SkillRiskLevel};
+use claw_core::skill_registry::{PlannerCapabilityEffect, SkillRiskLevel};
 use serde_json::Value;
 
 use crate::{evidence_policy::FailureAttribution, AppState, ClaimedTask, PlanResult, PlanStep};
@@ -61,7 +61,6 @@ pub(crate) enum VerifyIssueKind {
     SandboxPolicyDenied,
     #[cfg_attr(not(test), allow(dead_code))]
     RiskBudgetExceeded,
-    PrimaryFallbackConflict,
     BoundaryClarifyRequired,
     RecipeInspectBeforeMutateRequired,
     RecipeValidationAfterMutateRequired,
@@ -93,7 +92,6 @@ impl VerifyIssueKind {
             Self::ConfirmationRequired => "ConfirmationRequired",
             Self::SandboxPolicyDenied => "SandboxPolicyDenied",
             Self::RiskBudgetExceeded => "RiskBudgetExceeded",
-            Self::PrimaryFallbackConflict => "PrimaryFallbackConflict",
             Self::BoundaryClarifyRequired => "BoundaryClarifyRequired",
             Self::RecipeInspectBeforeMutateRequired => "RecipeInspectBeforeMutateRequired",
             Self::RecipeValidationAfterMutateRequired => "RecipeValidationAfterMutateRequired",
@@ -112,7 +110,6 @@ impl VerifyIssueKind {
             | Self::InvalidArgumentValue
             | Self::UnresolvedTemplateArg
             | Self::InvalidDependsOn
-            | Self::PrimaryFallbackConflict
             | Self::BoundaryClarifyRequired => FailureAttribution::ModelError,
             Self::DefaultCreationTargetApplied
             | Self::RecipeInspectBeforeMutateRequired
@@ -140,7 +137,6 @@ impl VerifyIssueKind {
             Self::ConfirmationRequired => "verify_confirmation_required",
             Self::SandboxPolicyDenied => "verify_sandbox_policy_denied",
             Self::RiskBudgetExceeded => "verify_risk_budget_exceeded",
-            Self::PrimaryFallbackConflict => "verify_primary_fallback_conflict",
             Self::BoundaryClarifyRequired => "verify_boundary_clarify_required",
             Self::RecipeInspectBeforeMutateRequired => {
                 "verify_recipe_inspect_before_mutate_required"
@@ -168,7 +164,6 @@ impl VerifyIssueKind {
             Self::ConfirmationRequired => "confirmation_required",
             Self::SandboxPolicyDenied => "sandbox_policy_denied",
             Self::RiskBudgetExceeded => "risk_budget_exceeded",
-            Self::PrimaryFallbackConflict => "primary_fallback_conflict",
             Self::BoundaryClarifyRequired => "boundary_clarify_required",
             Self::RecipeInspectBeforeMutateRequired => "recipe_inspect_before_mutate_required",
             Self::RecipeValidationAfterMutateRequired => "recipe_validation_after_mutate_required",
@@ -192,7 +187,6 @@ impl VerifyIssueKind {
             Self::ConfirmationRequired => "clawd.verify.confirmation_required",
             Self::SandboxPolicyDenied => "clawd.verify.sandbox_policy_denied",
             Self::RiskBudgetExceeded => "clawd.verify.risk_budget_exceeded",
-            Self::PrimaryFallbackConflict => "clawd.verify.primary_fallback_conflict",
             Self::BoundaryClarifyRequired => "clawd.verify.boundary_clarify_required",
             Self::RecipeInspectBeforeMutateRequired => {
                 "clawd.verify.recipe_inspect_before_mutate_required"
@@ -474,99 +468,6 @@ fn required_arg_satisfied(
         })
 }
 
-fn push_group_conflict_issues(
-    issues: &mut Vec<VerifyIssue>,
-    group: &str,
-    entries: &[(String, String, PrimaryFallbackRole)],
-    detail: String,
-) {
-    for (step_id, normalized_skill, _) in entries {
-        issues.push(VerifyIssue {
-            step_id: step_id.clone(),
-            kind: VerifyIssueKind::PrimaryFallbackConflict,
-            detail: format!("group `{group}` skill `{normalized_skill}` conflict: {detail}"),
-            missing_fields: Vec::new(),
-        });
-    }
-}
-
-fn verify_primary_fallback_conflicts(
-    state: &AppState,
-    plan_result: &PlanResult,
-    issues: &mut Vec<VerifyIssue>,
-) {
-    let mut grouped: HashMap<String, Vec<(String, String, PrimaryFallbackRole)>> = HashMap::new();
-
-    for step in &plan_result.steps {
-        if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
-            continue;
-        }
-        let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
-        let Some(manifest) = state.skill_manifest(&normalized_skill) else {
-            continue;
-        };
-        let Some(group) = manifest
-            .group
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        else {
-            continue;
-        };
-        let role = manifest
-            .primary_fallback_role
-            .unwrap_or(PrimaryFallbackRole::None);
-        if matches!(role, PrimaryFallbackRole::None) {
-            continue;
-        }
-        grouped.entry(group.to_string()).or_default().push((
-            step.step_id.clone(),
-            normalized_skill,
-            role,
-        ));
-    }
-
-    for (group, entries) in grouped {
-        let primary_skills = entries
-            .iter()
-            .filter(|(_, _, role)| matches!(role, PrimaryFallbackRole::Primary))
-            .map(|(_, normalized_skill, _)| normalized_skill.as_str())
-            .collect::<HashSet<_>>();
-        let fallback_skills = entries
-            .iter()
-            .filter(|(_, _, role)| matches!(role, PrimaryFallbackRole::Fallback))
-            .map(|(_, normalized_skill, _)| normalized_skill.as_str())
-            .collect::<HashSet<_>>();
-
-        if !primary_skills.is_empty() && !fallback_skills.is_empty() {
-            push_group_conflict_issues(
-                issues,
-                &group,
-                &entries,
-                "both primary and fallback steps are present in the same plan".to_string(),
-            );
-            continue;
-        }
-        if primary_skills.len() > 1 {
-            push_group_conflict_issues(
-                issues,
-                &group,
-                &entries,
-                "multiple primary steps are present in the same group".to_string(),
-            );
-            continue;
-        }
-        if fallback_skills.len() > 1 {
-            push_group_conflict_issues(
-                issues,
-                &group,
-                &entries,
-                "multiple fallback steps are present in the same group".to_string(),
-            );
-        }
-    }
-}
-
 fn verify_step_args(
     state: &AppState,
     step: &PlanStep,
@@ -691,7 +592,6 @@ pub(crate) fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
             | VerifyIssueKind::InvalidArgumentValue
             | VerifyIssueKind::UnresolvedTemplateArg
             | VerifyIssueKind::InvalidDependsOn
-            | VerifyIssueKind::PrimaryFallbackConflict
             | VerifyIssueKind::SandboxPolicyDenied
             | VerifyIssueKind::RiskBudgetExceeded
             | VerifyIssueKind::BoundaryClarifyRequired
@@ -1200,7 +1100,6 @@ pub(crate) fn verify_plan(
         }
     }
 
-    verify_primary_fallback_conflicts(state, &effective_plan_result, &mut issues);
     verify_execution_recipe(
         state,
         &effective_plan_result,
