@@ -293,15 +293,7 @@ fn parse_input(req: &Value) -> std::result::Result<SearchInput, SearchError> {
         domains_allow = site_domains_from_query(&query);
     }
     let domains_deny = get_string_array(args.get("domains_deny"), "domains_deny")?;
-    let backend = args
-        .get("backend")
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_string)
-                .ok_or_else(|| SearchError::new("INVALID_INPUT", "backend must be string"))
-        })
-        .transpose()?
+    let backend = optional_string(args.get("backend"), "backend")?
         .or_else(|| env::var("WEB_SEARCH_BACKEND").ok());
     if backend
         .as_deref()
@@ -370,14 +362,20 @@ fn optional_string(
     if value.is_null() {
         return Ok(None);
     }
-    value
+    let value = value
         .as_str()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .filter(|value| value.chars().count() <= MAX_OPTION_CHARS)
-        .map(str::to_string)
-        .map(Some)
-        .ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be string")))
+        .ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be string")))?
+        .trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().count() > MAX_OPTION_CHARS {
+        return Err(SearchError::new(
+            "INVALID_INPUT",
+            format!("{field} exceeds supported length"),
+        ));
+    }
+    Ok(Some(value.to_string()))
 }
 
 fn get_string_array(
