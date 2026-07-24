@@ -2,7 +2,7 @@
 # Do not edit by hand; regenerate with scripts/nl_tests/build_release_gate_subset.py.
 # Selection uses suite/name/tags/source metadata only, not natural-language prompt matching.
 # source=scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt
-# selected_rows=285 coverage_categories=223 missing_categories=0
+# selected_rows=285 coverage_categories=217 missing_categories=0
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_release_gate_equivalent.txt --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet --exclude-case-tag x_api --exclude-case-tag post_tweet --exclude-case-tag publish_tweet
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -183,6 +183,9 @@ act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_docs_archive_names_zh
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_docs_archive_names_en_034|act,exact_path_list,file_names,listing,en,client_like,aggregate|Output only file names inside scripts/nl_tests/fixtures/device_local/docs/archive.
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_tmp_dir_names_zh_035|act,exact_path_list,directory_names,listing,zh,client_like,aggregate|列出 scripts/nl_tests/fixtures/device_local/tmp 下的直接子目录名。
 act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_tmp_dir_names_en_036|act,exact_path_list,directory_names,listing,en,client_like,aggregate|List direct directory names under scripts/nl_tests/fixtures/device_local/tmp.
+act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_tmp_groups_zh_037|act,exact_path_list,directory_entry_groups,listing,zh,client_like,aggregate|把 scripts/nl_tests/fixtures/device_local/tmp 顶层内容按文件和目录分组列出来。
+act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_tmp_groups_en_038|act,exact_path_list,directory_entry_groups,listing,en,client_like,aggregate|Group top-level entries under scripts/nl_tests/fixtures/device_local/tmp by file and directory.
+act|nl_cases_agent_loop_exact_path_list_focus_20260612_epl_prompts_schema_paths_zh_039|act,exact_path_list,file_paths,listing,zh,client_like,aggregate|找出 prompts/schemas 目录下的 json 文件路径，只输出路径列表。
 # source: scripts/nl_tests/cases/nl_cases_agent_loop_structured_field_read_focus_20260611.txt
 act|nl_cases_agent_loop_structured_field_read_focus_20260611_sfr_json_pkg_name_zh_001|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like,aggregate|读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。|expect=rustclaw-nl-fixture
 act|nl_cases_agent_loop_structured_field_read_focus_20260611_sfr_json_pkg_name_zh_002|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like,aggregate|去 scripts/nl_tests/fixtures/device_local/package.json 里把 name 的值拿出来，只给值。|expect=rustclaw-nl-fixture
@@ -252,9 +255,6 @@ compound|nl_cases_client_like_typical_coverage_20260605_typical_two_commands_raw
 continuous|nl_cases_client_like_typical_coverage_20260605_typical_clarify_send_file_turn1|typical,clarify,delivery,turn_chain,zh,client_like,aggregate,allow_clarify|把文件发给我
 continuous|nl_cases_client_like_typical_coverage_20260605_typical_clarify_send_file_turn2|typical,clarify,delivery,turn_chain,zh,client_like,aggregate,allow_clarify|README.md
 config_edit_smoke|nl_cases_client_like_typical_coverage_20260605_typical_config_edit_plan_no_write_zh|typical,act,config,mutate,dry_run,tool:config_edit,zh,client_like,aggregate|只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程
-chat_act|nl_cases_client_like_typical_coverage_20260605_typical_weather_beijing_zh|typical,network,skill:weather,zh,client_like,aggregate|查一下 Beijing 今天天气，简短告诉我
-chat_act|nl_cases_client_like_typical_coverage_20260605_typical_stock_quote_zh|typical,network,skill:stock,zh,client_like,aggregate|查一下 600519 的最新行情，简短告诉我
-chat_act|nl_cases_client_like_typical_coverage_20260605_typical_crypto_quote_zh|typical,network,skill:crypto,zh,client_like,aggregate|查一下 BTCUSDT 的最新价格，简短告诉我
 # source: scripts/nl_tests/cases/nl_cases_codex_cli_continuous_dev_20260711.txt
 codex_cli_continuous_dev|nl_cases_codex_cli_continuous_dev_20260711_multi_file_refactor_package_zh|covers:continuous_dev,coding,multi_file_refactor,modify_files,run_tests,json_output,client_like,requires_tool_call=true,local_side_effect,aggregate|继续刚才第一个计算器项目：把 calc_core.py 重构成 calc_pkg/operations.py 和 calc_pkg/__init__.py，保持 add、sub、mul、safe_div 的公开导入不变；更新 test_calc_core.py 使用 from calc_pkg import add, sub, mul, safe_div；删除旧 calc_core.py 或把它变成兼容薄转发二选一，但测试必须真实导入 calc_pkg；运行 python3 test_calc_core.py。最后只输出 JSON，包含 changed_files、package_files、compat_strategy、test_command、test_status。
 codex_cli_continuous_dev|nl_cases_codex_cli_continuous_dev_20260711_failing_command_then_repair_zh|covers:continuous_dev,coding,modify_files,run_tests,verification_repair,failing_command_repair,json_output,client_like,requires_tool_call=true,local_side_effect,aggregate|在 run/nl_eval_tmp/codex_cli_failing_command_repair_20260714_live 创建一个小型 Python 项目，并按顺序完成：1. 新建 calc_core.py，先故意让 safe_div(a,b) 在 b 为 0 时返回 {"ok": true, "value": 0}；2. 新建 test_calc_core.py，断言 safe_div(1,0) 必须返回 {"ok": false, "error_code": "division_by_zero"}，并断言 safe_div(6,3) 的 value 为 2；3. 先运行 python3 test_calc_core.py，并把这次失败记录为 failure_observed；4. 修复 calc_core.py；5. 再运行 python3 test_calc_core.py 直到通过。最后只输出 JSON，包含 project_dir、changed_files、failed_command、failure_observed、failure_evidence、fix_summary、test_command、test_status。

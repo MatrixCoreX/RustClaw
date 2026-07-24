@@ -1,9 +1,10 @@
 use super::{
-    bounded_preview, domain_matches, error_extra, execute, host_matches_no_proxy, http_observation,
-    is_proxy_synthetic_ip, is_public_ip, is_sensitive_header, is_textual_content, read_limited,
-    redirect_switches_to_get, resolve_output_path, should_forward_header,
-    should_inject_rustclaw_key_for_base, validate_target_url, FetchPolicy, HttpArtifact,
-    HttpObservationInput, RequestMethod, SKILL_NAME,
+    bounded_preview, detects_proxy_synthetic_dns, domain_matches, error_extra, execute,
+    host_matches_no_proxy, http_observation, is_proxy_synthetic_ip, is_public_ip,
+    is_sensitive_header, is_textual_content, read_limited, redirect_switches_to_get,
+    resolve_output_path, should_forward_header, should_inject_rustclaw_key_for_base,
+    validate_target_url, FetchPolicy, HttpArtifact, HttpObservationInput, RequestMethod,
+    SKILL_NAME,
 };
 use reqwest::StatusCode;
 use serde_json::json;
@@ -206,6 +207,24 @@ fn private_and_reserved_network_ranges_are_blocked() {
     assert!(!is_proxy_synthetic_ip(IpAddr::V4(Ipv4Addr::new(
         192, 168, 1, 1
     ))));
+}
+
+#[test]
+fn synthetic_dns_detection_rejects_private_peers() {
+    assert!(detects_proxy_synthetic_dns(&[IpAddr::V4(Ipv4Addr::new(
+        198, 18, 0, 42
+    ))]));
+    assert!(detects_proxy_synthetic_dns(&[
+        IpAddr::V4(Ipv4Addr::new(198, 19, 0, 42)),
+        IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
+    ]));
+    assert!(!detects_proxy_synthetic_dns(&[IpAddr::V4(Ipv4Addr::new(
+        1, 1, 1, 1
+    ))]));
+    assert!(!detects_proxy_synthetic_dns(&[
+        IpAddr::V4(Ipv4Addr::new(198, 18, 0, 42)),
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+    ]));
 }
 
 #[test]
