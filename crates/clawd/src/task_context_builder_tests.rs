@@ -147,7 +147,12 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
             session_alias_context:
                 "### SESSION_ALIAS_BINDINGS\n- alias: report\n  target: /workspace/a.txt"
                     .to_string(),
-            recent_turns_full: "### RECENT_TURNS\nturn".to_string(),
+            recent_turns_full: concat!(
+                "### RECENT_TURNS_FULL\n",
+                "[TURN -1]\nUser: second request\nAssistant: second result\n[/TURN]\n",
+                "[TURN -2]\nUser: first request\nAssistant: first result\n[/TURN]\n",
+            )
+            .to_string(),
             last_turn_full: "<none>".to_string(),
             recent_execution_anchor: recent_execution_anchor.clone(),
             recent_execution_context: "<none>".to_string(),
@@ -167,7 +172,14 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
             .expect("render layered context prompts");
 
     assert!(chat.contains("### RUNTIME_CONTEXT"));
-    assert!(chat.contains("### RECENT_TURNS"));
+    assert!(chat.contains("### RECENT_TURNS_FULL"));
+    assert!(memory.contains("### RECENT_TURNS_FULL"));
+    assert!(memory.contains("[TURN -1]"));
+    assert!(memory.contains("[TURN -2]"));
+    assert!(
+        memory.find("[TURN -1]").expect("latest turn")
+            < memory.find("[TURN -2]").expect("second-latest turn")
+    );
     assert!(resolved.contains("### TASK_GOAL_CONTEXT"));
     assert!(resolved.contains("### CONTEXT_BUDGET_REPORT"));
     assert!(memory.contains("### RECENT_EXECUTION_CONTEXT"));
