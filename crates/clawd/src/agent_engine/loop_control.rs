@@ -107,18 +107,28 @@ async fn try_bounded_answer_verifier_synthesis_retry(
         return false;
     };
     let verifier_out = answer_verifier_summary_to_out(verifier);
-    let Some(retried_answer) = crate::finalize::retry_loop_answer_after_verifier(
-        state,
-        task,
-        user_text,
-        &route.output_contract,
-        &journal_snapshot,
-        &reply.text,
-        &verifier_out,
-    )
-    .await
-    else {
-        return false;
+    let retried_answer = if let Some(candidate) = verifier_out.exact_user_literal_retry_candidate()
+    {
+        info!(
+            task_id = %task.task_id,
+            "answer_verifier_exact_user_literal_retry_candidate"
+        );
+        candidate
+    } else {
+        let Some(candidate) = crate::finalize::retry_loop_answer_after_verifier(
+            state,
+            task,
+            user_text,
+            &route.output_contract,
+            &journal_snapshot,
+            &reply.text,
+            &verifier_out,
+        )
+        .await
+        else {
+            return false;
+        };
+        candidate
     };
     let retry_verifier = crate::answer_verifier::verify_answer_observe_only(
         state,

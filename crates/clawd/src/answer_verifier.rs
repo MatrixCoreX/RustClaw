@@ -85,6 +85,41 @@ impl AnswerVerifierOut {
     pub(crate) fn high_confidence_gap(&self) -> bool {
         !self.pass && self.should_retry && self.confidence >= 0.55
     }
+
+    pub(crate) fn exact_user_literal_retry_candidate(&self) -> Option<String> {
+        const MAX_EXACT_LITERAL_CHARS: usize = 4_096;
+
+        if !self.high_confidence_gap()
+            || self.missing_evidence_fields.as_slice() != ["output_format"]
+        {
+            return None;
+        }
+        let envelope = serde_json::from_str::<serde_json::Value>(&self.retry_instruction).ok()?;
+        let object = envelope.as_object()?;
+        if object.len() != 3
+            || object
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                != Some(1)
+            || object
+                .get("repair_kind")
+                .and_then(serde_json::Value::as_str)
+                != Some("exact_user_literal")
+        {
+            return None;
+        }
+        let candidate = object
+            .get("required_exact_answer")
+            .and_then(serde_json::Value::as_str)?;
+        if candidate.is_empty()
+            || candidate != candidate.trim()
+            || candidate.chars().count() > MAX_EXACT_LITERAL_CHARS
+            || candidate.chars().any(char::is_control)
+        {
+            return None;
+        }
+        Some(candidate.to_string())
+    }
 }
 
 pub(crate) fn should_verify_answer(

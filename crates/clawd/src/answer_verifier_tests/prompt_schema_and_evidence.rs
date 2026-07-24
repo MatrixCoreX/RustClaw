@@ -146,6 +146,51 @@ fn answer_verifier_prompts_enforce_payload_only_without_runtime_phrase_matching(
     assert!(VERIFIER_PROMPT.contains("without another tool call"));
     assert!(RETRY_PROMPT.contains("return exactly that payload"));
     assert!(RETRY_PROMPT.contains("remove every heading"));
+    assert!(VERIFIER_PROMPT.contains("\"repair_kind\":\"exact_user_literal\""));
+    assert!(VERIFIER_PROMPT.contains("Copy `required_exact_answer` verbatim"));
+}
+
+#[test]
+fn exact_user_literal_retry_candidate_requires_closed_machine_envelope() {
+    let accepted = AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "payload-only shape mismatch".to_string(),
+        should_retry: true,
+        retry_instruction: serde_json::json!({
+            "schema_version": 1,
+            "repair_kind": "exact_user_literal",
+            "required_exact_answer": "確認済み"
+        })
+        .to_string(),
+        confidence: 0.95,
+    };
+    assert_eq!(
+        accepted.exact_user_literal_retry_candidate().as_deref(),
+        Some("確認済み")
+    );
+
+    for retry_instruction in [
+        "rewrite the answer",
+        r#"{"schema_version":1,"repair_kind":"exact_user_literal","required_exact_answer":"confirmed","extra":true}"#,
+        r#"{"schema_version":1,"repair_kind":"exact_user_literal","required_exact_answer":" confirmed"}"#,
+        r#"{"schema_version":1,"repair_kind":"exact_user_literal","required_exact_answer":"line\nbreak"}"#,
+    ] {
+        let rejected = AnswerVerifierOut {
+            retry_instruction: retry_instruction.to_string(),
+            ..accepted.clone()
+        };
+        assert!(
+            rejected.exact_user_literal_retry_candidate().is_none(),
+            "unexpectedly accepted {retry_instruction}"
+        );
+    }
+
+    let mixed_gap = AnswerVerifierOut {
+        missing_evidence_fields: vec!["output_format".to_string(), "field_value".to_string()],
+        ..accepted
+    };
+    assert!(mixed_gap.exact_user_literal_retry_candidate().is_none());
 }
 
 #[test]
