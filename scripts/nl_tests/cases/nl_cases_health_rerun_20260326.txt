@@ -1,5 +1,5 @@
 # Focused rerun for local health endpoint auth propagation.
 
 # suite|name|tags|prompt
-chat_act|act_http_local_health_cn||请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
-chat_act|act_http_local_health_en||call http://127.0.0.1:8787/v1/health and briefly summarize the result if it is reachable
+chat_act|act_http_local_health_cn||请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
+chat_act|act_http_local_health_en||call __RUSTCLAW_TEST_BASE_URL__/v1/health and briefly summarize the result if it is reachable

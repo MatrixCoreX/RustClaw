@@ -19,7 +19,7 @@ chat_act|builtin_remove_file_smoke|builtin,builtin_skill:remove_file,skill:remov
 # Runner skills: mostly local/read-only
 chat|skill_chat_brief_joke|skill:chat,local|讲一个简短冷笑话
 chat_act|skill_system_basic_info_brief|skill:system_basic,local|帮我看一下这台机器的基础系统信息，简短告诉我最关键的几项
-chat_act|skill_http_basic_local_health|skill:http_basic,local,conditional|请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+chat_act|skill_http_basic_local_health|skill:http_basic,local,conditional|请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
 chat_act|skill_git_basic_status|skill:git_basic,local|看一下当前仓库 git 状态，简短告诉我最值得注意的变化
 chat_act|skill_process_basic_top_cpu|skill:process_basic,local|看一下当前最占 CPU 的前 5 个进程，简短告诉我最值得注意的是哪个
 chat_act|skill_package_manager_detect|skill:package_manager,local|检测这台机器上的包管理器，简短告诉我结果

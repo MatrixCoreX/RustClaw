@@ -1,7 +1,7 @@
 chat_act|act_package_manager_detect_cn||帮我看看这台机器识别到的包管理器是什么，简短告诉我
 chat_act|act_process_top_brief_cn||看一下当前最占 CPU 的几个进程，然后用一句话告诉我最值得注意的是哪个
 act|act_db_schema_version_cn||查一下 data/db-basic-contract.sqlite 的 schema version 是多少，简短告诉我
-chat_act|act_http_local_health_cn||请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+chat_act|act_http_local_health_cn||请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
 chat_act|act_workspace_glance_cn||快速看一下当前工作区，简短告诉我这里大概是什么项目
 chat_act|act_release_note_brief||读一下 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md，然后用一句话说它更像提醒什么
 act|act_fixture_package_name_scalar||去 scripts/nl_tests/fixtures/device_local/package.json 里找 name，只输出值

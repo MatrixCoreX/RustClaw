@@ -1270,6 +1270,11 @@ path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
 PY
 }
 
+materialize_case_prompt() {
+  local prompt="${1:-}"
+  printf '%s' "${prompt//__RUSTCLAW_TEST_BASE_URL__/${BASE_URL}}"
+}
+
 submit_turn() {
   local turn="$1"
   local prompt="$2"
@@ -2278,6 +2283,7 @@ if [[ "${#CASE_FILE_VALUES[@]}" -gt 0 || -n "${CASE_JSONL_VALUE:-}" ]]; then
       case_prompt="$(json_decode_arg "$case_prompt")"
       case_expect="$(json_decode_arg "$case_expect")"
     fi
+    case_prompt="$(materialize_case_prompt "$case_prompt")"
     turn=$((turn + 1))
     case_external_chat_id="$EXTERNAL_CHAT_ID_VALUE"
     if [[ "$CASE_GROUP_ISOLATION" -eq 1 ]]; then

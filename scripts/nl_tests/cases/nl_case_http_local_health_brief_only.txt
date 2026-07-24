@@ -6,4 +6,4 @@
 #     --case-file scripts/nl_tests/cases/nl_cases_singletons.txt
 # This stub file may be removed in a future cleanup.
 #
-请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果

@@ -19,7 +19,7 @@ chat_act|typical_compare_cargo_sizes_zh|typical,act,compare,summary,zh,client_li
 chat_act|typical_process_top_cpu_zh|typical,act,process,summary,zh,client_like|看一下当前最占 CPU 的几个进程，然后用一句话告诉我最值得注意的是哪个
 chat_act|typical_telegramd_status_en|typical,act,service,summary,en,client_like|check whether telegramd is running right now and briefly explain the status
 chat_act|typical_health_check_en|typical,act,health,summary,en,client_like|run a basic health check here and summarize only the most important findings
-single|typical_http_local_health_zh|typical,act,http,summary,zh,client_like|请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+single|typical_http_local_health_zh|typical,act,http,summary,zh,client_like|请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
 single|typical_ports_brief_zh|typical,act,network,ports,summary,zh,client_like|看看这台机器现在有哪些端口在监听，然后挑最值得注意的几个简单说一下
 single|typical_log_analyze_zh|typical,act,logs,summary,zh,client_like|快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
 single|typical_git_status_zh|typical,act,git,summary,zh,client_like|看看这个仓库现在有没有未提交改动，用一句话告诉我

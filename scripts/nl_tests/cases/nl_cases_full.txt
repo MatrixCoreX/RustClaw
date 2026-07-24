@@ -42,7 +42,7 @@ chat_act|act_transform_json_table_en||sort this JSON array by score descending a
 chat_act|act_package_manager_detect_cn||帮我看看这台机器现在识别到的包管理器是什么，简短告诉我结果
 chat_act|act_process_top_brief_cn||看一下当前最占 CPU 的几个进程，然后用一句话告诉我最值得注意的是哪个
 chat_act|act_db_schema_version_en||check the schema version in data/db-basic-contract.sqlite and tell me the result briefly
-chat_act|act_http_local_health_en||call http://127.0.0.1:8787/v1/health and briefly summarize the result if it is reachable
+chat_act|act_http_local_health_en||call __RUSTCLAW_TEST_BASE_URL__/v1/health and briefly summarize the result if it is reachable
 chat_act|act_archive_pack_brief_cn||把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功
 chat_act|act_system_info_brief_en||show me the basic machine info here like hostname and system, keep it brief
 chat_act|act_workspace_glance_cn||快速看一下当前工作区，简短告诉我这里大概是什么项目
@@ -68,7 +68,7 @@ chat_act|chat_act_current_dir_partition_cn||先看当前目录顶层文件夹，
 act|act_recent_commit_subject_cn||只告诉我最近一次 git 提交的标题，不要解释
 act|act_toml_paths_cn||找出仓库里 5 个代表性的 toml 文件，只输出路径列表
 chat_act|chat_act_json_transform_table_cn||把这个 JSON 数组按 score 从高到低排序，并转成 markdown 表格：[{"name":"delta","score":4},{"name":"beta","score":11},{"name":"alpha","score":7}]
-chat_act|chat_act_local_health_brief_cn||访问 http://127.0.0.1:8787/v1/health，简短告诉我结果
+chat_act|chat_act_local_health_brief_cn||访问 __RUSTCLAW_TEST_BASE_URL__/v1/health，简短告诉我结果
 chat_act|chat_act_service_status_brief_cn2||看看 telegramd 现在是不是在运行，用一句话回答
 chat_act|chat_act_package_manager_brief_cn||看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个
 chat_act|chat_act_sqlite_tables_brief_cn||看看 data/db-basic-contract.sqlite 里有哪些表，再一句话说这更像业务库还是测试库
@@ -93,7 +93,7 @@ chat_act|chat_act_current_dir_partition_en||look at the top-level directories he
 act|act_recent_commit_subject_en||tell me only the title of the most recent git commit
 act|act_toml_paths_en||find 5 representative toml files in this repo and output only the paths
 chat_act|chat_act_json_transform_table_en2||sort this JSON array by score descending and render it as a markdown table: [{"name":"delta","score":4},{"name":"beta","score":11},{"name":"alpha","score":7}]
-chat_act|chat_act_local_health_brief_en2||call http://127.0.0.1:8787/v1/health and briefly tell me the result
+chat_act|chat_act_local_health_brief_en2||call __RUSTCLAW_TEST_BASE_URL__/v1/health and briefly tell me the result
 chat_act|chat_act_service_status_brief_en2||check whether telegramd is running and answer in one short sentence
 chat_act|chat_act_package_manager_brief_en2||check which package manager is recognized on this machine and briefly say which one is most likely the everyday default
 chat_act|chat_act_sqlite_tables_brief_en2||list the tables in data/db-basic-contract.sqlite and briefly say whether this looks more like an app DB or a test DB
