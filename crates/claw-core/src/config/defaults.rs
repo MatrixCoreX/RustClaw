@@ -100,6 +100,7 @@ pub(super) fn default_skills_list() -> Vec<String> {
         "task_control".to_string(),
         "config_guard".to_string(),
         "doc_parse".to_string(),
+        "office_workspace".to_string(),
         "transform".to_string(),
         "web_search_extract".to_string(),
         "kb".to_string(),
