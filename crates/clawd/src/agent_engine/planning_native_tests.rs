@@ -1463,8 +1463,8 @@ fn native_object_response_schema_and_repair_explain_serialized_json_values() {
 }
 
 #[test]
-fn native_contract_repair_supports_two_bounded_protocol_transitions() {
-    assert_eq!(MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS, 2);
+fn native_contract_repair_supports_three_bounded_protocol_transitions() {
+    assert_eq!(MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS, 3);
 
     let capability_signal = native_contract_repair_signal("native_plan_capability_missing");
     let respond_signal = native_contract_repair_signal("native_plan_respond_tool_required");
@@ -1495,6 +1495,25 @@ fn native_contract_repair_supports_two_bounded_protocol_transitions() {
     assert_eq!(
         notes,
         "native_contract_repair_reason_codes=native_plan_capability_missing,native_plan_respond_tool_required"
+    );
+}
+
+#[test]
+fn native_response_contract_retry_exposes_mutually_exclusive_shapes() {
+    let signal = native_contract_repair_signal("native_respond_object_count_mismatch");
+    let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
+    let shape_contract =
+        &observation["protocol_observation"]["argument_constraints"]["response_shape_contract"];
+
+    assert_eq!(
+        shape_contract["object"]["exact_field_count"],
+        "must_equal_fields_length"
+    );
+    assert_eq!(shape_contract["object"]["observed_fields"], "empty");
+    assert_eq!(shape_contract["observed_object"]["fields"], "empty");
+    assert_eq!(
+        shape_contract["observed_object"]["exact_field_count"],
+        "must_equal_observed_fields_length"
     );
 }
 

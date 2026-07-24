@@ -26,7 +26,7 @@ const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_
 const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
 const NATIVE_CALL_CAPABILITY_TOOL: &str = "call_capability";
 const NATIVE_RESPOND_TOOL: &str = "respond";
-const MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS: usize = 2;
+const MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS: usize = 3;
 const MAX_NATIVE_RESPONSE_ITEMS: usize = 64;
 const MAX_NATIVE_RESPONSE_FIELDS: usize = 64;
 const MAX_NATIVE_RESPONSE_SOURCE_PATH: usize = 160;
@@ -1072,6 +1072,45 @@ fn native_contract_repair_signal_with_context(
         Some(failed_tool_name.unwrap_or(default_tool_name))
     };
     let mut argument_constraints = Map::new();
+    if respond_contract_error {
+        argument_constraints.insert(
+            "response_shape_contract".to_string(),
+            json!({
+                "free_text": {
+                    "content": "non_empty",
+                    "items": "empty",
+                    "exact_item_count": 0,
+                    "fields": "empty",
+                    "observed_fields": "empty",
+                    "exact_field_count": 0
+                },
+                "list": {
+                    "content": "empty",
+                    "items": "non_empty",
+                    "exact_item_count": "must_equal_items_length",
+                    "fields": "empty",
+                    "observed_fields": "empty",
+                    "exact_field_count": 0
+                },
+                "object": {
+                    "content": "empty",
+                    "items": "empty",
+                    "exact_item_count": 0,
+                    "fields": "non_empty",
+                    "observed_fields": "empty",
+                    "exact_field_count": "must_equal_fields_length"
+                },
+                "observed_object": {
+                    "content": "empty",
+                    "items": "empty",
+                    "exact_item_count": 0,
+                    "fields": "empty",
+                    "observed_fields": "non_empty",
+                    "exact_field_count": "must_equal_observed_fields_length"
+                }
+            }),
+        );
+    }
     if error_code == "native_respond_object_field_json_invalid" {
         argument_constraints.insert(
             "fields[].value_json".to_string(),
