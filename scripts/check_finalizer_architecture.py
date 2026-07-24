@@ -23,8 +23,8 @@ SYNTHESIS_PROMPT = ROOT / "prompts/layers/overlays/capability_result_synthesis_p
 
 # These ceilings are the post-semantic-contract baseline. They prevent
 # unrelated growth while domain-specific branches are held at exactly zero.
-MAX_FINALIZER_PRODUCTION_MODULES = 62
-MAX_FINALIZER_PRODUCTION_LINES = 21_965
+MAX_FINALIZER_PRODUCTION_MODULES = 55
+MAX_FINALIZER_PRODUCTION_LINES = 18_713
 
 FORBIDDEN_RUNTIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("legacy_raw_output_type", re.compile(r"\bRawCommandOutput\b")),

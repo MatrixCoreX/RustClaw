@@ -91,6 +91,24 @@ fn complete_structured_selector_stops_after_single_capability_only_plan() {
         "task_control",
         r#"{"extra":{"checkpoint":{"status":"planned"},"diff":{"status":"planned"},"failed_verification":{"status":"failed"},"repair_attempt":{"attempt":1},"passing_verification":{"status":"passed"},"rewind_references":["checkpoint:1"]}}"#,
     ));
+    loop_state
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "task_control",
+            Some("preview_repair".to_string()),
+            json!({
+                "output": {
+                    "extra": {
+                        "checkpoint": {"status":"planned"},
+                        "diff": {"status":"planned"},
+                        "failed_verification": {"status":"failed"},
+                        "repair_attempt": {"attempt":1},
+                        "passing_verification": {"status":"passed"},
+                        "rewind_references": ["checkpoint:1"]
+                    }
+                }
+            }),
+        ));
     let actions = vec![AgentAction::CallCapability {
         capability: "coding_workflow.preview_repair".to_string(),
         args: json!({}),

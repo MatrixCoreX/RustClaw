@@ -114,7 +114,7 @@ impl IntentOutputContract {
                 .selection
                 .structured_field_selector
                 .as_deref()
-                .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+                .and_then(crate::machine_selector::exact_machine_field_selector)
                 .is_some_and(|fields| matches!(fields.as_slice(), [field] if field == "count"))
     }
 
@@ -124,7 +124,7 @@ impl IntentOutputContract {
                 .selection
                 .structured_field_selector
                 .as_deref()
-                .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+                .and_then(crate::machine_selector::exact_machine_field_selector)
                 .is_some_and(
                     |fields| matches!(fields.as_slice(), [field] if field == "command_output"),
                 )
@@ -150,7 +150,7 @@ impl IntentOutputContract {
             .selection
             .structured_field_selector
             .as_deref()
-            .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+            .and_then(crate::machine_selector::exact_machine_field_selector)
             .is_some()
     }
 
@@ -159,7 +159,7 @@ impl IntentOutputContract {
             .selection
             .structured_field_selector
             .as_deref()
-            .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+            .and_then(crate::machine_selector::exact_machine_field_selector)
         else {
             return false;
         };
@@ -193,11 +193,11 @@ impl IntentOutputContract {
     }
 
     pub(crate) fn requests_exact_path_list(&self) -> bool {
-        crate::machine_kv_projection::output_contract_requests_exact_list_path(self)
+        crate::machine_selector::output_contract_requests_exact_list_path(self)
     }
 
     pub(crate) fn requests_exact_scalar_path(&self) -> bool {
-        crate::machine_kv_projection::output_contract_requests_exact_scalar_path(self)
+        crate::machine_selector::output_contract_requests_exact_scalar_path(self)
     }
 
     pub(crate) fn requests_exact_list(&self) -> bool {

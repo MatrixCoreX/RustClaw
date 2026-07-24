@@ -116,7 +116,7 @@ fn verifier_pass_preserves_current_recorded_candidate_over_stale_terminal_step()
 }
 
 #[test]
-fn verifier_pass_promotes_terminal_json_over_machine_kv_projection() {
+fn verifier_pass_promotes_terminal_json_over_structured_projection() {
     let prompt = "Return only a JSON object with requested machine fields.";
     let mut route = route_result();
     route.requires_content_evidence = true;

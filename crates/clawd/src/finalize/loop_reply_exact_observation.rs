@@ -1,5 +1,5 @@
-use crate::agent_engine::{AgentRunContext, LoopState};
-use crate::{AppState, ClaimedTask};
+use crate::agent_engine::LoopState;
+use crate::AppState;
 
 pub(super) fn looks_like_structured_machine_output(answer: &str) -> bool {
     let trimmed = answer.trim();
@@ -122,7 +122,7 @@ fn exact_selector_value(
         .selection
         .structured_field_selector
         .as_deref()
-        .and_then(crate::machine_kv_projection::exact_machine_field_selector)?;
+        .and_then(crate::machine_selector::exact_machine_field_selector)?;
     let [field] = fields.as_slice() else {
         return None;
     };
@@ -169,44 +169,6 @@ pub(crate) fn exact_observation_machine_field_projection_from_journal(
         .map(str::trim_end)
         .filter(|output| !output.trim().is_empty())
         .map(str::to_string)
-}
-
-pub(super) fn replace_final_delivery_with_exact_observation_machine_field_projection(
-    state: &AppState,
-    task: &ClaimedTask,
-    loop_state: &mut LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-    delivery_messages: &mut Vec<String>,
-) -> bool {
-    let Some(route) = agent_run_context.and_then(AgentRunContext::output_contract) else {
-        return false;
-    };
-    let Some((answer, summary)) =
-        direct_exact_observation_output_projection(state, route, loop_state)
-    else {
-        return false;
-    };
-    if delivery_messages
-        .last()
-        .is_some_and(|message| message.trim() == answer.trim())
-    {
-        loop_state.last_user_visible_respond = Some(answer);
-        *finalizer_summary = Some(summary);
-        return false;
-    }
-    delivery_messages.clear();
-    delivery_messages.push(answer.clone());
-    loop_state.last_user_visible_respond = Some(answer);
-    *finalizer_summary = Some(summary);
-    super::log_deterministic_delivery_record(
-        &task.task_id,
-        "final_exact_machine_projection",
-        "replaced",
-        agent_run_context,
-        loop_state.executed_step_results.len(),
-    );
-    true
 }
 
 pub(super) fn exact_observation_output_needs_structural_projection(

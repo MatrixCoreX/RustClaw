@@ -293,67 +293,11 @@ fn latest_path_batch_facts_all_missing(loop_state: &LoopState) -> bool {
     false
 }
 
-pub(crate) fn requested_success_marker(
-    _agent_run_context: Option<&AgentRunContext>,
-) -> Option<&'static str> {
-    None
-}
-
-fn observed_answer_contains_required_success_marker(
-    agent_run_context: Option<&AgentRunContext>,
-    loop_state: &LoopState,
-    marker: &str,
-) -> bool {
-    super::observed_output::extract_answer_from_observed_output(loop_state, agent_run_context)
-        .is_some_and(|answer| text_has_exact_marker_line(&answer, marker))
-        || super::observed_output::extract_direct_scalar_from_generic_output(
-            loop_state,
-            agent_run_context,
-        )
-        .is_some_and(|answer| text_has_exact_marker_line(&answer, marker))
-}
-
-fn text_has_exact_marker_line(text: &str, marker: &str) -> bool {
-    let marker = marker.trim();
-    !marker.is_empty() && text.lines().map(str::trim).any(|line| line == marker)
-}
-
 fn structured_field_selector_observation_can_finalize(
     route_result: &IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    if !matches!(
-        route_result.response_shape,
-        crate::OutputResponseShape::Scalar
-            | crate::OutputResponseShape::Strict
-            | crate::OutputResponseShape::FileToken
-    ) {
-        return false;
-    }
-    let Some(selector) = route_result
-        .selection
-        .structured_field_selector
-        .as_deref()
-        .map(str::trim)
-        .filter(|selector| !selector.is_empty())
-    else {
-        return false;
-    };
-    loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .filter(|step| {
-            step.is_ok()
-                && !matches!(
-                    step.skill.as_str(),
-                    "synthesize_answer" | "respond" | "answer_verifier"
-                )
-        })
-        .filter_map(|step| step.output.as_deref())
-        .any(|output| {
-            crate::machine_kv_projection::structured_json_satisfies_field_selector(selector, output)
-        })
+    crate::finalize::strict_capability_projection_ready(route_result, loop_state)
 }
 
 fn should_stop_for_observed_finalize(
@@ -395,7 +339,6 @@ fn should_stop_for_observed_finalize(
     {
         return false;
     }
-    let required_success_marker = requested_success_marker(agent_run_context);
     let has_direct_observed_answer =
         super::observed_output::extract_answer_from_observed_output(loop_state, agent_run_context)
             .is_some();
@@ -423,9 +366,7 @@ fn should_stop_for_observed_finalize(
     if has_direct_observed_answer
         && route_result.response_shape != crate::OutputResponseShape::Scalar
     {
-        return required_success_marker.is_none_or(|marker| {
-            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
-        });
+        return true;
     }
     if route_result.response_shape == crate::OutputResponseShape::Scalar {
         if super::observed_output::extract_direct_scalar_from_generic_output(
@@ -434,13 +375,7 @@ fn should_stop_for_observed_finalize(
         )
         .is_some()
         {
-            return required_success_marker.is_none_or(|marker| {
-                observed_answer_contains_required_success_marker(
-                    agent_run_context,
-                    loop_state,
-                    marker,
-                )
-            });
+            return true;
         }
         if super::observed_output::scalar_route_prefers_structured_observed_answer(
             route_result,
@@ -451,13 +386,7 @@ fn should_stop_for_observed_finalize(
         )
         .is_some()
         {
-            return required_success_marker.is_none_or(|marker| {
-                observed_answer_contains_required_success_marker(
-                    agent_run_context,
-                    loop_state,
-                    marker,
-                )
-            });
+            return true;
         }
     }
     let can_stop = has_executable_observation_or_action(actions)
@@ -465,9 +394,6 @@ fn should_stop_for_observed_finalize(
         && route_expects_terminal_user_answer(route_result)
         && has_observed_stop_candidate;
     can_stop
-        && required_success_marker.is_none_or(|marker| {
-            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
-        })
 }
 
 fn coding_workflow_ready_for_model_finalization(loop_state: &LoopState) -> bool {
@@ -1237,6 +1163,19 @@ async fn run_agent_round(
     {
         outcome.stop_signal = Some("observed_output_ready".to_string());
     }
+    if outcome.stop_signal.is_none() {
+        let output_contract = loop_state.output_contract.clone().or_else(|| {
+            agent_run_context
+                .and_then(|ctx| ctx.output_contract())
+                .cloned()
+        });
+        if output_contract.as_ref().is_some_and(|contract| {
+            crate::finalize::record_strict_capability_projection_issue(contract, loop_state)
+        }) {
+            outcome.next_goal_hint = Some("resolve_generic_projection_issue".to_string());
+            outcome.no_progress = false;
+        }
+    }
     if outcome.stop_signal.is_none()
         && prepared_round
             .effective_output_contract
@@ -1543,17 +1482,6 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             return Ok(reply);
         }
         let answer_contract = answer_contract_for_reply(user_text, &reply);
-        promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
-            &mut reply,
-            user_text,
-            &pre_finalize_loop_state,
-            agent_run_context,
-        );
-        promote_publishable_strict_json_projection_for_verifier_candidate(
-            &mut reply,
-            answer_contract.as_ref(),
-            &pre_finalize_loop_state,
-        );
         prefer_terminal_model_answer_for_verifier_candidate(&mut reply, answer_contract.as_ref());
         enforce_post_write_content_evidence_guard(&mut reply);
         enforce_code_mutation_validation_success_guard(&mut reply);

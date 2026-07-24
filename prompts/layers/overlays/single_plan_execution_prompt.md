@@ -53,6 +53,11 @@ requested result shape and the evidence/delivery needs of the selected capabilit
 listed machine tokens; never copy user prose into these fields. Set `structured_field_selector` to
 a comma-separated list of exact machine field identifiers only when the user requests named
 structured fields; otherwise set it to `null`.
+Every strict machine projection must name its result field selector. For an exact list, select the
+array-valued result field; for one exact scalar, select one scalar field; for an exact named object,
+select every requested field. A single-file `file_token` delivery may instead use the one observed
+artifact path. Do not finish a strict projection from prose, an implicit field guess, or multiple
+different observed values for the same selector.
 `response_shape="scalar"` is valid only when the complete final answer is exactly one atomic value
 or token. A path plus content, a value plus source, or two or more requested named fields is a
 compound result and must use `free` or `strict` so every requested deliverable survives final

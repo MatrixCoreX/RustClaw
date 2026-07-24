@@ -64,6 +64,11 @@ Return a single JSON object with this exact schema:
 rounds unless the user changed it; use only machine tokens and never copy user prose into it.
 Set `structured_field_selector` to a comma-separated list of exact machine field identifiers only
 when the user requests named structured fields; otherwise set it to `null`.
+Every strict machine projection must name its result field selector. For an exact list, select the
+array-valued result field; for one exact scalar, select one scalar field; for an exact named object,
+select every requested field. A single-file `file_token` delivery may instead use the one observed
+artifact path. If runtime reports a `generic_projection_*` issue, collect or disambiguate structured
+evidence and preserve the machine selector; never repair it by copying prose into the contract.
 `response_shape="scalar"` is valid only when the complete final answer is exactly one atomic value
 or token. A path plus content, a value plus source, or two or more requested named fields is a
 compound result and must use `free` or `strict` so every requested deliverable survives final

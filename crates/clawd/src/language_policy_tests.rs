@@ -1,8 +1,8 @@
 use super::{
-    first_clear_request_language_hint, mixed_language_prefers_cjk_response,
-    preferred_response_language_hint, request_language_hint, task_language_source_text,
-    task_language_source_text_with_active_clarify, task_user_request_for_prompt,
-    text_is_language_neutral_artifact_only, text_language_conflicts_with_hint,
+    first_clear_request_language_hint, preferred_response_language_hint, request_language_hint,
+    task_language_source_text, task_language_source_text_with_active_clarify,
+    task_user_request_for_prompt, text_is_language_neutral_artifact_only,
+    text_language_conflicts_with_hint,
 };
 
 #[test]
@@ -77,28 +77,6 @@ fn language_neutral_artifacts_do_not_force_english() {
         .as_deref(),
         Some("zh-CN")
     );
-}
-
-#[test]
-fn mixed_response_language_preference_uses_script_balance() {
-    assert!(!mixed_language_prefers_cjk_response(
-        "用 English language answer explain README please"
-    ));
-    assert!(mixed_language_prefers_cjk_response(
-        "读取 README.md 的第一行"
-    ));
-    assert!(mixed_language_prefers_cjk_response(
-        "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了"
-    ));
-    assert_eq!(
-        request_language_hint(
-            "比较 Cargo.lock 和 Cargo.toml 的大小，告诉我 lock 大概是 toml 的几倍"
-        ),
-        "zh-CN"
-    );
-    assert!(mixed_language_prefers_cjk_response(
-        "比较 Cargo.lock 和 Cargo.toml 的大小，告诉我 lock 大概是 toml 的几倍"
-    ));
 }
 
 #[test]

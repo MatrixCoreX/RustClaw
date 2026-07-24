@@ -286,7 +286,7 @@ pub(super) fn selected_capability_result_scalar_candidate(
         .selection
         .structured_field_selector
         .as_deref()
-        .and_then(crate::machine_kv_projection::exact_machine_field_selector)?;
+        .and_then(crate::machine_selector::exact_machine_field_selector)?;
     let [field] = fields.as_slice() else {
         return None;
     };
@@ -310,7 +310,7 @@ pub(super) fn selected_capability_result_exact_candidate(
         .selection
         .structured_field_selector
         .as_deref()
-        .and_then(crate::machine_kv_projection::exact_machine_field_selector)?;
+        .and_then(crate::machine_selector::exact_machine_field_selector)?;
     let [field] = fields.as_slice() else {
         return None;
     };

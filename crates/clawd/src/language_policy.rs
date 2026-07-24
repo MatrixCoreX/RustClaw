@@ -318,11 +318,6 @@ pub(crate) fn first_clear_request_language_hint<'a>(
     None
 }
 
-pub(crate) fn mixed_language_prefers_cjk_response(user_text: &str) -> bool {
-    let counts = text_language_counts_without_neutral_artifacts(user_text.trim());
-    counts.cjk > 0 && counts.cjk.saturating_mul(4) >= counts.non_cjk_alpha()
-}
-
 fn canonical_locale_hint(locale_hint: &str) -> Option<String> {
     let trimmed = locale_hint.trim();
     if trimmed.is_empty() {

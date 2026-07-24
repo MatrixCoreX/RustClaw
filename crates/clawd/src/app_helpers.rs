@@ -75,32 +75,6 @@ pub(crate) fn i18n_t_with_default_vars(
     render_i18n_vars(i18n_t_with_default(state, key, default_text), vars)
 }
 
-pub(crate) fn bilingual_t_with_default(
-    state: &AppState,
-    key: &str,
-    default_zh: &str,
-    default_en: &str,
-    prefer_english: bool,
-) -> String {
-    let configured_locale = state.policy.schedule.locale.trim().to_ascii_lowercase();
-    let configured_matches_requested = if prefer_english {
-        configured_locale.starts_with("en")
-    } else {
-        configured_locale.starts_with("zh")
-    };
-    let default_text = if prefer_english {
-        default_en
-    } else {
-        default_zh
-    };
-    if configured_matches_requested {
-        i18n_t_with_default(state, key, default_text)
-    } else {
-        let requested_locale = if prefer_english { "en-US" } else { "zh-CN" };
-        i18n_t_for_locale_with_default(state, requested_locale, key, default_text)
-    }
-}
-
 fn i18n_t_for_locale_with_default(
     state: &AppState,
     locale: &str,
@@ -174,20 +148,6 @@ pub(crate) fn i18n_t_for_language_hint_with_default_vars(
     }
     render_i18n_vars(
         i18n_t_for_locale_with_default(state, &locale, key, default_text),
-        vars,
-    )
-}
-
-pub(crate) fn bilingual_t_with_default_vars(
-    state: &AppState,
-    key: &str,
-    default_zh: &str,
-    default_en: &str,
-    prefer_english: bool,
-    vars: &[(&str, &str)],
-) -> String {
-    render_i18n_vars(
-        bilingual_t_with_default(state, key, default_zh, default_en, prefer_english),
         vars,
     )
 }

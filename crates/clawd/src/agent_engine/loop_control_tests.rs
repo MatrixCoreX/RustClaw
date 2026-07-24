@@ -6,16 +6,13 @@ use super::{
     next_resumable_budget_action, observe_only_round_should_continue,
     post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
-    promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
-    promote_publishable_strict_json_projection_for_verifier_candidate,
     record_agent_loop_decision_envelope_output_vars, retry_rewritten_answer_is_publishable,
     retry_verifier_accepts_rewritten_answer, round_is_policy_terminal, round_model_finished,
     select_round_task_budget_profile, should_stop_for_observed_finalize,
     structured_field_selector_observation_can_finalize,
     structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_structurally_satisfied, terminal_user_answer_stop_signal,
-    text_has_exact_marker_line, try_recover_inconsistent_boundary_clarify, AgentLoopGuardPolicy,
-    RoundOutcome,
+    try_recover_inconsistent_boundary_clarify, AgentLoopGuardPolicy, RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -59,18 +56,6 @@ fn child_loop_budget_comes_only_from_structured_child_contract() {
         .to_string()
     )
     .is_none());
-}
-
-#[test]
-fn success_marker_matching_requires_exact_line() {
-    assert!(!text_has_exact_marker_line(
-        "status=ok\nVALIDATION_PASSED_EXTRA",
-        "VALIDATION_PASSED",
-    ));
-    assert!(text_has_exact_marker_line(
-        "status=ok\nVALIDATION_PASSED\nnext=done",
-        "VALIDATION_PASSED",
-    ));
 }
 
 #[test]

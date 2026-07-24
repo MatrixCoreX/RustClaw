@@ -221,7 +221,7 @@ fn readback_only_code_validation_reserve_runs_unexecuted_probe_only() {
 }
 
 #[test]
-fn readback_only_code_validation_reserve_runs_planned_validation_when_requested() {
+fn readback_only_code_validation_reserve_uses_structured_machine_selector() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-readback-only-validation-requested",
@@ -275,16 +275,13 @@ fn readback_only_code_validation_reserve_runs_planned_validation_when_requested(
             )),
             verify_result: None,
         });
+    let mut output_contract = crate::IntentOutputContract::default();
+    output_contract.response_shape = crate::OutputResponseShape::Strict;
+    output_contract.requires_content_evidence = true;
+    output_contract.selection.structured_field_selector =
+        Some("changed_files,test_command,test_status".to_string());
     let context = AgentRunContext {
-        turn_analysis: Some(crate::turn_context::TurnAnalysis {
-            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
-            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
-            should_interrupt_active_run: false,
-            state_patch: Some(json!({
-                "required_machine_fields": ["changed_files", "test_command", "test_status"]
-            })),
-            attachment_processing_required: false,
-        }),
+        output_contract: Some(output_contract),
         ..Default::default()
     };
     let actions = post_write_validation_reserve_actions(
@@ -292,7 +289,7 @@ fn readback_only_code_validation_reserve_runs_planned_validation_when_requested(
         &reply,
         &loop_state,
         8,
-        "Return JSON with changed_files, test_command, test_status.",
+        "request",
         Some(&context),
     );
 

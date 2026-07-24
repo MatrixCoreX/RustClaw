@@ -1,15 +1,11 @@
 #[path = "loop_reply_matrix_shape_list_projection.rs"]
 mod list_projection;
-pub(super) use list_projection::generic_observed_machine_projection_answer;
 #[cfg(test)]
 pub(super) use list_projection::matrix_strict_list_observed_answer;
 use list_projection::{
     matrix_observed_answer_candidate_for_shape, route_requests_exact_list,
-    selected_name_list_prefers_observed_projection, stale_file_token_delivery_bounded_read_answer,
-    stale_file_token_delivery_listing_answer,
+    selected_name_list_prefers_observed_projection,
 };
-
-use tracing::info;
 
 use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::finalize::build_from_loop_state;
@@ -19,12 +15,9 @@ use super::{
     direct_exact_scalar_path_from_dry_run_payload, direct_exact_scalar_path_from_written_path,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
-    direct_path_from_active_bound_inventory, direct_scalar_observed_answer,
-    direct_scalar_path_candidate_list_from_observed_outputs,
+    direct_scalar_observed_answer, direct_scalar_path_candidate_list_from_observed_outputs,
     direct_structured_observed_answer_allowing_implicit_metadata_path_facts,
-    final_answer_text_from_delivery, inventory_ranked_size_list_answer,
-    latest_bounded_read_range_answer_from_loop, latest_plan_requested_synthesis,
-    log_deterministic_delivery_record,
+    inventory_ranked_size_list_answer, latest_plan_requested_synthesis,
     successful_content_observation_should_precede_status_summary,
 };
 
@@ -178,162 +171,6 @@ pub(super) fn matrix_observed_shape_summary(
         used_evidence_ids_count: loop_state.executed_step_results.len(),
         ..Default::default()
     }
-}
-
-pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    delivery_messages: &mut Vec<String>,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    if loop_state.pending_user_input_required {
-        return false;
-    }
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
-        return false;
-    };
-    if !route_requires_evidence_policy_deterministic_final_answer(route) {
-        return false;
-    }
-    if let Some((candidate, summary)) =
-        direct_path_from_active_bound_inventory(loop_state, agent_run_context)
-    {
-        let answer = candidate.trim().to_string();
-        if answer.is_empty() {
-            return false;
-        }
-        if final_answer_text_from_delivery(delivery_messages).trim() == answer {
-            *finalizer_summary = Some(summary);
-            loop_state.last_user_visible_respond = Some(answer);
-            return true;
-        }
-        delivery_messages.clear();
-        delivery_messages.push(answer.clone());
-        loop_state.last_user_visible_respond = Some(answer);
-        *finalizer_summary = Some(summary);
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "matrix_replace_active_bound_inventory_path",
-            "replaced",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-        return true;
-    }
-    let Some(shape_class) = evidence_policy_final_answer_shape_class(route) else {
-        return false;
-    };
-    let current_answer = final_answer_text_from_delivery(delivery_messages);
-    if let Some((candidate, summary)) =
-        stale_file_token_delivery_listing_answer(route, loop_state, delivery_messages)
-    {
-        let answer = candidate.trim().to_string();
-        if answer.is_empty() {
-            return false;
-        }
-        delivery_messages.clear();
-        delivery_messages.push(answer.clone());
-        loop_state.last_user_visible_respond = Some(answer);
-        *finalizer_summary = Some(summary);
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "matrix_replace_stale_file_token_with_listing",
-            "replaced",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-        return true;
-    }
-    if let Some((candidate, summary)) =
-        stale_file_token_delivery_bounded_read_answer(route, loop_state, delivery_messages)
-    {
-        let answer = candidate.trim().to_string();
-        if answer.is_empty() {
-            return false;
-        }
-        delivery_messages.clear();
-        delivery_messages.push(answer.clone());
-        loop_state.last_user_visible_respond = Some(answer);
-        *finalizer_summary = Some(summary);
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "matrix_replace_stale_file_token_with_bounded_read",
-            "replaced",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-        return true;
-    }
-    if !current_answer.trim().is_empty()
-        && !selected_name_list_prefers_observed_projection(route, loop_state)
-        && evidence_policy_candidate_satisfies_final_shape(
-            task,
-            user_text,
-            loop_state,
-            agent_run_context,
-            finalizer_summary.clone(),
-            route,
-            &current_answer,
-        )
-    {
-        return false;
-    }
-    let Some((candidate, summary)) = matrix_observed_answer_candidate_for_shape(
-        state,
-        loop_state,
-        agent_run_context,
-        shape_class,
-    ) else {
-        return false;
-    };
-    if !selected_name_list_prefers_observed_projection(route, loop_state)
-        && !evidence_policy_candidate_satisfies_final_shape(
-            task,
-            user_text,
-            loop_state,
-            agent_run_context,
-            Some(summary.clone()),
-            route,
-            &candidate,
-        )
-    {
-        return false;
-    }
-
-    let answer = candidate.trim().to_string();
-    delivery_messages.clear();
-    delivery_messages.push(answer.clone());
-    loop_state.last_user_visible_respond = Some(answer);
-    *finalizer_summary = Some(summary);
-    info!(
-        "delivery matrix_shape_from_observed task_id={} shape_class={} answer={}",
-        task.task_id,
-        shape_class.as_str(),
-        crate::truncate_for_log(&candidate)
-    );
-    log_deterministic_delivery_record(
-        &task.task_id,
-        "matrix_shape_from_observed",
-        "replaced",
-        agent_run_context,
-        loop_state.executed_step_results.len(),
-    );
-    true
-}
-
-pub(super) fn finalizer_summary_requires_matrix_observed_replacement(
-    summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    let Some(summary) = summary else {
-        return false;
-    };
-    summary.needs_clarify == Some(true)
-        || !summary.contract_ok
-        || summary.format_ok == Some(false)
-        || summary.grounded_ok == Some(false)
 }
 
 pub(crate) fn deterministic_matrix_observed_shape_answer(
