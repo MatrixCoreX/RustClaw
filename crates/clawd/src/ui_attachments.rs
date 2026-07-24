@@ -163,8 +163,8 @@ fn attachment_input_from_value(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| default_name_for_kind(&kind))
-        .to_string();
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| default_name_for_attachment(&kind, &mime_type));
     Some(UiAttachmentInput {
         name,
         mime_type,
@@ -285,6 +285,15 @@ fn default_name_for_kind(kind: &str) -> &'static str {
     }
 }
 
+fn default_name_for_attachment(kind: &str, mime_type: &str) -> String {
+    let base = match kind {
+        "image" => "image",
+        "audio" => "audio",
+        _ => "attachment",
+    };
+    format!("{base}.{}", default_extension_for(kind, mime_type))
+}
+
 fn safe_upload_filename(raw_name: &str, kind: &str, mime_type: &str) -> String {
     let basename = Path::new(raw_name)
         .file_name()
@@ -325,7 +334,13 @@ fn safe_path_token(raw: &str) -> String {
 
 fn default_extension_for(kind: &str, mime_type: &str) -> &'static str {
     let mime = mime_type.trim().to_ascii_lowercase();
-    if mime.contains("wav") {
+    if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+        "docx"
+    } else if mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+        "xlsx"
+    } else if mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" {
+        "pptx"
+    } else if mime.contains("wav") {
         "wav"
     } else if mime.contains("mpeg") || mime.contains("mp3") {
         "mp3"
@@ -387,5 +402,29 @@ mod tests {
             safe_upload_filename("../voice", "audio", "audio/webm"),
             "voice.webm"
         );
+    }
+
+    #[test]
+    fn office_mime_types_keep_machine_readable_extensions_without_a_name() {
+        for (mime_type, expected) in [
+            (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "attachment.docx",
+            ),
+            (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "attachment.xlsx",
+            ),
+            (
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "attachment.pptx",
+            ),
+        ] {
+            assert_eq!(
+                default_name_for_attachment("file", mime_type),
+                expected,
+                "{mime_type}"
+            );
+        }
     }
 }

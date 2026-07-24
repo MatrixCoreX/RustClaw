@@ -48,6 +48,18 @@ pub struct PackageEvidence {
     pub external_relationships: Vec<RelationshipEvidence>,
     pub macro_members: Vec<String>,
     pub embedded_members: Vec<String>,
+    pub artifact_members: Vec<PackageMemberArtifact>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PackageMemberArtifact {
+    pub id: String,
+    pub package_member: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+    pub storage_kind: String,
+    pub content_inline: bool,
+    pub untrusted: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -100,6 +112,7 @@ pub struct DocumentBlock {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list_level: Option<u8>,
     pub source_part: String,
+    pub untrusted: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -107,6 +120,7 @@ pub struct OfficeTable {
     pub id: String,
     pub source_part: String,
     pub rows: Vec<Vec<String>>,
+    pub untrusted: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -116,6 +130,9 @@ pub struct MediaArtifact {
     pub content_type: Option<String>,
     pub sha256: String,
     pub size_bytes: u64,
+    pub storage_kind: String,
+    pub content_inline: bool,
+    pub untrusted: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -144,6 +161,7 @@ pub struct WorksheetEvidence {
     pub images: Vec<String>,
     pub freeze_panes: Vec<String>,
     pub auto_filter: Option<String>,
+    pub untrusted: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -167,6 +185,7 @@ pub struct SlideEvidence {
     pub charts: Vec<String>,
     pub shapes: Vec<String>,
     pub images: Vec<String>,
+    pub untrusted: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

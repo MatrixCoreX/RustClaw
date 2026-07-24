@@ -203,6 +203,9 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
     memory_entry_points = _extract_section(interface_md, "Memory Entry Points")
     actions = _extract_section(interface_md, "Actions")
     params = _extract_section(interface_md, "Parameter Contract")
+    structured_operations = _extract_section(
+        interface_md, "Structured Operation Contract"
+    )
     errors = _extract_section(interface_md, "Error Contract")
     structured_evidence = _extract_section(interface_md, "Structured Evidence Contract")
     examples = _extract_section(interface_md, "Request/Response Examples")
@@ -225,6 +228,12 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
         structured_evidence_section = f"""
 ## Structured Evidence Contract (from interface)
 {structured_evidence}
+"""
+    structured_operations_section = ""
+    if structured_operations:
+        structured_operations_section = f"""
+## Structured Operation Contract (from interface)
+{structured_operations}
 """
     planner_selection_section = ""
     if planner_selection_notes:
@@ -253,7 +262,7 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
 {actions}
 
 ## Parameter Contract (from interface)
-{params}
+{params}{structured_operations_section}
 
 ## Error Contract (from interface)
 {errors}
@@ -369,6 +378,20 @@ Matrix admission status: eligible
         errors = validate_external_matrix_admission("demo", base, md)
         if bool(errors) != should_error:
             failures.append(f"{name}: expected_error={should_error} errors={errors}")
+
+    operation_contract = """# demo
+
+## Capability Summary
+- demo
+
+## Structured Operation Contract
+- `replace_text`: requires `target_id` and `text`.
+"""
+    rendered = prompt_template("demo", operation_contract, base)
+    if "## Structured Operation Contract (from interface)" not in rendered:
+        failures.append("structured operation contract heading was not rendered")
+    if "`replace_text`: requires `target_id` and `text`." not in rendered:
+        failures.append("structured operation contract body was not rendered")
 
     if failures:
         for failure in failures:

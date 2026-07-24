@@ -172,6 +172,7 @@ fn parse_slide(
                             id: format!("{stable_slide_id}_table_{}", tables.len() + 1),
                             source_part: part.to_string(),
                             rows: std::mem::take(&mut table_rows),
+                            untrusted: true,
                         });
                     }
                     table_depth -= 1;
@@ -228,6 +229,7 @@ fn parse_slide(
         charts,
         shapes,
         images,
+        untrusted: true,
     })
 }
 

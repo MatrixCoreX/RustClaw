@@ -218,6 +218,7 @@ fn parse_worksheet(
         images,
         freeze_panes,
         auto_filter,
+        untrusted: true,
     })
 }
 

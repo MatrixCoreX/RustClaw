@@ -183,6 +183,7 @@ fn parse_part(
                             heading_level,
                             list_level,
                             source_part: part.to_string(),
+                            untrusted: true,
                         });
                     }
                     paragraph_depth -= 1;
@@ -207,6 +208,7 @@ fn parse_part(
                             id: stable_id(part, "table", part_table_index),
                             source_part: part.to_string(),
                             rows: std::mem::take(&mut table_rows),
+                            untrusted: true,
                         });
                     }
                     table_depth -= 1;

@@ -1,7 +1,7 @@
 use crate::error::{OfficeError, OfficeResult};
 use crate::model::{
-    MediaArtifact, OfficeFormat, OfficeWarning, PackageEvidence, RelationshipEvidence,
-    SourceArtifact,
+    MediaArtifact, OfficeFormat, OfficeWarning, PackageEvidence, PackageMemberArtifact,
+    RelationshipEvidence, SourceArtifact,
 };
 use crate::xml::{attr_value, local_name};
 use quick_xml::events::Event;
@@ -18,6 +18,8 @@ const DEFAULT_MAX_ENTRIES: usize = 10_000;
 const DEFAULT_MAX_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 const DEFAULT_MAX_EXPANSION_RATIO: u64 = 200;
+const DEFAULT_LARGE_MEMBER_REF_BYTES: u64 = 256 * 1024;
+const DEFAULT_MAX_ARTIFACT_REFS: usize = 1_000;
 
 #[derive(Clone, Debug)]
 pub struct PackageLimits {
@@ -201,7 +203,22 @@ impl OfficePackage {
                 json!({"members": embedded_members}),
             ));
         }
-        let media = collect_media(&members);
+        let artifact_ref_limit =
+            env_usize("OFFICE_MAX_ARTIFACT_REFS", DEFAULT_MAX_ARTIFACT_REFS).clamp(1, 10_000);
+        let (media, media_truncated) = collect_media(&members, artifact_ref_limit);
+        let (artifact_members, artifact_members_truncated) =
+            collect_artifact_members(&members, artifact_ref_limit);
+        if media_truncated || artifact_members_truncated {
+            warnings.push(OfficeWarning::new(
+                "artifact_refs_truncated",
+                None,
+                json!({
+                    "limit": artifact_ref_limit,
+                    "media_truncated": media_truncated,
+                    "package_members_truncated": artifact_members_truncated
+                }),
+            ));
+        }
         let evidence = PackageEvidence {
             member_count: members.len(),
             total_uncompressed_bytes: total_uncompressed,
@@ -209,6 +226,7 @@ impl OfficePackage {
             external_relationships,
             macro_members: Vec::new(),
             embedded_members,
+            artifact_members,
         };
         Ok(Self {
             format,
@@ -395,8 +413,8 @@ fn inspect_relationships(
     (external, warnings)
 }
 
-fn collect_media(members: &BTreeMap<String, Vec<u8>>) -> Vec<MediaArtifact> {
-    members
+fn collect_media(members: &BTreeMap<String, Vec<u8>>, limit: usize) -> (Vec<MediaArtifact>, bool) {
+    let mut values = members
         .iter()
         .filter(|(name, _)| {
             name.starts_with("word/media/")
@@ -410,8 +428,48 @@ fn collect_media(members: &BTreeMap<String, Vec<u8>>) -> Vec<MediaArtifact> {
             content_type: content_type_from_name(name),
             sha256: hash_bytes(bytes),
             size_bytes: bytes.len() as u64,
+            storage_kind: "source_package_member".to_string(),
+            content_inline: false,
+            untrusted: true,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let truncated = values.len() > limit;
+    values.truncate(limit);
+    (values, truncated)
+}
+
+fn collect_artifact_members(
+    members: &BTreeMap<String, Vec<u8>>,
+    limit: usize,
+) -> (Vec<PackageMemberArtifact>, bool) {
+    let threshold = env_u64(
+        "OFFICE_LARGE_MEMBER_REF_BYTES",
+        DEFAULT_LARGE_MEMBER_REF_BYTES,
+    )
+    .max(1);
+    let mut values = members
+        .iter()
+        .filter(|(name, bytes)| {
+            let is_media = name.starts_with("word/media/")
+                || name.starts_with("xl/media/")
+                || name.starts_with("ppt/media/");
+            let is_large_xml = name.ends_with(".xml") && bytes.len() as u64 >= threshold;
+            is_media || is_large_xml
+        })
+        .enumerate()
+        .map(|(index, (name, bytes))| PackageMemberArtifact {
+            id: format!("package_member_{}", index + 1),
+            package_member: name.clone(),
+            sha256: hash_bytes(bytes),
+            size_bytes: bytes.len() as u64,
+            storage_kind: "source_package_member".to_string(),
+            content_inline: false,
+            untrusted: true,
+        })
+        .collect::<Vec<_>>();
+    let truncated = values.len() > limit;
+    values.truncate(limit);
+    (values, truncated)
 }
 
 fn content_type_from_name(name: &str) -> Option<String> {
