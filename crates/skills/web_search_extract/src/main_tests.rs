@@ -162,6 +162,29 @@ fn parse_input_projects_site_operator_to_domain_filter() {
 }
 
 #[test]
+fn parse_input_treats_blank_optional_string_selectors_as_absent() {
+    let input = parse_input(&json!({
+        "request_id": "blank-optionals",
+        "args": {
+            "action": "search_extract",
+            "query": "rust async tutorial",
+            "lang": " ",
+            "time_range": "",
+            "backend": "\t",
+            "domains_allow": [],
+            "domains_deny": []
+        }
+    }))
+    .expect("blank optional selectors should be absent");
+
+    assert_eq!(input.lang, None);
+    assert_eq!(input.time_range, None);
+    assert_eq!(input.backend, None);
+    assert!(input.domains_allow.is_empty());
+    assert!(input.domains_deny.is_empty());
+}
+
+#[test]
 fn query_without_site_operators_preserves_plain_terms() {
     assert_eq!(
         query_without_site_operators("site:docs.rs tokio task"),
