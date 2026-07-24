@@ -23,6 +23,11 @@ pub enum ModelContentPart {
         #[serde(skip_serializing_if = "Option::is_none")]
         media_type: Option<String>,
     },
+    ToolCall {
+        call: ModelToolCall,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        provider_metadata: BTreeMap<String, Value>,
+    },
     ToolResult {
         tool_call_id: String,
         content: Value,

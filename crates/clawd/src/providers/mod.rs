@@ -1,7 +1,9 @@
 pub(crate) mod anthropic_claude;
+pub(crate) mod anthropic_model_turn;
 pub(crate) mod circuit;
 pub(crate) mod client;
 pub(crate) mod fixture_replay;
+pub(crate) mod gemini_model_turn;
 pub(crate) mod google_gemini;
 pub(crate) mod openai_compat;
 pub(crate) mod openai_model_turn;

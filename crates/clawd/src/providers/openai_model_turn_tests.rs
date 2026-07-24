@@ -1,6 +1,7 @@
 use claw_core::config::{LlmProviderConfig, LlmProviderParams};
 use claw_core::model_turn::{
-    ModelMessage, ModelRole, ModelToolChoice, ModelToolDefinition, ModelTurnRequest,
+    ModelContentPart, ModelMessage, ModelRole, ModelToolCall, ModelToolChoice, ModelToolDefinition,
+    ModelTurnRequest,
 };
 
 use super::*;
@@ -67,6 +68,42 @@ fn native_request_maps_messages_and_function_tools() {
         json!(["capability", "args"])
     );
     assert_eq!(body["parallel_tool_calls"], true);
+}
+
+#[test]
+fn native_request_maps_assistant_tool_call_history_before_tool_result() {
+    let mut request = native_request();
+    request.messages.push(ModelMessage {
+        role: ModelRole::Assistant,
+        content: vec![ModelContentPart::ToolCall {
+            call: ModelToolCall {
+                id: "call-1".to_string(),
+                name: "call_capability".to_string(),
+                arguments: json!({"capability": "fs.read", "args": {"path": "README.md"}}),
+            },
+            provider_metadata: BTreeMap::new(),
+        }],
+    });
+    request.messages.push(ModelMessage {
+        role: ModelRole::Tool,
+        content: vec![ModelContentPart::ToolResult {
+            tool_call_id: "call-1".to_string(),
+            content: json!({"text": "ok"}),
+            is_error: false,
+        }],
+    });
+
+    let body = build_openai_request(&provider(), &request, &ChatRequestHints::default())
+        .expect("build request");
+
+    assert_eq!(body["messages"][1]["role"], "assistant");
+    assert_eq!(body["messages"][1]["tool_calls"][0]["id"], "call-1");
+    assert_eq!(
+        body["messages"][1]["tool_calls"][0]["function"]["name"],
+        "call_capability"
+    );
+    assert_eq!(body["messages"][2]["role"], "tool");
+    assert_eq!(body["messages"][2]["tool_call_id"], "call-1");
 }
 
 #[test]

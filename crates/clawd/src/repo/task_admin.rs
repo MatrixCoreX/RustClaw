@@ -192,22 +192,71 @@ pub(crate) fn resume_task_with_input(
         Some(&input),
     )?;
     if update.is_some() {
-        let db = state
-            .core
-            .db
-            .get()
-            .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
-        let _ = super::child_task_graph::record_child_graph_steering(
-            &db,
-            &input.task_id,
-            input.checkpoint_id.as_deref(),
-            input.resume_trigger.status_code(),
-            input.user_message.as_deref(),
-            input.new_constraints.as_ref(),
-            &now_ts.to_string(),
-        )?;
+        let steering = {
+            let db = state
+                .core
+                .db
+                .get()
+                .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
+            super::child_task_graph::record_child_graph_steering(
+                &db,
+                &input.task_id,
+                input.checkpoint_id.as_deref(),
+                input.resume_trigger.status_code(),
+                input.user_message.as_deref(),
+                input.new_constraints.as_ref(),
+                &now_ts.to_string(),
+            )?
+        };
+        if let Some(directive) = steering.as_ref() {
+            publish_child_steering_event(state, directive);
+        }
     }
     Ok(update)
+}
+
+fn publish_child_steering_event(state: &AppState, directive: &Value) {
+    let payload = child_steering_event_payload(directive);
+    let Some(parent_task_id) = payload
+        .get("parent_task_id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+    else {
+        return;
+    };
+    let Some(child_task_id) = payload
+        .get("child_task_id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+    else {
+        return;
+    };
+    let _ = crate::task_event_transport::publish_event(
+        state,
+        &parent_task_id,
+        "subagent_steering",
+        payload.clone(),
+    );
+    let _ = crate::task_event_transport::publish_event(
+        state,
+        &child_task_id,
+        "subagent_steering",
+        payload,
+    );
+}
+
+fn child_steering_event_payload(directive: &Value) -> Value {
+    json!({
+        "schema_version": 1,
+        "directive": "steer_child",
+        "parent_task_id": directive.get("parent_task_id").and_then(Value::as_str),
+        "child_task_id": directive.get("child_task_id").and_then(Value::as_str),
+        "steering_version": directive.get("steering_version").and_then(Value::as_u64),
+        "checkpoint_id": directive.get("checkpoint_id").and_then(Value::as_str),
+        "resume_trigger": directive.get("resume_trigger").and_then(Value::as_str),
+        "has_user_message": directive.get("user_message").is_some_and(|value| !value.is_null()),
+        "has_new_constraints": directive.get("new_constraints").is_some_and(|value| !value.is_null()),
+    })
 }
 
 pub(crate) fn pause_task_by_id(

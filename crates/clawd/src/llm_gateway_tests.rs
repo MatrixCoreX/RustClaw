@@ -244,4 +244,23 @@ fn configured_vendor_capabilities_reach_provider_runtime() {
     assert_eq!(mimo.config.input_modalities, vec!["text".to_string()]);
     assert!(mimo.config.supports_tools);
     assert_eq!(mimo.config.expected_latency_ms, Some(5_000));
+
+    let anthropic = build_providers_for_selection(&config, Some("anthropic"), None)
+        .into_iter()
+        .next()
+        .expect("anthropic runtime provider");
+    assert_eq!(anthropic.config.provider_type, "anthropic_claude");
+    assert!(anthropic.config.supports_tools);
+    assert!(anthropic.model_capabilities().native_tools);
+    assert!(!anthropic.model_capabilities().streaming);
+
+    let google = build_providers_for_selection(&config, Some("google"), None)
+        .into_iter()
+        .next()
+        .expect("google runtime provider");
+    assert_eq!(google.config.provider_type, "google_gemini");
+    assert!(google.config.supports_tools);
+    assert!(google.model_capabilities().native_tools);
+    assert!(google.model_capabilities().structured_output);
+    assert!(!google.model_capabilities().streaming);
 }

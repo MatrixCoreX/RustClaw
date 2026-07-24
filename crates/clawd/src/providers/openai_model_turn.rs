@@ -714,6 +714,7 @@ fn openai_messages(message: &ModelMessage) -> Vec<Value> {
         ModelRole::Tool => "tool",
     };
     let mut standard_parts = Vec::new();
+    let mut assistant_tool_calls = Vec::new();
     let mut tool_messages = Vec::new();
     for part in &message.content {
         match part {
@@ -724,6 +725,16 @@ fn openai_messages(message: &ModelMessage) -> Vec<Value> {
                 standard_parts.push(json!({
                     "type": "image_url",
                     "image_url": {"url": source}
+                }));
+            }
+            ModelContentPart::ToolCall { call, .. } => {
+                assistant_tool_calls.push(json!({
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": call.arguments.to_string(),
+                    }
                 }));
             }
             ModelContentPart::ToolResult {
@@ -738,15 +749,27 @@ fn openai_messages(message: &ModelMessage) -> Vec<Value> {
         }
     }
     let mut messages = Vec::new();
-    if standard_parts.len() == 1
-        && standard_parts[0].get("type").and_then(Value::as_str) == Some("text")
-    {
-        messages.push(json!({
-            "role": role,
-            "content": standard_parts[0].get("text").cloned().unwrap_or(Value::Null)
-        }));
-    } else if !standard_parts.is_empty() {
-        messages.push(json!({"role": role, "content": standard_parts}));
+    if !standard_parts.is_empty() || !assistant_tool_calls.is_empty() {
+        let content = if standard_parts.len() == 1
+            && standard_parts[0].get("type").and_then(Value::as_str) == Some("text")
+        {
+            standard_parts[0]
+                .get("text")
+                .cloned()
+                .unwrap_or(Value::Null)
+        } else if standard_parts.is_empty() {
+            Value::Null
+        } else {
+            Value::Array(standard_parts)
+        };
+        let mut mapped = Map::from_iter([
+            ("role".to_string(), Value::String(role.to_string())),
+            ("content".to_string(), content),
+        ]);
+        if !assistant_tool_calls.is_empty() {
+            mapped.insert("tool_calls".to_string(), Value::Array(assistant_tool_calls));
+        }
+        messages.push(Value::Object(mapped));
     }
     messages.extend(tool_messages);
     messages
