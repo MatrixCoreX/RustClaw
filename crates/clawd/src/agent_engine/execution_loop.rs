@@ -5,12 +5,74 @@ use super::{
     AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, ClaimedTask};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 struct RoundProgressSnapshot {
     delivery_count: usize,
     machine_progress_fingerprints: BTreeSet<String>,
+}
+
+fn active_tool_event_payload(
+    action: &AgentAction,
+    round_no: usize,
+    step_in_round: usize,
+    global_step: usize,
+) -> Option<Value> {
+    let (action_kind, action_ref, tool_or_skill, requested_capability) = match action {
+        AgentAction::CallTool { tool, .. } => {
+            ("call_tool", tool.as_str(), Some(tool.as_str()), None)
+        }
+        AgentAction::CallSkill { skill, .. } => {
+            ("call_skill", skill.as_str(), Some(skill.as_str()), None)
+        }
+        AgentAction::CallCapability { capability, .. } => (
+            "call_capability",
+            capability.as_str(),
+            None,
+            Some(capability.as_str()),
+        ),
+        AgentAction::Think { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. } => return None,
+    };
+    Some(json!({
+        "schema_version": 1,
+        "phase": "active",
+        "round_no": round_no,
+        "step_in_round": step_in_round,
+        "global_step": global_step,
+        "action_kind": action_kind,
+        "action_ref": action_ref,
+        "tool_or_skill": tool_or_skill,
+        "requested_capability": requested_capability,
+        "status": "running",
+    }))
+}
+
+fn publish_active_tool_event(
+    state: &AppState,
+    task: &ClaimedTask,
+    action: &AgentAction,
+    round_no: usize,
+    step_in_round: usize,
+    global_step: usize,
+) {
+    let Some(payload) = active_tool_event_payload(action, round_no, step_in_round, global_step)
+    else {
+        return;
+    };
+    if let Err(error) =
+        crate::task_event_transport::publish_claimed_event(state, task, "tool_active", payload)
+    {
+        info!(
+            "executor_tool_active_event_error task_id={} round={} step={} error={}",
+            task.task_id,
+            round_no,
+            step_in_round,
+            crate::truncate_for_log(&error.to_string())
+        );
+    }
 }
 
 fn capture_round_progress_snapshot(loop_state: &LoopState) -> RoundProgressSnapshot {
@@ -577,6 +639,14 @@ pub(super) async fn execute_actions_once(
             plan_step_label(action)
         );
         loop_state.last_actions_fingerprint = Some(fingerprint.clone());
+        publish_active_tool_event(
+            state,
+            task,
+            action,
+            loop_state.round_no,
+            step_in_round,
+            global_step,
+        );
         let decision = dispatch_round_action(
             state,
             task,

@@ -41,8 +41,16 @@ pub(super) async fn prepare_ask_execution_context(
         );
     }
     let mut initial_task_observations = Vec::new();
+    let provider_context_window_tokens = state
+        .task_llm_providers(task)
+        .iter()
+        .filter_map(|provider| provider.config.context_window_tokens)
+        .min();
     if let Some(mut compaction_plan) =
-        crate::task_context_builder::plan_agent_loop_context_compaction(&context_bundle)
+        crate::task_context_builder::plan_agent_loop_context_compaction_with_provider_window(
+            &context_bundle,
+            provider_context_window_tokens,
+        )
     {
         crate::task_context_builder::hydrate_agent_loop_context_compaction_plan(
             state,

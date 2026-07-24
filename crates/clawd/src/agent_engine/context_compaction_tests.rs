@@ -83,7 +83,10 @@ fn context_compaction_schema_accepts_complete_strict_output() {
 #[test]
 fn context_compaction_source_bundle_enforces_total_budget() {
     let bundle = source_bundle_fixture();
-    let plan = crate::task_context_builder::plan_agent_loop_context_compaction(&bundle)
+    let plan =
+        crate::task_context_builder::plan_agent_loop_context_compaction_with_provider_window(
+            &bundle, None,
+        )
         .expect("large source fixture should require compaction");
     let source = context_source_bundle(&bundle, &plan);
 

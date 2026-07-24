@@ -1,7 +1,7 @@
 use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
-    capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
-    prior_structured_observation_satisfies_read_only_action,
+    active_tool_event_payload, capture_round_progress_snapshot, check_repeat_action_guard,
+    finalize_execute_round_outcome, prior_structured_observation_satisfies_read_only_action,
     successful_structured_observation_satisfies_selector,
     terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
 };
@@ -42,6 +42,32 @@ fn task_fixture(id: &str) -> crate::ClaimedTask {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     }
+}
+
+#[test]
+fn active_tool_event_is_machine_only_and_omits_arguments() {
+    let action = crate::AgentAction::CallCapability {
+        capability: "terminal.run_command".to_string(),
+        args: serde_json::json!({
+            "command": "private command",
+            "user_text": "do not publish this",
+        }),
+    };
+
+    let payload =
+        active_tool_event_payload(&action, 2, 3, 7).expect("capability should emit active event");
+
+    assert_eq!(payload["phase"], "active");
+    assert_eq!(payload["round_no"], 2);
+    assert_eq!(payload["step_in_round"], 3);
+    assert_eq!(payload["global_step"], 7);
+    assert_eq!(payload["action_kind"], "call_capability");
+    assert_eq!(payload["action_ref"], "terminal.run_command");
+    assert_eq!(payload["requested_capability"], "terminal.run_command");
+    assert!(payload["tool_or_skill"].is_null());
+    assert!(payload.get("args").is_none());
+    assert!(!payload.to_string().contains("private command"));
+    assert!(!payload.to_string().contains("do not publish this"));
 }
 
 fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {

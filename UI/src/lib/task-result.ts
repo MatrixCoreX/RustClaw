@@ -714,11 +714,13 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
     };
   }
 
-  if (eventType === "tool_started") {
-    const tool = field("skill") || field("tool_or_skill") || field("resolved_tool_or_skill");
+  if (eventType === "tool_active" || eventType === "tool_started") {
+    const tool = field("skill") || field("tool_or_skill") || field("resolved_tool_or_skill") || field("action_ref");
     return {
       eventType,
-      title: tLocal("工具开始执行", "Tool started"),
+      title: eventType === "tool_active"
+        ? tLocal("工具正在执行", "Tool active")
+        : tLocal("工具开始执行", "Tool started"),
       detail: tool
         ? tLocal(`${tool} 正在执行。`, `${tool} is running.`)
         : tLocal("任务正在调用工具。", "The task is calling a tool."),

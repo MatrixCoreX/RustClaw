@@ -8,6 +8,7 @@ use crate::{AppState, ClaimedTask};
 
 const CONTEXT_COMPACTION_THRESHOLD_CHARS: usize = 24_000;
 const TRANSCRIPT_COMPACTION_THRESHOLD_CHARS: usize = 12_000;
+const PROVIDER_CONTEXT_COMPACTION_PERCENT: usize = 75;
 const COMPACTED_LAST_TURN_SEGMENT_CHARS: usize = 800;
 const COMPACTED_LAST_TURN_TOTAL_CHARS: usize = 1_600;
 const MAX_CONTINUITY_REFS: usize = 128;
@@ -32,8 +33,11 @@ const SPACED_SCALAR_REF_NAMESPACES: &[&str] = &["owner"];
 pub(crate) struct ContextCompactionPlan {
     pub(crate) generation: u64,
     pub(crate) before_char_count: usize,
+    pub(crate) before_token_estimate: usize,
     pub(crate) transcript_char_count: usize,
     pub(crate) threshold_chars: usize,
+    pub(crate) provider_context_window_tokens: Option<usize>,
+    pub(crate) provider_compaction_threshold_tokens: Option<usize>,
     pub(crate) trigger_codes: Vec<&'static str>,
     source_refs: Vec<Value>,
     source_task_ids: Vec<String>,
@@ -47,8 +51,11 @@ impl ContextCompactionPlan {
             "compaction_kind": "deterministic_context_budget",
             "generation": self.generation,
             "before_char_count": self.before_char_count,
+            "before_token_estimate": self.before_token_estimate,
             "transcript_char_count": self.transcript_char_count,
             "threshold_chars": self.threshold_chars,
+            "provider_context_window_tokens": self.provider_context_window_tokens,
+            "provider_compaction_threshold_tokens": self.provider_compaction_threshold_tokens,
             "trigger_codes": self.trigger_codes,
             "source_ref_count": self.source_refs.len(),
             "source_task_count": self.source_task_ids.len(),
@@ -57,8 +64,9 @@ impl ContextCompactionPlan {
     }
 }
 
-pub(crate) fn plan_agent_loop_context_compaction(
+pub(crate) fn plan_agent_loop_context_compaction_with_provider_window(
     bundle: &TaskContextBundle,
+    provider_context_window_tokens: Option<usize>,
 ) -> Option<ContextCompactionPlan> {
     let view = bundle.execution_view.as_ref()?;
     let slots = context_budget_slots(view);
@@ -66,6 +74,11 @@ pub(crate) fn plan_agent_loop_context_compaction(
         .iter()
         .filter(|(_, value)| context_slot_present(value))
         .map(|(_, value)| value.chars().count())
+        .sum::<usize>();
+    let before_token_estimate = slots
+        .iter()
+        .filter(|(_, value)| context_slot_present(value))
+        .map(|(_, value)| crate::token_estimator::estimate_generic_tokens(value).provider_tokens)
         .sum::<usize>();
     let transcript_char_count = [
         view.recent_turns_full.as_str(),
@@ -81,6 +94,19 @@ pub(crate) fn plan_agent_loop_context_compaction(
     }
     if transcript_char_count > TRANSCRIPT_COMPACTION_THRESHOLD_CHARS {
         trigger_codes.push("transcript_budget_exceeded");
+    }
+    let provider_compaction_threshold_tokens = provider_context_window_tokens
+        .filter(|tokens| *tokens > 0)
+        .map(|tokens| {
+            tokens
+                .saturating_mul(PROVIDER_CONTEXT_COMPACTION_PERCENT)
+                .saturating_div(100)
+                .max(1)
+        });
+    if provider_compaction_threshold_tokens
+        .is_some_and(|threshold| before_token_estimate >= threshold)
+    {
+        trigger_codes.push("provider_context_window_pressure");
     }
     if trigger_codes.is_empty() {
         return None;
@@ -99,8 +125,11 @@ pub(crate) fn plan_agent_loop_context_compaction(
     Some(ContextCompactionPlan {
         generation: bundle.compaction_records.len() as u64 + 1,
         before_char_count,
+        before_token_estimate,
         transcript_char_count,
         threshold_chars: CONTEXT_COMPACTION_THRESHOLD_CHARS,
+        provider_context_window_tokens,
+        provider_compaction_threshold_tokens,
         trigger_codes,
         source_refs,
         source_task_ids: bundle.context_source_task_ids.clone(),
@@ -370,8 +399,11 @@ pub(super) fn apply_context_compaction_with_inputs(
         "continuity_refs": continuity_refs,
         "current_state_refs": current_state_refs,
         "before_char_count": plan.before_char_count,
+        "before_token_estimate": plan.before_token_estimate,
         "after_char_count": after_char_count,
         "threshold_chars": plan.threshold_chars,
+        "provider_context_window_tokens": plan.provider_context_window_tokens,
+        "provider_compaction_threshold_tokens": plan.provider_compaction_threshold_tokens,
         "trigger_codes": plan.trigger_codes,
         "facts": [],
         "open_questions": [],
