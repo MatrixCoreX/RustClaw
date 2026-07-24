@@ -233,6 +233,13 @@ fn attach_mutation_evidence(
             "backup_path": publish.backup_path.as_ref().map(|path| path.display().to_string()),
         }),
     );
+    object.insert(
+        "transaction_recovery".to_string(),
+        json!({
+            "abandoned_temp_files_removed": publish.abandoned_temp_files_removed,
+            "cleanup_error_kinds": publish.temp_cleanup_errors,
+        }),
+    );
     if let Some(source_object) = object.get_mut("source").and_then(Value::as_object_mut) {
         source_object.insert(
             "parent_sha256".to_string(),

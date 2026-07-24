@@ -110,7 +110,7 @@ fn parse_worksheet(
         .and_then(|bytes| std::str::from_utf8(bytes).ok())
         .map(relationship_map)
         .unwrap_or_default();
-    let comments = load_comments(package, &relationships);
+    let comments = load_comments(package, &sheet.path, &relationships);
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
     let mut cells = Vec::new();
@@ -449,12 +449,13 @@ fn record_hyperlink(
 
 fn load_comments(
     package: &OfficePackage,
+    sheet_path: &str,
     relationships: &BTreeMap<String, (String, String, bool)>,
 ) -> BTreeMap<String, String> {
     let comments_part = relationships
         .values()
         .find(|(_, kind, external)| !*external && kind.ends_with("/comments"))
-        .map(|(target, _, _)| normalize_xl_target(target));
+        .map(|(target, _, _)| normalize_part_target(sheet_path, target));
     let Some(bytes) = comments_part.and_then(|part| package.members.get(&part)) else {
         return BTreeMap::new();
     };
