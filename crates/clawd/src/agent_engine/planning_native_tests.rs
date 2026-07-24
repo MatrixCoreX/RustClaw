@@ -600,6 +600,23 @@ fn native_respond_rejects_invalid_or_duplicate_object_fields() {
         "native_respond_object_field_json_invalid"
     );
 
+    let non_string_json = turn(
+        vec![respond_call(json!({
+            "shape": "object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [{"name": "provider", "value_json": null}],
+            "exact_field_count": 1
+        }))],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn(&non_string_json, &callable_capabilities())
+            .expect_err("schema-level null rejected"),
+        "native_respond_object_field_value_invalid"
+    );
+
     let duplicate = turn(
         vec![respond_call(json!({
             "shape": "object",
@@ -1443,23 +1460,21 @@ fn native_object_response_schema_and_repair_explain_serialized_json_values() {
     assert!(value_json_description.contains("complete_serialized_json_value_v1"));
     assert!(value_json_description.contains("json_string_requires_surrounding_quotes=true"));
 
-    let signal = native_contract_repair_signal("native_respond_object_field_json_invalid");
-    let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
-    assert_eq!(
-        observation["protocol_observation"]["argument_constraints"]["fields[].value_json"]
-            ["encoding"],
-        "complete_serialized_json_value"
-    );
-    assert_eq!(
-        observation["protocol_observation"]["argument_constraints"]["fields[].value_json"]
-            ["json_string_requires_surrounding_quotes"],
-        true
-    );
-    assert_eq!(
-        observation["protocol_observation"]["argument_constraints"]["fields[].value_json"]
-            ["malformed_json"],
-        "rejected"
-    );
+    for error_code in [
+        "native_respond_object_field_json_invalid",
+        "native_respond_object_field_value_invalid",
+    ] {
+        let signal = native_contract_repair_signal(error_code);
+        let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
+        let constraint =
+            &observation["protocol_observation"]["argument_constraints"]["fields[].value_json"];
+        assert_eq!(constraint["type"], "string");
+        assert_eq!(constraint["encoding"], "complete_serialized_json_value");
+        assert_eq!(constraint["json_string_requires_surrounding_quotes"], true);
+        assert_eq!(constraint["json_null"], "string_literal_null");
+        assert_eq!(constraint["schema_level_null"], "rejected");
+        assert_eq!(constraint["malformed_json"], "rejected");
+    }
 }
 
 #[test]
