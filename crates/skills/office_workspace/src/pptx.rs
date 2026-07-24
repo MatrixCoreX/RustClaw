@@ -65,6 +65,7 @@ fn parse_slide(
     part: &str,
     xml: &str,
 ) -> OfficeResult<SlideEvidence> {
+    let stable_slide_id = stable_slide_id(part);
     let rels_path = slide_relationships_path(part);
     let relationships = package
         .members
@@ -85,10 +86,14 @@ fn parse_slide(
     let mut cell = String::new();
     let mut tables = Vec::new();
     let mut shapes = Vec::new();
+    let mut hidden = false;
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(element)) => match local_name(element.name().as_ref()) {
+                b"sld" => {
+                    hidden = attr_value(&element, b"show").as_deref() == Some("0");
+                }
                 b"p" => {
                     in_paragraph = true;
                     paragraph.clear();
@@ -118,11 +123,17 @@ fn parse_slide(
                 }
                 _ => {}
             },
-            Ok(Event::Empty(element)) if local_name(element.name().as_ref()) == b"cNvPr" => {
-                let name = attr_value(&element, b"name").unwrap_or_default();
-                let id = attr_value(&element, b"id").unwrap_or_default();
-                shapes.push(format!("{id}:{name}"));
-            }
+            Ok(Event::Empty(element)) => match local_name(element.name().as_ref()) {
+                b"sld" => {
+                    hidden = attr_value(&element, b"show").as_deref() == Some("0");
+                }
+                b"cNvPr" => {
+                    let name = attr_value(&element, b"name").unwrap_or_default();
+                    let id = attr_value(&element, b"id").unwrap_or_default();
+                    shapes.push(format!("{id}:{name}"));
+                }
+                _ => {}
+            },
             Ok(Event::Text(value)) if in_paragraph => {
                 let value = value.unescape().map_err(|error| {
                     OfficeError::new(
@@ -158,7 +169,7 @@ fn parse_slide(
                 b"tbl" if table_depth > 0 => {
                     if table_depth == 1 {
                         tables.push(OfficeTable {
-                            id: format!("slide_{index}_table_{}", tables.len() + 1),
+                            id: format!("{stable_slide_id}_table_{}", tables.len() + 1),
                             source_part: part.to_string(),
                             rows: std::mem::take(&mut table_rows),
                         });
@@ -205,11 +216,11 @@ fn parse_slide(
         }
     }
     Ok(SlideEvidence {
-        id: format!("slide_{index}"),
+        id: stable_slide_id,
         index,
         relationship_id: Some(relationship_id.to_string()),
         layout,
-        hidden: false,
+        hidden,
         title: text.first().cloned(),
         text,
         notes,
@@ -218,6 +229,19 @@ fn parse_slide(
         shapes,
         images,
     })
+}
+
+fn stable_slide_id(part: &str) -> String {
+    part.rsplit_once('/')
+        .map(|(_, file)| file)
+        .unwrap_or(part)
+        .strip_prefix("slide")
+        .and_then(|value| value.strip_suffix(".xml"))
+        .filter(|value| {
+            !value.is_empty() && value.chars().all(|character| character.is_ascii_digit())
+        })
+        .map(|value| format!("slide_{value}"))
+        .unwrap_or_else(|| format!("slide_part_{}", crate::package::hash_bytes(part.as_bytes())))
 }
 
 fn plain_text(xml: &str) -> Vec<String> {

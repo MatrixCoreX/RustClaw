@@ -9,6 +9,7 @@ mod operations;
 mod package;
 mod package_write;
 mod pptx;
+mod pptx_edit;
 mod pptx_write;
 mod range;
 mod renderer;
