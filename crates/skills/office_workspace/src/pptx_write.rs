@@ -1,6 +1,6 @@
 use crate::error::{OfficeError, OfficeResult};
 use crate::operations::NormalizedOperation;
-use crate::package::{resolve_input_path, OfficePackage};
+use crate::package::resolve_input_path;
 use quick_xml::escape::escape;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -73,115 +73,6 @@ pub fn create_pptx(operations: &[NormalizedOperation]) -> OfficeResult<PptxWrite
             .flat_map(NormalizedOperation::object_refs)
             .collect(),
         preservation: vec!["new_package".to_string()],
-    })
-}
-
-pub fn edit_pptx(
-    package: &OfficePackage,
-    operations: &[NormalizedOperation],
-) -> OfficeResult<PptxWriteResult> {
-    let mut members = package.members.clone();
-    let mut changed_refs = Vec::new();
-    for operation in operations {
-        match operation.kind.as_str() {
-            "replace_slide_text" => {
-                let slide_id = operation.string("slide_id")?;
-                let index = slide_index(slide_id)?;
-                let path = format!("ppt/slides/slide{index}.xml");
-                let source = member_text(&members, &path)?.to_string();
-                let expected = operation.string("match")?;
-                let replacement = operation.string("text")?;
-                members.insert(
-                    path,
-                    replace_drawing_text(&source, expected, replacement)?.into_bytes(),
-                );
-                changed_refs.push(slide_id.to_string());
-            }
-            "add_notes" => {
-                let slide_id = operation.string("slide_id")?;
-                let index = slide_index(slide_id)?;
-                let notes = operation
-                    .value("notes")
-                    .map(string_list)
-                    .transpose()?
-                    .unwrap_or_else(|| {
-                        operation
-                            .optional_string("text")
-                            .map(|text| vec![text.to_string()])
-                            .unwrap_or_default()
-                    });
-                if notes.is_empty() {
-                    return Err(invalid_operation_field(operation, "notes|text"));
-                }
-                members.insert(
-                    format!("ppt/notesSlides/notesSlide{index}.xml"),
-                    notes_xml(index, &notes).into_bytes(),
-                );
-                ensure_slide_relation(
-                    &mut members,
-                    index,
-                    "notesSlide",
-                    &format!("../notesSlides/notesSlide{index}.xml"),
-                    &format!("rIdRustClawNotes{index}"),
-                    false,
-                )?;
-                changed_refs.push(format!("{slide_id}:notes"));
-            }
-            "move_slide" => {
-                let slide_id = operation.string("slide_id")?;
-                let index = slide_index(slide_id)?;
-                let new_position = operation.usize("position")?;
-                let presentation = member_text(&members, "ppt/presentation.xml")?.to_string();
-                members.insert(
-                    "ppt/presentation.xml".into(),
-                    move_slide_id(&presentation, index, new_position)?.into_bytes(),
-                );
-                changed_refs.push(slide_id.to_string());
-            }
-            "hide_slide" => {
-                let slide_id = operation.string("slide_id")?;
-                let index = slide_index(slide_id)?;
-                let hidden = operation.bool("hidden").unwrap_or(true);
-                let path = format!("ppt/slides/slide{index}.xml");
-                let slide = member_text(&members, &path)?.to_string();
-                members.insert(path, set_slide_hidden(&slide, hidden).into_bytes());
-                changed_refs.push(slide_id.to_string());
-            }
-            "replace_image" => {
-                let media_id = operation.string("media_id")?;
-                let source = resolve_input_path(operation.string("path")?)?;
-                replace_media(&mut members, media_id, &source)?;
-                changed_refs.push(media_id.to_string());
-            }
-            "delete_slide" => {
-                let slide_id = operation.string("slide_id")?;
-                let index = slide_index(slide_id)?;
-                let presentation = member_text(&members, "ppt/presentation.xml")?.to_string();
-                let relation_id = format!("rIdSlide{index}");
-                members.insert(
-                    "ppt/presentation.xml".into(),
-                    remove_slide_id(&presentation, &relation_id)?.into_bytes(),
-                );
-                members.remove(&format!("ppt/slides/slide{index}.xml"));
-                members.remove(&format!("ppt/slides/_rels/slide{index}.xml.rels"));
-                changed_refs.push(slide_id.to_string());
-            }
-            _ => {
-                return Err(OfficeError::unsupported(
-                    "PPTX edit operation is not implemented without potential layout loss",
-                    json!({"operation_id": operation.id, "op": operation.kind}),
-                ))
-            }
-        }
-    }
-    Ok(PptxWriteResult {
-        members,
-        changed_refs,
-        preservation: vec![
-            "themes_masters_layouts_preserved".to_string(),
-            "unknown_package_parts_preserved".to_string(),
-            "untouched_slides_preserved".to_string(),
-        ],
     })
 }
 
@@ -680,165 +571,6 @@ fn notes_xml(number: usize, notes: &[String]) -> String {
     )
 }
 
-fn replace_drawing_text(source: &str, expected: &str, replacement: &str) -> OfficeResult<String> {
-    let escaped_expected = xml(expected);
-    if !source.contains(&escaped_expected) {
-        return Err(OfficeError::new(
-            "source_conflict",
-            "expected slide text is absent from the selected revision",
-            json!({"expected_text": expected}),
-        ));
-    }
-    Ok(source.replacen(&escaped_expected, &xml(replacement), 1))
-}
-
-fn move_slide_id(source: &str, slide_index: usize, new_position: usize) -> OfficeResult<String> {
-    let ranges = slide_id_ranges(source)?;
-    if slide_index == 0
-        || slide_index > ranges.len()
-        || new_position == 0
-        || new_position > ranges.len()
-    {
-        return Err(OfficeError::new(
-            "invalid_selector",
-            "slide move index is outside the presentation",
-            json!({"slide_index": slide_index, "position": new_position, "slide_count": ranges.len()}),
-        ));
-    }
-    let items = ranges
-        .iter()
-        .map(|(start, end)| source[*start..*end].to_string())
-        .collect::<Vec<_>>();
-    let mut reordered = items.clone();
-    let item = reordered.remove(slide_index - 1);
-    reordered.insert(new_position - 1, item);
-    let start = ranges.first().map(|range| range.0).unwrap_or(0);
-    let end = ranges.last().map(|range| range.1).unwrap_or(start);
-    Ok(format!(
-        "{}{}{}",
-        &source[..start],
-        reordered.join(""),
-        &source[end..]
-    ))
-}
-
-fn remove_slide_id(source: &str, relationship_id: &str) -> OfficeResult<String> {
-    for (start, end) in slide_id_ranges(source)? {
-        if source[start..end].contains(&format!("r:id=\"{}\"", xml(relationship_id))) {
-            return Ok(format!("{}{}", &source[..start], &source[end..]));
-        }
-    }
-    Err(OfficeError::new(
-        "object_not_found",
-        "selected slide relationship does not exist",
-        json!({"relationship_id": relationship_id}),
-    ))
-}
-
-fn slide_id_ranges(source: &str) -> OfficeResult<Vec<(usize, usize)>> {
-    let mut output = Vec::new();
-    let mut cursor = 0usize;
-    while let Some(relative) = source[cursor..].find("<p:sldId") {
-        let start = cursor + relative;
-        let boundary = source.as_bytes().get(start + 8).copied();
-        if !matches!(boundary, Some(b' ') | Some(b'>') | Some(b'/')) {
-            cursor = start + 8;
-            continue;
-        }
-        let end = source[start..]
-            .find("/>")
-            .map(|relative| start + relative + 2)
-            .ok_or_else(|| malformed_xml("p:sldId"))?;
-        output.push((start, end));
-        cursor = end;
-    }
-    Ok(output)
-}
-
-fn set_slide_hidden(source: &str, hidden: bool) -> String {
-    if hidden {
-        if source.contains("<p:sld ") {
-            source.replacen("<p:sld ", "<p:sld show=\"0\" ", 1)
-        } else {
-            source.replacen("<p:sld>", "<p:sld show=\"0\">", 1)
-        }
-    } else {
-        source.replace(" show=\"0\"", "")
-    }
-}
-
-fn ensure_slide_relation(
-    members: &mut BTreeMap<String, Vec<u8>>,
-    slide_index: usize,
-    kind: &str,
-    target: &str,
-    id: &str,
-    external: bool,
-) -> OfficeResult<()> {
-    let path = format!("ppt/slides/_rels/slide{slide_index}.xml.rels");
-    let source = members
-        .get(&path)
-        .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .unwrap_or(r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#);
-    if source.contains(&format!("Id=\"{}\"", xml(id))) {
-        return Ok(());
-    }
-    let relation = format!(
-        "<Relationship Id=\"{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{}\" Target=\"{}\"{}/>",
-        xml(id),
-        xml(kind),
-        xml(target),
-        if external { " TargetMode=\"External\"" } else { "" }
-    );
-    let updated = insert_before(source, "</Relationships>", &relation)?;
-    members.insert(path, updated.into_bytes());
-    Ok(())
-}
-
-fn replace_media(
-    members: &mut BTreeMap<String, Vec<u8>>,
-    media_id: &str,
-    source: &Path,
-) -> OfficeResult<()> {
-    let index = media_id
-        .strip_prefix("media_")
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|index| *index > 0)
-        .ok_or_else(|| OfficeError::invalid("media_id must use media_<index> format"))?;
-    let member = members
-        .keys()
-        .filter(|name| name.starts_with("ppt/media/"))
-        .nth(index - 1)
-        .cloned()
-        .ok_or_else(|| {
-            OfficeError::new(
-                "object_not_found",
-                "selected presentation image does not exist",
-                json!({"media_id": media_id}),
-            )
-        })?;
-    let existing = Path::new(&member)
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("");
-    let replacement = image_extension(source)?;
-    if existing != replacement {
-        return Err(OfficeError::unsupported(
-            "image replacement must preserve the package media type",
-            json!({"existing_extension": existing, "source_extension": replacement}),
-        ));
-    }
-    let bytes = fs::read(source).map_err(|error| {
-        OfficeError::new(
-            "source_unavailable",
-            format!("cannot read replacement image: {error}"),
-            json!({"path": source.display().to_string()}),
-        )
-    })?;
-    members.insert(member, bytes);
-    Ok(())
-}
-
 fn slide_mut<'a>(slides: &'a mut [SlideBuild], slide_id: &str) -> OfficeResult<&'a mut SlideBuild> {
     let index = slide_index(slide_id)?;
     let slide_count = slides.len();
@@ -928,43 +660,6 @@ fn image_content_type(extension: &str) -> &'static str {
     }
 }
 
-fn member_text<'a>(members: &'a BTreeMap<String, Vec<u8>>, name: &str) -> OfficeResult<&'a str> {
-    members
-        .get(name)
-        .ok_or_else(|| {
-            OfficeError::new(
-                "missing_package_part",
-                "required PPTX package part is missing",
-                json!({"member": name}),
-            )
-        })
-        .and_then(|bytes| {
-            std::str::from_utf8(bytes).map_err(|error| {
-                OfficeError::new(
-                    "malformed_xml",
-                    format!("PPTX package part is not UTF-8 XML: {error}"),
-                    json!({"member": name}),
-                )
-            })
-        })
-}
-
-fn insert_before(source: &str, needle: &str, content: &str) -> OfficeResult<String> {
-    let index = source.rfind(needle).ok_or_else(|| {
-        OfficeError::new(
-            "malformed_xml",
-            "required presentation closing element is missing",
-            json!({"closing_element": needle}),
-        )
-    })?;
-    Ok(format!(
-        "{}{}{}",
-        &source[..index],
-        content,
-        &source[index..]
-    ))
-}
-
 fn scalar_text(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
@@ -984,14 +679,6 @@ fn invalid_operation_field(operation: &NormalizedOperation, field: &str) -> Offi
         "invalid_operation",
         "operation field is missing or invalid",
         json!({"operation_id": operation.id, "op": operation.kind, "field": field}),
-    )
-}
-
-fn malformed_xml(element: &str) -> OfficeError {
-    OfficeError::new(
-        "malformed_xml",
-        "selected presentation XML element is malformed",
-        json!({"element": element}),
     )
 }
 
