@@ -1111,12 +1111,18 @@ fn native_contract_repair_signal_with_context(
             }),
         );
     }
-    if error_code == "native_respond_object_field_json_invalid" {
+    if matches!(
+        error_code,
+        "native_respond_object_field_json_invalid" | "native_respond_object_field_value_invalid"
+    ) {
         argument_constraints.insert(
             "fields[].value_json".to_string(),
             json!({
+                "type": "string",
                 "encoding": "complete_serialized_json_value",
                 "json_string_requires_surrounding_quotes": true,
+                "json_null": "string_literal_null",
+                "schema_level_null": "rejected",
                 "malformed_json": "rejected"
             }),
         );
