@@ -1,6 +1,6 @@
 # Retrieval Validation Scripts
 
-用于验证 `kb ingest -> unified retrieval index -> kb search` 这条链路。
+用于验证 `kb ingest -> skill-owned retrieval index -> kb search` 这条链路。
 
 ## 脚本
 
@@ -8,7 +8,7 @@
   - 创建隔离临时 workspace
   - 写入测试文档
   - 调用 `kb-skill` 执行 `ingest`
-  - 查询 `memory_retrieval_index`
+  - 查询 KB 私有数据库中的 `memory_retrieval_index`
   - 调用 `kb-skill` 执行 `search`
   - 打印详细过程与关键字段
   - 默认自动清理临时 workspace

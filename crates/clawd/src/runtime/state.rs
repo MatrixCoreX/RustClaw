@@ -127,6 +127,8 @@ pub(crate) struct CoreServices {
     /// Phase 2.2 Stage 2: 独立 audit pool（独立 SQLite 文件）。
     /// audit_logs 走这个池，主 pool 只承载任务/调度/记忆等热路径。
     pub(crate) audit_db: crate::db_init::DbPool,
+    /// Isolated pools and path resolver for state owned by individual skills.
+    pub(crate) skill_storage: Arc<crate::skill_storage::SkillStorageRuntime>,
     pub(crate) llm_providers: Vec<Arc<LlmProviderRuntime>>,
     pub(crate) agents_by_id: Arc<HashMap<String, AgentRuntimeConfig>>,
     pub(crate) http_client: Client,
@@ -145,6 +147,7 @@ impl CoreServices {
         Self {
             db: crate::db_init::test_pool(),
             audit_db: crate::db_init::test_audit_pool(),
+            skill_storage: Arc::new(crate::skill_storage::SkillStorageRuntime::test_default()),
             llm_providers: Vec::new(),
             agents_by_id: Arc::new(agents_by_id),
             http_client: Client::new(),
@@ -310,8 +313,6 @@ pub(crate) struct WorkerConfig {
     pub(crate) active_running_task_ids: Arc<Mutex<HashSet<String>>>,
     pub(crate) task_cancellation_tokens:
         Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
-    pub(crate) database_busy_timeout_ms: u64,
-    pub(crate) database_sqlite_path: PathBuf,
 }
 
 impl WorkerConfig {
@@ -380,8 +381,6 @@ impl WorkerConfig {
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
             active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
             task_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
-            database_busy_timeout_ms: 5_000,
-            database_sqlite_path: PathBuf::new(),
         }
     }
 }

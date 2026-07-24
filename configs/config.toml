@@ -37,6 +37,10 @@ default_locale = "zh-CN"
 busy_timeout_ms = 2000
 # SQLite 文件路径 / SQLite file path.
 sqlite_path = "data/rustclaw.db"
+# 技能私有数据库根目录；每个持久化技能只访问自己的 `<skill>/state.db`。
+# Skill-owned database root; each persisted skill may access only its own
+# `<skill>/state.db`.
+skill_data_root = "data/skills"
 # Phase 2.2 Stage 2: audit_logs 走独立 SQLite 文件 + 独立连接池，避免与任务/调度
 # 写入争抢同一份 writer 锁。首次启动时若主库还有 audit_logs 数据，会自动一次性
 # 迁移到这里，然后清空主库副本。

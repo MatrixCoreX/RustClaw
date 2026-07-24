@@ -50,7 +50,6 @@ fn file_db_pool(path: &Path) -> crate::db_init::DbPool {
 fn file_backed_state_with_schema(db_path: &Path) -> crate::AppState {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.db = file_db_pool(db_path);
-    state.worker.database_sqlite_path = db_path.to_path_buf();
     state.with_seeded_db_schema()
 }
 

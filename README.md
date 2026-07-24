@@ -284,7 +284,7 @@ Hybrid recall uses `memory_retrieval_index` plus optional FTS. Each indexed row 
 - `embedding_dims`
 - `embedding_version`
 
-The default provider is `local-hash-v1`, which runs offline. Unsupported or unavailable embedding providers fall back to local hash so the runtime keeps working. Retrieval only uses cosine scoring when the stored embedding metadata matches the current provider spec; mismatched rows fall back to lexical, salience, recency, and success-state scoring. Set `reindex_on_startup = true` in `configs/memory.toml`, or start with an empty index, to rebuild the retrieval index from short-term records, preferences, fact cards, and KB snapshots.
+The default provider is `local-hash-v1`, which runs offline. Unsupported or unavailable embedding providers fall back to local hash so the runtime keeps working. Retrieval only uses cosine scoring when the stored embedding metadata matches the current provider spec; mismatched rows fall back to lexical, salience, recency, and success-state scoring. Set `reindex_on_startup = true` in `configs/memory.toml`, or start with an empty index, to rebuild the runtime retrieval index from short-term records, preferences, and fact cards. KB document rows remain in the separate KB-owned database and are queried through its own pool.
 
 Retrieval combines several signals instead of trusting a single score: exact / lexical matches, vector similarity when compatible, salience, recency, source kind, success state, safety filter, and the current memory use policy. This makes the index useful for multilingual recall while keeping execution grounded in planner actions and output/evidence contracts.
 
@@ -293,13 +293,13 @@ Retrieval combines several signals instead of trusting a single score: exact / l
 The `kb` skill is the user-managed document knowledge-base path. It is selected like other ordinary capabilities: `ask` tasks let the agent loop plan `call_capability("kb.*")`, while direct API callers can use `kind=run_skill` with `skill_name=kb`. Runtime code does not special-case knowledge-base wording before the planner; it resolves and verifies registry capability metadata, then dispatches the same skill protocol as other runner skills.
 
 
-Detailed flow: [Task state and context](docs/architecture/03-task-state-context.md).
+Detailed flows: [Task state and context](docs/architecture/03-task-state-context.md) and [Skill-owned storage](docs/architecture/08-skill-owned-storage.md).
 
 Key boundaries:
 
 - `kb.ingest` is a local mutation capability. Registry policy marks it medium risk, once per task, and async-preferred through the local process adapter.
 - `kb.search`, `kb.list_namespaces`, and `kb.stats` are observe-mode capabilities. They return structured machine fields such as `namespace`, `hits`, `names`, `document_count`, and `chunk_count`.
-- Namespace snapshots under `data/kb/by_user/...` keep the compatibility document index. Ingest also syncs chunks into the unified retrieval index as `kb_doc` / `knowledge_doc`, and startup reindex can rebuild those rows from snapshots.
+- Namespace snapshots and `kb_doc` retrieval rows live only in the KB-owned database under `[database].skill_data_root` (normally `data/skills/kb/state.db`). The runtime queries that pool during recall; it does not copy KB rows into the main runtime database.
 - KB rows are scoped by `user_key` and workspace files, not by one chat thread. They can be recalled later only through the same memory use-policy filters as other knowledge docs, and current user input remains the authority.
 
 ### User Control
@@ -419,6 +419,7 @@ UI renders these same Markdown sources instead of maintaining a second copy:
 5. [Skills, media, and models](docs/architecture/05-skills-media-models.md)
 6. [Release validation](docs/architecture/06-release-validation.md)
 7. [Office artifact workspace](docs/architecture/07-office-artifacts.md)
+8. [Skill-owned storage](docs/architecture/08-skill-owned-storage.md)
 
 Use the [architecture index](docs/architecture/README.md) for language selection and previous/next navigation.
 The [full documentation index](docs/README.md) links every engineering document in English and Simplified Chinese.

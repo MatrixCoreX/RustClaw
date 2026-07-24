@@ -32,6 +32,9 @@ Archive 同时上传为 workflow artifact 和 GitHub Release asset。
 - `logs/`
 - `.pids/`
 
+`data/` 同时包含主运行时数据库和 `data/skills/` 下的技能私有库；更新时必须
+保留整个目录，不能只保留 `rustclaw.db`。
+
 更新包提供二进制、脚本、prompt、migration 和 `UI/dist`，不得用包内默认值覆盖线上 secret 或 channel 设置。
 
 Admin Release 更新路径验证 checksum、保留 runtime 目录，并通过原子替换逐个更新预编译二进制，避免覆盖正在运行的 `clawd` 时出现 `Text file busy`，随后重启 `clawd`。systemd 托管的 Linux 安装会用独立 transient unit 调度重启，避免旧 service 停止时同时杀死自己的重启进程。主机已有 RustClaw nginx site 时，只复制包内 `UI/dist`，不重新构建；没有 nginx site 的本地安装不会被配置 nginx。

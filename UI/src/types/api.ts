@@ -398,6 +398,8 @@ export interface SkillStoreItem {
   install_mode?: string | null;
   config_files?: string[];
   existing_config_files?: string[];
+  storage_kind?: string | null;
+  private_data_state?: "present" | "empty" | null;
   skill: SkillListItem;
 }
 
@@ -419,8 +421,14 @@ export interface SkillStoreMutationResponse {
   binary_path?: string | null;
   binary_removed?: boolean;
   config_preserved?: boolean;
+  data_preserved?: boolean;
   reused_config_files?: string[];
   deleted_config_files?: string[];
+  deleted_private_data?: {
+    data_present_before: boolean;
+    rows_deleted: number;
+    files_deleted: number;
+  } | null;
 }
 
 export interface MemoryCounts {

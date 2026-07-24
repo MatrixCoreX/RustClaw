@@ -18,18 +18,34 @@ Use it when the user wants RustClaw to:
 - inspect basic namespace/library statistics
 
 Current runtime notes:
-- `ingest` still keeps the namespace JSON index under `data/kb/` for compatibility.
-- `ingest` also tries to sync chunk rows into the unified retrieval index used by `clawd`, so later route/planner/execution recall can reuse the same document chunks.
-- document KB is workspace-scoped by default; it is not tied to a single chat.
+- Namespace snapshots and retrieval rows live only in the KB-owned SQLite
+  database resolved from `database.skill_data_root` (normally
+  `data/skills/kb/state.db`).
+- `clawd` may query the KB-owned retrieval index during recall, but KB rows are
+  not copied into the main runtime database.
+- KB data is isolated by `user_key`; it is not tied to a single chat.
+- On upgrade, legacy `data/kb/**/*.json` snapshots and legacy main-database
+  `kb_doc` rows are migrated once, verified, and removed from their legacy
+  location. New writes never use those compatibility paths.
 
 Natural-language intent mapping:
 - Requests that semantically mean "add documents to an indexed knowledge base" should use `ingest` when required args are available; examples are illustrative only.
 - Requests that semantically mean "retrieve from an indexed knowledge base" should use `search` when the namespace is known or uniquely bound; examples are illustrative only.
-- Requests that ask to inspect available knowledge-base namespaces, namespace catalog entries, or global KB counts should use `list_namespaces` or `stats`, not filesystem directory listing, unless the user explicitly asks to inspect the backing `data/kb` files/directories.
+- Requests that ask to inspect available knowledge-base namespaces, namespace catalog entries, or global KB counts should use `list_namespaces` or `stats`, not filesystem directory listing. Runtime storage paths are implementation details and are not a substitute for KB actions.
 - `kb` is for indexed retrieval over previously ingested local content, not for direct file reading, ad hoc filesystem search, or open-ended chat.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- The runtime resolves the private database from
+  `[database].skill_data_root` in `configs/config.toml`; the default is
+  `data/skills`.
+- The `kb` registry entry declares
+  `storage = { kind = "sqlite", schema_version = 1, migration_owner = "kb" }`.
+- `skill-runner` supplies the resolved `context.skill_storage` descriptor.
+  Callers and the model must not invent a database path or reuse
+  `[database].sqlite_path`.
+- Direct protocol tests must pass a descriptor whose `skill_name` is `kb`,
+  `storage_kind` is `sqlite`, and `schema_version` is `1`.
+- No third-party account, API key, or external database is required.
 
 ## Actions (from interface)
 - `ingest`: build/update namespace index from local files
@@ -83,6 +99,9 @@ Natural-language intent mapping:
 - per-chunk metadata: `chunk_id`, `offset`, `path`, `file_type`, `mtime_epoch`
 - `ingest` prefers Markdown heading / paragraph boundaries when chunking, then falls back to bounded overlapping windows.
 - `search` accepts filter fields either nested under `filters` or as top-level aliases; the nested value is checked first.
+- Successful `ingest` responses expose `stats.retrieval_index_synced` and
+  `stats.retrieval_index_rows`; they never expose or mutate the main runtime
+  database.
 
 ## Error Contract (from interface)
 - Return explicit error when `namespace`, `paths`, or `query` is missing for the selected action.

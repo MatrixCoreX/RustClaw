@@ -56,8 +56,7 @@ fn rebuild_retrieval_index_restores_memory_preference_and_fact_rows() {
 
     db.execute("DELETE FROM memory_retrieval_index", [])
         .expect("clear index");
-    rebuild_retrieval_index(&db, &MemoryConfig::default(), &std::env::temp_dir())
-        .expect("rebuild retrieval index");
+    rebuild_retrieval_index(&db, &MemoryConfig::default()).expect("rebuild retrieval index");
 
     let memory_rows: i64 = db
         .query_row(
@@ -116,8 +115,7 @@ fn rebuild_retrieval_index_skips_safety_signal_memories() {
     .expect("insert safety signal memory");
     let safety_memory_id = db.last_insert_rowid();
 
-    rebuild_retrieval_index(&db, &MemoryConfig::default(), &std::env::temp_dir())
-        .expect("rebuild retrieval index");
+    rebuild_retrieval_index(&db, &MemoryConfig::default()).expect("rebuild retrieval index");
 
     let rows: i64 = db
         .query_row(

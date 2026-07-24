@@ -1,9 +1,5 @@
-use std::fs;
-use std::path::Path;
-
 use claw_core::config::MemoryConfig;
 use rusqlite::{params, Connection};
-use serde::Deserialize;
 use serde_json::json;
 
 use super::embedding::{embed_text_locally, local_hash_embedding_spec};
@@ -11,15 +7,14 @@ use super::retrieval::{build_topic_tags, vector_to_json};
 #[cfg(test)]
 use super::RETRIEVAL_SOURCE_KNOWLEDGE_FACT;
 use super::{
-    retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
-    retrieval_source_ref_for_memory_fact, retrieval_source_ref_for_preference,
-    LLM_SHORT_TERM_MEMORY_PREFIX, MEMORY_FACT_STATUS_ACTIVE, MEMORY_ROLE_ASSISTANT,
-    MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_SCOPE_CHAT, MEMORY_SCOPE_USER,
-    MEMORY_TYPE_SAFETY_SIGNAL, MEMORY_TYPE_UNFINISHED_GOAL, RETRIEVAL_KIND_ASSISTANT_RESULT,
-    RETRIEVAL_KIND_EPISODIC_EVENT, RETRIEVAL_KIND_KNOWLEDGE_DOC, RETRIEVAL_KIND_SEMANTIC_FACT,
-    RETRIEVAL_KIND_TRIGGER_ANCHOR, RETRIEVAL_KIND_UNFINISHED_GOAL, RETRIEVAL_PRODUCER_KB,
-    RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_KB_DOC, RETRIEVAL_SOURCE_MEMORY,
-    RETRIEVAL_SOURCE_MEMORY_FACT, RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
+    retrieval_source_ref_for_memory, retrieval_source_ref_for_memory_fact,
+    retrieval_source_ref_for_preference, LLM_SHORT_TERM_MEMORY_PREFIX, MEMORY_FACT_STATUS_ACTIVE,
+    MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_SCOPE_CHAT,
+    MEMORY_SCOPE_USER, MEMORY_TYPE_SAFETY_SIGNAL, MEMORY_TYPE_UNFINISHED_GOAL,
+    RETRIEVAL_KIND_ASSISTANT_RESULT, RETRIEVAL_KIND_EPISODIC_EVENT, RETRIEVAL_KIND_SEMANTIC_FACT,
+    RETRIEVAL_KIND_TRIGGER_ANCHOR, RETRIEVAL_KIND_UNFINISHED_GOAL,
+    RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY, RETRIEVAL_SOURCE_MEMORY_FACT,
+    RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
     RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
 };
 
@@ -137,11 +132,7 @@ pub(crate) fn cleanup_retrieval_index(
     Ok(())
 }
 
-pub(crate) fn rebuild_retrieval_index(
-    db: &Connection,
-    _cfg: &MemoryConfig,
-    workspace_root: &Path,
-) -> anyhow::Result<()> {
+pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> anyhow::Result<()> {
     ensure_retrieval_schema(db)?;
     db.execute("DELETE FROM memory_retrieval_index", [])?;
     let _ = db.execute("DELETE FROM memory_retrieval_index_fts", []);
@@ -217,7 +208,6 @@ pub(crate) fn rebuild_retrieval_index(
         index_preference_entries(db, user_id, chat_id, &user_key, &pref, ts)?;
     }
     rebuild_memory_fact_rows(db)?;
-    rebuild_kb_rows(db, workspace_root)?;
     Ok(())
 }
 
@@ -482,88 +472,6 @@ fn build_preference_metadata_json(pref_key: &str) -> String {
     .to_string()
 }
 
-#[derive(Debug, Deserialize)]
-struct KbNamespaceSnapshot {
-    namespace: String,
-    #[serde(default)]
-    owner_user_key: String,
-    #[serde(default)]
-    chunks: Vec<KbChunkSnapshot>,
-}
-
-#[derive(Debug, Deserialize)]
-struct KbChunkSnapshot {
-    chunk_id: String,
-    path: String,
-    file_type: String,
-    offset: usize,
-    text: String,
-    #[serde(default)]
-    mtime_epoch: i64,
-}
-
-fn rebuild_kb_rows(db: &Connection, workspace_root: &Path) -> anyhow::Result<()> {
-    db.execute(
-        "DELETE FROM memory_retrieval_index WHERE source_kind = ?1",
-        params![RETRIEVAL_SOURCE_KB_DOC],
-    )?;
-    let kb_dir = workspace_root.join("data").join("kb");
-    if !kb_dir.exists() {
-        return Ok(());
-    }
-    for path in collect_kb_snapshot_files(&kb_dir)? {
-        let raw = fs::read_to_string(&path)?;
-        let snapshot = serde_json::from_str::<KbNamespaceSnapshot>(&raw)?;
-        let namespace = snapshot.namespace.trim();
-        let owner_user_key = snapshot.owner_user_key.trim();
-        if namespace.is_empty() || owner_user_key.is_empty() {
-            continue;
-        }
-        for chunk in snapshot.chunks {
-            let search_text = chunk.text.trim();
-            if search_text.is_empty() {
-                continue;
-            }
-            let source_ref =
-                retrieval_source_ref_for_kb_chunk(owner_user_key, namespace, &chunk.chunk_id);
-            let metadata = build_kb_metadata(
-                owner_user_key,
-                namespace,
-                &chunk.path,
-                &chunk.file_type,
-                chunk.mtime_epoch,
-                &chunk.chunk_id,
-                chunk.offset,
-            );
-            let row_ts = if chunk.mtime_epoch > 0 {
-                chunk.mtime_epoch
-            } else {
-                crate::now_ts_u64() as i64
-            };
-            insert_index_row(
-                db,
-                RETRIEVAL_SOURCE_KB_DOC,
-                None,
-                None,
-                Some(&source_ref),
-                0,
-                0,
-                owner_user_key,
-                RETRIEVAL_KIND_KNOWLEDGE_DOC,
-                None,
-                search_text,
-                None,
-                Some(&metadata),
-                0.78,
-                RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
-                Some(RETRIEVAL_PRODUCER_KB),
-                row_ts,
-            )?;
-        }
-    }
-    Ok(())
-}
-
 fn rebuild_memory_fact_rows(db: &Connection) -> anyhow::Result<()> {
     super::facts::ensure_memory_fact_schema(db)?;
     let now_ts = crate::now_ts_u64() as i64;
@@ -591,48 +499,6 @@ fn rebuild_memory_fact_rows(db: &Connection) -> anyhow::Result<()> {
         )?;
     }
     Ok(())
-}
-
-fn collect_kb_snapshot_files(root: &Path) -> anyhow::Result<Vec<std::path::PathBuf>> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                out.push(path);
-            }
-        }
-    }
-    out.sort();
-    Ok(out)
-}
-
-fn build_kb_metadata(
-    owner_user_key: &str,
-    namespace: &str,
-    path: &str,
-    file_type: &str,
-    mtime_epoch: i64,
-    chunk_id: &str,
-    offset: usize,
-) -> String {
-    json!({
-        "scope_kind": MEMORY_SCOPE_USER,
-        "owner_user_key": owner_user_key,
-        "namespace": namespace,
-        "path": path,
-        "file_type": file_type,
-        "mtime_epoch": mtime_epoch,
-        "chunk_id": chunk_id,
-        "offset": offset,
-    })
-    .to_string()
 }
 
 #[cfg(test)]

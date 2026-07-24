@@ -23,6 +23,7 @@ enum SkillStoreErrorCode {
     BuildBinaryMissing,
     BinaryRemoveFailed,
     ConfigRemoveFailed,
+    DataRemoveFailed,
     OperationBusy,
 }
 
@@ -46,6 +47,7 @@ impl SkillStoreErrorCode {
             Self::BuildBinaryMissing => "skill_store_build_binary_missing",
             Self::BinaryRemoveFailed => "skill_store_binary_remove_failed",
             Self::ConfigRemoveFailed => "skill_store_config_remove_failed",
+            Self::DataRemoveFailed => "skill_store_data_remove_failed",
             Self::OperationBusy => "skill_store_operation_busy",
         }
     }

@@ -13,6 +13,9 @@ default_locale = "zh-CN"
 busy_timeout_ms = 2000
 # SQLite 文件路径 / SQLite file path.
 sqlite_path = "data/rustclaw.db"
+# Skill-owned databases survive image/binary updates under this mounted data
+# root and remain separate from runtime task/auth state.
+skill_data_root = "data/skills"
 
 # 用途/Purpose: 文档/文件生成默认输出目录.
 # 建议修改/Recommended change: 可改.

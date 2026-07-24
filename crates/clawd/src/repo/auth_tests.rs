@@ -6,6 +6,78 @@ use super::{
 };
 use rusqlite::{params, Connection};
 
+fn auth_lifecycle_test_state() -> AppState {
+    let state = AppState::test_default_with_fixture_provider();
+    let db = state.core.db.get().expect("main db");
+    db.execute_batch(crate::INIT_SQL).expect("base schema");
+    crate::ensure_schedule_schema(&db).expect("schedule schema");
+    crate::ensure_memory_schema(&db).expect("memory schema");
+    crate::ensure_channel_schema(&db).expect("channel schema");
+    crate::ensure_task_lease_schema(&db).expect("task lease schema");
+    ensure_key_auth_schema(&db).expect("auth schema");
+    crate::repo::child_task_graph::ensure_child_task_graph_schema(&db).expect("child task schema");
+    crate::memory::indexing::ensure_retrieval_schema(&db).expect("retrieval schema");
+    drop(db);
+    state
+}
+
+fn seed_kb_user_data(state: &AppState, user_key: &str) {
+    let db = state.core.skill_storage.kb_pool().get().expect("KB db");
+    let payload = serde_json::json!({
+        "namespace": "docs",
+        "owner_user_key": user_key,
+        "updated_at_epoch": 1,
+        "next_chunk_seq": 1,
+        "docs": {},
+        "chunks": []
+    })
+    .to_string();
+    db.execute(
+        "INSERT INTO kb_namespaces
+            (owner_user_key, namespace, payload_json, updated_at_epoch)
+         VALUES (?1, 'docs', ?2, 1)",
+        params![user_key, payload],
+    )
+    .expect("seed KB namespace");
+    db.execute(
+        "INSERT INTO memory_retrieval_index (
+            source_kind, source_ref, user_id, chat_id, user_key, memory_kind,
+            search_text, metadata_json, created_at_ts, updated_at_ts
+         ) VALUES (
+            'kb_doc', ?1, 0, 0, ?2, 'knowledge_doc', 'manual', ?3, 1, 1
+         )",
+        params![
+            format!("kb:{user_key}:docs:chunk-1"),
+            user_key,
+            serde_json::json!({
+                "owner_user_key": user_key,
+                "namespace": "docs"
+            })
+            .to_string()
+        ],
+    )
+    .expect("seed KB retrieval row");
+}
+
+fn kb_user_row_counts(state: &AppState, user_key: &str) -> (i64, i64) {
+    let db = state.core.skill_storage.kb_pool().get().expect("KB db");
+    let namespaces = db
+        .query_row(
+            "SELECT COUNT(*) FROM kb_namespaces WHERE owner_user_key = ?1",
+            params![user_key],
+            |row| row.get(0),
+        )
+        .expect("count KB namespaces");
+    let retrieval = db
+        .query_row(
+            "SELECT COUNT(*) FROM memory_retrieval_index WHERE user_key = ?1",
+            params![user_key],
+            |row| row.get(0),
+        )
+        .expect("count KB retrieval rows");
+    (namespaces, retrieval)
+}
+
 #[test]
 fn rebuild_channel_tables_upgrades_channel_constraints_for_wechat() {
     let db = Connection::open_in_memory().expect("open sqlite");
@@ -184,6 +256,140 @@ fn normalize_auth_key_role_supports_builtin_and_custom_values() {
 }
 
 #[test]
+fn admin_rotation_rebinds_crypto_and_kb_storage() {
+    let state = auth_lifecycle_test_state();
+    let old_user_key = "rk-admin-old";
+    {
+        let db = state.core.db.get().expect("main db");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'admin', 1, '123', NULL)",
+            params![old_user_key],
+        )
+        .expect("seed admin key");
+    }
+    super::super::crypto_storage::upsert_for_user_key(
+        &state,
+        old_user_key,
+        "okx",
+        "api-key",
+        "api-secret",
+        None,
+    )
+    .expect("seed crypto credential");
+    seed_kb_user_data(&state, old_user_key);
+
+    let new_user_key = create_auth_key(&state, "admin").expect("rotate admin key");
+
+    assert_eq!(
+        super::super::crypto_storage::credential_context_for_user_key(&state, old_user_key)
+            .expect("old crypto context"),
+        serde_json::json!({})
+    );
+    assert_eq!(
+        super::super::crypto_storage::credential_context_for_user_key(&state, &new_user_key)
+            .expect("new crypto context")["okx"]["api_secret"],
+        "api-secret"
+    );
+    assert_eq!(kb_user_row_counts(&state, old_user_key), (0, 0));
+    assert_eq!(kb_user_row_counts(&state, &new_user_key), (1, 1));
+
+    let kb = state.core.skill_storage.kb_pool().get().expect("KB db");
+    let (payload, source_ref, metadata): (String, String, String) = kb
+        .query_row(
+            "SELECT n.payload_json, r.source_ref, r.metadata_json
+             FROM kb_namespaces n
+             JOIN memory_retrieval_index r ON r.user_key = n.owner_user_key
+             WHERE n.owner_user_key = ?1",
+            params![new_user_key],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read rebound KB identities");
+    assert!(payload.contains(&new_user_key));
+    assert!(source_ref.contains(&new_user_key));
+    assert!(metadata.contains(&new_user_key));
+}
+
+#[test]
+fn deleting_auth_key_removes_only_its_skill_owned_data() {
+    let state = auth_lifecycle_test_state();
+    let deleted_user_key = create_auth_key(&state, "user").expect("create deleted user");
+    let retained_user_key = create_auth_key(&state, "user").expect("create retained user");
+    for user_key in [&deleted_user_key, &retained_user_key] {
+        super::super::crypto_storage::upsert_for_user_key(
+            &state,
+            user_key,
+            "okx",
+            "api-key",
+            "api-secret",
+            None,
+        )
+        .expect("seed crypto credential");
+        seed_kb_user_data(&state, user_key);
+    }
+    let key_id = {
+        let db = state.core.db.get().expect("main db");
+        db.query_row(
+            "SELECT rowid FROM auth_keys WHERE user_key = ?1",
+            params![deleted_user_key],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("deleted key id")
+    };
+
+    assert!(delete_auth_key_by_id(&state, key_id, "rk-separate-actor").expect("delete auth key"));
+
+    assert_eq!(
+        super::super::crypto_storage::credential_context_for_user_key(&state, &deleted_user_key)
+            .expect("deleted crypto context"),
+        serde_json::json!({})
+    );
+    assert_eq!(kb_user_row_counts(&state, &deleted_user_key), (0, 0));
+    assert_eq!(kb_user_row_counts(&state, &retained_user_key), (1, 1));
+    assert_ne!(
+        super::super::crypto_storage::credential_context_for_user_key(&state, &retained_user_key)
+            .expect("retained crypto context"),
+        serde_json::json!({})
+    );
+}
+
+#[test]
+fn factory_reset_clears_skill_owned_data_and_recreates_one_admin() {
+    let state = auth_lifecycle_test_state();
+    let user_key = create_auth_key(&state, "user").expect("create user");
+    super::super::crypto_storage::upsert_for_user_key(
+        &state,
+        &user_key,
+        "okx",
+        "api-key",
+        "api-secret",
+        None,
+    )
+    .expect("seed crypto credential");
+    seed_kb_user_data(&state, &user_key);
+
+    let result = factory_reset_auth_state(&state).expect("factory reset");
+
+    assert_eq!(result.exchange_credentials_deleted, 1);
+    assert_eq!(
+        super::super::crypto_storage::credential_context_for_user_key(&state, &user_key)
+            .expect("cleared crypto context"),
+        serde_json::json!({})
+    );
+    assert_eq!(kb_user_row_counts(&state, &user_key), (0, 0));
+    let db = state.core.db.get().expect("main db");
+    let (count, admin_key): (i64, String) = db
+        .query_row(
+            "SELECT COUNT(*), MAX(user_key) FROM auth_keys WHERE role = 'admin'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("admin after reset");
+    assert_eq!(count, 1);
+    assert_eq!(admin_key, result.admin_user_key);
+}
+
+#[test]
 fn rebuild_auth_keys_for_flexible_roles_allows_guest_and_custom_roles() {
     let db = Connection::open_in_memory().expect("open sqlite");
     db.execute_batch(
@@ -232,10 +438,6 @@ fn rebind_user_key_references_updates_related_tables() {
             user_key TEXT NOT NULL,
             bound_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
-        );
-        CREATE TABLE exchange_api_credentials (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_key TEXT NOT NULL
         );
         CREATE TABLE tasks (
             task_id TEXT PRIMARY KEY,

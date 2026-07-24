@@ -178,8 +178,14 @@ fn runner_context_carries_internal_idempotency_contract_outside_skill_args() {
         attempt_no: 2,
     };
 
-    let context =
-        build_runner_skill_context(&state, &task, "ui", serde_json::json!({}), Some(&execution));
+    let context = build_runner_skill_context(
+        &state,
+        &task,
+        "ui",
+        serde_json::json!({}),
+        None,
+        Some(&execution),
+    );
 
     assert_eq!(
         context.pointer("/execution/schema_version"),
@@ -197,4 +203,44 @@ fn runner_context_carries_internal_idempotency_contract_outside_skill_args() {
             .and_then(serde_json::Value::as_i64),
         Some(2)
     );
+}
+
+#[test]
+fn runner_context_exposes_only_the_calling_skills_storage_descriptor() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: "task-runner-storage".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: Some("rk-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let descriptor = state
+        .core
+        .skill_storage
+        .descriptor("kb")
+        .expect("KB descriptor");
+    let context = build_runner_skill_context(
+        &state,
+        &task,
+        "ui",
+        serde_json::json!({}),
+        Some(descriptor),
+        None,
+    );
+    assert_eq!(
+        context.pointer("/skill_storage/skill_name"),
+        Some(&json!("kb"))
+    );
+    assert_eq!(
+        context.pointer("/skill_storage/storage_kind"),
+        Some(&json!("sqlite"))
+    );
+    assert!(context.get("database_sqlite_path").is_none());
+    assert!(context.get("database_busy_timeout_ms").is_none());
 }

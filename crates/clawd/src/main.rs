@@ -84,6 +84,7 @@ mod schema_contract;
 mod semantic_judge;
 mod skill_availability;
 mod skill_output_artifact;
+mod skill_storage;
 mod skills;
 mod system_health;
 mod task_admin_routes;
@@ -360,7 +361,7 @@ async fn main() -> anyhow::Result<()> {
             && (config.memory.reindex_on_startup
                 || memory::indexing::retrieval_index_is_empty(&db).unwrap_or(true))
         {
-            memory::indexing::rebuild_retrieval_index(&db, &config.memory, &workspace_root)?;
+            memory::indexing::rebuild_retrieval_index(&db, &config.memory)?;
         }
     }
     let bootstrap_admin_key = {
@@ -371,6 +372,11 @@ async fn main() -> anyhow::Result<()> {
         seed_channel_bindings(&db, &config)?;
         key
     };
+    let skill_storage = Arc::new(skill_storage::SkillStorageRuntime::initialize(
+        &workspace_root,
+        &config.database,
+        &db_pool,
+    )?);
     if let Some(user_key) = bootstrap_admin_key.as_deref() {
         warn!("============================================================");
         warn!("No auth key found in database. Generated initial admin key.");
@@ -534,14 +540,6 @@ async fn main() -> anyhow::Result<()> {
     let active_provider_type = llm_providers
         .first()
         .map(|p| p.config.provider_type.clone());
-    let database_sqlite_path = {
-        let raw = std::path::PathBuf::from(&config.database.sqlite_path);
-        if raw.is_absolute() {
-            raw
-        } else {
-            workspace_root.join(raw)
-        }
-    };
     let normalized_agents = config.normalized_agents();
     let mut agents_by_id = HashMap::new();
     for agent in &normalized_agents {
@@ -690,6 +688,7 @@ async fn main() -> anyhow::Result<()> {
         core: crate::CoreServices {
             db: db_pool,
             audit_db: audit_db_pool,
+            skill_storage,
             llm_providers,
             agents_by_id: Arc::new(agents_by_id),
             http_client: Client::new(),
@@ -756,8 +755,6 @@ async fn main() -> anyhow::Result<()> {
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
             active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
             task_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
-            database_busy_timeout_ms: config.database.busy_timeout_ms,
-            database_sqlite_path,
         },
         metrics: crate::TaskMetricsRegistry::default(),
         channels: ChannelConfig {

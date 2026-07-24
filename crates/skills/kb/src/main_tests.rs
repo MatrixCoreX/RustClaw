@@ -1,11 +1,20 @@
 use super::{
     do_ingest, do_list_namespaces, do_stats, error_extra, normalize_search_path_prefix,
-    parse_ingest_args, parse_stats_args, split_chunks, storage_path_for, storage_segment, tokenize,
-    KbRuntime, SKILL_NAME,
+    parse_ingest_args, parse_stats_args, split_chunks, storage_path_for, tokenize, KbRuntime,
+    SKILL_NAME,
 };
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
+
+fn runtime(root: &std::path::Path, user_key: &str) -> KbRuntime {
+    KbRuntime {
+        scope_user_key: user_key.to_string(),
+        workspace_root: root.to_path_buf(),
+        storage_database_path: root.join("data/skills/kb/state.db"),
+        storage_busy_timeout_ms: 5_000,
+    }
+}
 
 #[test]
 fn error_extra_exposes_machine_contract() {
@@ -60,12 +69,7 @@ fn ingest_success_extra_includes_path_evidence_fields() {
         "# Demo\n\nThis document is indexed for a knowledge-base ingest test.",
     )
     .expect("write README fixture");
-    let runtime = KbRuntime {
-        scope_user_key: "user:test".to_string(),
-        workspace_root: root.clone(),
-        unified_index_db_path: Some(root.join("data").join("rustclaw.db")),
-        unified_index_busy_timeout_ms: None,
-    };
+    let runtime = runtime(&root, "user:test");
 
     let out = do_ingest(
         &runtime,
@@ -115,12 +119,7 @@ fn list_namespaces_extra_includes_names_and_count_fields() {
         "# Demo\n\nThis document is indexed for a knowledge-base namespace listing test.",
     )
     .expect("write README fixture");
-    let runtime = KbRuntime {
-        scope_user_key: "user:test".to_string(),
-        workspace_root: root.clone(),
-        unified_index_db_path: Some(root.join("data").join("rustclaw.db")),
-        unified_index_busy_timeout_ms: None,
-    };
+    let runtime = runtime(&root, "user:test");
 
     do_ingest(
         &runtime,
@@ -163,12 +162,7 @@ fn stats_extra_includes_document_and_chunk_count_aliases() {
         "# Demo\n\nThis document is indexed for a knowledge-base stats test.",
     )
     .expect("write README fixture");
-    let runtime = KbRuntime {
-        scope_user_key: "user:test".to_string(),
-        workspace_root: root.clone(),
-        unified_index_db_path: Some(root.join("data").join("rustclaw.db")),
-        unified_index_busy_timeout_ms: None,
-    };
+    let runtime = runtime(&root, "user:test");
 
     do_ingest(
         &runtime,
@@ -217,12 +211,7 @@ fn ingest_unchanged_file_marks_idempotent_success() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create temp kb workspace");
     fs::write(root.join("README.md"), "# Demo\n\nIndexed content.").expect("write README fixture");
-    let runtime = KbRuntime {
-        scope_user_key: "user:test".to_string(),
-        workspace_root: root.clone(),
-        unified_index_db_path: Some(root.join("data").join("rustclaw.db")),
-        unified_index_busy_timeout_ms: None,
-    };
+    let runtime = runtime(&root, "user:test");
     let args = json!({
         "action": "ingest",
         "namespace": "demo_docs_nl",
@@ -280,24 +269,12 @@ fn tokenize_supports_cjk_queries() {
 }
 
 #[test]
-fn storage_segment_is_stable_and_hashed() {
-    let first = storage_segment("docs/release notes");
-    let second = storage_segment("docs/release notes");
-    assert_eq!(first, second);
-    assert!(first.contains("--"));
-}
-
-#[test]
-fn kb_root_is_user_scoped() {
-    let runtime = KbRuntime {
-        scope_user_key: "user:alpha".to_string(),
-        workspace_root: PathBuf::from("/tmp/workspace"),
-        unified_index_db_path: None,
-        unified_index_busy_timeout_ms: None,
-    };
-    let root = super::kb_root(&runtime);
-    assert!(root.starts_with(PathBuf::from("/tmp/workspace/data/kb/by_user")));
-    assert!(root.file_name().is_some());
+fn runtime_uses_the_kb_owned_database_path() {
+    let runtime = runtime(&PathBuf::from("/tmp/workspace"), "user:alpha");
+    assert_eq!(
+        runtime.storage_database_path,
+        PathBuf::from("/tmp/workspace/data/skills/kb/state.db")
+    );
 }
 
 #[test]

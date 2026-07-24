@@ -569,6 +569,13 @@ pub struct SkillManifest {
 
 /// 注册表中的单条技能定义
 #[derive(Debug, Clone, Deserialize)]
+pub struct SkillStorageDeclaration {
+    pub kind: String,
+    pub schema_version: u32,
+    pub migration_owner: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SkillRegistryEntry {
     pub name: String,
     #[serde(default = "default_true")]
@@ -671,6 +678,10 @@ pub struct SkillRegistryEntry {
     /// skill. Removing a skill may preserve or delete only these declared files.
     #[serde(default)]
     pub config_files: Vec<String>,
+    /// Persistent state owned exclusively by this skill. Runtime uses this
+    /// declaration to disclose only the calling skill's storage descriptor.
+    #[serde(default)]
+    pub storage: Option<SkillStorageDeclaration>,
     #[serde(default)]
     pub primary_fallback_role: Option<PrimaryFallbackRole>,
     /// Host OS families where this skill/tool is expected to work, e.g.
@@ -1572,6 +1583,10 @@ impl SkillsRegistry {
         })
     }
 
+    pub fn storage(&self, canonical_name: &str) -> Option<&SkillStorageDeclaration> {
+        self.get(canonical_name)?.storage.as_ref()
+    }
+
     /// Phase 5: Runner 执行名；未配置则用 canonical_name。返回 String 避免混合借用来源的 lifetime 问题。
     pub fn runner_name(&self, canonical_name: &str) -> String {
         self.get(canonical_name)
@@ -1909,17 +1924,10 @@ pub struct ExternalSkillConfig<'a> {
     pub auth_ref: Option<&'a str>,
 }
 
-/// 小写化（技能名仅 ASCII，用 to_lowercase 即可）
 fn to_canonical_key(s: &str) -> String {
     s.trim().to_lowercase()
 }
 
-/// §P4.1 收尾：clawd 进程内"必须存在且 kind=builtin"的技能 canonical 集合。
-///
-/// 这一组在 `crates/clawd/src/skills.rs::is_builtin_skill_name` 仍保留作为
-/// registry 缺失时的安全网，但运行期权威是这里。任何变动都需要同时更新
-/// 那张安全网；CI 上有 `crates/clawd/tests/config_templates.rs` 里的
-/// `registry_covers_all_required_builtins` 守底，registry 漏一个就红。
 pub const REQUIRED_BUILTIN_SKILLS: &[&str] = &[
     "run_cmd",
     "code_index",
@@ -1933,12 +1941,9 @@ pub const REQUIRED_BUILTIN_SKILLS: &[&str] = &[
     "schedule",
 ];
 
-/// §P4.1 收尾：registry 完整性校验报告，便于启动期 / CI 一次性输出全部漂移点。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RegistryIntegrityReport {
-    /// 在 [`REQUIRED_BUILTIN_SKILLS`] 里但 registry 完全找不到的 canonical name。
     pub missing: Vec<String>,
-    /// 找到了，但 `kind` 不是 `Builtin`（例如被误改成 `Runner`）的 canonical name。
     pub wrong_kind: Vec<String>,
 }
 
@@ -1947,7 +1952,6 @@ impl RegistryIntegrityReport {
         self.missing.is_empty() && self.wrong_kind.is_empty()
     }
 
-    /// 把报告打成给人看的一行错误描述。空报告返回 None。
     pub fn into_human_message(self) -> Option<String> {
         if self.is_clean() {
             return None;
@@ -1967,8 +1971,7 @@ impl RegistryIntegrityReport {
 }
 
 impl SkillsRegistry {
-    /// 检查 registry 是否覆盖了 [`REQUIRED_BUILTIN_SKILLS`]，并且每条都标
-    /// `kind = "builtin"`。返回结构化报告，便于一次性输出所有漂移点。
+    /// Validate required built-in registry entries and their kinds.
     ///
     /// 这是 §P4.1 alias 收敛子项的"启动期 + CI 双保险"基础：
     /// - clawd 启动时调一次，发现漂移直接 bail；

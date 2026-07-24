@@ -262,7 +262,6 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
 
     let webd_accounts_deleted = delete_all_rows_if_exists(&tx, "webd_login_accounts")?;
     let channel_bindings_deleted = delete_all_rows_if_exists(&tx, "channel_bindings")?;
-    let exchange_credentials_deleted = delete_all_rows_if_exists(&tx, "exchange_api_credentials")?;
     let pending_bind_sessions_deleted =
         delete_all_rows_if_exists(&tx, "pending_channel_bind_sessions")?;
     let auth_keys_deleted = delete_all_rows_if_exists(&tx, "auth_keys")?;
@@ -291,7 +290,20 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
         params![DEFAULT_WEBD_USERNAME, password_hash, admin_user_key, now],
     )?;
 
-    tx.commit()?;
+    let removed_credentials = super::crypto_storage::take_all(state)?;
+    let exchange_credentials_deleted = removed_credentials.len();
+    let removed_kb = match state.core.skill_storage.take_all_kb_data() {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            super::crypto_storage::restore(state, &removed_credentials)?;
+            return Err(error);
+        }
+    };
+    if let Err(error) = tx.commit() {
+        super::crypto_storage::restore(state, &removed_credentials)?;
+        state.core.skill_storage.restore_kb_data(&removed_kb)?;
+        return Err(error.into());
+    }
     let audit_logs_deleted = clear_audit_logs_if_exists(&state.core.audit_db)?;
 
     Ok(FactoryResetDbResult {
@@ -355,7 +367,6 @@ fn rebind_user_key_references(
 ) -> anyhow::Result<()> {
     let updates = [
         "UPDATE channel_bindings SET user_key = ?2 WHERE user_key = ?1",
-        "UPDATE exchange_api_credentials SET user_key = ?2 WHERE user_key = ?1",
         "UPDATE tasks SET user_key = ?2 WHERE user_key = ?1",
         "UPDATE scheduled_jobs SET user_key = ?2 WHERE user_key = ?1",
         "UPDATE memories SET user_key = ?2 WHERE user_key = ?1",
@@ -462,7 +473,23 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
         if let Some((admin_rowid, old_user_key)) = existing_admins.into_iter().next() {
             let tx = db.transaction()?;
             rotate_auth_key_row(&tx, admin_rowid, &old_user_key, &user_key)?;
-            tx.commit()?;
+            super::crypto_storage::rebind_user_key(state, &old_user_key, &user_key)?;
+            if let Err(error) = state
+                .core
+                .skill_storage
+                .rebind_kb_user_key(&old_user_key, &user_key)
+            {
+                super::crypto_storage::rebind_user_key(state, &user_key, &old_user_key)?;
+                return Err(error);
+            }
+            if let Err(error) = tx.commit() {
+                super::crypto_storage::rebind_user_key(state, &user_key, &old_user_key)?;
+                state
+                    .core
+                    .skill_storage
+                    .rebind_kb_user_key(&user_key, &old_user_key)?;
+                return Err(error.into());
+            }
             // Phase 2.2 Stage 2: 主事务提交后再异步刷一次 audit_logs（独立 pool）。
             // 失败只 warn，避免审计跨库写入阻塞 admin key 轮换。
             match rebind_audit_logs_user_key(&state.core.audit_db, &old_user_key, &user_key) {
@@ -965,15 +992,23 @@ pub(crate) fn delete_auth_key_by_id(
         params![target_user_key],
     )?;
     tx.execute(
-        "DELETE FROM exchange_api_credentials WHERE user_key = ?1",
-        params![target_user_key],
-    )?;
-    tx.execute(
         "DELETE FROM webd_login_accounts WHERE user_key = ?1",
         params![target_user_key],
     )?;
     let changed = tx.execute("DELETE FROM auth_keys WHERE rowid = ?1", params![key_id])?;
-    tx.commit()?;
+    let removed_credentials = super::crypto_storage::take_for_user_key(state, &target_user_key)?;
+    let removed_kb = match state.core.skill_storage.take_kb_user_data(&target_user_key) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            super::crypto_storage::restore(state, &removed_credentials)?;
+            return Err(error);
+        }
+    };
+    if let Err(error) = tx.commit() {
+        super::crypto_storage::restore(state, &removed_credentials)?;
+        state.core.skill_storage.restore_kb_data(&removed_kb)?;
+        return Err(error.into());
+    }
     Ok(changed > 0)
 }
 
@@ -985,47 +1020,7 @@ pub(crate) fn exchange_credential_status_for_user_key(
     state: &AppState,
     user_key: &str,
 ) -> anyhow::Result<Vec<ExchangeCredentialStatus>> {
-    let user_key = normalize_user_key(user_key);
-    if user_key.is_empty() {
-        return Ok(Vec::new());
-    }
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut out = Vec::new();
-    for exchange in ["binance", "okx"] {
-        let row = db
-            .query_row(
-                "SELECT api_key, updated_at, enabled
-                 FROM exchange_api_credentials
-                 WHERE user_key = ?1 AND exchange = ?2
-                 LIMIT 1",
-                params![user_key, exchange],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let (configured, api_key_masked, updated_at) = match row {
-            Some((api_key, updated_at, enabled)) if enabled == 1 => {
-                (true, Some(api_key), Some(updated_at))
-            }
-            _ => (false, None, None),
-        };
-        out.push(ExchangeCredentialStatus {
-            exchange: exchange.to_string(),
-            configured,
-            api_key_masked,
-            updated_at,
-        });
-    }
-    Ok(out)
+    super::crypto_storage::status_for_user_key(state, user_key)
 }
 
 pub(crate) fn upsert_exchange_credential_for_user_key(
@@ -1036,36 +1031,14 @@ pub(crate) fn upsert_exchange_credential_for_user_key(
     api_secret: &str,
     passphrase: Option<&str>,
 ) -> anyhow::Result<ExchangeCredentialStatus> {
-    let user_key = normalize_user_key(user_key);
-    if user_key.is_empty() {
-        return Err(anyhow::anyhow!("user_key is required"));
-    }
-    let exchange = crate::normalize_exchange_name(exchange_raw)?;
-    let api_key = api_key.trim();
-    let api_secret = api_secret.trim();
-    if api_key.is_empty() || api_secret.is_empty() {
-        return Err(anyhow::anyhow!("api_key and api_secret are required"));
-    }
-    let passphrase = passphrase.map(str::trim).filter(|v| !v.is_empty());
-    let now = now_ts();
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    db.execute(
-        "INSERT INTO exchange_api_credentials (user_key, exchange, api_key, api_secret, passphrase, enabled, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)
-         ON CONFLICT(user_key, exchange)
-         DO UPDATE SET api_key=excluded.api_key, api_secret=excluded.api_secret, passphrase=excluded.passphrase, enabled=1, updated_at=excluded.updated_at",
-        params![user_key, exchange, api_key, api_secret, passphrase, now],
-    )?;
-    Ok(ExchangeCredentialStatus {
-        exchange,
-        configured: true,
-        api_key_masked: Some(api_key.to_string()),
-        updated_at: Some(now),
-    })
+    super::crypto_storage::upsert_for_user_key(
+        state,
+        user_key,
+        exchange_raw,
+        api_key,
+        api_secret,
+        passphrase,
+    )
 }
 
 fn build_auth_identity(

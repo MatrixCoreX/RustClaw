@@ -86,7 +86,7 @@ export interface SkillStoreCatalogProps {
   actionName: string | null;
   onRefresh: () => unknown | Promise<unknown>;
   onInstall: (name: string) => unknown | Promise<unknown>;
-  onRemove: (name: string, preserveConfig: boolean) => unknown | Promise<unknown>;
+  onRemove: (name: string, preserveConfig: boolean, preserveData: boolean) => unknown | Promise<unknown>;
 }
 
 export function SkillStoreCatalog({
@@ -109,11 +109,11 @@ export function SkillStoreCatalog({
   const mutationRunning = actionName !== null;
   const activeOperation = data?.active_operation ?? null;
 
-  const confirmRemoval = async (preserveConfig: boolean) => {
+  const confirmRemoval = async (preserveConfig: boolean, preserveData: boolean) => {
     if (!pendingRemoval) return;
     const name = pendingRemoval.name;
     setPendingRemoval(null);
-    await onRemove(name, preserveConfig);
+    await onRemove(name, preserveConfig, preserveData);
   };
 
   const renderItem = (item: SkillStoreItem) => {
@@ -266,6 +266,8 @@ export function SkillStoreCatalog({
         <SkillRemovalDialog
           skillName={pendingRemoval.name}
           existingConfigFiles={pendingRemoval.existing_config_files}
+          storageKind={pendingRemoval.storage_kind}
+          privateDataState={pendingRemoval.private_data_state}
           t={t}
           onCancel={() => setPendingRemoval(null)}
           onConfirm={confirmRemoval}

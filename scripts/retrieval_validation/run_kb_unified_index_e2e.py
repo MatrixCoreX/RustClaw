@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-隔离验证 kb ingest -> unified retrieval index -> kb search。
+隔离验证 kb ingest -> skill-owned retrieval index -> kb search。
 
 默认行为：
 - 在 scripts/retrieval_validation/.tmp_runs 下创建临时 workspace
-- 复制最小 config.toml 并把 sqlite_path 指向临时数据库
+- 复制最小 config.toml，并把主库和技能存储根目录指向临时工作区
 - 生成测试文档
 - 通过 kb-skill stdin JSON 协议执行 ingest / search
 - 打印详细过程、请求、响应、数据库行摘要
@@ -69,6 +69,15 @@ def patch_sqlite_path(config_text: str, sqlite_path: str) -> str:
     )
     if count != 1:
         raise RuntimeError("未能在 config.toml 中找到 database.sqlite_path")
+    patched, count = re.subn(
+        r'(^\s*skill_data_root\s*=\s*)".*?"',
+        r'\1"data/skills"',
+        patched,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if count != 1:
+        raise RuntimeError("未能在 config.toml 中找到 database.skill_data_root")
     return patched
 
 
@@ -134,6 +143,20 @@ def write_fixture_docs(workspace: Path, namespace: str) -> list[Path]:
 
 
 def run_kb_skill(workspace: Path, request: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    request["user_id"] = 1001
+    request["chat_id"] = 2001
+    request["user_key"] = "rk-kb-e2e"
+    request["context"] = {
+        "workspace_root": str(workspace),
+        "user_key": "rk-kb-e2e",
+        "skill_storage": {
+            "skill_name": "kb",
+            "storage_kind": "sqlite",
+            "schema_version": 1,
+            "database_path": str(db_path_for_workspace(workspace)),
+            "database_busy_timeout_ms": 5000,
+        },
+    }
     cmd = ["cargo", "run", "--quiet", "-p", "kb-skill", "--bin", "kb-skill"]
     env = os.environ.copy()
     env["WORKSPACE_ROOT"] = str(workspace)
@@ -170,7 +193,7 @@ def run_kb_skill(workspace: Path, request: dict[str, Any]) -> tuple[dict[str, An
 
 
 def db_path_for_workspace(workspace: Path) -> Path:
-    return workspace / "data" / "retrieval_validation.db"
+    return workspace / "data" / "skills" / "kb" / "state.db"
 
 
 def fetch_kb_rows(db_path: Path, namespace: str) -> list[sqlite3.Row]:
@@ -184,10 +207,11 @@ def fetch_kb_rows(db_path: Path, namespace: str) -> list[sqlite3.Row]:
                    metadata_json, substr(search_text, 1, 120) AS excerpt
             FROM memory_retrieval_index
             WHERE source_kind = 'kb_doc'
-              AND source_ref LIKE ?
+              AND user_key = ?
+              AND json_extract(metadata_json, '$.namespace') = ?
             ORDER BY id ASC
             """,
-            (f"kb:{namespace}:%",),
+            ("rk-kb-e2e", namespace),
         )
         return cur.fetchall()
     finally:
@@ -223,7 +247,7 @@ def validate_kb_rows(rows: list[sqlite3.Row], namespace: str) -> None:
         assert row["source_kind"] == "kb_doc", row["source_kind"]
         assert row["memory_kind"] == "knowledge_doc", row["memory_kind"]
         assert row["tool_or_skill_name"] == "kb", row["tool_or_skill_name"]
-        assert row["source_ref"].startswith(f"kb:{namespace}:"), row["source_ref"]
+        assert row["source_ref"].startswith(f"kb:rk-kb-e2e:{namespace}:"), row["source_ref"]
         assert metadata.get("namespace") == namespace, metadata
         assert metadata.get("path"), metadata
         assert metadata.get("chunk_id"), metadata
@@ -250,7 +274,7 @@ def cleanup_workspace(workspace: Path, keep_temp: bool) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="验证 kb -> unified index -> search 链路")
+    parser = argparse.ArgumentParser(description="验证 kb -> skill-owned index -> search 链路")
     parser.add_argument(
         "--namespace-prefix",
         default="kb_e2e",
@@ -293,13 +317,13 @@ def main() -> int:
             raise RuntimeError(f"ingest 失败: {pretty_json(ingest_payload)}")
         print_ok("KB ingest 成功")
 
-        print_section("检查 Unified Index")
+        print_section("检查 Skill-Owned Index")
         db_path = db_path_for_workspace(workspace)
         print_info(f"数据库路径: {db_path}")
         rows = fetch_kb_rows(db_path, namespace)
         print_kb_rows(rows)
         validate_kb_rows(rows, namespace)
-        print_ok(f"Unified index 校验通过，共 {len(rows)} 条 kb_doc 行")
+        print_ok(f"Skill-owned index 校验通过，共 {len(rows)} 条 kb_doc 行")
 
         print_section("执行 KB Search")
         search_request = {
@@ -316,7 +340,7 @@ def main() -> int:
         print_ok("KB search 校验通过")
 
         print_section("测试结论")
-        print_ok("kb ingest -> unified index -> kb search 全链路验证通过")
+        print_ok("kb ingest -> skill-owned index -> kb search 全链路验证通过")
         return 0
     except Exception as exc:
         print_section("测试失败")

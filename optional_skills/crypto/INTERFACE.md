@@ -12,6 +12,24 @@
 - **Execution vs preview**: `trade_preview` is for preview-only user intent. `trade_submit` is only when the **current** user message explicitly requests immediate execution (same turn). There is **no** platform-level second-step pending-confirm chain in `clawd`; do not rely on a later yes/no follow-up flow.
 - Supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker` (Binance); `market`, `limit` (OKX).
 
+## Config Entry Points
+
+- Trading policy, exchange allow-lists, symbols, and risk limits remain in
+  `configs/crypto.toml`.
+- Exchange credentials are owned by `crypto` and persisted per `user_key` in
+  the runtime-resolved crypto database (normally
+  `data/skills/crypto/state.db`). They are never written to the main runtime
+  database.
+- The registry declares
+  `storage = { kind = "sqlite", schema_version = 1, migration_owner = "crypto" }`;
+  `[database].skill_data_root` in `configs/config.toml` controls the parent
+  directory.
+- Bind credentials through the authenticated credential API, the supported
+  channel setup flow, or `scripts/import-crypto-credentials.sh`. Do not ask the
+  user to paste raw secrets into ordinary agent conversation.
+- A legacy main-database credential table is migrated once, verified, and
+  physically dropped. New runtime code must use the crypto storage repository.
+
 ## Actions
 - Market/info: `quote` (aliases `price`, `get_price` when querying one symbol), `multi_quote` (aliases `get_multi_price`; `price` when `symbols` is present), `get_book_ticker` (alias `book_ticker`), `binance_symbol_check`, `normalize_symbol`, `healthcheck`, `candles` (aliases `kline`, `klines`, `candlestick`, `candlesticks`, `ohlcv`; these normalize to `indicator` when an `indicator` param is also present), `indicator` (aliases `technical_indicator`, `technical_indicators`, `ta_indicator`, `ta`), `price_alert_check`, `onchain`
 - **Price-alert aliases** (normalize to `price_alert_check` internally, no separate actions): `price_monitor`, `monitor_price`, `price_alert`, `volatility_alert`.
