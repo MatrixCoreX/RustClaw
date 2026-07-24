@@ -722,6 +722,7 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
             signal,
             "recoverable_failure_continue_round"
                 | "capability_groups_loaded"
+                | "mcp_capabilities_loaded"
                 | "replan_from_verifier_signal"
                 | "post_write_validation_reserve"
                 | "repeat_action_limit"

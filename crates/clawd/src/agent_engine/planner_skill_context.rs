@@ -203,12 +203,22 @@ pub(super) fn build_skill_quick_index_text_scoped(
     task: &ClaimedTask,
     skill_scope: Option<&BTreeSet<String>>,
 ) -> String {
-    let enabled = planner_available_skills_for_task_scoped(state, task, skill_scope);
+    let mut enabled = planner_available_skills_for_task_scoped(state, task, skill_scope);
     if enabled.is_empty() {
         let mut line = String::from("- ");
         line.push_str(SKILL_QUICK_INDEX_EMPTY_TOKEN);
         return line;
     }
+    let registry = state.get_skills_registry();
+    enabled.sort_by(|left, right| {
+        let eager = |skill: &str| {
+            registry
+                .as_ref()
+                .and_then(|registry| registry.get(skill))
+                .is_some_and(|entry| entry.planner_eager_load)
+        };
+        eager(right).cmp(&eager(left)).then_with(|| left.cmp(right))
+    });
     let mut candidate_lines = Vec::new();
     for skill in &enabled {
         let Some(manifest) = state.skill_manifest(skill) else {
