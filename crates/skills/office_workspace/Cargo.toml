@@ -8,6 +8,10 @@ license.workspace = true
 name = "office-workspace-skill"
 path = "src/main.rs"
 
+[lib]
+name = "office_workspace"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true

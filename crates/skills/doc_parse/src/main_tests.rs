@@ -26,6 +26,22 @@ impl TempOfficeFile {
         let file = File::create(&path).expect("create docx fixture");
         let mut archive = ZipWriter::new(file);
         archive
+            .start_file("[Content_Types].xml", SimpleFileOptions::default())
+            .expect("start content types");
+        archive
+            .write_all(
+                br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#,
+            )
+            .expect("write content types");
+        archive
+            .start_file("_rels/.rels", SimpleFileOptions::default())
+            .expect("start root relationships");
+        archive
+            .write_all(
+                br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#,
+            )
+            .expect("write root relationships");
+        archive
             .start_file("word/document.xml", SimpleFileOptions::default())
             .expect("start document.xml");
         archive

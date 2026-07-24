@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Context, Result};
+use office_workspace::read_docx_for_legacy_parser;
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use zip::ZipArchive;
 
 #[derive(Clone, Copy, Debug)]
 enum DocType {
@@ -471,26 +471,16 @@ fn parse_pdf(path: &Path, page_range: &PageRange) -> Result<ParseResultInternal>
 }
 
 fn parse_docx(path: &Path, table_mode: TableMode) -> Result<ParseResultInternal> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let mut zip = ZipArchive::new(file).with_context(|| "invalid docx zip archive")?;
-
-    let mut document_xml = String::new();
-    {
-        let mut f = zip
-            .by_name("word/document.xml")
-            .with_context(|| "missing word/document.xml in docx")?;
-        f.read_to_string(&mut document_xml)
-            .with_context(|| "failed to read word/document.xml")?;
-    }
-
-    let paragraphs = parse_docx_paragraphs(&document_xml);
+    let evidence = read_docx_for_legacy_parser(path)
+        .map_err(|error| anyhow!("office_workspace {}: {}", error.code, error))?;
     let mut sections = vec![];
     let mut current_title = "Document".to_string();
     let mut current_level = 1u8;
     let mut buf = String::new();
     let mut idx = 1usize;
-    for (text, level_opt) in paragraphs {
+    for block in evidence.blocks {
+        let text = block.text;
+        let level_opt = block.heading_level;
         if text.trim().is_empty() {
             continue;
         }
@@ -523,7 +513,20 @@ fn parse_docx(path: &Path, table_mode: TableMode) -> Result<ParseResultInternal>
         });
     }
 
-    let tables = parse_docx_tables(&document_xml, table_mode);
+    let tables = evidence
+        .tables
+        .into_iter()
+        .filter_map(|table| {
+            let mut rows = table.rows;
+            let header = rows.first().cloned().unwrap_or_default();
+            let body = if rows.len() > 1 {
+                rows.drain(1..).collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            normalize_table(table.id, header, body, table_mode)
+        })
+        .collect::<Vec<_>>();
     let text = sections
         .iter()
         .map(|s| {
@@ -707,72 +710,6 @@ fn parse_html_tables(html: &str, table_mode: TableMode) -> Vec<Table> {
     out
 }
 
-fn parse_docx_paragraphs(xml: &str) -> Vec<(String, Option<u8>)> {
-    let p_re = Regex::new(r"(?is)<w:p\b[^>]*>(.*?)</w:p>").expect("valid regex");
-    let t_re = Regex::new(r"(?is)<w:t[^>]*>(.*?)</w:t>").expect("valid regex");
-    let style_re = Regex::new(r#"(?is)<w:pStyle[^>]*w:val="Heading([1-6])""#).expect("valid regex");
-    let mut out = vec![];
-    for cap in p_re.captures_iter(xml) {
-        let p = cap.get(1).map(|m| m.as_str()).unwrap_or("");
-        let mut text = String::new();
-        for tcap in t_re.captures_iter(p) {
-            if !text.is_empty() {
-                text.push(' ');
-            }
-            text.push_str(&xml_unescape(tcap.get(1).map(|m| m.as_str()).unwrap_or("")));
-        }
-        let level = style_re
-            .captures(p)
-            .and_then(|c| c.get(1))
-            .and_then(|m| m.as_str().parse::<u8>().ok());
-        if !text.trim().is_empty() {
-            out.push((text.trim().to_string(), level));
-        }
-    }
-    out
-}
-
-fn parse_docx_tables(xml: &str, table_mode: TableMode) -> Vec<Table> {
-    let tbl_re = Regex::new(r"(?is)<w:tbl\b[^>]*>(.*?)</w:tbl>").expect("valid regex");
-    let tr_re = Regex::new(r"(?is)<w:tr\b[^>]*>(.*?)</w:tr>").expect("valid regex");
-    let tc_re = Regex::new(r"(?is)<w:tc\b[^>]*>(.*?)</w:tc>").expect("valid regex");
-    let t_re = Regex::new(r"(?is)<w:t[^>]*>(.*?)</w:t>").expect("valid regex");
-    let mut out = vec![];
-    for (tid, tbl_cap) in tbl_re.captures_iter(xml).enumerate() {
-        let tbl = tbl_cap.get(1).map(|m| m.as_str()).unwrap_or("");
-        let mut rows = vec![];
-        for tr_cap in tr_re.captures_iter(tbl) {
-            let tr = tr_cap.get(1).map(|m| m.as_str()).unwrap_or("");
-            let mut row = vec![];
-            for tc_cap in tc_re.captures_iter(tr) {
-                let tc = tc_cap.get(1).map(|m| m.as_str()).unwrap_or("");
-                let mut cell = String::new();
-                for text_cap in t_re.captures_iter(tc) {
-                    if !cell.is_empty() {
-                        cell.push(' ');
-                    }
-                    cell.push_str(&xml_unescape(
-                        text_cap.get(1).map(|m| m.as_str()).unwrap_or(""),
-                    ));
-                }
-                row.push(cell.trim().to_string());
-            }
-            if !row.is_empty() {
-                rows.push(row);
-            }
-        }
-        if rows.is_empty() {
-            continue;
-        }
-        let header = rows.first().cloned().unwrap_or_default();
-        let body = rows.into_iter().skip(1).collect::<Vec<_>>();
-        if let Some(t) = normalize_table(format!("tbl_{}", tid + 1), header, body, table_mode) {
-            out.push(t);
-        }
-    }
-    out
-}
-
 fn normalize_table(
     id: String,
     header: Vec<String>,
@@ -886,10 +823,6 @@ fn html_unescape(s: &str) -> String {
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
-}
-
-fn xml_unescape(s: &str) -> String {
-    html_unescape(s)
 }
 
 #[cfg(test)]
