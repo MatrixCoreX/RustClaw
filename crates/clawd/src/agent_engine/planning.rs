@@ -154,111 +154,12 @@ pub(super) async fn plan_round_actions(
     let user_request_for_prompt =
         crate::language_policy::task_user_request_for_prompt(task, user_text);
     let attempt_ledger = build_attempt_ledger_compact(loop_state);
-    let (prompt_name, prompt_source, prompt_version, prompt_text) = if loop_state.round_no <= 1 {
-        let (prompt_name, prompt_logical_path) = round1_prompt_spec();
-        let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
-            state,
-            prompt_logical_path,
-        )
-        .map_err(|e| e.to_string())?;
-        (
-            prompt_name,
-            resolved.source,
-            resolved.version,
-            build_single_plan_prompt(
-                &resolved.template,
-                &user_request_for_prompt,
-                goal,
-                &turn_analysis,
-                &tool_spec_template,
-                &skill_playbooks,
-                &recent_assistant_replies,
-                &request_language_hint,
-                &state.policy.command_intent.default_locale,
-                &agent_runtime_identity,
-                &runtime_os,
-                &runtime_shell,
-                &workspace_root,
-            ),
-        )
-    } else {
-        let history_compact = build_loop_history_compact(loop_state);
-        // Phase 3.3 / observation history regression fix:
-        // 之前这里只读 delivery_messages.last()。delivery_messages 仅承载最终 respond/交付
-        // 文本，observation-only 步骤（fs_search/list_dir/read_file/run_cmd 等）的输出从不
-        // 写入这里。结果是 round N+1 的 loop planner 看到 "Last round output: (none)"，
-        // 完全看不到 round N 的工具输出，于是会重复同一观察步骤，最终触发 plan_unactionable
-        // 兜底（i18n 模板被误用作 "provider unavailable" 文案）。
-        // 真正记录每步输出的字段是 LoopState.last_output（agent_engine.rs 中
-        // register_step_output / register_failed_step_output 都会维护）。优先使用它，
-        // 仅在确无 step output 时回退到 delivery_messages，最后退化到占位符。
-        let last_output = {
-            let observation = planner_last_observation(loop_state);
-            if observation.is_empty() {
-                "(none)".to_string()
-            } else {
-                observation
-            }
-        };
-        let (prompt_name, prompt_logical_path) = incremental_prompt_spec();
-        let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
-            state,
-            prompt_logical_path,
-        )
-        .map_err(|e| e.to_string())?;
-        (
-            prompt_name,
-            resolved.source,
-            resolved.version,
-            build_incremental_plan_prompt(
-                &resolved.template,
-                &user_request_for_prompt,
-                goal,
-                &turn_analysis,
-                &tool_spec_template,
-                &skill_playbooks,
-                &recent_assistant_replies,
-                &request_language_hint,
-                &state.policy.command_intent.default_locale,
-                &agent_runtime_identity,
-                loop_state.round_no,
-                &history_compact,
-                &attempt_ledger,
-                &last_output,
-                &runtime_os,
-                &runtime_shell,
-                &workspace_root,
-            ),
-        )
-    };
-    crate::log_prompt_render_with_version(
-        state,
-        &task.task_id,
-        prompt_name,
-        &prompt_source,
-        prompt_version.as_deref(),
-        Some(loop_state.round_no),
-    );
     info!(
         "{} loop_round_plan task_id={} round={} max_steps={}",
         crate::highlight_tag("loop"),
         task.task_id,
         loop_state.round_no,
         policy.max_steps
-    );
-    info!(
-        "plan_llm_request task_id={} round={} planner_mode=agent_loop prompt_chars={} tool_spec_chars={} skill_context_chars={} skill_context_mode={} selected_skills={} quick_index_chars={} playbook_chars={} recent_replies_chars={} user_request={}",
-        task.task_id,
-        loop_state.round_no,
-        prompt_text.chars().count(),
-        tool_spec_template.chars().count(),
-        skill_playbooks.chars().count(),
-        skill_context.disclosure_mode,
-        skill_context.selected_skills.join(","),
-        skill_context.quick_index_chars,
-        skill_context.playbook_chars,
-        recent_assistant_replies.chars().count(),
-        crate::truncate_for_log(user_text)
     );
     let native_protocol = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
@@ -368,6 +269,20 @@ pub(super) async fn plan_round_actions(
     );
     let native_prompt = format!("{native_system_prompt}\n\n{native_user_prompt}");
     let native_prompt_source = format!("{}+{}", native_protocol.source, native_turn_context.source);
+    info!(
+        "plan_llm_request task_id={} round={} planner_mode=native_tools prompt_chars={} tool_spec_chars={} skill_context_chars={} skill_context_mode={} selected_skills={} quick_index_chars={} playbook_chars={} recent_replies_chars={} user_request={}",
+        task.task_id,
+        loop_state.round_no,
+        native_prompt.chars().count(),
+        tool_spec_template.chars().count(),
+        skill_playbooks.chars().count(),
+        skill_context.disclosure_mode,
+        skill_context.selected_skills.join(","),
+        skill_context.quick_index_chars,
+        skill_context.playbook_chars,
+        recent_assistant_replies.chars().count(),
+        crate::truncate_for_log(user_text)
+    );
     let provider_timeout_seconds = loop_state
         .task_budget_slice
         .as_ref()
@@ -513,6 +428,96 @@ pub(super) async fn plan_round_actions(
         log_plan_split(task, loop_state, &plan_result);
         return Ok(plan_result);
     }
+    let (prompt_name, prompt_source, prompt_version, prompt_text) = if loop_state.round_no <= 1 {
+        let (prompt_name, prompt_logical_path) = round1_prompt_spec();
+        let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+            state,
+            prompt_logical_path,
+        )
+        .map_err(|error| error.to_string())?;
+        (
+            prompt_name,
+            resolved.source,
+            resolved.version,
+            build_single_plan_prompt(
+                &resolved.template,
+                &user_request_for_prompt,
+                goal,
+                &turn_analysis,
+                &tool_spec_template,
+                skill_playbooks,
+                &recent_assistant_replies,
+                &request_language_hint,
+                &state.policy.command_intent.default_locale,
+                &agent_runtime_identity,
+                &runtime_os,
+                &runtime_shell,
+                &workspace_root,
+            ),
+        )
+    } else {
+        let history_compact = build_loop_history_compact(loop_state);
+        let last_output = {
+            let observation = planner_last_observation(loop_state);
+            if observation.is_empty() {
+                "(none)".to_string()
+            } else {
+                observation
+            }
+        };
+        let (prompt_name, prompt_logical_path) = incremental_prompt_spec();
+        let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+            state,
+            prompt_logical_path,
+        )
+        .map_err(|error| error.to_string())?;
+        (
+            prompt_name,
+            resolved.source,
+            resolved.version,
+            build_incremental_plan_prompt(
+                &resolved.template,
+                &user_request_for_prompt,
+                goal,
+                &turn_analysis,
+                &tool_spec_template,
+                skill_playbooks,
+                &recent_assistant_replies,
+                &request_language_hint,
+                &state.policy.command_intent.default_locale,
+                &agent_runtime_identity,
+                loop_state.round_no,
+                &history_compact,
+                &attempt_ledger,
+                &last_output,
+                &runtime_os,
+                &runtime_shell,
+                &workspace_root,
+            ),
+        )
+    };
+    crate::log_prompt_render_with_version(
+        state,
+        &task.task_id,
+        prompt_name,
+        &prompt_source,
+        prompt_version.as_deref(),
+        Some(loop_state.round_no),
+    );
+    info!(
+        "plan_llm_request task_id={} round={} planner_mode=text_json_fallback prompt_chars={} tool_spec_chars={} skill_context_chars={} skill_context_mode={} selected_skills={} quick_index_chars={} playbook_chars={} recent_replies_chars={} user_request={}",
+        task.task_id,
+        loop_state.round_no,
+        prompt_text.chars().count(),
+        tool_spec_template.chars().count(),
+        skill_playbooks.chars().count(),
+        skill_context.disclosure_mode,
+        skill_context.selected_skills.join(","),
+        skill_context.quick_index_chars,
+        skill_context.playbook_chars,
+        recent_assistant_replies.chars().count(),
+        crate::truncate_for_log(user_text)
+    );
     let plan_raw = llm_gateway::run_with_fallback_with_hints(
         state,
         task,

@@ -49,6 +49,28 @@ fn planner_overlays_expand_high_cardinality_placeholders_once() {
 }
 
 #[test]
+fn text_json_planner_prompt_is_built_only_after_native_turn_declines() {
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/agent_engine/planning.rs"),
+    )
+    .expect("read planner source");
+    let native_turn = source
+        .find("if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback")
+        .expect("native model turn branch");
+    let fallback_prompt = source
+        .find("let (prompt_name, prompt_source, prompt_version, prompt_text) =")
+        .expect("text JSON fallback prompt");
+    let fallback_request = source
+        .find("planner_mode=text_json_fallback")
+        .expect("bounded fallback request marker");
+
+    assert!(
+        native_turn < fallback_prompt && fallback_prompt < fallback_request,
+        "native turns must not render or log the legacy text-JSON planner prompt"
+    );
+}
+
+#[test]
 fn native_action_protocol_requires_capability_owned_structured_observations() {
     let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../prompts/layers/overlays/native_action_protocol.md");

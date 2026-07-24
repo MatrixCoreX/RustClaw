@@ -48,6 +48,23 @@ MAX_RENDERED_PROMPT_LINES = 900
 MAX_RENDERED_PROMPT_BYTES = 260_000
 MAX_RENDERED_SKILL_PROMPT_LINES = 420
 MAX_RENDERED_SKILL_PROMPT_BYTES = 40_000
+MAX_VENDOR_PATCH_LINES = 120
+MAX_VENDOR_PATCH_BYTES = 16_000
+GENERIC_PROMPT_ROOTS = (
+    PROMPT_LAYERS / "base",
+    PROMPT_LAYERS / "overlays",
+)
+MODEL_VENDOR_TOKENS = (
+    "anthropic",
+    "claude",
+    "deepseek",
+    "gemini",
+    "grok",
+    "minimax",
+    "mimo",
+    "openai",
+    "qwen",
+)
 
 
 def parse_registry_prompt_files(path: Path) -> list[tuple[str, str]]:
@@ -140,6 +157,44 @@ def check_vendor_skill_patches_are_overlays() -> list[str]:
                 f"Vendor skill patch appears to copy skill-document sections: {rel} "
                 f"sections={','.join(copied_sections)}"
             )
+    return errors
+
+
+def check_vendor_patch_budgets() -> list[str]:
+    errors: list[str] = []
+    if not VENDOR_PATCHES.exists():
+        return errors
+    for path in sorted(VENDOR_PATCHES.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        line_count = len(text.splitlines())
+        byte_count = len(text.encode("utf-8"))
+        if line_count > MAX_VENDOR_PATCH_LINES or byte_count > MAX_VENDOR_PATCH_BYTES:
+            errors.append(
+                "Vendor patch exceeds bounded overlay budget: "
+                f"{path.relative_to(REPO_ROOT)} "
+                f"({line_count} lines/{byte_count} bytes; "
+                f"max {MAX_VENDOR_PATCH_LINES} lines/{MAX_VENDOR_PATCH_BYTES} bytes)"
+            )
+    return errors
+
+
+def check_generic_prompt_vendor_neutrality() -> list[str]:
+    errors: list[str] = []
+    vendor_pattern = re.compile(
+        r"(?i)(?<![a-z0-9_])(" + "|".join(map(re.escape, MODEL_VENDOR_TOKENS)) + r")(?![a-z0-9_])"
+    )
+    for root in GENERIC_PROMPT_ROOTS:
+        for path in sorted(root.rglob("*.md")):
+            for line_number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                match = vendor_pattern.search(line)
+                if match:
+                    errors.append(
+                        "Generic prompt layer contains model-vendor tuning: "
+                        f"{path.relative_to(REPO_ROOT)}:{line_number} "
+                        f"vendor={match.group(1).lower()}"
+                    )
     return errors
 
 
@@ -309,6 +364,8 @@ def main() -> int:
     prompt_errors = (
         check_multilingual_reinforcement_blocks()
         + check_vendor_skill_patches_are_overlays()
+        + check_vendor_patch_budgets()
+        + check_generic_prompt_vendor_neutrality()
         + check_vendor_skill_patch_duplication()
         + check_generated_skill_prompt_budget()
         + check_rendered_prompt_budget(skills)
