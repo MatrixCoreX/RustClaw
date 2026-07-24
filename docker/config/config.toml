@@ -86,6 +86,7 @@ cache_write_usd_per_million = 0.375
 [llm.anthropic]
 api_key = ""
 base_url = "https://api.anthropic.com/v1"
+supports_tools = true
 # 该提供商最大并发 / Max concurrency for this provider.
 max_concurrency = 1
 # 默认模型 / Default model for this provider.
@@ -110,6 +111,7 @@ timeout_seconds = 60
 [llm.google]
 api_key = ""
 base_url = "https://generativelanguage.googleapis.com/v1beta"
+supports_tools = true
 max_concurrency = 1
 model = "gemini-2.5-pro"
 models = [

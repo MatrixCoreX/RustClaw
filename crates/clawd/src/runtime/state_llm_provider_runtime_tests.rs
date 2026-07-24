@@ -202,8 +202,15 @@ fn model_capabilities_require_adapter_and_configuration_support() {
 
     provider.config.provider_type = "anthropic_claude".to_string();
     let capabilities = provider.model_capabilities();
-    assert!(!capabilities.native_tools);
-    assert!(!capabilities.parallel_tools);
+    assert!(capabilities.native_tools);
+    assert!(capabilities.parallel_tools);
+    assert!(!capabilities.streaming);
+
+    provider.config.provider_type = "google_gemini".to_string();
+    let capabilities = provider.model_capabilities();
+    assert!(capabilities.native_tools);
+    assert!(capabilities.parallel_tools);
+    assert!(capabilities.structured_output);
     assert!(!capabilities.streaming);
 
     provider.config.provider_type = "openai_compat".to_string();

@@ -594,6 +594,19 @@ impl LlmProvider for GoogleGeminiProvider {
             super::google_gemini::call_google_gemini(provider, &prompt, &hints).await
         })
     }
+
+    fn call_turn(
+        &self,
+        provider: Arc<LlmProviderRuntime>,
+        request: ModelTurnRequest,
+        hints: ChatRequestHints,
+        event_sink: Option<ModelTurnEventSink>,
+    ) -> ModelTurnProviderCallFuture {
+        Box::pin(async move {
+            super::gemini_model_turn::call_gemini_model_turn(provider, &request, &hints, event_sink)
+                .await
+        })
+    }
 }
 
 impl LlmProvider for AnthropicClaudeProvider {
@@ -608,6 +621,21 @@ impl LlmProvider for AnthropicClaudeProvider {
     ) -> ProviderCallFuture {
         Box::pin(async move {
             super::anthropic_claude::call_anthropic_claude(provider, &prompt, &hints).await
+        })
+    }
+
+    fn call_turn(
+        &self,
+        provider: Arc<LlmProviderRuntime>,
+        request: ModelTurnRequest,
+        hints: ChatRequestHints,
+        event_sink: Option<ModelTurnEventSink>,
+    ) -> ModelTurnProviderCallFuture {
+        Box::pin(async move {
+            super::anthropic_model_turn::call_anthropic_model_turn(
+                provider, &request, &hints, event_sink,
+            )
+            .await
         })
     }
 }

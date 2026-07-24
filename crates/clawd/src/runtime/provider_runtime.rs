@@ -22,13 +22,16 @@ pub(crate) struct LlmProviderRuntime {
 impl LlmProviderRuntime {
     pub(crate) fn model_capabilities(&self) -> ProviderModelCapabilities {
         let protocol = self.config.provider_type.trim();
-        let openai_compatible = protocol == "openai_compat";
-        let native_tools = self.config.supports_tools && openai_compatible;
+        let adapter_supports_tools = matches!(
+            protocol,
+            "openai_compat" | "anthropic_claude" | "google_gemini"
+        );
+        let native_tools = self.config.supports_tools && adapter_supports_tools;
         ProviderModelCapabilities {
             native_tools,
             parallel_tools: native_tools,
-            structured_output: false,
-            streaming: openai_compatible,
+            structured_output: protocol == "google_gemini",
+            streaming: protocol == "openai_compat",
             reasoning: false,
             vision: self
                 .config

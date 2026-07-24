@@ -82,6 +82,10 @@ fn sanitize_provider_raw_response(raw: &str) -> (String, bool) {
     (raw.to_string(), false)
 }
 
+pub(super) fn provider_safe_raw_response(raw: &str) -> String {
+    sanitize_provider_raw_response(raw).0
+}
+
 fn sanitize_provider_raw_value(value: &mut Value) {
     match value {
         Value::Object(map) => {

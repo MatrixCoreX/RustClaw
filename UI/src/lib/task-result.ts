@@ -402,6 +402,10 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "execution_mode",
     "write_enabled",
     "write_permission",
+    "steering_version",
+    "resume_trigger",
+    "has_user_message",
+    "has_new_constraints",
     "external_publish_enabled",
     "failure_isolated",
     "child_run_id",
@@ -872,6 +876,19 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       title: tLocal("子任务节点", "Subagent task node"),
       detail: [childTaskId, readiness].filter(Boolean).join(" · ") || eventType,
       tone: ["failed", "canceled", "timeout"].includes(readiness) ? "failed" : tone,
+      meta,
+    };
+  }
+
+  if (eventType === "subagent_steering") {
+    const childTaskId = field("child_task_id");
+    const version = field("steering_version");
+    const trigger = field("resume_trigger");
+    return {
+      eventType,
+      title: tLocal("子任务指令已更新", "Subagent steering updated"),
+      detail: [childTaskId, version ? `v${version}` : "", trigger].filter(Boolean).join(" · ") || eventType,
+      tone: "attention",
       meta,
     };
   }

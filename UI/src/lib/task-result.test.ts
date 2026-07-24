@@ -131,6 +131,24 @@ test("summarizes persisted subagent graph events", () => {
   assert.equal(nodeView.title, "Subagent task node");
   assert.equal(nodeView.detail, "child-2 · failed");
   assert.equal(nodeView.tone, "failed");
+
+  const steeringView = buildTaskTraceEventView(
+    {
+      event_type: "subagent_steering",
+      payload: {
+        parent_task_id: "parent-1",
+        child_task_id: "child-2",
+        steering_version: 2,
+        resume_trigger: "user_followup",
+        has_user_message: true,
+        has_new_constraints: true,
+      },
+    },
+    "en",
+  );
+  assert.equal(steeringView.title, "Subagent steering updated");
+  assert.equal(steeringView.detail, "child-2 · v2 · user_followup");
+  assert.equal(steeringView.tone, "attention");
 });
 
 test("distinguishes archive recovery from an irrecoverable event gap", () => {

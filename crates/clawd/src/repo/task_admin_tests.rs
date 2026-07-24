@@ -26,6 +26,29 @@ impl Drop for TempDir {
     }
 }
 
+#[test]
+fn child_steering_event_projection_omits_user_content() {
+    let payload = child_steering_event_payload(&json!({
+        "parent_task_id": "parent-1",
+        "child_task_id": "child-1",
+        "steering_version": 2,
+        "checkpoint_id": "checkpoint-1",
+        "resume_trigger": "user_followup",
+        "user_message": "private multilingual instruction",
+        "new_constraints": {"allowed_capabilities": ["filesystem.read_text_range"]}
+    }));
+
+    assert_eq!(payload["directive"], "steer_child");
+    assert_eq!(payload["steering_version"], 2);
+    assert_eq!(payload["has_user_message"], true);
+    assert_eq!(payload["has_new_constraints"], true);
+    assert!(payload.get("user_message").is_none());
+    assert!(payload.get("new_constraints").is_none());
+    assert!(!payload
+        .to_string()
+        .contains("private multilingual instruction"));
+}
+
 fn state_with_tasks_table() -> crate::AppState {
     let state = crate::AppState::test_default_with_fixture_provider();
     let db = state.core.db.get().expect("get db");
