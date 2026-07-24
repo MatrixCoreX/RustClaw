@@ -12,6 +12,7 @@ mod pptx_write;
 mod range;
 mod renderer;
 mod xlsx;
+mod xlsx_edit;
 mod xlsx_write;
 mod xml;
 

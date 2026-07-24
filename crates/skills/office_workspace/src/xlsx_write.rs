@@ -1,11 +1,7 @@
 use crate::error::{OfficeError, OfficeResult};
 use crate::operations::NormalizedOperation;
-use crate::package::OfficePackage;
 use crate::range::{format_coordinate, parse_coordinate, CellCoordinate, CellRange};
-use crate::xml::{attr_value, attr_value_qualified, local_name, relationship_map};
 use quick_xml::escape::escape;
-use quick_xml::events::Event;
-use quick_xml::Reader;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -27,7 +23,7 @@ enum CellValue {
 }
 
 #[derive(Clone, Debug)]
-struct CellBuild {
+pub(super) struct CellBuild {
     value: CellValue,
     style_id: Option<u32>,
 }
@@ -92,119 +88,6 @@ pub fn create_xlsx(operations: &[NormalizedOperation]) -> OfficeResult<XlsxWrite
             .flat_map(NormalizedOperation::object_refs)
             .collect(),
         preservation: vec!["new_package".to_string()],
-    })
-}
-
-pub fn edit_xlsx(
-    package: &OfficePackage,
-    operations: &[NormalizedOperation],
-) -> OfficeResult<XlsxWriteResult> {
-    let mut members = package.members.clone();
-    let sheet_paths = workbook_sheet_paths(package)?;
-    let mut changed_refs = Vec::new();
-    for operation in operations {
-        match operation.kind.as_str() {
-            "set_cell" => {
-                let sheet = operation.string("sheet")?;
-                let reference = operation.string("cell")?;
-                parse_coordinate(reference)?;
-                let path = require_sheet_path(&sheet_paths, sheet)?;
-                let xml = member_text(&members, &path)?.to_string();
-                let cell = cell_from_operation(operation)?;
-                let updated = upsert_cell(&xml, reference, &cell_xml(reference, &cell))?;
-                members.insert(path, updated.into_bytes());
-                changed_refs.push(format!("{sheet}!{reference}"));
-            }
-            "clear_cell" => {
-                let sheet = operation.string("sheet")?;
-                let reference = operation.string("cell")?;
-                parse_coordinate(reference)?;
-                let path = require_sheet_path(&sheet_paths, sheet)?;
-                let xml = member_text(&members, &path)?.to_string();
-                members.insert(path, remove_cell(&xml, reference)?.into_bytes());
-                changed_refs.push(format!("{sheet}!{reference}"));
-            }
-            "set_range" | "fill_range" => {
-                let sheet = operation.string("sheet")?;
-                let range = CellRange::parse(operation.string("range")?)?;
-                let path = require_sheet_path(&sheet_paths, sheet)?;
-                let mut xml = member_text(&members, &path)?.to_string();
-                let cells = cells_for_range(operation, range)?;
-                for (coordinate, value) in cells {
-                    let reference = format_coordinate(coordinate);
-                    xml = upsert_cell(&xml, &reference, &cell_xml(&reference, &value))?;
-                    changed_refs.push(format!("{sheet}!{reference}"));
-                }
-                members.insert(path, xml.into_bytes());
-            }
-            "merge_cells" | "unmerge_cells" => {
-                let sheet = operation.string("sheet")?;
-                let range = operation.string("range")?;
-                CellRange::parse(range)?;
-                let path = require_sheet_path(&sheet_paths, sheet)?;
-                let xml = member_text(&members, &path)?.to_string();
-                let updated = if operation.kind == "merge_cells" {
-                    add_merge(&xml, range)?
-                } else {
-                    remove_merge(&xml, range)?
-                };
-                members.insert(path, updated.into_bytes());
-                changed_refs.push(format!("{sheet}!{range}"));
-            }
-            "freeze_panes" => {
-                let sheet = operation.string("sheet")?;
-                let cell = operation.string("cell")?;
-                parse_coordinate(cell)?;
-                let path = require_sheet_path(&sheet_paths, sheet)?;
-                let xml = member_text(&members, &path)?.to_string();
-                members.insert(path, set_freeze(&xml, cell)?.into_bytes());
-                changed_refs.push(format!("{sheet}!freeze:{cell}"));
-            }
-            "set_auto_filter" => {
-                let sheet = operation.string("sheet")?;
-                let range = operation.string("range")?;
-                CellRange::parse(range)?;
-                let path = require_sheet_path(&sheet_paths, sheet)?;
-                let xml = member_text(&members, &path)?.to_string();
-                members.insert(path, set_auto_filter(&xml, range)?.into_bytes());
-                changed_refs.push(format!("{sheet}!filter:{range}"));
-            }
-            "rename_sheet" => {
-                let sheet = operation.string("sheet")?;
-                let new_name = operation.string("new_name")?;
-                validate_sheet_name(new_name)?;
-                let workbook = member_text(&members, "xl/workbook.xml")?.to_string();
-                members.insert(
-                    "xl/workbook.xml".into(),
-                    rename_sheet(&workbook, sheet, new_name)?.into_bytes(),
-                );
-                changed_refs.push(format!("sheet:{sheet}"));
-            }
-            "hide_sheet" => {
-                let sheet = operation.string("sheet")?;
-                let hidden = operation.bool("hidden").unwrap_or(true);
-                let workbook = member_text(&members, "xl/workbook.xml")?.to_string();
-                members.insert(
-                    "xl/workbook.xml".into(),
-                    set_sheet_hidden(&workbook, sheet, hidden)?.into_bytes(),
-                );
-                changed_refs.push(format!("sheet:{sheet}"));
-            }
-            _ => {
-                return Err(OfficeError::unsupported(
-                    "XLSX edit operation is not implemented without potential package loss",
-                    json!({"operation_id": operation.id, "op": operation.kind}),
-                ))
-            }
-        }
-    }
-    Ok(XlsxWriteResult {
-        members,
-        changed_refs,
-        preservation: vec![
-            "unknown_package_parts_preserved".to_string(),
-            "untouched_worksheets_preserved".to_string(),
-        ],
     })
 }
 
@@ -387,7 +270,7 @@ fn apply_create_operation(
     Ok(())
 }
 
-fn cells_for_range(
+pub(super) fn cells_for_range(
     operation: &NormalizedOperation,
     range: CellRange,
 ) -> OfficeResult<Vec<(CellCoordinate, CellBuild)>> {
@@ -440,7 +323,7 @@ fn cells_for_range(
     Ok(output)
 }
 
-fn cell_from_operation(operation: &NormalizedOperation) -> OfficeResult<CellBuild> {
+pub(super) fn cell_from_operation(operation: &NormalizedOperation) -> OfficeResult<CellBuild> {
     let value = operation.value("value").unwrap_or(&Value::Null);
     Ok(CellBuild {
         value: infer_cell_value(value, operation.optional_string("value_type"))?,
@@ -842,7 +725,7 @@ fn build_sheet(
     })
 }
 
-fn cell_xml(reference: &str, cell: &CellBuild) -> String {
+pub(super) fn cell_xml(reference: &str, cell: &CellBuild) -> String {
     let style = cell
         .style_id
         .map(|id| format!(" s=\"{id}\""))
@@ -880,7 +763,11 @@ fn cell_xml(reference: &str, cell: &CellBuild) -> String {
     }
 }
 
-fn upsert_cell(sheet_xml: &str, reference: &str, replacement: &str) -> OfficeResult<String> {
+pub(super) fn upsert_cell(
+    sheet_xml: &str,
+    reference: &str,
+    replacement: &str,
+) -> OfficeResult<String> {
     if let Some(range) = find_cell_range(sheet_xml, reference)? {
         return Ok(format!(
             "{}{}{}",
@@ -889,10 +776,37 @@ fn upsert_cell(sheet_xml: &str, reference: &str, replacement: &str) -> OfficeRes
             &sheet_xml[range.1..]
         ));
     }
-    insert_before(sheet_xml, "</sheetData>", replacement)
+    let coordinate = parse_coordinate(reference)?;
+    if let Some((opening_start, opening_end, closing_start)) =
+        find_row_range(sheet_xml, coordinate.row)?
+    {
+        let opening = &sheet_xml[opening_start..opening_end];
+        if opening.trim_end().ends_with("/>") {
+            let opening = opening.trim_end_matches("/>").trim_end();
+            return Ok(format!(
+                "{}{}>{}</row>{}",
+                &sheet_xml[..opening_start],
+                opening,
+                replacement,
+                &sheet_xml[opening_end..]
+            ));
+        }
+        let closing_start = closing_start.ok_or_else(|| malformed_xml("row"))?;
+        return Ok(format!(
+            "{}{}{}",
+            &sheet_xml[..closing_start],
+            replacement,
+            &sheet_xml[closing_start..]
+        ));
+    }
+    insert_before(
+        sheet_xml,
+        "</sheetData>",
+        &format!("<row r=\"{}\">{replacement}</row>", coordinate.row),
+    )
 }
 
-fn remove_cell(sheet_xml: &str, reference: &str) -> OfficeResult<String> {
+pub(super) fn remove_cell(sheet_xml: &str, reference: &str) -> OfficeResult<String> {
     let Some(range) = find_cell_range(sheet_xml, reference)? else {
         return Ok(sheet_xml.to_string());
     };
@@ -903,7 +817,7 @@ fn remove_cell(sheet_xml: &str, reference: &str) -> OfficeResult<String> {
     ))
 }
 
-fn find_cell_range(xml: &str, reference: &str) -> OfficeResult<Option<(usize, usize)>> {
+pub(super) fn find_cell_range(xml: &str, reference: &str) -> OfficeResult<Option<(usize, usize)>> {
     let patterns = [
         format!("r=\"{}\"", xml_attr_literal(reference)),
         format!("r='{}'", xml_attr_literal(reference)),
@@ -937,7 +851,38 @@ fn find_cell_range(xml: &str, reference: &str) -> OfficeResult<Option<(usize, us
     Ok(None)
 }
 
-fn add_merge(source: &str, range: &str) -> OfficeResult<String> {
+fn find_row_range(xml: &str, row: u32) -> OfficeResult<Option<(usize, usize, Option<usize>)>> {
+    let patterns = [format!("r=\"{row}\""), format!("r='{row}'")];
+    let mut cursor = 0usize;
+    while let Some(relative) = xml[cursor..].find("<row") {
+        let start = cursor + relative;
+        let boundary = xml.as_bytes().get(start + 4).copied();
+        if !matches!(boundary, Some(b' ') | Some(b'>') | Some(b'/')) {
+            cursor = start + 4;
+            continue;
+        }
+        let opening_end = xml[start..]
+            .find('>')
+            .map(|relative| start + relative + 1)
+            .ok_or_else(|| malformed_xml("row"))?;
+        let opening = &xml[start..opening_end];
+        if !patterns.iter().any(|pattern| opening.contains(pattern)) {
+            cursor = opening_end;
+            continue;
+        }
+        if opening.trim_end().ends_with("/>") {
+            return Ok(Some((start, opening_end, None)));
+        }
+        let closing_start = xml[opening_end..]
+            .find("</row>")
+            .map(|relative| opening_end + relative)
+            .ok_or_else(|| malformed_xml("row"))?;
+        return Ok(Some((start, opening_end, Some(closing_start))));
+    }
+    Ok(None)
+}
+
+pub(super) fn add_merge(source: &str, range: &str) -> OfficeResult<String> {
     if source.contains(&format!("ref=\"{}\"", xml_attr_literal(range))) {
         return Ok(source.to_string());
     }
@@ -948,9 +893,20 @@ fn add_merge(source: &str, range: &str) -> OfficeResult<String> {
             &format!("<mergeCell ref=\"{}\"/>", xml(range)),
         )
     } else {
-        insert_before(
+        insert_before_first_of(
             source,
-            "</worksheet>",
+            &[
+                "<phoneticPr",
+                "<conditionalFormatting",
+                "<dataValidations",
+                "<hyperlinks",
+                "<printOptions",
+                "<pageMargins",
+                "<drawing",
+                "<legacyDrawing",
+                "<tableParts",
+                "</worksheet>",
+            ],
             &format!(
                 "<mergeCells count=\"1\"><mergeCell ref=\"{}\"/></mergeCells>",
                 xml(range)
@@ -959,7 +915,7 @@ fn add_merge(source: &str, range: &str) -> OfficeResult<String> {
     }
 }
 
-fn remove_merge(source: &str, range: &str) -> OfficeResult<String> {
+pub(super) fn remove_merge(source: &str, range: &str) -> OfficeResult<String> {
     let patterns = [
         format!("<mergeCell ref=\"{}\"/>", xml(range)),
         format!("<mergeCell ref='{}'/>", xml(range)),
@@ -971,7 +927,7 @@ fn remove_merge(source: &str, range: &str) -> OfficeResult<String> {
     Ok(output)
 }
 
-fn set_freeze(source: &str, cell: &str) -> OfficeResult<String> {
+pub(super) fn set_freeze(source: &str, cell: &str) -> OfficeResult<String> {
     let coordinate = parse_coordinate(cell)?;
     let pane = format!(
         "<pane xSplit=\"{}\" ySplit=\"{}\" topLeftCell=\"{}\" state=\"frozen\"/>",
@@ -997,7 +953,7 @@ fn set_freeze(source: &str, cell: &str) -> OfficeResult<String> {
     }
 }
 
-fn set_auto_filter(source: &str, range: &str) -> OfficeResult<String> {
+pub(super) fn set_auto_filter(source: &str, range: &str) -> OfficeResult<String> {
     let filter = format!("<autoFilter ref=\"{}\"/>", xml(range));
     if let Some(start) = source.find("<autoFilter") {
         let end = source[start..]
@@ -1006,17 +962,33 @@ fn set_auto_filter(source: &str, range: &str) -> OfficeResult<String> {
             .ok_or_else(|| malformed_xml("autoFilter"))?;
         Ok(format!("{}{}{}", &source[..start], filter, &source[end..]))
     } else {
-        insert_before(source, "</worksheet>", &filter)
+        insert_before_first_of(
+            source,
+            &[
+                "<mergeCells",
+                "<phoneticPr",
+                "<conditionalFormatting",
+                "<dataValidations",
+                "<hyperlinks",
+                "<printOptions",
+                "<pageMargins",
+                "<drawing",
+                "<legacyDrawing",
+                "<tableParts",
+                "</worksheet>",
+            ],
+            &filter,
+        )
     }
 }
 
-fn rename_sheet(workbook: &str, old_name: &str, new_name: &str) -> OfficeResult<String> {
+pub(super) fn rename_sheet(workbook: &str, old_name: &str, new_name: &str) -> OfficeResult<String> {
     replace_sheet_opening(workbook, old_name, |opening| {
         replace_or_add_attribute(opening, "name", new_name)
     })
 }
 
-fn set_sheet_hidden(workbook: &str, sheet: &str, hidden: bool) -> OfficeResult<String> {
+pub(super) fn set_sheet_hidden(workbook: &str, sheet: &str, hidden: bool) -> OfficeResult<String> {
     replace_sheet_opening(workbook, sheet, |opening| {
         replace_or_add_attribute(opening, "state", if hidden { "hidden" } else { "visible" })
     })
@@ -1060,7 +1032,7 @@ fn replace_sheet_opening(
     ))
 }
 
-fn replace_or_add_attribute(opening: &str, name: &str, value: &str) -> String {
+pub(super) fn replace_or_add_attribute(opening: &str, name: &str, value: &str) -> String {
     for quote in ['"', '\''] {
         let prefix = format!("{name}={quote}");
         if let Some(start) = opening.find(&prefix) {
@@ -1088,52 +1060,6 @@ fn replace_or_add_attribute(opening: &str, name: &str, value: &str) -> String {
     )
 }
 
-fn workbook_sheet_paths(package: &OfficePackage) -> OfficeResult<BTreeMap<String, String>> {
-    let workbook = package.text("xl/workbook.xml")?;
-    let relationships = package
-        .members
-        .get("xl/_rels/workbook.xml.rels")
-        .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .map(relationship_map)
-        .unwrap_or_default();
-    let mut reader = Reader::from_str(workbook);
-    reader.config_mut().trim_text(true);
-    let mut output = BTreeMap::new();
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(element)) | Ok(Event::Empty(element))
-                if local_name(element.name().as_ref()) == b"sheet" =>
-            {
-                let name = attr_value(&element, b"name").unwrap_or_default();
-                let id = attr_value_qualified(&element, b"r:id").unwrap_or_default();
-                if let Some((target, _, false)) = relationships.get(&id) {
-                    output.insert(name, normalize_xl_target(target));
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(error) => {
-                return Err(OfficeError::new(
-                    "malformed_xml",
-                    format!("cannot parse workbook sheet mapping: {error}"),
-                    json!({"part": "xl/workbook.xml"}),
-                ))
-            }
-            _ => {}
-        }
-    }
-    Ok(output)
-}
-
-fn require_sheet_path(paths: &BTreeMap<String, String>, sheet: &str) -> OfficeResult<String> {
-    paths.get(sheet).cloned().ok_or_else(|| {
-        OfficeError::new(
-            "worksheet_not_found",
-            "requested worksheet does not exist",
-            json!({"sheet": sheet, "available_sheets": paths.keys().collect::<Vec<_>>() }),
-        )
-    })
-}
-
 fn require_sheet_mut<'a>(
     sheets: &'a mut [SheetBuild],
     name: &str,
@@ -1154,7 +1080,7 @@ fn require_sheet_mut<'a>(
         })
 }
 
-fn validate_sheet_name(name: &str) -> OfficeResult<()> {
+pub(super) fn validate_sheet_name(name: &str) -> OfficeResult<()> {
     if name.is_empty()
         || name.chars().count() > 31
         || name
@@ -1394,28 +1320,10 @@ fn styles_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>"#
 }
 
-fn normalize_xl_target(target: &str) -> String {
-    let target = if target.starts_with('/') {
-        target.trim_start_matches('/').to_string()
-    } else if target.starts_with("xl/") {
-        target.to_string()
-    } else {
-        format!("xl/{target}")
-    };
-    let mut parts = Vec::new();
-    for part in target.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(part),
-        }
-    }
-    parts.join("/")
-}
-
-fn member_text<'a>(members: &'a BTreeMap<String, Vec<u8>>, name: &str) -> OfficeResult<&'a str> {
+pub(super) fn member_text<'a>(
+    members: &'a BTreeMap<String, Vec<u8>>,
+    name: &str,
+) -> OfficeResult<&'a str> {
     members
         .get(name)
         .ok_or_else(|| {
@@ -1436,7 +1344,7 @@ fn member_text<'a>(members: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Office
         })
 }
 
-fn insert_before(source: &str, needle: &str, content: &str) -> OfficeResult<String> {
+pub(super) fn insert_before(source: &str, needle: &str, content: &str) -> OfficeResult<String> {
     let index = source.rfind(needle).ok_or_else(|| {
         OfficeError::new(
             "malformed_xml",
@@ -1444,6 +1352,20 @@ fn insert_before(source: &str, needle: &str, content: &str) -> OfficeResult<Stri
             json!({"closing_element": needle}),
         )
     })?;
+    Ok(format!(
+        "{}{}{}",
+        &source[..index],
+        content,
+        &source[index..]
+    ))
+}
+
+fn insert_before_first_of(source: &str, anchors: &[&str], content: &str) -> OfficeResult<String> {
+    let index = anchors
+        .iter()
+        .filter_map(|anchor| source.find(anchor))
+        .min()
+        .ok_or_else(|| malformed_xml("worksheet"))?;
     Ok(format!(
         "{}{}{}",
         &source[..index],
@@ -1471,7 +1393,7 @@ fn cell_value_text(value: &CellValue) -> String {
     }
 }
 
-fn xml(value: &str) -> String {
+pub(super) fn xml(value: &str) -> String {
     escape(value).into_owned()
 }
 
@@ -1487,7 +1409,7 @@ fn invalid_operation_field(operation: &NormalizedOperation, field: &str) -> Offi
     )
 }
 
-fn malformed_xml(element: &str) -> OfficeError {
+pub(super) fn malformed_xml(element: &str) -> OfficeError {
     OfficeError::new(
         "malformed_xml",
         "selected worksheet XML element is malformed",
