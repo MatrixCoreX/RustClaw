@@ -103,20 +103,19 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         ]
     })
     .to_string();
-    let finalizer_response = json!({
-        "answer": "The MCP fixture returned agent-loop-token from fixture.",
-        "qualified": true,
-        "needs_clarify": false,
-        "is_meta_instruction": false,
-        "publishable": true,
-        "confidence": 0.99,
-        "reason": "observed_structured_result"
+    let terminal_response = json!({
+        "steps": [
+            {
+                "type": "respond",
+                "content": "The MCP fixture returned agent-loop-token from fixture."
+            }
+        ]
     })
     .to_string();
     let responses = vec![
         recorded_call(1, "single_plan_execution_prompt", &discovery_response),
         recorded_call(2, "loop_incremental_plan_prompt", &execution_response),
-        recorded_call(3, "observed_answer_fallback_prompt", &finalizer_response),
+        recorded_call(3, "loop_incremental_plan_prompt", &terminal_response),
     ];
     install_sequence_fixture(&fixture_root.path, case, &responses);
     eprintln!("NL CASE: {user_request}");
