@@ -442,6 +442,84 @@ fn native_respond_projects_exact_fields_from_successful_capability_observation()
 }
 
 #[test]
+fn native_respond_projects_matching_machine_fields_without_model_path_guessing() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "filesystem.read_text_range",
+            Some("read_text_range".to_string()),
+            json!({
+                "output": {
+                    "path": "/workspace/README.md",
+                    "line_count": 844,
+                    "first_line": "# RustClaw"
+                }
+            }),
+        ));
+    let copied = turn(
+        vec![respond_call(json!({
+            "shape": "object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [
+                {"name": "path", "value_json": "\"/workspace/README.md\""},
+                {"name": "line_count", "value_json": "844"},
+                {"name": "first_line", "value_json": "\"# RustClaw\""}
+            ],
+            "observed_fields": [],
+            "exact_field_count": 3
+        }))],
+        "",
+    );
+
+    let actions = actions_from_native_turn_with_groups(
+        &copied,
+        &["filesystem.read_text_range".to_string()],
+        &BTreeMap::new(),
+        Some(&loop_state),
+    )
+    .expect("matching fields are canonicalized from observations");
+    let AgentAction::Respond { content } = &actions[0] else {
+        panic!("expected terminal response");
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(content).expect("projected object"),
+        json!({
+            "path": "/workspace/README.md",
+            "line_count": 844,
+            "first_line": "# RustClaw"
+        })
+    );
+
+    let authored = turn(
+        vec![respond_call(json!({
+            "shape": "object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [
+                {"name": "summary", "value_json": "\"README has 844 lines\""}
+            ],
+            "observed_fields": [],
+            "exact_field_count": 1
+        }))],
+        "",
+    );
+    assert!(
+        actions_from_native_turn_with_groups(
+            &authored,
+            &["filesystem.read_text_range".to_string()],
+            &BTreeMap::new(),
+            Some(&loop_state),
+        )
+        .is_ok(),
+        "model-authored fields remain valid"
+    );
+}
+
+#[test]
 fn native_respond_rejects_unobserved_or_invalid_field_references() {
     let mut failed_loop_state = LoopState::default();
     let mut failed = CapabilityResultEnvelope::ok(
@@ -614,6 +692,85 @@ fn native_tool_rejects_unknown_protocol_name_and_invalid_args() {
         actions_from_native_turn(&malformed_transport_arguments, &callable_capabilities())
             .expect_err("malformed transport arguments rejected by planner contract"),
         "native_plan_arguments_not_object"
+    );
+}
+
+#[test]
+fn native_tool_normalizes_only_schema_proven_empty_argument_objects() {
+    let capability = "coding_workflow.preview_repair";
+    let empty_args_turn = turn(
+        vec![ModelToolCall {
+            id: "call-empty-args".to_string(),
+            name: "call_capability".to_string(),
+            arguments: json!({"capability": capability, "args": ""}),
+        }],
+        "",
+    );
+    let callable = vec![capability.to_string()];
+    let schemas = BTreeMap::from([(
+        capability.to_string(),
+        json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+    )]);
+
+    let actions = actions_from_native_turn_with_schemas(
+        &empty_args_turn,
+        &callable,
+        &BTreeMap::new(),
+        &schemas,
+        None,
+    )
+    .expect("provider empty-object encoding normalized");
+    assert!(matches!(
+        &actions[0],
+        AgentAction::CallCapability {
+            capability: selected,
+            args
+        } if selected == capability && args == &json!({})
+    ));
+
+    let required_schema = BTreeMap::from([(
+        capability.to_string(),
+        json!({
+            "type": "object",
+            "required": ["path"],
+            "properties": {"path": {"type": "string"}},
+            "additionalProperties": false
+        }),
+    )]);
+    assert_eq!(
+        actions_from_native_turn_with_schemas(
+            &empty_args_turn,
+            &callable,
+            &BTreeMap::new(),
+            &required_schema,
+            None,
+        )
+        .expect_err("required args cannot be normalized away"),
+        "native_plan_args_not_object"
+    );
+
+    let non_empty_string = turn(
+        vec![ModelToolCall {
+            id: "call-non-empty-args".to_string(),
+            name: "call_capability".to_string(),
+            arguments: json!({"capability": capability, "args": "unexpected"}),
+        }],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn_with_schemas(
+            &non_empty_string,
+            &callable,
+            &BTreeMap::new(),
+            &schemas,
+            None,
+        )
+        .expect_err("non-empty strings remain invalid"),
+        "native_plan_args_not_object"
     );
 }
 
@@ -1078,6 +1235,95 @@ fn native_contract_repair_supports_two_bounded_protocol_transitions() {
         notes,
         "native_contract_repair_reason_codes=native_plan_capability_missing,native_plan_respond_tool_required"
     );
+}
+
+#[test]
+fn native_contract_repair_preserves_failed_group_tool_and_leaf_schema() {
+    let tool_name = "call_task_control";
+    let capability = "coding_workflow.preview_repair";
+    let leaf_schema = json!({
+        "type": "object",
+        "required": ["capability", "args"],
+        "properties": {
+            "capability": {"type": "string", "enum": [capability]},
+            "args": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        },
+        "additionalProperties": false
+    });
+    let request = ModelTurnRequest {
+        messages: vec![
+            ModelMessage::text(ModelRole::System, "protocol"),
+            ModelMessage::text(ModelRole::User, "current turn"),
+        ],
+        tools: vec![
+            ModelToolDefinition {
+                name: tool_name.to_string(),
+                description: "task control".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "oneOf": [leaf_schema.clone()]
+                }),
+                strict: true,
+            },
+            ModelToolDefinition {
+                name: "respond".to_string(),
+                description: "respond".to_string(),
+                input_schema: json!({"type": "object"}),
+                strict: true,
+            },
+        ],
+        tool_choice: ModelToolChoice::Auto,
+        response_schema: None,
+        stream: true,
+        metadata: BTreeMap::new(),
+    };
+    let malformed = turn(
+        vec![ModelToolCall {
+            id: "call-1".to_string(),
+            name: tool_name.to_string(),
+            arguments: json!({
+                "capability": capability,
+                "args": ""
+            }),
+        }],
+        "",
+    );
+    let groups = BTreeMap::from([(
+        tool_name.to_string(),
+        BTreeSet::from([capability.to_string()]),
+    )]);
+    let signal = native_contract_repair_signal_for_turn(
+        "native_plan_args_not_object",
+        &malformed,
+        &request,
+        &groups,
+        Some(&LoopState::default()),
+        &[capability.to_string()],
+    );
+    let observation: Value = serde_json::from_str(&signal).expect("repair observation");
+
+    assert_eq!(observation["protocol_observation"]["tool_name"], tool_name);
+    assert_eq!(
+        observation["protocol_observation"]["exact_failed_tool"],
+        true
+    );
+    assert_eq!(
+        observation["protocol_observation"]["argument_constraints"]["args"]["type"],
+        "object"
+    );
+    assert_eq!(
+        observation["protocol_observation"]["argument_constraints"]["exact_call_schema"],
+        leaf_schema
+    );
+
+    let retry = native_contract_retry_request(&request, &signal);
+    assert_eq!(retry.tools.len(), 1);
+    assert_eq!(retry.tools[0].name, tool_name);
+    assert_eq!(retry.tool_choice, ModelToolChoice::Required);
 }
 
 #[test]

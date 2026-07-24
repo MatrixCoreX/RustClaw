@@ -378,6 +378,10 @@ pub(super) async fn plan_round_actions(
     let all_native_capability_groups = planner_tool_library.all_native_capability_groups();
     let native_capability_groups =
         planner_tool_library.disclosed_native_capability_groups(loop_state);
+    let mut native_capability_argument_schemas = mcp_capability_argument_schemas.clone();
+    for group in &native_capability_groups {
+        native_capability_argument_schemas.extend(group.capability_argument_schemas.clone());
+    }
     let loadable_capability_group_names =
         planner_tool_library.loadable_capability_group_names(loop_state);
     let native_capability_group_map = native_capability_groups
@@ -441,10 +445,11 @@ pub(super) async fn plan_round_actions(
         let mut native_turn = native_turn;
         let mut repair_reason_codes = Vec::new();
         loop {
-            match actions_from_native_turn_with_groups(
+            match actions_from_native_turn_with_schemas(
                 &native_turn,
                 &native_callable_capability_names,
                 &native_capability_group_map,
+                &native_capability_argument_schemas,
                 Some(loop_state),
             ) {
                 Ok(_) => break,
@@ -459,7 +464,14 @@ pub(super) async fn plan_round_actions(
                         repair_reason_codes.len() + 1,
                         error_code
                     );
-                    let repair_signal = native_contract_repair_signal(&error_code);
+                    let repair_signal = native_contract_repair_signal_for_turn(
+                        &error_code,
+                        &native_turn,
+                        &native_request,
+                        &native_capability_group_map,
+                        Some(loop_state),
+                        &native_callable_capability_names,
+                    );
                     let repair_request =
                         native_contract_retry_request(&native_request, &repair_signal);
                     let repair_prompt = format!("{native_prompt}\n\n{repair_signal}");
@@ -481,10 +493,11 @@ pub(super) async fn plan_round_actions(
         let planner_notes = native_contract_repair_notes(&repair_reason_codes);
         let plan_actions = normalize_planned_actions(
             state,
-            actions_from_native_turn_with_groups(
+            actions_from_native_turn_with_schemas(
                 &native_turn,
                 &callable_capability_names,
                 &native_capability_group_map,
+                &native_capability_argument_schemas,
                 Some(loop_state),
             )?,
         );
@@ -837,11 +850,78 @@ fn native_capability_tool_definition(
     }
 }
 
+#[cfg(test)]
 fn native_contract_repair_signal(error_code: &str) -> String {
+    native_contract_repair_signal_with_context(error_code, None, None)
+}
+
+fn native_contract_repair_signal_for_turn(
+    error_code: &str,
+    turn: &ModelTurnResponse,
+    request: &ModelTurnRequest,
+    native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
+    loop_state: Option<&LoopState>,
+    callable_capability_names: &[String],
+) -> String {
+    let failed_call = turn.tool_calls.iter().find(|call| {
+        action_from_native_tool_call(call, native_capability_groups, loop_state)
+            .err()
+            .as_deref()
+            == Some(error_code)
+            || (error_code == "native_plan_capability_not_in_runtime_catalog"
+                && call
+                    .arguments
+                    .get("capability")
+                    .and_then(Value::as_str)
+                    .is_some_and(|capability| {
+                        !callable_capability_names
+                            .iter()
+                            .any(|name| name == capability)
+                    }))
+    });
+    let expected_schema = failed_call.and_then(|call| {
+        request
+            .tools
+            .iter()
+            .find(|tool| tool.name == call.name)
+            .map(|tool| exact_schema_branch_for_call(&tool.input_schema, call))
+    });
+    native_contract_repair_signal_with_context(error_code, failed_call, expected_schema)
+}
+
+fn exact_schema_branch_for_call(schema: &Value, call: &ModelToolCall) -> Value {
+    let capability = call.arguments.get("capability").and_then(Value::as_str);
+    schema
+        .get("oneOf")
+        .and_then(Value::as_array)
+        .and_then(|branches| {
+            branches.iter().find(|branch| {
+                let Some(capability) = capability else {
+                    return false;
+                };
+                branch
+                    .pointer("/properties/capability/enum")
+                    .and_then(Value::as_array)
+                    .is_some_and(|values| {
+                        values
+                            .iter()
+                            .any(|value| value.as_str() == Some(capability))
+                    })
+            })
+        })
+        .cloned()
+        .unwrap_or_else(|| schema.clone())
+}
+
+fn native_contract_repair_signal_with_context(
+    error_code: &str,
+    failed_call: Option<&ModelToolCall>,
+    expected_schema: Option<Value>,
+) -> String {
     let respond_contract_error = error_code.starts_with("native_respond_")
         || error_code == "native_plan_respond_tool_required";
     let loader_contract_error = error_code.starts_with("native_capability_group_load_");
-    let (tool_name, required_argument_fields, next_action) = if respond_contract_error {
+    let (default_tool_name, required_argument_fields, next_action) = if respond_contract_error {
         (
             NATIVE_RESPOND_TOOL,
             vec![
@@ -868,24 +948,43 @@ fn native_contract_repair_signal(error_code: &str) -> String {
             "retry_native_tool_call",
         )
     };
-    let argument_constraints = if error_code == "native_respond_object_field_json_invalid" {
-        json!({
-            "fields[].value_json": {
+    let exact_failed_tool = failed_call.is_some();
+    let tool_name = failed_call
+        .map(|call| call.name.as_str())
+        .unwrap_or(default_tool_name);
+    let mut argument_constraints = Map::new();
+    if error_code == "native_respond_object_field_json_invalid" {
+        argument_constraints.insert(
+            "fields[].value_json".to_string(),
+            json!({
                 "encoding": "complete_serialized_json_value",
                 "json_string_requires_surrounding_quotes": true,
                 "malformed_json": "rejected"
-            }
-        })
-    } else {
-        json!({})
-    };
+            }),
+        );
+    }
+    if error_code == "native_plan_args_not_object" {
+        argument_constraints.insert(
+            "args".to_string(),
+            json!({
+                "type": "object",
+                "encoding": "json_object",
+                "empty_object": {},
+                "string_value": "rejected"
+            }),
+        );
+    }
+    if let Some(expected_schema) = expected_schema {
+        argument_constraints.insert("exact_call_schema".to_string(), expected_schema);
+    }
     json!({
         "protocol_observation": {
             "status": "error",
             "error_code": error_code,
             "tool_name": tool_name,
+            "exact_failed_tool": exact_failed_tool,
             "required_argument_fields": required_argument_fields,
-            "argument_constraints": argument_constraints,
+            "argument_constraints": Value::Object(argument_constraints),
             "capability_value_source": "RUNTIME_CAPABILITY_MAP",
             "next_action": next_action
         }
@@ -917,8 +1016,18 @@ fn native_contract_retry_request(
                 .and_then(Value::as_str)
                 .map(str::to_string)
         });
+    let exact_failed_tool = serde_json::from_str::<Value>(repair_signal)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/protocol_observation/exact_failed_tool")
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false);
     if let Some(repair_tool_name) = repair_tool_name {
-        if repair_tool_name == NATIVE_CALL_CAPABILITY_TOOL {
+        if exact_failed_tool {
+            request.tools.retain(|tool| tool.name == repair_tool_name);
+        } else if repair_tool_name == NATIVE_CALL_CAPABILITY_TOOL {
             request
                 .tools
                 .retain(|tool| tool.name != NATIVE_RESPOND_TOOL);
@@ -941,17 +1050,41 @@ fn actions_from_native_turn(
     actions_from_native_turn_with_groups(turn, callable_capability_names, &BTreeMap::new(), None)
 }
 
+#[cfg(test)]
 fn actions_from_native_turn_with_groups(
     turn: &ModelTurnResponse,
     callable_capability_names: &[String],
     native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
     loop_state: Option<&LoopState>,
 ) -> Result<Vec<AgentAction>, String> {
+    actions_from_native_turn_with_schemas(
+        turn,
+        callable_capability_names,
+        native_capability_groups,
+        &BTreeMap::new(),
+        loop_state,
+    )
+}
+
+fn actions_from_native_turn_with_schemas(
+    turn: &ModelTurnResponse,
+    callable_capability_names: &[String],
+    native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
+    capability_argument_schemas: &BTreeMap<String, Value>,
+    loop_state: Option<&LoopState>,
+) -> Result<Vec<AgentAction>, String> {
     if !turn.tool_calls.is_empty() {
         let actions = turn
             .tool_calls
             .iter()
-            .map(|call| action_from_native_tool_call(call, native_capability_groups, loop_state))
+            .map(|call| {
+                action_from_native_tool_call_with_schemas(
+                    call,
+                    native_capability_groups,
+                    capability_argument_schemas,
+                    loop_state,
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         if actions.iter().any(|action| {
             matches!(
@@ -983,14 +1116,30 @@ fn action_from_native_tool_call(
     native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
     loop_state: Option<&LoopState>,
 ) -> Result<AgentAction, String> {
+    action_from_native_tool_call_with_schemas(
+        call,
+        native_capability_groups,
+        &BTreeMap::new(),
+        loop_state,
+    )
+}
+
+fn action_from_native_tool_call_with_schemas(
+    call: &ModelToolCall,
+    native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
+    capability_argument_schemas: &BTreeMap<String, Value>,
+    loop_state: Option<&LoopState>,
+) -> Result<AgentAction, String> {
     match call.name.as_str() {
-        NATIVE_CALL_CAPABILITY_TOOL => action_from_native_capability_call(call),
+        NATIVE_CALL_CAPABILITY_TOOL => {
+            action_from_native_capability_call(call, capability_argument_schemas)
+        }
         NATIVE_RESPOND_TOOL => action_from_native_respond_call(call, loop_state),
         super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL => {
             action_from_native_capability_group_load(call)
         }
         tool_name if native_capability_groups.contains_key(tool_name) => {
-            let action = action_from_native_capability_call(call)?;
+            let action = action_from_native_capability_call(call, capability_argument_schemas)?;
             let AgentAction::CallCapability { capability, .. } = &action else {
                 return Err("native_plan_group_action_invalid".to_string());
             };
@@ -1032,7 +1181,10 @@ fn action_from_native_capability_group_load(call: &ModelToolCall) -> Result<Agen
     })
 }
 
-fn action_from_native_capability_call(call: &ModelToolCall) -> Result<AgentAction, String> {
+fn action_from_native_capability_call(
+    call: &ModelToolCall,
+    capability_argument_schemas: &BTreeMap<String, Value>,
+) -> Result<AgentAction, String> {
     let arguments = call
         .arguments
         .as_object()
@@ -1043,15 +1195,31 @@ fn action_from_native_capability_call(call: &ModelToolCall) -> Result<AgentActio
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "native_plan_capability_missing".to_string())?;
-    let args = arguments
-        .get("args")
-        .cloned()
-        .filter(Value::is_object)
-        .ok_or_else(|| "native_plan_args_not_object".to_string())?;
+    let args = match arguments.get("args") {
+        Some(args) if args.is_object() => args.clone(),
+        Some(Value::String(args))
+            if args.is_empty()
+                && capability_argument_schemas
+                    .get(capability)
+                    .is_some_and(schema_accepts_empty_object) =>
+        {
+            json!({})
+        }
+        _ => return Err("native_plan_args_not_object".to_string()),
+    };
     Ok(AgentAction::CallCapability {
         capability: capability.to_string(),
         args,
     })
+}
+
+fn schema_accepts_empty_object(schema: &Value) -> bool {
+    schema.get("type").and_then(Value::as_str) == Some("object")
+        && schema
+            .get("required")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+        && schema.get("additionalProperties").and_then(Value::as_bool) == Some(false)
 }
 
 fn action_from_native_respond_call(
@@ -1213,6 +1381,8 @@ fn action_from_native_respond_call(
                     return Err("native_respond_object_non_field_payload".to_string());
                 }
             }
+            let object =
+                project_exact_object_from_observations(&object, loop_state).unwrap_or(object);
             let content = serde_json::to_string(&object)
                 .map_err(|_| "native_respond_object_serialize_failed".to_string())?;
             Ok(AgentAction::Respond { content })
@@ -1272,6 +1442,55 @@ fn action_from_native_respond_call(
         }
         _ => Err("native_respond_shape_unsupported".to_string()),
     }
+}
+
+fn project_exact_object_from_observations(
+    object: &Value,
+    loop_state: Option<&LoopState>,
+) -> Option<Value> {
+    let Some(object) = object.as_object().filter(|object| !object.is_empty()) else {
+        return None;
+    };
+    let Some(loop_state) = loop_state else {
+        return None;
+    };
+    object
+        .iter()
+        .map(|(name, expected)| {
+            loop_state
+                .capability_results
+                .iter()
+                .rev()
+                .filter(|result| {
+                    result.status == claw_core::capability_result::CapabilityResultStatus::Ok
+                })
+                .find_map(|result| observed_named_value(&result.data, name, expected, 0))
+                .cloned()
+                .map(|value| (name.clone(), value))
+        })
+        .collect::<Option<Map<String, Value>>>()
+        .map(Value::Object)
+}
+
+fn observed_named_value<'a>(
+    current: &'a Value,
+    field_name: &str,
+    expected: &Value,
+    depth: usize,
+) -> Option<&'a Value> {
+    if depth > 12 {
+        return None;
+    }
+    let Some(object) = current.as_object() else {
+        return None;
+    };
+    object.iter().find_map(|(name, value)| {
+        if name == field_name && value == expected {
+            Some(value)
+        } else {
+            observed_named_value(value, field_name, expected, depth + 1)
+        }
+    })
 }
 
 fn machine_response_field_name(value: Option<&Value>) -> Result<&str, String> {
