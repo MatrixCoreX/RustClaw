@@ -119,40 +119,6 @@ fn backfill_delivery_defers_structured_dry_run_payload_to_finalizer_projection()
 }
 
 #[test]
-fn backfill_delivery_accepts_strict_json_projection_marker() {
-    let task = claimed_task("task-strict-json-projection");
-    let answer = r#"{"created_files":["/workspace/calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
-    let mut loop_state = crate::agent_engine::LoopState::new();
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.last_publishable_synthesis_output = Some(answer.to_string());
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_publishable".to_string(),
-        "true".to_string(),
-    );
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_output".to_string(),
-        answer.to_string(),
-    );
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "run_cmd",
-        "All tests passed.\n",
-    ));
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_2", "synthesize_answer", answer));
-
-    assert_eq!(
-        crate::finalize::loop_reply::valid_publishable_synthesis_output(&loop_state),
-        Some(answer)
-    );
-
-    backfill_delivery_from_last_outputs(&task, &mut loop_state, None);
-
-    assert_eq!(loop_state.delivery_messages, vec![answer.to_string()]);
-}
-
-#[test]
 fn backfill_delivery_uses_terminal_contract_respond_without_observed_execution() {
     let task = claimed_task("task-terminal-contract-respond-no-observed-execution");
     let answer = r#"Dry-run async_start contract shape:

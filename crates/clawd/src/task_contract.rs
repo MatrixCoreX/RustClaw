@@ -100,7 +100,7 @@ pub(crate) fn required_evidence_fields_for_output_contract(
             .selection
             .structured_field_selector
             .as_deref()
-            .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+            .and_then(crate::machine_selector::exact_machine_field_selector)
         {
             return fields;
         }

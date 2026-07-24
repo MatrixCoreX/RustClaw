@@ -8,48 +8,43 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::{
     agent_context_allows_observed_output_language_fallback,
     append_compound_file_delivery_token_from_route,
-    attach_deterministic_observed_execution_status_answer,
-    attach_execution_recipe_closeout_to_delivery, attach_execution_summary_to_delivery,
-    auto_requested_success_marker, backfill_delivery_from_last_outputs,
-    build_execution_summary_message, build_execution_summary_messages,
-    build_pending_user_input_clarify_reason, content_evidence_missing_target_answer,
-    content_evidence_step_failure_answer, content_evidence_terminal_respond_is_contractual_answer,
+    attach_deterministic_observed_execution_status_answer, attach_execution_summary_to_delivery,
+    backfill_delivery_from_last_outputs, build_execution_summary_message,
+    build_execution_summary_messages, build_pending_user_input_clarify_reason,
+    content_evidence_missing_target_answer, content_evidence_step_failure_answer,
+    content_evidence_terminal_respond_is_contractual_answer,
     delivery_contract_suppresses_execution_summary, delivery_is_content_answer_candidate,
     deterministic_matrix_observed_shape_answer, deterministic_missing_observed_target_answer,
     deterministic_observed_execution_status_answer,
     deterministic_observed_execution_status_summary, direct_exact_scalar_path_from_dry_run_payload,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
-    direct_non_builtin_skill_raw_answer, direct_path_from_active_bound_inventory,
-    direct_publishable_observed_answer, direct_scalar_observed_answer,
-    direct_structured_observed_answer,
+    direct_non_builtin_skill_raw_answer, direct_publishable_observed_answer,
+    direct_scalar_observed_answer, direct_structured_observed_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
     discard_observed_passthrough_delivery_when_structured_answer_available,
-    effective_agent_run_context_for_finalization, ensure_requested_success_marker_visible,
-    execution_recipe_closeout_note, final_answer_text_from_delivery, finalize_loop_reply,
-    finalizer_requires_clarify, generated_delivery_existing_file_content_synthesis_token,
-    has_missing_file_search_evidence, latest_file_delivery_observation_is_missing,
-    looks_like_structured_machine_output, missing_file_path_from_output,
-    missing_requested_success_marker, normalize_file_token_delivery_from_auto_locator,
+    effective_agent_run_context_for_finalization, final_answer_text_from_delivery,
+    finalize_loop_reply, finalizer_requires_clarify,
+    generated_delivery_existing_file_content_synthesis_token, has_missing_file_search_evidence,
+    latest_file_delivery_observation_is_missing, looks_like_structured_machine_output,
+    missing_file_path_from_output, normalize_file_token_delivery_from_auto_locator,
     normalize_file_token_delivery_from_observed_paths,
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
     observed_execution_without_publishable_delivery_reply, observed_synthesis_unavailable_reply,
     output_text_from_execution_result, planned_delivery_identifies_failed_observed_step,
-    pre_execution_confirmation_checkpoint_seed,
-    prefer_latest_synthesis_for_compound_observation_delivery,
-    prefer_observed_answer_for_exact_contract, preferred_route_clarify_question,
-    preserve_compound_content_summary_with_file_token, priority_last_respond_for_final_delivery,
+    pre_execution_confirmation_checkpoint_seed, prefer_observed_answer_for_exact_contract,
+    preferred_route_clarify_question, preserve_compound_content_summary_with_file_token,
+    priority_last_respond_for_final_delivery,
     replace_delivery_with_deterministic_observed_execution_status_answer,
     replace_delivery_with_latest_tail_read_range_answer,
-    replace_delivery_with_requested_machine_kv_summary,
     resolve_file_token_from_auto_locator_answer, route_allows_file_token_only_fallback,
     route_structured_clarify_context, run_deterministic_fallback_renderer_registry,
     run_task_lifecycle_renderer_registry, should_drop_passthrough_delivery_for_content_evidence,
     should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
-    structured_compound_synthesis_can_replace_current_delivery, structured_json_values_from_output,
-    successful_delivery_final_status, verify_summary_requires_resume_confirmation,
-    visible_answer_is_machine_payload, visible_answer_is_observed_machine_projection,
+    structured_json_values_from_output, successful_delivery_final_status,
+    verify_summary_requires_resume_confirmation, visible_answer_is_machine_payload,
+    visible_answer_is_observed_machine_projection,
     visible_machine_payload_should_remain_structured,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
@@ -59,12 +54,6 @@ use crate::{
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
-
-#[path = "loop_reply_tests/machine_kv_json_guard.rs"]
-mod machine_kv_json_guard;
-
-#[path = "loop_reply_tests/machine_kv_path_fact.rs"]
-mod machine_kv_path_fact;
 
 #[test]
 fn visible_answer_machine_payload_detection_is_structural() {
@@ -190,9 +179,6 @@ mod exact_contract_tests;
 #[path = "loop_reply_content_evidence_tests.rs"]
 mod content_evidence_tests;
 
-#[path = "loop_reply_language_closeout_tests.rs"]
-mod language_closeout_tests;
-
 #[path = "loop_reply_missing_delivery_tests.rs"]
 mod missing_delivery_tests;
 
@@ -223,14 +209,8 @@ mod delivery_backfill_tests;
 #[path = "loop_reply_content_evidence_passthrough_tests.rs"]
 mod content_evidence_passthrough_tests;
 
-#[path = "loop_reply_matrix_shape_tests.rs"]
-mod matrix_shape_tests;
-
 #[path = "loop_reply_machine_envelope_tests.rs"]
 mod machine_envelope_tests;
-
-#[path = "loop_reply_machine_kv_text_boundary_tests.rs"]
-mod machine_kv_text_boundary_tests;
 
 #[path = "loop_reply_clarify_envelope_tests.rs"]
 mod clarify_envelope_tests;
@@ -244,17 +224,11 @@ mod deterministic_fallback_renderers_tests;
 #[path = "loop_reply_artifact_renderers_tests.rs"]
 mod artifact_renderers_tests;
 
-#[path = "loop_reply_final_answer_renderers_tests.rs"]
-mod final_answer_renderers_tests;
-
 #[path = "loop_reply_route_helpers_tests.rs"]
 mod route_helpers_tests;
 
 #[path = "loop_reply_tail_read_tests.rs"]
 mod tail_read_tests;
-
-#[path = "loop_reply_tests/requested_machine_kv_summary.rs"]
-mod requested_machine_kv_summary_tests;
 
 struct TempDirGuard {
     path: PathBuf,

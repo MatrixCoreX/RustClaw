@@ -3,24 +3,7 @@ use serde_json::Value;
 use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::{AppState, OutputResponseShape};
 
-#[path = "dispatch_synthesis_local_code_fields.rs"]
-mod dispatch_synthesis_local_code_fields;
-#[path = "dispatch_synthesis_local_code_projection.rs"]
-mod dispatch_synthesis_local_code_projection;
-#[path = "dispatch_synthesis_local_code_readbacks.rs"]
-mod dispatch_synthesis_local_code_readbacks;
-#[path = "dispatch_synthesis_local_code_writes.rs"]
-mod dispatch_synthesis_local_code_writes;
 use crate::read_range_utils::strip_read_range_line_prefix;
-use dispatch_synthesis_local_code_projection::{
-    common_parent_path, filesystem_projection_skill, machine_code_token, normalize_projection_path,
-    path_looks_like_code_or_test_file, path_looks_like_test_file, projection_paths_match,
-    successful_code_readbacks, successful_fs_readbacks_after_latest_writes, FsReadback,
-};
-pub(super) use dispatch_synthesis_local_code_projection::{
-    local_code_task_strict_json_projection, requested_local_code_json_fields,
-    strict_json_projection_answer_satisfies_request,
-};
 
 pub(super) fn synthesize_answer_allows_direct_fallback(evidence_refs: &[String]) -> bool {
     evidence_refs.is_empty()
@@ -201,27 +184,6 @@ fn json_contains_unresolved_terminal_value(value: &Value) -> bool {
 #[cfg(test)]
 #[path = "dispatch_synthesis_tests.rs"]
 mod tests;
-
-fn skill_output_payload(output: &str) -> Option<Value> {
-    let value = serde_json::from_str::<Value>(output.trim()).ok()?;
-    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
-        return Some(extra.clone());
-    }
-    Some(value)
-}
-
-fn push_unique_string(values: &mut Vec<String>, value: &str) {
-    let value = value.trim();
-    if value.is_empty() {
-        return;
-    }
-    if !values
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(value))
-    {
-        values.push(value.to_string());
-    }
-}
 
 fn synthesize_strict_exact_tail_read_direct_answer(
     loop_state: &LoopState,

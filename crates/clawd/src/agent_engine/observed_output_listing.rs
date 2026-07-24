@@ -169,14 +169,11 @@ pub(super) fn route_allows_scalar_read_range_direct_answer(
 }
 
 pub(super) fn route_requests_exact_scalar_path(route: &crate::IntentOutputContract) -> bool {
-    crate::machine_kv_projection::output_contract_requests_exact_scalar_path(route)
+    crate::machine_selector::output_contract_requests_exact_scalar_path(route)
 }
 
 pub(super) fn exact_scalar_path_selector(route: &crate::IntentOutputContract) -> Option<String> {
-    crate::machine_kv_projection::output_contract_exact_scalar_field(
-        route,
-        &["path", "resolved_path"],
-    )
+    crate::machine_selector::output_contract_exact_scalar_field(route, &["path", "resolved_path"])
 }
 
 pub(super) fn route_allows_path_batch_scalar_path_observed_answer(

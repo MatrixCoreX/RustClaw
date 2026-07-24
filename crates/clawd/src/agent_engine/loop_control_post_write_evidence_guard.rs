@@ -268,41 +268,6 @@ pub(super) fn journal_has_code_write_followed_by_failed_validation(
         .any(|(_, step)| validation_step_failed(step))
 }
 
-pub(super) fn commit_local_code_strict_json_projection_after_readback(
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    let Some(answer) =
-        crate::agent_engine::dispatch_support::local_code_strict_json_projection_from_machine_evidence(
-            user_text,
-            loop_state,
-            agent_run_context,
-        )
-    else {
-        return false;
-    };
-
-    loop_state.delivery_messages.clear();
-    crate::agent_engine::append_delivery_message(
-        &task.task_id,
-        &mut loop_state.delivery_messages,
-        answer.clone(),
-    );
-    loop_state.last_user_visible_respond = Some(answer.clone());
-    loop_state.last_publishable_synthesis_output = Some(answer.clone());
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_publishable".to_string(),
-        "true".to_string(),
-    );
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_output".to_string(),
-        answer,
-    );
-    true
-}
-
 pub(super) async fn try_run_post_write_validation_reserve_recovery(
     state: &AppState,
     task: &ClaimedTask,
@@ -368,12 +333,6 @@ pub(super) async fn try_run_post_write_validation_reserve_recovery(
         agent_run_context,
     )
     .await?;
-    commit_local_code_strict_json_projection_after_readback(
-        task,
-        user_text,
-        loop_state,
-        agent_run_context,
-    );
     loop_state.last_stop_signal = Some(
         outcome
             .stop_signal
@@ -485,37 +444,18 @@ fn readback_only_code_context_has_source_and_test(records: &[StepActionRecord]) 
 }
 
 fn local_code_validation_fields_requested_for_reserve(
-    user_text: &str,
+    _user_text: &str,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let mut surfaces = Vec::new();
-    if let Some(context) = agent_run_context {
-        if let Some(state_patch) = context
-            .turn_analysis
-            .as_ref()
-            .and_then(|analysis| analysis.state_patch.as_ref())
-        {
-            crate::machine_kv_projection::collect_requested_machine_kv_surfaces_from_state_patch(
-                state_patch,
-                &mut surfaces,
-            );
-        }
-        for value in [
-            context.original_user_request.as_deref(),
-            context.user_request.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, value);
-        }
-    }
-    crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, user_text);
-    surfaces.iter().any(|surface| {
-        crate::machine_kv_projection::requested_machine_markers_for_projection(surface)
-            .iter()
-            .any(|field| matches!(field.as_str(), "test_command" | "test_status"))
-    })
+    agent_run_context
+        .and_then(AgentRunContext::output_contract)
+        .and_then(|contract| contract.selection.structured_field_selector.as_deref())
+        .and_then(crate::machine_selector::exact_machine_field_selector)
+        .is_some_and(|fields| {
+            fields
+                .iter()
+                .any(|field| matches!(field.as_str(), "test_command" | "test_status"))
+        })
 }
 
 fn executed_run_cmd_commands(loop_state: &LoopState) -> BTreeSet<String> {

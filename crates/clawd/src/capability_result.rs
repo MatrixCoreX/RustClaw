@@ -135,6 +135,11 @@ pub(crate) fn selected_result_value<'a>(
                 .and_then(|output| structured_value_at_path(output, selector))
         })
         .or_else(|| {
+            data.get("output")
+                .and_then(|output| output.get("extra"))
+                .and_then(|extra| structured_value_at_path(extra, selector))
+        })
+        .or_else(|| {
             (selector == "command_output")
                 .then(|| data.get("output"))
                 .flatten()

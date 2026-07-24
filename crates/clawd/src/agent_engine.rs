@@ -67,48 +67,6 @@ pub(crate) fn planner_internal_tool_is_observe_only(tool: &str) -> bool {
     tool == "load_capability_groups"
 }
 
-pub(crate) fn local_code_strict_json_projection_from_machine_evidence(
-    user_text: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<String> {
-    self::dispatch_support::local_code_strict_json_projection_from_machine_evidence(
-        user_text,
-        loop_state,
-        agent_run_context,
-    )
-}
-
-pub(crate) fn local_code_strict_json_answer_satisfies_request(
-    user_text: &str,
-    answer: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    self::dispatch_support::local_code_strict_json_answer_satisfies_request(
-        user_text,
-        answer,
-        loop_state,
-        agent_run_context,
-    )
-}
-
-pub(crate) fn local_code_strict_json_projection_should_defer_finalizer_fallback(
-    user_text: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    self::dispatch_support::local_code_strict_json_projection_should_defer_observed_synthesis(
-        user_text,
-        loop_state,
-        agent_run_context,
-    ) || self::dispatch_support::local_code_strict_json_projection_should_defer_until_validation(
-        user_text,
-        loop_state,
-        agent_run_context,
-    )
-}
-
 pub(crate) use self::context_compaction::run_model_assisted_context_compaction;
 use self::execution_loop::execute_actions_once;
 use self::loop_control::{

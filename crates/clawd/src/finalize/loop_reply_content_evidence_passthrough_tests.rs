@@ -80,14 +80,6 @@ fn content_evidence_keeps_strict_json_projection_before_meta_classifier() {
     loop_state.last_user_visible_respond = Some(answer.to_string());
     loop_state.delivery_messages.push(answer.to_string());
     loop_state.last_publishable_synthesis_output = Some(answer.to_string());
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_publishable".to_string(),
-        "true".to_string(),
-    );
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_output".to_string(),
-        answer.to_string(),
-    );
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",

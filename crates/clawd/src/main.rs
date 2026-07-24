@@ -56,7 +56,7 @@ mod intent;
 mod language_policy;
 mod llm_gateway;
 mod log_utils;
-mod machine_kv_projection;
+mod machine_selector;
 mod mcp_admin_routes;
 mod mcp_runtime;
 mod media_artifact_paths;
@@ -105,11 +105,10 @@ mod visible_text;
 mod worker;
 
 pub(crate) use app_helpers::{
-    bilingual_t_with_default_vars, ensure_column_exists,
-    i18n_t_for_language_hint_with_default_vars, i18n_t_with_default, i18n_t_with_default_vars,
-    is_affirmation_click_text, main_flow_rules, mask_secret, normalize_affirmation_text,
-    normalize_exchange_name, normalize_external_id_opt, now_ts, now_ts_u64,
-    parse_resume_context_error, parse_task_status, TASK_STATUS_QUEUED,
+    ensure_column_exists, i18n_t_for_language_hint_with_default_vars, i18n_t_with_default,
+    i18n_t_with_default_vars, is_affirmation_click_text, main_flow_rules, mask_secret,
+    normalize_affirmation_text, normalize_exchange_name, normalize_external_id_opt, now_ts,
+    now_ts_u64, parse_resume_context_error, parse_task_status, TASK_STATUS_QUEUED,
 };
 pub(crate) use ask_flow::{analyze_attached_images_for_ask, transcribe_attached_audio_for_ask};
 #[cfg(test)]

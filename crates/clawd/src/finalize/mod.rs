@@ -18,7 +18,6 @@ mod clarify;
 mod helpers;
 mod journal;
 mod loop_reply;
-mod search_path_projection;
 mod task;
 
 // === JOURNAL BUILDER（Stage 3.1）===
@@ -45,4 +44,5 @@ pub(crate) use loop_reply::{
     deterministic_matrix_observed_shape_answer,
     exact_observation_machine_field_delivery_satisfies_request,
     exact_observation_machine_field_projection_from_journal, finalize_loop_reply,
+    record_strict_capability_projection_issue, strict_capability_projection_ready,
 };

@@ -34,24 +34,10 @@ pub(super) struct FinalizerRendererDescriptor {
 
 pub(super) const FINALIZER_RENDERER_REGISTRY: &[FinalizerRendererDescriptor] = &[
     FinalizerRendererDescriptor {
-        key: "matrix_observed_shape",
+        key: "generic_schema_projection",
         shape_class: FinalizerRendererShapeClass::FinalAnswerShape,
-        owner_module: "finalize::loop_reply_matrix_shape",
-        entrypoint: "replace_delivery_with_matrix_observed_shape_answer",
-        summary_contract: "finalizer_summary",
-    },
-    FinalizerRendererDescriptor {
-        key: "machine_kv_summary",
-        shape_class: FinalizerRendererShapeClass::FinalAnswerShape,
-        owner_module: "finalize::loop_reply_machine_kv",
-        entrypoint: "replace_delivery_with_requested_machine_kv_summary",
-        summary_contract: "finalizer_summary",
-    },
-    FinalizerRendererDescriptor {
-        key: "exact_observation_machine_field_projection",
-        shape_class: FinalizerRendererShapeClass::FinalAnswerShape,
-        owner_module: "finalize::loop_reply_exact_observation",
-        entrypoint: "replace_final_delivery_with_exact_observation_machine_field_projection",
+        owner_module: "finalize::loop_reply_generic_projection",
+        entrypoint: "finalize_generic_machine_projection",
         summary_contract: "finalizer_summary",
     },
     FinalizerRendererDescriptor {

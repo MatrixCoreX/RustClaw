@@ -6,7 +6,6 @@ use super::{
     observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route,
-    post_write_content_evidence_missing_before_verifier,
     recent_structured_scalar_values_from_journal, should_verify_answer,
     strict_list_route_allows_observed_subset, structural_satisfaction_can_skip_verifier,
     structurally_satisfies_answer_contract,
@@ -140,7 +139,7 @@ fn planner_plain_answer_with_tool_observation_still_uses_answer_verifier() {
 }
 
 #[test]
-fn grounded_machine_kv_projection_skips_answer_verifier() {
+fn generic_grounded_machine_projection_skips_answer_verifier() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -158,11 +157,22 @@ fn grounded_machine_kv_projection_skips_answer_verifier() {
             "fs_basic",
             r#"{"extra":{"action":"grep_text","matches":[{"line":246,"path":"AGENTS.md","text":"run `python3 scripts/check_no_nl_hardmatch.py` after boundary changes"}],"query":"check_no_nl_hardmatch.py","results":["AGENTS.md"]},"text":"AGENTS.md"}"#,
         ));
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
 
     assert!(!should_verify_answer(
         &route,
         &journal,
-        "no_hardmatch_guard=check_no_nl_hardmatch.py"
+        r#"{"provider":"minimax","model":"MiniMax-M3"}"#
     ));
     assert!(should_verify_answer(&route, &journal, "AGENTS.md"));
 }
@@ -823,9 +833,6 @@ mod local_status_evidence;
 
 #[path = "answer_verifier_tests/prompt_schema_and_evidence.rs"]
 mod prompt_schema_and_evidence;
-
-#[path = "answer_verifier_tests/strict_json_projection_skip.rs"]
-mod strict_json_projection_skip;
 
 #[path = "answer_verifier_tests/control_envelope_projection_skip.rs"]
 mod control_envelope_projection_skip;

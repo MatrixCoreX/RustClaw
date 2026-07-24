@@ -13,8 +13,6 @@ use super::{
 };
 use crate::{AgentAction, OutputResponseShape};
 
-#[path = "dispatch_local_code_projection_gate.rs"]
-mod dispatch_local_code_projection_gate;
 #[path = "dispatch_synthesis.rs"]
 mod dispatch_synthesis;
 #[path = "dispatch_synthesis_bounded_read.rs"]
@@ -26,15 +24,9 @@ mod respond_template_guard;
 #[path = "dispatch_support/skill_call_args.rs"]
 mod skill_call_args;
 
-use dispatch_local_code_projection_gate::{
-    local_code_strict_json_projection_should_defer_observed_synthesis as gate_defer_observed_synthesis,
-    local_code_strict_json_projection_should_defer_until_validation as gate_defer_until_validation,
-    LOCAL_CODE_PROJECTION_PENDING_READBACK, LOCAL_CODE_PROJECTION_PENDING_VALIDATION,
-};
 use dispatch_synthesis::{
-    local_code_task_strict_json_projection, requested_local_code_json_fields,
     route_resolved_intent, step_has_observable_synthesis_fact,
-    strict_json_projection_answer_satisfies_request, synthesize_answer_allows_direct_fallback,
+    synthesize_answer_allows_direct_fallback,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
@@ -53,51 +45,6 @@ use skill_call_args::{
     record_latest_run_cmd_command_output_vars, strip_internal_execution_args,
     strip_unsupported_planner_metadata_args, write_file_effective_path,
 };
-
-pub(super) fn local_code_strict_json_projection_should_defer_observed_synthesis(
-    user_text: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    gate_defer_observed_synthesis(user_text, loop_state, agent_run_context)
-}
-
-pub(super) fn local_code_strict_json_projection_should_defer_until_validation(
-    user_text: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    gate_defer_until_validation(user_text, loop_state, agent_run_context)
-}
-
-pub(super) fn local_code_strict_json_projection_from_machine_evidence(
-    user_text: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<String> {
-    let answer = local_code_task_strict_json_projection(user_text, loop_state, agent_run_context)?;
-    strict_json_projection_answer_satisfies_request(
-        user_text,
-        &answer,
-        loop_state,
-        agent_run_context,
-    )
-    .then_some(answer)
-}
-
-pub(super) fn local_code_strict_json_answer_satisfies_request(
-    user_text: &str,
-    answer: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    strict_json_projection_answer_satisfies_request(
-        user_text,
-        answer,
-        loop_state,
-        agent_run_context,
-    )
-}
 
 pub(super) fn apply_skill_action_outcome(
     loop_state: &mut LoopState,
@@ -914,29 +861,6 @@ pub(super) async fn handle_synthesize_answer_action(
             let allow_direct_fallback = synthesize_answer_allows_direct_fallback(evidence_refs)
                 && synthesize_route_allows_direct_fallback(agent_run_context)
                 && !direct_fallback_blocked;
-            if let Some(answer) =
-                local_code_strict_json_projection_from_machine_evidence(
-                    user_text,
-                    loop_state,
-                    agent_run_context,
-                )
-            {
-                return Ok(answer);
-            }
-            if local_code_strict_json_projection_should_defer_observed_synthesis(
-                user_text,
-                loop_state,
-                agent_run_context,
-            ) {
-                return Err(LOCAL_CODE_PROJECTION_PENDING_READBACK.to_string());
-            }
-            if local_code_strict_json_projection_should_defer_until_validation(
-                user_text,
-                loop_state,
-                agent_run_context,
-            ) {
-                return Err(LOCAL_CODE_PROJECTION_PENDING_VALIDATION.to_string());
-            }
             if allow_direct_fallback {
                 if let Some(answer) =
                     synthesize_direct_observed_fallback_answer(state, loop_state, agent_run_context)
@@ -1004,28 +928,6 @@ pub(super) async fn handle_synthesize_answer_action(
                     synthesis.evidence_count.to_string(),
                 );
             }
-            if strict_json_projection_answer_satisfies_request(
-                user_text,
-                &answer,
-                loop_state,
-                agent_run_context,
-            ) {
-                loop_state.output_vars.insert(
-                    "agent_loop.strict_json_projection_publishable".to_string(),
-                    "true".to_string(),
-                );
-                loop_state.output_vars.insert(
-                    "agent_loop.strict_json_projection_output".to_string(),
-                    answer.clone(),
-                );
-            } else {
-                loop_state
-                    .output_vars
-                    .remove("agent_loop.strict_json_projection_publishable");
-                loop_state
-                    .output_vars
-                    .remove("agent_loop.strict_json_projection_output");
-            }
             crate::append_subtask_result(
                 &mut loop_state.subtask_results,
                 global_step,
@@ -1072,13 +974,7 @@ pub(super) async fn handle_synthesize_answer_action(
                 .error
                 .clone()
                 .unwrap_or_else(|| "synthesize_answer failed".to_string());
-            let local_code_projection_pending_readback =
-                err == LOCAL_CODE_PROJECTION_PENDING_READBACK;
-            let local_code_projection_pending_validation =
-                err == LOCAL_CODE_PROJECTION_PENDING_VALIDATION;
-            let should_replan = !local_code_projection_pending_readback
-                && !local_code_projection_pending_validation
-                && synthesize_failure_should_replan(loop_state);
+            let should_replan = synthesize_failure_should_replan(loop_state);
             if should_replan {
                 let compact_err = err
                     .replace('\n', " ")
@@ -1131,10 +1027,6 @@ pub(super) async fn handle_synthesize_answer_action(
             );
             Ok(ActionLoopDecision::StopRound(if should_replan {
                 "recoverable_failure_continue_round".to_string()
-            } else if local_code_projection_pending_validation {
-                "recoverable_failure_continue_round".to_string()
-            } else if local_code_projection_pending_readback {
-                LOCAL_CODE_PROJECTION_PENDING_READBACK.to_string()
             } else {
                 "synthesize_answer_failed".to_string()
             }))

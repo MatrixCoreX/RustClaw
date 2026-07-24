@@ -270,13 +270,9 @@ fn terminal_synthesis_strict_json_owns_response(loop_state: &LoopState) -> bool 
         return false;
     }
     loop_state
-        .output_vars
-        .get("agent_loop.strict_json_projection_publishable")
-        .is_some_and(|value| value == "true")
-        || loop_state
-            .output_contract
-            .as_ref()
-            .is_some_and(|contract| contract.response_shape == crate::OutputResponseShape::Strict)
+        .output_contract
+        .as_ref()
+        .is_some_and(|contract| contract.response_shape == crate::OutputResponseShape::Strict)
 }
 
 fn response_content_is_json_object(content: &str) -> bool {
@@ -343,7 +339,7 @@ fn latest_successful_output_satisfies_structured_selector(
         .filter(|step| step.is_ok())
         .and_then(|step| step.output.as_deref())
         .is_some_and(|output| {
-            crate::machine_kv_projection::structured_json_satisfies_field_selector(selector, output)
+            crate::machine_selector::structured_json_satisfies_field_selector(selector, output)
         })
 }
 

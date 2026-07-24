@@ -162,7 +162,7 @@ fn exact_list_evidence_fields(output_contract: &IntentOutputContract) -> Option<
                 .selection
                 .structured_field_selector
                 .as_deref()
-                .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+                .and_then(crate::machine_selector::exact_machine_field_selector)
         })
 }
 

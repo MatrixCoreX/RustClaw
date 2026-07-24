@@ -767,8 +767,7 @@ pub(super) fn latest_publishable_synthesis_step_output(loop_state: &LoopState) -
         .find(|output| {
             !output.is_empty()
                 && (planned_delivery_is_publishable_model_language_answer(output)
-                    || lifecycle_result_synthesis_payload_is_publishable(output)
-                    || strict_json_projection_synthesis_payload_is_publishable(loop_state, output))
+                    || lifecycle_result_synthesis_payload_is_publishable(output))
                 && !crate::finalize::is_execution_summary_message(output)
         })
 }
@@ -793,66 +792,6 @@ fn lifecycle_result_synthesis_payload_is_publishable(output: &str) -> bool {
             .pointer("/final_state/cleanup_observed")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
-}
-
-fn strict_json_projection_synthesis_payload_is_publishable(
-    loop_state: &LoopState,
-    output: &str,
-) -> bool {
-    let output = output.trim();
-    if output.is_empty()
-        || crate::finalize::looks_like_planner_artifact(output)
-        || crate::finalize::looks_like_internal_trace_artifact(output)
-    {
-        return false;
-    }
-    if loop_state
-        .output_vars
-        .get("agent_loop.strict_json_projection_publishable")
-        .map(String::as_str)
-        != Some("true")
-    {
-        return false;
-    }
-    if loop_state
-        .output_vars
-        .get("agent_loop.strict_json_projection_output")
-        .map(|value| value.trim())
-        != Some(output)
-    {
-        return false;
-    }
-    let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(output)
-    else {
-        return false;
-    };
-    !object.is_empty()
-        && object.len() <= 16
-        && object
-            .iter()
-            .all(|(key, value)| valid_projection_json_key(key) && json_value_has_payload(value))
-}
-
-fn valid_projection_json_key(key: &str) -> bool {
-    !key.is_empty()
-        && key.len() <= 64
-        && key
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-}
-
-fn json_value_has_payload(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Null => false,
-        serde_json::Value::String(text) => !text.trim().is_empty(),
-        serde_json::Value::Array(items) => {
-            !items.is_empty() && items.iter().all(json_value_has_payload)
-        }
-        serde_json::Value::Object(object) => {
-            !object.is_empty() && object.values().all(json_value_has_payload)
-        }
-        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
-    }
 }
 
 pub(crate) fn latest_contractual_synthesis_output(loop_state: &LoopState) -> Option<&str> {
@@ -882,21 +821,6 @@ pub(super) fn current_delivery_is_latest_publishable_synthesis(
         && !crate::finalize::looks_like_planner_artifact(synthesis)
         && !crate::finalize::looks_like_internal_trace_artifact(synthesis)
         && crate::finalize::parse_delivery_token(synthesis).is_none()
-}
-
-pub(super) fn current_delivery_is_latest_terminal_respond(
-    loop_state: &LoopState,
-    current_delivery: &str,
-) -> bool {
-    let current_delivery = current_delivery.trim();
-    let latest = loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .find(|step| step.is_ok() && step.skill == "respond")
-        .and_then(|step| step.output.as_deref())
-        .map(str::trim);
-    terminal_respond_delivery_candidate(current_delivery) && latest == Some(current_delivery)
 }
 
 pub(crate) fn route_expects_synthesis_over_direct_observation(

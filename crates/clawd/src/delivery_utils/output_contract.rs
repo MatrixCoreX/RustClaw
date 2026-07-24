@@ -780,7 +780,7 @@ fn scalar_candidate_is_path_or_locator_for_non_path_contract(
     candidate: &str,
     output_contract: &IntentOutputContract,
 ) -> bool {
-    if crate::machine_kv_projection::output_contract_requests_exact_scalar_field(
+    if crate::machine_selector::output_contract_requests_exact_scalar_field(
         output_contract,
         &["path", "resolved_path"],
     ) {

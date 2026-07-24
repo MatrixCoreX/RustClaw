@@ -81,37 +81,6 @@ fn effective_final_stop_signal<'a>(
     Some(Cow::Borrowed(signal))
 }
 
-fn strict_json_projection_observation(loop_state: &LoopState) -> Option<serde_json::Value> {
-    if loop_state
-        .output_vars
-        .get("agent_loop.strict_json_projection_publishable")
-        .map(String::as_str)
-        != Some("true")
-    {
-        return None;
-    }
-    let output = loop_state
-        .output_vars
-        .get("agent_loop.strict_json_projection_output")
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())?;
-    let serde_json::Value::Object(object) =
-        serde_json::from_str::<serde_json::Value>(output).ok()?
-    else {
-        return None;
-    };
-    if object.is_empty() || object.len() > 16 || output.len() > 8192 {
-        return None;
-    }
-    Some(serde_json::json!({
-        "kind": "agent_loop_strict_json_projection",
-        "owner_layer": "agent_loop",
-        "schema_version": 1,
-        "publishable": true,
-        "output": output,
-    }))
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn build_terminal_from_loop_state(
     state: &AppState,
@@ -212,9 +181,6 @@ pub(crate) fn build_from_loop_state(
     journal.capability_results = loop_state.capability_results.clone();
     for observation in &loop_state.task_observations {
         journal.push_task_observation(observation.clone());
-    }
-    if let Some(observation) = strict_json_projection_observation(loop_state) {
-        journal.push_task_observation(observation);
     }
     if let Some(summary) = finalizer_summary {
         journal.record_finalizer_summary(summary);

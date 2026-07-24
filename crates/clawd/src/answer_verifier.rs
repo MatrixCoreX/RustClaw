@@ -11,8 +11,6 @@ mod answer_verifier_control_envelope;
 mod answer_verifier_delivery_exact;
 #[path = "answer_verifier_evidence_policy.rs"]
 mod answer_verifier_evidence_policy;
-#[path = "answer_verifier_machine_kv.rs"]
-mod answer_verifier_machine_kv;
 #[path = "answer_verifier_runtime.rs"]
 mod answer_verifier_runtime;
 #[path = "answer_verifier_scalar.rs"]

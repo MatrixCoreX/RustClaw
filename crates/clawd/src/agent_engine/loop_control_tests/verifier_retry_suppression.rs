@@ -7,32 +7,14 @@ use super::super::{
 use super::{
     answer_contract, answer_verifier_retry_summary, commit_answer_verifier_retry_answer, ok_step,
     post_write_content_evidence_recovery_policy,
-    prefer_terminal_model_answer_for_verifier_candidate,
-    promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
-    promote_publishable_strict_json_projection_for_verifier_candidate,
-    retry_verifier_accepts_rewritten_answer, route_result,
-    suppress_answer_verifier_retry_if_structurally_satisfied, test_policy,
+    prefer_terminal_model_answer_for_verifier_candidate, retry_verifier_accepts_rewritten_answer,
+    route_result, suppress_answer_verifier_retry_if_structurally_satisfied, test_policy,
 };
 use crate::{
     agent_engine::LoopState, executor::StepExecutionStatus, AskReply, OutputDeliveryIntent,
     OutputLocatorKind, OutputResponseShape,
 };
 use serde_json::{json, Value};
-
-fn local_code_context_with_required_fields(
-    fields: serde_json::Value,
-) -> crate::agent_engine::AgentRunContext {
-    crate::agent_engine::AgentRunContext {
-        turn_analysis: Some(crate::turn_context::TurnAnalysis {
-            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
-            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
-            should_interrupt_active_run: false,
-            state_patch: Some(json!({ "required_machine_fields": fields })),
-            attachment_processing_required: false,
-        }),
-        ..Default::default()
-    }
-}
 
 fn require_content_evidence(journal: &mut crate::task_journal::TaskJournal) {
     journal.record_output_contract(&crate::IntentOutputContract {
@@ -260,161 +242,6 @@ fn post_write_guard_overrides_output_format_gap_when_content_evidence_missing() 
     assert!(summary
         .answer_incomplete_reason
         .starts_with("post_write_content_evidence_required"));
-}
-
-#[test]
-fn publishable_strict_json_projection_replaces_stale_verifier_candidate() {
-    let answer = r#"{"changed_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"test_command":["python3 test_calc_core.py","python3 - <<'PY'\nfrom calc_core import safe_div\nprint(safe_div(1,0))\nPY"],"test_status":"passed","functions":["add","sub","mul","safe_div"],"error_codes":["division_by_zero"]}"#;
-    let mut route = route_result(OutputResponseShape::Strict);
-    route.requires_content_evidence = true;
-    route.delivery_required = false;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-strict-json-projection-promote",
-        "ask",
-        "prompt",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"}}"#,
-    ));
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_2",
-            "run_cmd",
-            "All tests passed\n",
-        ));
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-        "step_3",
-        "fs_basic",
-        r#"{"extra":{"action":"read_text_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a,b): return a+b\n2|def sub(a,b): return a-b\n3|def mul(a,b): return a*b\n4|def safe_div(a,b): return {'ok': False, 'error_code': 'division_by_zero'}"}}"#,
-    ));
-    journal.push_task_observation(json!({
-        "kind": "agent_loop_strict_json_projection",
-        "owner_layer": "agent_loop",
-        "schema_version": 1,
-        "publishable": true,
-        "output": answer,
-    }));
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["output_format".to_string()],
-        answer_incomplete_reason: "stale raw readback candidate".to_string(),
-        should_retry: true,
-        retry_instruction: "use publishable projection".to_string(),
-        confidence: 0.95,
-    });
-    let mut reply = AskReply::non_llm("def safe_div(a,b): ...".to_string())
-        .with_messages(vec!["def safe_div(a,b): ...".to_string()])
-        .with_task_journal(journal);
-    let mut loop_state = LoopState::new();
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_publishable".to_string(),
-        "true".to_string(),
-    );
-    loop_state.output_vars.insert(
-        "agent_loop.strict_json_projection_output".to_string(),
-        answer.to_string(),
-    );
-
-    assert!(
-        promote_publishable_strict_json_projection_for_verifier_candidate(
-            &mut reply,
-            Some(&answer_contract(&route)),
-            &loop_state,
-        )
-    );
-    assert_eq!(reply.text, answer);
-    let journal = reply.task_journal.as_ref().expect("journal");
-    assert!(journal.answer_verifier_summary.is_none());
-    assert_eq!(
-        journal.final_status,
-        Some(crate::task_journal::TaskJournalFinalStatus::Success)
-    );
-}
-
-#[test]
-fn local_code_machine_projection_replaces_stale_verifier_candidate_before_verifier() {
-    let user_text =
-        "最后只输出 JSON，包含 changed_files、test_command、test_status、functions、error_codes。";
-    let mut loop_state = LoopState::new();
-    loop_state.output_vars.insert(
-        "agent_loop.run_cmd_commands".to_string(),
-        serde_json::json!([
-            "python3 test_calc_core.py",
-            "python3 - <<'PY'\nfrom calc_core import safe_div\nprint(safe_div(1,0))\nPY"
-        ])
-        .to_string(),
-    );
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_2",
-        "fs_basic",
-        r#"{"extra":{"action":"write_text","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py"}}"#,
-    ));
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_3", "run_cmd", "ALL TESTS PASSED\n"));
-    loop_state.executed_step_results.push(ok_step(
-        "step_4",
-        "run_cmd",
-        r#"{"ok":false,"error_code":"division_by_zero"}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_5",
-        "fs_basic",
-        r#"{"extra":{"action":"read_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|\n4|def sub(a, b):\n5|    return a - b\n6|\n7|def mul(a, b):\n8|    return a * b\n9|\n10|def safe_div(a, b):\n11|    if b == 0:\n12|        return {\"ok\": False, \"error_code\": \"division_by_zero\"}"}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step(
-        "step_6",
-        "fs_basic",
-        r#"{"extra":{"action":"read_range","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py","excerpt":"1|from calc_core import add, sub, mul, safe_div\n2|def test_safe_div_zero(): pass"}}"#,
-    ));
-    let journal =
-        crate::task_journal::TaskJournal::for_task("task-local-code-promote", "ask", user_text);
-    let mut reply = AskReply::non_llm("calc_core.py\ntest_calc_core.py".to_string())
-        .with_messages(vec!["calc_core.py\ntest_calc_core.py".to_string()])
-        .with_task_journal(journal);
-    let context = local_code_context_with_required_fields(json!([
-        "changed_files",
-        "test_command",
-        "test_status",
-        "functions",
-        "error_codes"
-    ]));
-
-    assert!(
-        promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
-            &mut reply,
-            user_text,
-            &loop_state,
-            Some(&context),
-        )
-    );
-    let value: serde_json::Value = serde_json::from_str(&reply.text).expect("strict json");
-    assert_eq!(
-        value["functions"],
-        serde_json::json!(["add", "sub", "mul", "safe_div"])
-    );
-    assert_eq!(
-        value["error_codes"],
-        serde_json::json!(["division_by_zero"])
-    );
-    let journal = reply.task_journal.as_ref().expect("journal");
-    assert!(journal.answer_verifier_summary.is_none());
-    assert!(journal.task_observations.iter().any(|observation| {
-        observation.get("kind").and_then(serde_json::Value::as_str)
-            == Some("agent_loop_strict_json_projection")
-    }));
 }
 
 #[test]

@@ -300,7 +300,7 @@ fn scalar_path_answer_bound_target(
     }
     normalize_scalar_path_bound_target(
         line,
-        crate::machine_kv_projection::output_contract_requests_exact_scalar_field(
+        crate::machine_selector::output_contract_requests_exact_scalar_field(
             route_result,
             &["path", "resolved_path"],
         ),
@@ -308,7 +308,7 @@ fn scalar_path_answer_bound_target(
 }
 
 fn scalar_path_contract_can_bind_target(route_result: &crate::IntentOutputContract) -> bool {
-    crate::machine_kv_projection::output_contract_requests_exact_scalar_field(
+    crate::machine_selector::output_contract_requests_exact_scalar_field(
         route_result,
         &["path", "resolved_path"],
     ) || (matches!(

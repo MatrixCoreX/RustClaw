@@ -354,7 +354,7 @@ impl GenericProfile {
                 .selection
                 .structured_field_selector
                 .as_deref()
-                .and_then(crate::machine_kv_projection::exact_machine_field_selector)
+                .and_then(crate::machine_selector::exact_machine_field_selector)
             else {
                 return false;
             };
@@ -362,7 +362,7 @@ impl GenericProfile {
             let matches_configured_selector =
                 self.structured_field_selectors.iter().any(|selector| {
                     let Some(mut configured) =
-                        crate::machine_kv_projection::exact_machine_field_selector(selector)
+                        crate::machine_selector::exact_machine_field_selector(selector)
                     else {
                         return false;
                     };

@@ -20,17 +20,16 @@ use deterministic_fallback_renderers::run_deterministic_fallback_renderer_regist
 mod capability_synthesis;
 use capability_synthesis::finalize_capability_synthesis;
 
+#[path = "loop_reply_generic_projection.rs"]
+mod generic_projection;
+use generic_projection::finalize_generic_machine_projection;
+pub(crate) use generic_projection::{
+    record_strict_capability_projection_issue, strict_capability_projection_ready,
+};
+
 #[path = "loop_reply_artifact_renderers.rs"]
 mod artifact_renderers;
 use artifact_renderers::normalize_file_token_delivery_from_observed_paths;
-
-#[path = "loop_reply_final_answer_renderers.rs"]
-mod final_answer_renderers;
-use final_answer_renderers::{
-    replace_delivery_with_matrix_observed_shape_answer,
-    replace_delivery_with_requested_machine_kv_summary,
-    replace_final_delivery_with_exact_observation_machine_field_projection,
-};
 
 #[path = "loop_reply_scalar_answer.rs"]
 mod scalar_answer;
@@ -164,9 +163,7 @@ use matrix_shape::{
 };
 use matrix_shape::{
     current_synthesis_satisfies_evidence_policy_shape,
-    evidence_policy_candidate_satisfies_final_shape,
-    finalizer_summary_requires_matrix_observed_replacement,
-    generic_observed_machine_projection_answer, matrix_observed_shape_summary,
+    evidence_policy_candidate_satisfies_final_shape, matrix_observed_shape_summary,
     route_requires_evidence_policy_deterministic_final_answer,
     route_requires_observed_output_projection, should_try_observed_output_language_fallback,
     synthetic_task_for_evidence_policy_shape_check,
@@ -177,9 +174,6 @@ mod machine_envelope;
 use machine_envelope::{
     attach_machine_envelope_delivery_from_loop, mark_machine_envelope_delivery_complete,
 };
-
-#[path = "loop_reply_machine_kv.rs"]
-mod machine_kv;
 
 #[path = "loop_reply_machine_payload.rs"]
 mod machine_payload;
@@ -200,8 +194,8 @@ mod control_envelope;
 mod delivery_backfill;
 use delivery_backfill::{
     backfill_delivery_from_last_outputs, current_delivery_is_latest_publishable_synthesis,
-    current_delivery_is_latest_terminal_respond, delivery_is_direct_read_observation,
-    last_respond_matches_single_line_observation, publishable_summary_has_multi_source_observation,
+    delivery_is_direct_read_observation, last_respond_matches_single_line_observation,
+    publishable_summary_has_multi_source_observation,
     replace_direct_observation_delivery_with_synthesis,
     replace_direct_read_observation_with_synthesis, replace_placeholder_delivery_with_synthesis,
     step_output_is_read_range, strict_exact_observation_output_exact_observation_answer,
@@ -246,23 +240,10 @@ use exact_contract::{prefer_observed_answer_for_exact_contract, route_prefers_ob
 
 #[path = "loop_reply_language_closeout.rs"]
 mod language_closeout;
-#[cfg(test)]
-use language_closeout::execution_recipe_closeout_note;
 pub(crate) use language_closeout::planned_delivery_is_publishable_model_language_answer;
 use language_closeout::{
-    attach_execution_recipe_closeout_to_delivery, attach_execution_recipe_done_machine_closeout,
-    auto_requested_success_marker, ensure_requested_success_marker_visible,
-    execution_recipe_budget_exhausted_message, execution_recipe_missing_success_marker_message,
-    final_reply_language_hint, missing_requested_success_marker,
+    execution_recipe_budget_exhausted_message, final_reply_language_hint,
     route_allows_model_language_final_answer, route_resolved_intent,
-};
-
-#[path = "loop_reply_local_code_projection.rs"]
-mod local_code_projection;
-use local_code_projection::{
-    attach_local_code_strict_json_projection, sync_final_delivery_with_local_code_projection,
-    sync_latest_synthesis_local_code_projection_if_needed,
-    sync_recorded_local_code_projection_if_needed,
 };
 
 #[path = "loop_reply_missing_delivery.rs"]
@@ -299,8 +280,6 @@ use content_evidence_failure::{
 
 #[path = "loop_reply_synthesis_preference.rs"]
 mod synthesis_preference;
-#[cfg(test)]
-use synthesis_preference::structured_compound_synthesis_can_replace_current_delivery;
 use synthesis_preference::{
     prefer_content_evidence_synthesis_for_final_delivery,
     prefer_latest_synthesis_for_compound_observation_delivery,
@@ -432,6 +411,17 @@ pub(crate) async fn finalize_loop_reply(
 
     if !machine_envelope::loop_has_machine_envelope(&loop_state) {
         if let Some(reply) = finalize_capability_synthesis(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            agent_run_context,
+        )
+        .await
+        {
+            return Ok(reply);
+        }
+        if let Some(reply) = finalize_generic_machine_projection(
             state,
             task,
             user_text,
@@ -702,45 +692,9 @@ pub(crate) async fn finalize_loop_reply(
         }
     }
 
-    if attach_local_code_strict_json_projection(
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    ) {
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "fallback_from_local_code_strict_json_projection",
-            "attached",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-    }
-
-    if loop_state.delivery_messages.is_empty() {
-        if let Some((answer, summary)) = generic_observed_machine_projection_answer(&loop_state) {
-            finalizer_summary = Some(summary);
-            loop_state.last_user_visible_respond = Some(answer.clone());
-            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-            log_deterministic_delivery_record(
-                &task.task_id,
-                "generic_observed_machine_projection",
-                "attached",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-        }
-    }
-
     if loop_state.delivery_messages.is_empty()
         && valid_publishable_synthesis_output(&loop_state).is_none()
         && should_try_observed_output_language_fallback(&loop_state, agent_run_context)
-        && !crate::agent_engine::local_code_strict_json_projection_should_defer_finalizer_fallback(
-            user_text,
-            &loop_state,
-            agent_run_context,
-        )
     {
         match crate::agent_engine::observed_output::try_synthesize_answer_from_observed_output(
             state,
@@ -777,22 +731,14 @@ pub(crate) async fn finalize_loop_reply(
             }
             Ok(None) => {}
             Err(err) => {
-                if !attach_execution_recipe_done_machine_closeout(
+                return Ok(observed_synthesis_unavailable_reply(
+                    state,
                     task,
                     user_text,
-                    &mut loop_state,
+                    &loop_state,
                     agent_run_context,
-                    &mut finalizer_summary,
-                ) {
-                    return Ok(observed_synthesis_unavailable_reply(
-                        state,
-                        task,
-                        user_text,
-                        &loop_state,
-                        agent_run_context,
-                        &err,
-                    ));
-                }
+                    &err,
+                ));
             }
         }
     }
@@ -803,16 +749,6 @@ pub(crate) async fn finalize_loop_reply(
             task,
             user_text,
             &mut loop_state,
-            &mut finalizer_summary,
-        );
-    }
-
-    if loop_state.delivery_messages.is_empty() {
-        attach_local_code_strict_json_projection(
-            task,
-            user_text,
-            &mut loop_state,
-            agent_run_context,
             &mut finalizer_summary,
         );
     }
@@ -832,35 +768,6 @@ pub(crate) async fn finalize_loop_reply(
                 loop_state.executed_step_results.len(),
             );
         }
-    }
-
-    attach_execution_recipe_done_machine_closeout(
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    );
-
-    if let Some(marker) = auto_requested_success_marker(
-        agent_run_context,
-        &loop_state,
-        &loop_state.delivery_messages,
-    ) {
-        let marker_text = marker.to_string();
-        loop_state.last_user_visible_respond = Some(marker_text.clone());
-        append_delivery_message(
-            &task.task_id,
-            &mut loop_state.delivery_messages,
-            marker_text,
-        );
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "auto_requested_success_marker",
-            "attached",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
     }
 
     normalize_file_token_delivery_from_auto_locator(&mut loop_state, agent_run_context);
@@ -930,34 +837,11 @@ pub(crate) async fn finalize_loop_reply(
     } else {
         false
     };
-    let replaced_matrix_observed_shape = if !replaced_grounded_answer
-        && !replaced_deterministic_fallback
-        && !replaced_direct_scalar
-        && !replaced_direct_structured
-        && !replaced_contract_answer
-        && finalizer_summary_requires_matrix_observed_replacement(finalizer_summary.as_ref())
-    {
-        let mut delivery_messages = std::mem::take(&mut loop_state.delivery_messages);
-        let replaced = replace_delivery_with_matrix_observed_shape_answer(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
-            agent_run_context,
-            &mut delivery_messages,
-            &mut finalizer_summary,
-        );
-        loop_state.delivery_messages = delivery_messages;
-        replaced
-    } else {
-        false
-    };
     if !replaced_grounded_answer
         && !replaced_deterministic_fallback
         && !replaced_direct_scalar
         && !replaced_direct_structured
         && !replaced_contract_answer
-        && !replaced_matrix_observed_shape
         && !delivery_is_content_answer_candidate(
             agent_run_context,
             &loop_state,
@@ -1215,50 +1099,9 @@ pub(crate) async fn finalize_loop_reply(
         }
     }
 
-    if let Some(marker) =
-        missing_requested_success_marker(agent_run_context, &loop_state, &delivery_deduped)
-    {
-        let message = execution_recipe_missing_success_marker_message(
-            state,
-            task,
-            user_text,
-            marker,
-            agent_run_context,
-        )
-        .await;
-        let delivery_messages = vec![message.clone()];
-        let delivery_consistent =
-            crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
-        let journal = build_loop_journal(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
-            agent_run_context,
-            finalizer_summary,
-            delivery_consistent,
-            &message,
-            crate::task_journal::TaskJournalFinalStatus::Failure,
-        )
-        .await;
-        return Ok(AskReply::non_llm(message.clone())
-            .with_messages(delivery_messages)
-            .with_task_journal(journal)
-            .with_failure(message));
-    }
-
     prefer_observed_answer_for_exact_contract(
         state,
         &task.task_id,
-        &mut loop_state,
-        agent_run_context,
-        &mut delivery_deduped,
-        &mut finalizer_summary,
-    );
-    replace_delivery_with_matrix_observed_shape_answer(
-        state,
-        task,
-        user_text,
         &mut loop_state,
         agent_run_context,
         &mut delivery_deduped,
@@ -1285,20 +1128,6 @@ pub(crate) async fn finalize_loop_reply(
         &mut finalizer_summary,
         agent_run_context,
     );
-    let exact_delivery_requested = agent_run_context
-        .and_then(|ctx| ctx.output_contract())
-        .map(output_contract_requests_exact_delivery)
-        .unwrap_or(false);
-    if !exact_delivery_requested {
-        attach_execution_recipe_closeout_to_delivery(
-            Some(state),
-            user_text,
-            &loop_state,
-            agent_run_context,
-            &mut delivery_deduped,
-        );
-        ensure_requested_success_marker_visible(agent_run_context, &mut delivery_deduped);
-    }
     attach_execution_summary_to_delivery(
         &loop_state,
         agent_run_context,
@@ -1311,14 +1140,6 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
         &mut delivery_deduped,
         &mut finalizer_summary,
-    );
-    replace_delivery_with_requested_machine_kv_summary(
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
     );
     render_machine_payload_delivery_if_needed(
         state,
@@ -1344,30 +1165,6 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
-    replace_final_delivery_with_exact_observation_machine_field_projection(
-        state,
-        task,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
-    );
-    if sync_final_delivery_with_local_code_projection(
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
-    ) {
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "final_delivery_from_local_code_strict_json_projection",
-            "attached",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-    }
     render_machine_payload_delivery_if_needed(
         state,
         task,
@@ -1395,38 +1192,6 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
         &mut delivery_deduped,
     );
-    if sync_latest_synthesis_local_code_projection_if_needed(
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
-    ) {
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "final_delivery_from_synthesis_local_code_strict_json_projection",
-            "synced",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-    }
-    if sync_recorded_local_code_projection_if_needed(
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
-    ) {
-        log_deterministic_delivery_record(
-            &task.task_id,
-            "final_delivery_from_recorded_local_code_strict_json_projection",
-            "synced",
-            agent_run_context,
-            loop_state.executed_step_results.len(),
-        );
-    }
     let (normalized_delivery, _, _) =
         crate::finalize::build_final_delivery_with_priority(&delivery_deduped, None);
     delivery_deduped = normalized_delivery;
@@ -1468,8 +1233,8 @@ pub(crate) async fn finalize_loop_reply(
     if let Some(route_result) = agent_run_context.and_then(|ctx| ctx.output_contract()) {
         let defer_to_post_write_readback =
             crate::answer_verifier::post_write_content_evidence_missing_before_verifier(
+                route_result,
                 &journal,
-                &final_text,
             );
         if defer_to_post_write_readback {
             crate::append_act_plan_log(
