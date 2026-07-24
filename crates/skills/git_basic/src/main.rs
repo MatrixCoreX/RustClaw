@@ -466,9 +466,13 @@ fn resolve_repository_root(
             ));
         }
     };
-    let relative = normalize_repo_relative_path(requested)?;
-    let candidate = workspace
-        .join(relative)
+    let requested_path = Path::new(requested);
+    let candidate = if requested_path.is_absolute() {
+        requested_path.to_path_buf()
+    } else {
+        workspace.join(normalize_repo_relative_path(requested)?)
+    };
+    let candidate = candidate
         .canonicalize()
         .map_err(|error| GitBasicError::new("git_repository_path_invalid", error.to_string()))?;
     if !candidate.starts_with(&workspace) {

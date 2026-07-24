@@ -6,7 +6,9 @@
 ## Capability Summary
 - `git_basic` exposes read-oriented Git repository inspection commands.
 - It is designed for status/history/diff visibility without destructive history changes.
-- Repository selection is workspace-bound. `repo` is a workspace-relative repository directory; it cannot escape `WORKSPACE_ROOT`.
+- Repository selection is workspace-bound. `repo` may be a workspace-relative
+  repository directory or an absolute path whose canonical target remains
+  inside `WORKSPACE_ROOT`; it cannot escape `WORKSPACE_ROOT`.
 - Revision reads resolve `target` / `ref` to an exact Git object ID before executing the observation.
 - Not a git repository: returns `status=error` and `error_text` (no silent ok).
 
@@ -32,7 +34,7 @@ Action selection notes:
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported actions. |
-| all | `repo` | no | string | `.` | Workspace-relative repository directory. |
+| all | `repo` | no | string | `.` | Workspace-relative repository directory, or a canonical workspace-contained absolute path. |
 | `status`, `log`, `branch`, `remote`, `changed_files` | `cursor` | no | integer | 0 | Zero-based observation cursor. |
 | `status`, `log`, `branch`, `remote`, `changed_files` | `limit` | no | integer | 20 | Page size, range 1..200. |
 | `log` | `n` | no | integer | 20 | Alias for `limit`. |
@@ -46,7 +48,10 @@ Action selection notes:
 - Unsupported action names.
 - Not a git repository: `status=error`, `error_text` set.
 - Invalid target/revision/path; git command failures return readable stderr.
-- Option-like revisions, absolute paths, parent traversal, repositories outside the workspace, and invalid argument types return stable `error_code` values.
+- Option-like revisions, absolute file/pathspec values, parent traversal,
+  repositories outside the workspace, and invalid argument types return stable
+  `error_code` values. An absolute `repo` selector is accepted only when its
+  canonical target remains inside `WORKSPACE_ROOT`.
 - Non-zero `git` command exit codes are returned as `status=error` with `error_text=git command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `schema_version`, `action`, `subcommand`, `exit_code`, `output`, and action-specific machine fields.
 
