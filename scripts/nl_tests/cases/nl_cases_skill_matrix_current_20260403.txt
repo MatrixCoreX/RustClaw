@@ -27,7 +27,7 @@ chat_act|skill_db_basic_schema_version|skill:db_basic,local|查一下 data/skill
 chat_act|skill_docker_basic_ps|skill:docker_basic,local,conditional|看一下当前 docker 容器列表，简短告诉我有没有在运行的容器
 chat_act|skill_fs_search_readme_paths|skill:fs_search,local|在当前仓库里找名字包含 README 的文件，列出前 5 个完整路径
 chat_act|skill_health_check_summary|skill:health_check,local|帮我做一次基础健康检查，只列最重要的结论
-chat_act|skill_log_analyze_fixture_app|skill:log_analyze,local|分析 scripts/nl_tests/fixtures/device_local/logs/app.log，简短说有没有明显异常
+chat_act|skill_log_analyze_fixture_app|any_skill:log_analyze+fs_basic,covers:log_analysis,requires_tool_call=true,local|分析 scripts/nl_tests/fixtures/device_local/logs/app.log，简短说有没有明显异常
 chat_act|skill_service_control_clawd_status|skill:service_control,local,conditional|检查 clawd 服务状态，简短告诉我
 chat_act|skill_task_control_list|skill:task_control,local|看看当前任务队列里有没有任务，简短告诉我结果
 chat_act|skill_config_guard_validate_main|any_skill:config_basic+config_edit,capability:config.guard_rustclaw_config,covers:config_guard,requires_tool_call=true,local_readonly|检查 configs/config.toml 有没有明显配置问题，简短给我结论
