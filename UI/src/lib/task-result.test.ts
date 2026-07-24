@@ -65,6 +65,31 @@ test("renders safe model turn lifecycle fields", () => {
   assert.ok(view.meta.includes("tool_name=call_capability"));
 });
 
+test("renders a live tool event before the persisted step completes", () => {
+  const view = buildTaskTraceEventView(
+    {
+      event_type: "tool_active",
+      payload: {
+        phase: "active",
+        round_no: 2,
+        step_in_round: 1,
+        global_step: 3,
+        action_kind: "call_capability",
+        action_ref: "terminal.run_command",
+        requested_capability: "terminal.run_command",
+        status: "running",
+      },
+    },
+    "en",
+  );
+
+  assert.equal(view.title, "Tool active");
+  assert.equal(view.detail, "terminal.run_command is running.");
+  assert.equal(view.tone, "running");
+  assert.ok(view.meta.includes("action_kind=call_capability"));
+  assert.ok(view.meta.includes("action_ref=terminal.run_command"));
+});
+
 test("summarizes persisted subagent graph events", () => {
   const graphView = buildTaskTraceEventView(
     {
