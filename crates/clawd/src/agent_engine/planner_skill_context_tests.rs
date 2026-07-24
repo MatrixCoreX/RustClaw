@@ -158,44 +158,22 @@ fn first_round_uses_only_budgeted_compact_index() {
         fs_basic_line.contains("Use list_entries for complete direct-child inventories"),
         "fs_basic_line={fs_basic_line}"
     );
-    let video_line = context
-        .text
-        .lines()
-        .find(|line| line.contains("video.generate"))
-        .expect("video_generate compact-index line");
-    assert!(
-        video_line.contains(
-            "optional=first_frame_image|first_frame|image|last_frame_image|last_frame|duration|resolution|output_path"
-        ),
-        "video_line={video_line}"
+    let loadable_groups = crate::capability_map::planner_loadable_capability_group_names_for_task(
+        &state,
+        &task,
+        &BTreeSet::new(),
     );
-    let schedule_line = context
-        .text
-        .lines()
-        .find(|line| line.contains("schedule.preview(action=preview"))
-        .expect("schedule compact-index line");
-    assert!(
-        !schedule_line.contains("summary=Shared skill prompt contract:"),
-        "schedule_line={schedule_line}"
-    );
-    assert!(
-        schedule_line.contains("schedule.preview(action=preview"),
-        "schedule_line={schedule_line}"
-    );
-    let process_line = context
-        .text
-        .lines()
-        .find(|line| line.contains("process.ps(action=ps"))
-        .expect("process capability compact-index line");
-    assert!(process_line.contains("process.port_list(action=port_list"));
-    assert!(!context.text.contains("process_basic"));
-    let module_line = context
-        .text
-        .lines()
-        .find(|line| line.contains("module.preview_install(action=preview_install"))
-        .expect("module preview compact-index line");
-    assert!(module_line.contains("module.install(action=install"));
-    assert!(module_line.contains("Use module.preview_install for every preview-only request"));
+    for deferred_skill in [
+        "install_module",
+        "process_basic",
+        "schedule",
+        "video_generate",
+    ] {
+        assert!(
+            loadable_groups.iter().any(|skill| skill == deferred_skill),
+            "deferred_skill={deferred_skill}; loadable_groups={loadable_groups:?}"
+        );
+    }
 }
 
 #[test]
