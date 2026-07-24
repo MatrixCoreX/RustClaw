@@ -99,7 +99,18 @@ fn structured_observed_body_compacts_large_inventory_dir_by_kind() {
     let observed = structured_observed_body("system_basic", &body).expect("observed body");
     assert!(observed.contains("dir_entries=dir_0:size_bytes=0,dir_1:size_bytes=0"));
     assert!(observed.contains("file_entries=file_0.md:size_bytes=42,file_1.md:size_bytes=42"));
-    assert!(!observed.contains("modified_ts=1777513843"));
+    assert!(observed.contains(
+        "ordering.first_entry name=dir_0 path=dir_0 kind=dir size_bytes=0 modified_ts=1777513843"
+    ));
+    assert!(observed.contains(
+        "ordering.last_entry name=file_8.md path=file_8.md kind=file size_bytes=42 modified_ts=1777513843"
+    ));
+    assert!(observed.contains(
+        "ordering.first_file name=file_0.md path=file_0.md kind=file size_bytes=42 modified_ts=1777513843"
+    ));
+    assert!(observed.contains(
+        "ordering.last_dir name=dir_8 path=dir_8 kind=dir size_bytes=0 modified_ts=1777513843"
+    ));
     assert!(observed.contains("size_bytes=42"));
 }
 

@@ -489,6 +489,57 @@ fn compact_inventory_dir_kind_lines(entries: &[serde_json::Value]) -> Option<Vec
     (!lines.is_empty()).then_some(lines)
 }
 
+fn inventory_dir_boundary_entry_line(label: &str, entry: &serde_json::Value) -> Option<String> {
+    let entry = entry.as_object()?;
+    let mut fields = Vec::new();
+    for field in ["name", "path", "kind", "size_bytes", "modified_ts"] {
+        if let Some(value) = entry.get(field).and_then(value_scalar_text) {
+            fields.push(format!("{field}={value}"));
+        }
+    }
+    (!fields.is_empty()).then(|| format!("ordering.{label} {}", fields.join(" ")))
+}
+
+fn inventory_dir_boundary_lines(entries: &[serde_json::Value]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (label, entry) in
+        [
+            ("first_entry", entries.first()),
+            ("last_entry", entries.last()),
+            (
+                "first_file",
+                entries.iter().find(|entry| {
+                    entry.get("kind").and_then(|value| value.as_str()) == Some("file")
+                }),
+            ),
+            (
+                "last_file",
+                entries.iter().rev().find(|entry| {
+                    entry.get("kind").and_then(|value| value.as_str()) == Some("file")
+                }),
+            ),
+            (
+                "first_dir",
+                entries.iter().find(|entry| {
+                    entry.get("kind").and_then(|value| value.as_str()) == Some("dir")
+                }),
+            ),
+            (
+                "last_dir",
+                entries.iter().rev().find(|entry| {
+                    entry.get("kind").and_then(|value| value.as_str()) == Some("dir")
+                }),
+            ),
+        ]
+    {
+        if let Some(line) = entry.and_then(|entry| inventory_dir_boundary_entry_line(label, entry))
+        {
+            lines.push(line);
+        }
+    }
+    lines
+}
+
 fn inventory_dir_size_summary_lines(value: &serde_json::Value) -> Vec<String> {
     let Some(summary) = value.get("size_summary").and_then(|v| v.as_object()) else {
         return Vec::new();
@@ -562,6 +613,7 @@ pub(super) fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Opt
             if let Some(lines) = compact_inventory_dir_kind_lines(entries) {
                 let lines = size_summary_lines
                     .into_iter()
+                    .chain(inventory_dir_boundary_lines(entries))
                     .chain(lines)
                     .collect::<Vec<_>>();
                 return Some(format!("{header}\n{}", lines.join("\n")));
