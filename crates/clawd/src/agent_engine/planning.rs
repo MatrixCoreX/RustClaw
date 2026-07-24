@@ -868,13 +868,17 @@ fn native_capability_leaf_tool_name(capability: &str) -> String {
             }
         })
         .collect::<String>();
+    let direct_name = format!("call_{readable}");
+    if direct_name.len() <= MAX_NATIVE_TOOL_NAME_BYTES {
+        return direct_name;
+    }
     let digest = Sha256::digest(capability.as_bytes());
     let suffix = digest[..8]
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     let suffix = format!("__{suffix}");
-    let mut prefix = format!("call_{readable}");
+    let mut prefix = direct_name;
     prefix.truncate(MAX_NATIVE_TOOL_NAME_BYTES.saturating_sub(suffix.len()));
     format!("{prefix}{suffix}")
 }
@@ -933,7 +937,7 @@ fn native_capability_tool_map(
 
 #[cfg(test)]
 fn native_contract_repair_signal(error_code: &str) -> String {
-    native_contract_repair_signal_with_context(error_code, None, None)
+    native_contract_repair_signal_with_context(error_code, None, None, &[])
 }
 
 fn native_contract_repair_signal_for_turn(
@@ -973,7 +977,21 @@ fn native_contract_repair_signal_for_turn(
             .find(|tool| tool.name == call.name)
             .map(|tool| exact_schema_branch_for_call(&tool.input_schema, call))
     });
-    native_contract_repair_signal_with_context(error_code, failed_call, expected_schema)
+    let available_tool_names = if error_code == "native_plan_unknown_tool" {
+        request
+            .tools
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    native_contract_repair_signal_with_context(
+        error_code,
+        failed_call,
+        expected_schema,
+        &available_tool_names,
+    )
 }
 
 fn exact_schema_branch_for_call(schema: &Value, call: &ModelToolCall) -> Value {
@@ -1004,10 +1022,12 @@ fn native_contract_repair_signal_with_context(
     error_code: &str,
     failed_call: Option<&ModelToolCall>,
     expected_schema: Option<Value>,
+    available_tool_names: &[String],
 ) -> String {
     let respond_contract_error = error_code.starts_with("native_respond_")
         || error_code == "native_plan_respond_tool_required";
     let loader_contract_error = error_code.starts_with("native_capability_group_load_");
+    let unknown_tool_error = error_code == "native_plan_unknown_tool";
     let (default_tool_name, mut required_argument_fields, next_action) = if respond_contract_error {
         (
             NATIVE_RESPOND_TOOL,
@@ -1031,6 +1051,12 @@ fn native_contract_repair_signal_with_context(
             vec!["groups".to_string()],
             "retry_native_capability_group_load",
         )
+    } else if unknown_tool_error {
+        (
+            NATIVE_CALL_CAPABILITY_TOOL,
+            Vec::new(),
+            "retry_with_available_native_tool",
+        )
     } else {
         (
             NATIVE_CALL_CAPABILITY_TOOL,
@@ -1038,10 +1064,13 @@ fn native_contract_repair_signal_with_context(
             "retry_native_tool_call",
         )
     };
-    let exact_failed_tool = failed_call.is_some();
-    let tool_name = failed_call
-        .map(|call| call.name.as_str())
-        .unwrap_or(default_tool_name);
+    let exact_failed_tool = failed_call.is_some() && expected_schema.is_some();
+    let failed_tool_name = failed_call.map(|call| call.name.as_str());
+    let tool_name = if unknown_tool_error {
+        None
+    } else {
+        Some(failed_tool_name.unwrap_or(default_tool_name))
+    };
     let mut argument_constraints = Map::new();
     if error_code == "native_respond_object_field_json_invalid" {
         argument_constraints.insert(
@@ -1085,7 +1114,9 @@ fn native_contract_repair_signal_with_context(
             "status": "error",
             "error_code": error_code,
             "tool_name": tool_name,
+            "failed_tool_name": failed_tool_name,
             "exact_failed_tool": exact_failed_tool,
+            "available_tool_names": available_tool_names,
             "required_argument_fields": required_argument_fields,
             "argument_constraints": Value::Object(argument_constraints),
             "capability_value_source": "RUNTIME_CAPABILITY_MAP",
@@ -1111,23 +1142,45 @@ fn native_contract_retry_request(
     repair_signal: &str,
 ) -> ModelTurnRequest {
     let mut request = request.clone();
-    let repair_tool_name = serde_json::from_str::<Value>(repair_signal)
-        .ok()
+    let repair_observation = serde_json::from_str::<Value>(repair_signal).ok();
+    let error_code = repair_observation
+        .as_ref()
         .and_then(|value| {
             value
-                .pointer("/protocol_observation/tool_name")
+                .pointer("/protocol_observation/error_code")
                 .and_then(Value::as_str)
-                .map(str::to_string)
-        });
-    let exact_failed_tool = serde_json::from_str::<Value>(repair_signal)
-        .ok()
+        })
+        .unwrap_or_default();
+    let repair_tool_name = repair_observation.as_ref().and_then(|value| {
+        value
+            .pointer("/protocol_observation/tool_name")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+    let exact_failed_tool = repair_observation
+        .as_ref()
         .and_then(|value| {
             value
                 .pointer("/protocol_observation/exact_failed_tool")
                 .and_then(Value::as_bool)
         })
         .unwrap_or(false);
-    if let Some(repair_tool_name) = repair_tool_name {
+    if error_code == "native_plan_unknown_tool" {
+        let available_tool_names = repair_observation
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .pointer("/protocol_observation/available_tool_names")
+                    .and_then(Value::as_array)
+            })
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<BTreeSet<_>>();
+        request
+            .tools
+            .retain(|tool| available_tool_names.contains(tool.name.as_str()));
+    } else if let Some(repair_tool_name) = repair_tool_name {
         if exact_failed_tool {
             request.tools.retain(|tool| tool.name == repair_tool_name);
         } else if repair_tool_name == NATIVE_CALL_CAPABILITY_TOOL {
