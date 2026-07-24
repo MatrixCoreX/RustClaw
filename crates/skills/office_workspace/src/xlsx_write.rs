@@ -8,6 +8,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 
 pub struct XlsxWriteResult {
     pub members: BTreeMap<String, Vec<u8>>,
@@ -43,10 +44,11 @@ struct SheetBuild {
     row_heights: BTreeMap<u32, f64>,
     tables: Vec<TableBuild>,
     charts: Vec<ChartBuild>,
+    images: Vec<ImageBuild>,
     comments: BTreeMap<String, String>,
     hyperlinks: BTreeMap<String, String>,
-    validations: Vec<String>,
-    conditional_formats: Vec<String>,
+    validations: Vec<Value>,
+    conditional_formats: Vec<Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +64,13 @@ struct ChartBuild {
     chart_type: String,
 }
 
+#[derive(Clone, Debug)]
+struct ImageBuild {
+    path: String,
+    cell: String,
+    alt: String,
+}
+
 pub fn create_xlsx(operations: &[NormalizedOperation]) -> OfficeResult<XlsxWriteResult> {
     let mut sheets = Vec::<SheetBuild>::new();
     let mut named_ranges = Vec::new();
@@ -75,7 +84,7 @@ pub fn create_xlsx(operations: &[NormalizedOperation]) -> OfficeResult<XlsxWrite
             json!({}),
         ));
     }
-    let members = build_workbook(&sheets, &named_ranges);
+    let members = build_workbook(&sheets, &named_ranges)?;
     Ok(XlsxWriteResult {
         members,
         changed_refs: operations
@@ -345,19 +354,28 @@ fn apply_create_operation(
             let sheet = operation.string("sheet")?;
             require_sheet_mut(sheets, sheet)?
                 .validations
-                .push(operation.as_value().to_string());
+                .push(operation.as_value());
         }
         "add_conditional_format" => {
             let sheet = operation.string("sheet")?;
             require_sheet_mut(sheets, sheet)?
                 .conditional_formats
-                .push(operation.as_value().to_string());
+                .push(operation.as_value());
         }
         "add_image" => {
-            return Err(OfficeError::unsupported(
-                "XLSX image creation requires a drawing anchor adapter",
-                json!({"operation_id": operation.id}),
-            ))
+            let sheet = operation.string("sheet")?;
+            let path = crate::package::resolve_input_path(operation.string("path")?)?;
+            image_extension(&path)?;
+            let cell = operation.optional_string("cell").unwrap_or("A1");
+            parse_coordinate(cell)?;
+            require_sheet_mut(sheets, sheet)?.images.push(ImageBuild {
+                path: path.display().to_string(),
+                cell: cell.to_string(),
+                alt: operation
+                    .optional_string("alt")
+                    .unwrap_or("image")
+                    .to_string(),
+            });
         }
         _ => {
             return Err(OfficeError::unsupported(
@@ -480,7 +498,7 @@ fn infer_cell_value(value: &Value, explicit_type: Option<&str>) -> OfficeResult<
 fn build_workbook(
     sheets: &[SheetBuild],
     named_ranges: &[(String, String)],
-) -> BTreeMap<String, Vec<u8>> {
+) -> OfficeResult<BTreeMap<String, Vec<u8>>> {
     let mut members = BTreeMap::new();
     let mut content_types = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>"#,
@@ -489,6 +507,9 @@ fn build_workbook(
     let mut workbook_rels = String::new();
     let mut table_index = 0usize;
     let mut chart_index = 0usize;
+    let mut image_index = 0usize;
+    let mut image_extensions = BTreeSet::new();
+    let mut has_vml = false;
     for (index, sheet) in sheets.iter().enumerate() {
         let number = index + 1;
         content_types.push_str(&format!(
@@ -506,7 +527,13 @@ fn build_workbook(
         workbook_rels.push_str(&format!(
             "<Relationship Id=\"rId{number}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{number}.xml\"/>"
         ));
-        let built = build_sheet(sheet, number, &mut table_index, &mut chart_index);
+        let built = build_sheet(
+            sheet,
+            number,
+            &mut table_index,
+            &mut chart_index,
+            &mut image_index,
+        )?;
         members.insert(
             format!("xl/worksheets/sheet{number}.xml"),
             built.xml.into_bytes(),
@@ -530,9 +557,34 @@ fn build_workbook(
                 content_types.push_str(&format!(
                     "<Override PartName=\"/{name}\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>"
                 ));
+            } else if name.starts_with("xl/comments") {
+                content_types.push_str(&format!(
+                    "<Override PartName=\"/{name}\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml\"/>"
+                ));
+            } else if name.starts_with("xl/media/") {
+                if let Some(extension) = std::path::Path::new(&name)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                {
+                    image_extensions.insert(extension.to_string());
+                }
+            } else if name.ends_with(".vml") {
+                has_vml = true;
             }
             members.insert(name, bytes);
         }
+    }
+    for extension in image_extensions {
+        content_types.push_str(&format!(
+            "<Default Extension=\"{}\" ContentType=\"{}\"/>",
+            xml(&extension),
+            image_content_type(&extension)
+        ));
+    }
+    if has_vml {
+        content_types.push_str(
+            r#"<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>"#,
+        );
     }
     let named_ranges = if named_ranges.is_empty() {
         String::new()
@@ -582,7 +634,7 @@ fn build_workbook(
         )
         .into_bytes(),
     );
-    members
+    Ok(members)
 }
 
 struct BuiltSheet {
@@ -596,7 +648,8 @@ fn build_sheet(
     sheet_number: usize,
     table_index: &mut usize,
     chart_index: &mut usize,
-) -> BuiltSheet {
+    image_index: &mut usize,
+) -> OfficeResult<BuiltSheet> {
     let mut rows: BTreeMap<u32, Vec<(u32, &CellBuild)>> = BTreeMap::new();
     for ((row, column), cell) in &sheet.cells {
         rows.entry(*row).or_default().push((*column, cell));
@@ -683,28 +736,54 @@ fn build_sheet(
             sheet.tables.len()
         );
     }
-    let drawing = if let Some(chart) = sheet.charts.first() {
-        *chart_index += 1;
-        let id = *chart_index;
+    let drawing = if !sheet.charts.is_empty() || !sheet.images.is_empty() {
+        let drawing_id = sheet_number;
         relationships.push(format!(
-            "<Relationship Id=\"rIdDrawing{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing{id}.xml\"/>"
+            "<Relationship Id=\"rIdDrawing{drawing_id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing{drawing_id}.xml\"/>"
         ));
+        let mut anchors = String::new();
+        let mut drawing_relationships = String::new();
+        for chart in &sheet.charts {
+            *chart_index += 1;
+            let chart_id = *chart_index;
+            anchors.push_str(&chart_anchor(chart_id));
+            drawing_relationships.push_str(&format!(
+                "<Relationship Id=\"rIdChart{chart_id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart{chart_id}.xml\"/>"
+            ));
+            parts.insert(
+                format!("xl/charts/chart{chart_id}.xml"),
+                chart_xml(chart, &sheet.name).into_bytes(),
+            );
+        }
+        for image in &sheet.images {
+            *image_index += 1;
+            let image_id = *image_index;
+            let extension = image_extension(std::path::Path::new(&image.path))?;
+            let bytes = fs::read(&image.path).map_err(|error| {
+                OfficeError::new(
+                    "source_unavailable",
+                    format!("cannot read spreadsheet image: {error}"),
+                    json!({"path": image.path}),
+                )
+            })?;
+            parts.insert(format!("xl/media/image{image_id}.{extension}"), bytes);
+            drawing_relationships.push_str(&format!(
+                "<Relationship Id=\"rIdImage{image_id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"../media/image{image_id}.{extension}\"/>"
+            ));
+            anchors.push_str(&image_anchor(image_id, image)?);
+        }
         parts.insert(
-            format!("xl/drawings/drawing{id}.xml"),
-            drawing_xml(id).into_bytes(),
+            format!("xl/drawings/drawing{drawing_id}.xml"),
+            drawing_xml(&anchors).into_bytes(),
         );
         parts.insert(
-            format!("xl/drawings/_rels/drawing{id}.xml.rels"),
+            format!("xl/drawings/_rels/drawing{drawing_id}.xml.rels"),
             format!(
-                "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rIdChart{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart{id}.xml\"/></Relationships>"
+                "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{drawing_relationships}</Relationships>"
             )
             .into_bytes(),
         );
-        parts.insert(
-            format!("xl/charts/chart{id}.xml"),
-            chart_xml(chart, &sheet.name).into_bytes(),
-        );
-        format!("<drawing r:id=\"rIdDrawing{id}\"/>")
+        format!("<drawing r:id=\"rIdDrawing{drawing_id}\"/>")
     } else {
         String::new()
     };
@@ -722,15 +801,29 @@ fn build_sheet(
         }
         format!("<hyperlinks>{values}</hyperlinks>")
     };
-    let validations = data_validations_xml(&sheet.validations);
-    let conditional_formats = conditional_formats_xml(&sheet.conditional_formats);
-    let comments_warning = if sheet.comments.is_empty() {
+    let validations = data_validations_xml(&sheet.validations)?;
+    let conditional_formats = conditional_formats_xml(&sheet.conditional_formats)?;
+    let comments_parts = if sheet.comments.is_empty() {
         String::new()
     } else {
-        "<extLst><ext uri=\"rustclaw:comments-preserved-as-structured-evidence\"/></extLst>".into()
+        relationships.push(format!(
+            "<Relationship Id=\"rIdComments{sheet_number}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments\" Target=\"../comments{sheet_number}.xml\"/>"
+        ));
+        relationships.push(format!(
+            "<Relationship Id=\"rIdVml{sheet_number}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing\" Target=\"../drawings/vmlDrawing{sheet_number}.vml\"/>"
+        ));
+        parts.insert(
+            format!("xl/comments{sheet_number}.xml"),
+            comments_xml(&sheet.comments).into_bytes(),
+        );
+        parts.insert(
+            format!("xl/drawings/vmlDrawing{sheet_number}.vml"),
+            comments_vml(&sheet.comments).into_bytes(),
+        );
+        format!("<legacyDrawing r:id=\"rIdVml{sheet_number}\"/>")
     };
     let xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><dimension ref=\"{}\"/>{sheet_views}{columns}<sheetData>{row_xml}</sheetData>{merges}{auto_filter}{validations}{conditional_formats}{hyperlinks}{table_parts}{drawing}{comments_warning}</worksheet>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><dimension ref=\"{}\"/>{sheet_views}{columns}<sheetData>{row_xml}</sheetData>{auto_filter}{merges}{conditional_formats}{validations}{hyperlinks}{drawing}{comments_parts}{table_parts}</worksheet>",
         xml(&dimension)
     );
     let relationships = if relationships.is_empty() {
@@ -742,11 +835,11 @@ fn build_sheet(
         )
     };
     let _ = sheet_number;
-    BuiltSheet {
+    Ok(BuiltSheet {
         xml,
         relationships,
         parts,
-    }
+    })
 }
 
 fn cell_xml(reference: &str, cell: &CellBuild) -> String {
@@ -1127,10 +1220,26 @@ fn table_xml(id: usize, table: &TableBuild, sheet: &SheetBuild) -> String {
     )
 }
 
-fn drawing_xml(id: usize) -> String {
+fn drawing_xml(anchors: &str) -> String {
     format!(
-        "<?xml version=\"1.0\"?><xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>4</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>8</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>20</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{id}\" name=\"Chart {id}\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"rIdChart{id}\"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>"
+        "<?xml version=\"1.0\"?><xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">{anchors}</xdr:wsDr>"
     )
+}
+
+fn chart_anchor(id: usize) -> String {
+    format!(
+        "<xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>4</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>8</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>20</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{id}\" name=\"Chart {id}\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"rIdChart{id}\"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>"
+    )
+}
+
+fn image_anchor(id: usize, image: &ImageBuild) -> OfficeResult<String> {
+    let coordinate = parse_coordinate(&image.cell)?;
+    let column = coordinate.column.saturating_sub(1);
+    let row = coordinate.row.saturating_sub(1);
+    Ok(format!(
+        "<xdr:oneCellAnchor><xdr:from><xdr:col>{column}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>{row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx=\"2400000\" cy=\"1600000\"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"Image {id}\" descr=\"{}\"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"rIdImage{id}\"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>",
+        xml(&image.alt)
+    ))
 }
 
 fn chart_xml(chart: &ChartBuild, sheet: &str) -> String {
@@ -1148,24 +1257,137 @@ fn chart_xml(chart: &ChartBuild, sheet: &str) -> String {
     )
 }
 
-fn data_validations_xml(values: &[String]) -> String {
+fn data_validations_xml(values: &[Value]) -> OfficeResult<String> {
     if values.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
-    format!(
-        "<extLst><ext uri=\"rustclaw:data-validations\" count=\"{}\"/></extLst>",
+    let mut rules = String::new();
+    for value in values {
+        let object = value
+            .as_object()
+            .ok_or_else(|| OfficeError::invalid("data validation operation must be an object"))?;
+        let range = object
+            .get("range")
+            .and_then(Value::as_str)
+            .ok_or_else(|| OfficeError::invalid("data validation requires range"))?;
+        CellRange::parse(range)?;
+        let kind = object
+            .get("validation_type")
+            .and_then(Value::as_str)
+            .unwrap_or("list");
+        let formula = object
+            .get("formula1")
+            .or_else(|| object.get("formula"))
+            .map(scalar_text)
+            .unwrap_or_default();
+        let allow_blank = object
+            .get("allow_blank")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        rules.push_str(&format!(
+            "<dataValidation type=\"{}\" allowBlank=\"{}\" sqref=\"{}\"><formula1>{}</formula1></dataValidation>",
+            xml(kind),
+            if allow_blank { 1 } else { 0 },
+            xml(range),
+            xml(&formula)
+        ));
+    }
+    Ok(format!(
+        "<dataValidations count=\"{}\">{rules}</dataValidations>",
         values.len()
+    ))
+}
+
+fn conditional_formats_xml(values: &[Value]) -> OfficeResult<String> {
+    if values.is_empty() {
+        return Ok(String::new());
+    }
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let object = value.as_object().ok_or_else(|| {
+                OfficeError::invalid("conditional format operation must be an object")
+            })?;
+            let range = object
+                .get("range")
+                .and_then(Value::as_str)
+                .ok_or_else(|| OfficeError::invalid("conditional format requires range"))?;
+            CellRange::parse(range)?;
+            let formula = object
+                .get("formula")
+                .map(scalar_text)
+                .unwrap_or_else(|| "TRUE".to_string());
+            Ok(format!(
+                "<conditionalFormatting sqref=\"{}\"><cfRule type=\"expression\" priority=\"{}\"><formula>{}</formula></cfRule></conditionalFormatting>",
+                xml(range),
+                index + 1,
+                xml(&formula)
+            ))
+        })
+        .collect()
+}
+
+fn comments_xml(comments: &BTreeMap<String, String>) -> String {
+    let values = comments
+        .iter()
+        .map(|(cell, text)| {
+            format!(
+                "<comment ref=\"{}\" authorId=\"0\"><text><r><t xml:space=\"preserve\">{}</t></r></text></comment>",
+                xml(cell),
+                xml(text)
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><comments xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><authors><author>RustClaw</author></authors><commentList>{values}</commentList></comments>"
     )
 }
 
-fn conditional_formats_xml(values: &[String]) -> String {
-    if values.is_empty() {
-        return String::new();
-    }
+fn comments_vml(comments: &BTreeMap<String, String>) -> String {
+    let shapes = comments
+        .keys()
+        .enumerate()
+        .filter_map(|(index, cell)| {
+            let coordinate = parse_coordinate(cell).ok()?;
+            let row = coordinate.row.saturating_sub(1);
+            let column = coordinate.column.saturating_sub(1);
+            let shape_id = 1025 + index;
+            Some(format!(
+                "<v:shape id=\"_x0000_s{shape_id}\" type=\"#_x0000_t202\" style=\"position:absolute;visibility:hidden\" fillcolor=\"#ffffe1\" o:insetmode=\"auto\"><v:fill color2=\"#ffffe1\"/><v:shadow on=\"t\" color=\"black\" obscured=\"t\"/><v:path o:connecttype=\"none\"/><v:textbox style=\"mso-direction-alt:auto\"><div style=\"text-align:left\"/></v:textbox><x:ClientData ObjectType=\"Note\"><x:MoveWithCells/><x:SizeWithCells/><x:Anchor>{column}, 15, {row}, 2, {}, 15, {}, 4</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>{row}</x:Row><x:Column>{column}</x:Column></x:ClientData></v:shape>",
+                column + 3,
+                row + 4
+            ))
+        })
+        .collect::<String>();
     format!(
-        "<extLst><ext uri=\"rustclaw:conditional-formats\" count=\"{}\"/></extLst>",
-        values.len()
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><xml xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\"><o:shapelayout v:ext=\"edit\"><o:idmap v:ext=\"edit\" data=\"1\"/></o:shapelayout><v:shapetype id=\"_x0000_t202\" coordsize=\"21600,21600\" o:spt=\"202\" path=\"m,l,21600r21600,l21600,xe\"><v:stroke joinstyle=\"miter\"/><v:path gradientshapeok=\"t\" o:connecttype=\"rect\"/></v:shapetype>{shapes}</xml>"
     )
+}
+
+fn image_extension(path: &std::path::Path) -> OfficeResult<&str> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or_else(|| OfficeError::invalid("image source requires a file extension"))?;
+    match extension.as_str() {
+        "png" => Ok("png"),
+        "jpg" | "jpeg" => Ok("jpeg"),
+        "gif" => Ok("gif"),
+        _ => Err(OfficeError::unsupported(
+            "supported spreadsheet image inputs are PNG, JPEG, and GIF",
+            json!({"extension": extension}),
+        )),
+    }
+}
+
+fn image_content_type(extension: &str) -> &'static str {
+    match extension {
+        "jpeg" | "jpg" => "image/jpeg",
+        "gif" => "image/gif",
+        _ => "image/png",
+    }
 }
 
 fn styles_xml() -> &'static str {

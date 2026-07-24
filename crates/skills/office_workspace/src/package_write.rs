@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
@@ -15,6 +16,8 @@ pub struct PublishEvidence {
     pub output_path: PathBuf,
     pub output_sha256: String,
     pub backup_path: Option<PathBuf>,
+    pub abandoned_temp_files_removed: usize,
+    pub temp_cleanup_errors: Vec<String>,
 }
 
 pub fn resolve_output_path(value: &str) -> OfficeResult<PathBuf> {
@@ -75,6 +78,12 @@ pub fn publish_package(
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("office-output");
+    let cleanup = cleanup_abandoned_temp_packages(
+        parent,
+        file_name,
+        SystemTime::now(),
+        abandoned_temp_max_age(),
+    );
     let temp_path = parent.join(format!(".{file_name}.rustclaw-{}.tmp", Uuid::new_v4()));
     let result = write_and_validate(members, &temp_path, format);
     let package = match result {
@@ -121,7 +130,86 @@ pub fn publish_package(
         output_path: output_path.to_path_buf(),
         output_sha256: package.source.sha256,
         backup_path,
+        abandoned_temp_files_removed: cleanup.removed,
+        temp_cleanup_errors: cleanup.errors,
     })
+}
+
+struct TempCleanupEvidence {
+    removed: usize,
+    errors: Vec<String>,
+}
+
+fn abandoned_temp_max_age() -> Duration {
+    let seconds = std::env::var("OFFICE_TEMP_MAX_AGE_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(86_400)
+        .max(3_600);
+    Duration::from_secs(seconds)
+}
+
+fn cleanup_abandoned_temp_packages(
+    parent: &Path,
+    file_name: &str,
+    now: SystemTime,
+    max_age: Duration,
+) -> TempCleanupEvidence {
+    let prefix = format!(".{file_name}.rustclaw-");
+    let mut evidence = TempCleanupEvidence {
+        removed: 0,
+        errors: Vec::new(),
+    };
+    let entries = match fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(error) => {
+            evidence.errors.push(error.kind().to_string());
+            return evidence;
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                evidence.errors.push(error.kind().to_string());
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(candidate_id) = name
+            .strip_prefix(&prefix)
+            .and_then(|value| value.strip_suffix(".tmp"))
+        else {
+            continue;
+        };
+        if Uuid::parse_str(candidate_id).is_err() {
+            continue;
+        }
+        let metadata = match entry.metadata() {
+            Ok(metadata) if metadata.is_file() => metadata,
+            Ok(_) => continue,
+            Err(error) => {
+                evidence.errors.push(error.kind().to_string());
+                continue;
+            }
+        };
+        let old_enough = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age >= max_age);
+        if !old_enough {
+            continue;
+        }
+        match fs::remove_file(entry.path()) {
+            Ok(()) => evidence.removed += 1,
+            Err(error) => evidence.errors.push(error.kind().to_string()),
+        }
+    }
+    evidence
 }
 
 fn write_and_validate(
