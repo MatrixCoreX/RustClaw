@@ -11,6 +11,7 @@ use claw_core::model_turn::{
     ModelTurnResponse,
 };
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use tracing::{info, warn};
 
@@ -29,6 +30,7 @@ const MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS: usize = 2;
 const MAX_NATIVE_RESPONSE_ITEMS: usize = 64;
 const MAX_NATIVE_RESPONSE_FIELDS: usize = 64;
 const MAX_NATIVE_RESPONSE_SOURCE_PATH: usize = 160;
+const MAX_NATIVE_TOOL_NAME_BYTES: usize = 64;
 
 fn planner_last_observation(loop_state: &LoopState) -> String {
     super::observed_output::latest_structured_capability_observation(loop_state)
@@ -299,19 +301,7 @@ pub(super) async fn plan_round_actions(
     }
     let loadable_capability_group_names =
         planner_tool_library.loadable_capability_group_names(loop_state);
-    let native_capability_group_map = native_capability_groups
-        .iter()
-        .map(|group| {
-            (
-                group.tool_name.clone(),
-                group
-                    .capability_names
-                    .iter()
-                    .cloned()
-                    .collect::<BTreeSet<_>>(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    let native_capability_group_map = native_capability_tool_map(&native_capability_groups);
     let native_callable_capability_names = disclosed_callable_capability_names(
         &callable_capability_names,
         &all_native_capability_groups,
@@ -384,6 +374,7 @@ pub(super) async fn plan_round_actions(
                         &native_turn,
                         &native_request,
                         &native_capability_group_map,
+                        &native_capability_argument_schemas,
                         Some(loop_state),
                         &native_callable_capability_names,
                     );
@@ -660,12 +651,7 @@ fn native_planner_request(
         ));
     }
     for group in native_capability_groups {
-        tools.push(native_capability_tool_definition(
-            &group.tool_name,
-            &group.description,
-            &group.capability_names,
-            &group.capability_argument_schemas,
-        ));
+        tools.extend(native_group_tool_definitions(group));
     }
     tools.push(ModelToolDefinition {
         name: NATIVE_RESPOND_TOOL.to_string(),
@@ -871,6 +857,80 @@ fn native_capability_tool_definition(
     }
 }
 
+fn native_capability_leaf_tool_name(capability: &str) -> String {
+    let readable = capability
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let digest = Sha256::digest(capability.as_bytes());
+    let suffix = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let suffix = format!("__{suffix}");
+    let mut prefix = format!("call_{readable}");
+    prefix.truncate(MAX_NATIVE_TOOL_NAME_BYTES.saturating_sub(suffix.len()));
+    format!("{prefix}{suffix}")
+}
+
+fn native_group_leaf_tool_name(
+    group: &crate::capability_map::PlannerNativeCapabilityGroup,
+    capability: &str,
+) -> String {
+    if group.capability_names.len() == 1 {
+        group.tool_name.clone()
+    } else {
+        native_capability_leaf_tool_name(capability)
+    }
+}
+
+fn native_group_tool_definitions(
+    group: &crate::capability_map::PlannerNativeCapabilityGroup,
+) -> Vec<ModelToolDefinition> {
+    group
+        .capability_names
+        .iter()
+        .map(|capability| {
+            let description = if group.capability_names.len() == 1 {
+                group.description.clone()
+            } else {
+                format!(
+                    "runtime_capability_leaf_v1; source_group={}; capability={capability}; dispatch=resolver_verifier",
+                    group.skill_name
+                )
+            };
+            native_capability_tool_definition(
+                &native_group_leaf_tool_name(group, capability),
+                &description,
+                std::slice::from_ref(capability),
+                &group.capability_argument_schemas,
+            )
+        })
+        .collect()
+}
+
+fn native_capability_tool_map(
+    groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
+) -> BTreeMap<String, BTreeSet<String>> {
+    groups
+        .iter()
+        .flat_map(|group| {
+            group.capability_names.iter().map(|capability| {
+                (
+                    native_group_leaf_tool_name(group, capability),
+                    BTreeSet::from([capability.clone()]),
+                )
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 fn native_contract_repair_signal(error_code: &str) -> String {
     native_contract_repair_signal_with_context(error_code, None, None)
@@ -881,13 +941,19 @@ fn native_contract_repair_signal_for_turn(
     turn: &ModelTurnResponse,
     request: &ModelTurnRequest,
     native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
+    capability_argument_schemas: &BTreeMap<String, Value>,
     loop_state: Option<&LoopState>,
     callable_capability_names: &[String],
 ) -> String {
     let failed_call = turn.tool_calls.iter().find(|call| {
-        action_from_native_tool_call(call, native_capability_groups, loop_state)
-            .err()
-            .as_deref()
+        action_from_native_tool_call_with_schemas(
+            call,
+            native_capability_groups,
+            capability_argument_schemas,
+            loop_state,
+        )
+        .err()
+        .as_deref()
             == Some(error_code)
             || (error_code == "native_plan_capability_not_in_runtime_catalog"
                 && call
@@ -942,7 +1008,7 @@ fn native_contract_repair_signal_with_context(
     let respond_contract_error = error_code.starts_with("native_respond_")
         || error_code == "native_plan_respond_tool_required";
     let loader_contract_error = error_code.starts_with("native_capability_group_load_");
-    let (default_tool_name, required_argument_fields, next_action) = if respond_contract_error {
+    let (default_tool_name, mut required_argument_fields, next_action) = if respond_contract_error {
         (
             NATIVE_RESPOND_TOOL,
             vec![
@@ -953,19 +1019,22 @@ fn native_contract_repair_signal_with_context(
                 "fields",
                 "observed_fields",
                 "exact_field_count",
-            ],
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
             "retry_native_respond_call",
         )
     } else if loader_contract_error {
         (
             super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL,
-            vec!["groups"],
+            vec!["groups".to_string()],
             "retry_native_capability_group_load",
         )
     } else {
         (
             NATIVE_CALL_CAPABILITY_TOOL,
-            vec!["capability", "args"],
+            vec!["capability".to_string(), "args".to_string()],
             "retry_native_tool_call",
         )
     };
@@ -994,6 +1063,19 @@ fn native_contract_repair_signal_with_context(
                 "string_value": "rejected"
             }),
         );
+    }
+    if exact_failed_tool && !respond_contract_error && !loader_contract_error {
+        if let Some(required) = expected_schema
+            .as_ref()
+            .and_then(|schema| schema.get("required"))
+            .and_then(Value::as_array)
+        {
+            required_argument_fields = required
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+        }
     }
     if let Some(expected_schema) = expected_schema {
         argument_constraints.insert("exact_call_schema".to_string(), expected_schema);
@@ -1132,19 +1214,6 @@ fn actions_from_native_turn_with_schemas(
     Err("native_plan_respond_tool_required".to_string())
 }
 
-fn action_from_native_tool_call(
-    call: &ModelToolCall,
-    native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
-    loop_state: Option<&LoopState>,
-) -> Result<AgentAction, String> {
-    action_from_native_tool_call_with_schemas(
-        call,
-        native_capability_groups,
-        &BTreeMap::new(),
-        loop_state,
-    )
-}
-
 fn action_from_native_tool_call_with_schemas(
     call: &ModelToolCall,
     native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
@@ -1161,31 +1230,22 @@ fn action_from_native_tool_call_with_schemas(
         }
         tool_name if native_capability_groups.contains_key(tool_name) => {
             let allowed = &native_capability_groups[tool_name];
-            let uses_discriminated_wrapper = call.arguments.as_object().is_some_and(|arguments| {
-                arguments.contains_key("capability") || arguments.contains_key("args")
-            });
-            let action = if allowed.len() == 1 && !uses_discriminated_wrapper {
-                let Some(capability) = allowed.iter().next() else {
-                    return Err("native_plan_group_action_invalid".to_string());
-                };
-                if !call.arguments.is_object() {
-                    return Err("native_plan_args_not_object".to_string());
-                }
-                AgentAction::CallCapability {
-                    capability: capability.clone(),
-                    args: call.arguments.clone(),
-                }
-            } else {
-                action_from_native_capability_call(call, capability_argument_schemas)?
-            };
-            let AgentAction::CallCapability { capability, .. } = &action else {
+            let Some(capability) = allowed.iter().next().filter(|_| allowed.len() == 1) else {
                 return Err("native_plan_group_action_invalid".to_string());
             };
-            if allowed.contains(capability) {
-                Ok(action)
-            } else {
-                Err("native_plan_capability_not_in_selected_group".to_string())
+            if !call.arguments.is_object() {
+                return Err("native_plan_args_not_object".to_string());
             }
+            if capability_argument_schemas
+                .get(capability)
+                .is_some_and(|schema| schema_has_missing_required_fields(schema, &call.arguments))
+            {
+                return Err("native_plan_required_args_missing".to_string());
+            }
+            Ok(AgentAction::CallCapability {
+                capability: capability.clone(),
+                args: call.arguments.clone(),
+            })
         }
         _ => Err("native_plan_unknown_tool".to_string()),
     }
@@ -1255,6 +1315,20 @@ fn schema_accepts_empty_object(schema: &Value) -> bool {
             .and_then(Value::as_array)
             .is_none_or(Vec::is_empty)
         && schema.get("additionalProperties").and_then(Value::as_bool) == Some(false)
+}
+
+fn schema_has_missing_required_fields(schema: &Value, arguments: &Value) -> bool {
+    let Some(arguments) = arguments.as_object() else {
+        return true;
+    };
+    schema
+        .get("required")
+        .and_then(Value::as_array)
+        .is_some_and(|required| {
+            required.iter().filter_map(Value::as_str).any(|field| {
+                !arguments.contains_key(field) || arguments.get(field) == Some(&Value::Null)
+            })
+        })
 }
 
 fn action_from_native_respond_call(
