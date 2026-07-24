@@ -16,6 +16,7 @@ risk_level = "high"
 requires_confirmation = true
 side_effect = true
 timeout_seconds = 60
+input_schema = { type = "object", properties = { command = { type = "string" } } }
 planner_capabilities = [
   { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true },
 ]

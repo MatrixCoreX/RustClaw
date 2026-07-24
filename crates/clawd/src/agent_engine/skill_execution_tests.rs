@@ -464,6 +464,7 @@ planner_kind = "skill"
 risk_level = "high"
 requires_confirmation = true
 side_effect = true
+input_schema = { type = "object", properties = { path = { type = "string" }, field_path = { type = "string" }, value = {} } }
 planner_capabilities = [
   { name = "config.plan_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
   { name = "config.apply_change", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
@@ -625,6 +626,7 @@ side_effect = true
 confirmation_exempt_when = [
   { action = "smart_install", dry_run = true },
 ]
+input_schema = { type = "object", properties = { package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, dry_run = { type = "boolean" } } }
 planner_capabilities = [
   { name = "package.smart_install_preview", action = "smart_install", effect = "mutate", required = ["package|packages"], optional = ["dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
@@ -666,9 +668,10 @@ name = "install_module"
 enabled = true
 kind = "runner"
 planner_kind = "tool"
+input_schema = { type = "object", properties = { module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, ecosystem = { type = "string" } } }
 planner_capabilities = [
-  { name = "module.preview_install", action = "preview_install", effect = "observe", required = ["module|modules"], risk_level = "low", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
-  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], risk_level = "high", subprocess = true, package_install = true, privilege_escalation = false },
+  { name = "module.preview_install", action = "preview_install", effect = "observe", required = ["module|modules"], optional = ["ecosystem"], risk_level = "low", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem"], risk_level = "high", subprocess = true, package_install = true, privilege_escalation = false },
 ]
 "#,
         &["install_module"],

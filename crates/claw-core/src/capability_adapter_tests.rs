@@ -100,6 +100,7 @@ name = "video_generate"
 enabled = true
 kind = "runner"
 planner_kind = "skill"
+input_schema = { type = "object", properties = { prompt = { type = "string" }, wait_for_completion = { type = "boolean" }, poll_after_seconds = { type = "integer" } } }
 
 [[skills.planner_capabilities]]
 name = "video.generate"

@@ -517,6 +517,7 @@ risk_level = "medium"
 side_effect = true
 idempotent = false
 dedup_scope = "action"
+input_schema = { type = "object", properties = { path = { type = "string" }, limit = { type = "integer" } } }
 planner_capabilities = [
   { name = "demo.preview", action = "preview", effect = "observe", required = ["path"], optional = ["limit"], risk_level = "low", idempotent = true, dedup_scope = "args" },
 ]

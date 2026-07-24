@@ -642,6 +642,7 @@ fn native_request_separates_system_protocol_from_user_turn() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        &BTreeMap::new(),
         &[],
         &[],
         &[],
@@ -692,13 +693,32 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
         tool_name: "call_doc_parse".to_string(),
         description: "runtime_capability_group_v1; semantic_tags=document_summary".to_string(),
         capability_names: vec!["doc_parse".to_string()],
+        capability_argument_schemas: BTreeMap::from([(
+            "doc_parse".to_string(),
+            json!({
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string"}},
+                "additionalProperties": false
+            }),
+        )]),
     }];
     let callable = vec!["doc_parse".to_string(), "mcp.dynamic".to_string()];
+    let mcp_schemas = BTreeMap::from([(
+        "mcp.dynamic".to_string(),
+        json!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {"query": {"type": "string"}},
+            "additionalProperties": false
+        }),
+    )]);
     let request = native_planner_request(
         "protocol",
         "current turn",
         None,
         &callable,
+        &mcp_schemas,
         &groups,
         &groups,
         &[],
@@ -707,14 +727,26 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
     assert_eq!(request.tools.len(), 3);
     assert_eq!(request.tools[0].name, "call_capability");
     assert_eq!(
-        request.tools[0].input_schema["properties"]["capability"]["enum"],
+        request.tools[0].input_schema["oneOf"][0]["properties"]["capability"]["enum"],
         json!(["mcp.dynamic"])
+    );
+    assert_eq!(
+        request.tools[0].input_schema["oneOf"][0]["properties"]["args"]["required"],
+        json!(["query"])
     );
     assert_eq!(request.tools[1].name, "call_doc_parse");
     assert!(request.tools[1].description.contains("document_summary"));
     assert_eq!(
-        request.tools[1].input_schema["properties"]["capability"]["enum"],
+        request.tools[1].input_schema["oneOf"][0]["properties"]["capability"]["enum"],
         json!(["doc_parse"])
+    );
+    assert_eq!(
+        request.tools[1].input_schema["oneOf"][0]["properties"]["args"]["required"],
+        json!(["path"])
+    );
+    assert_eq!(
+        request.tools[1].input_schema["oneOf"][0]["properties"]["args"]["additionalProperties"],
+        json!(false)
     );
     assert_eq!(request.tools[2].name, "respond");
 
@@ -723,6 +755,7 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
         "current turn",
         None,
         &["doc_parse".to_string()],
+        &BTreeMap::new(),
         &groups,
         &groups,
         &[],
@@ -766,6 +799,7 @@ fn native_respond_tool_requires_runtime_observation_for_machine_evidence() {
         "user",
         None,
         &callable_capabilities(),
+        &BTreeMap::new(),
         &[],
         &[],
         &[],
@@ -797,6 +831,15 @@ fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
         tool_name: "call_doc_parse".to_string(),
         description: "runtime_capability_group_v1".to_string(),
         capability_names: vec!["doc_parse".to_string()],
+        capability_argument_schemas: BTreeMap::from([(
+            "doc_parse".to_string(),
+            json!({
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string"}},
+                "additionalProperties": false
+            }),
+        )]),
     }];
     let callable = vec!["doc_parse".to_string(), "mcp.dynamic".to_string()];
     let disclosed = disclosed_callable_capability_names(&callable, &groups, &[]);
@@ -807,6 +850,7 @@ fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
         "current turn",
         None,
         &callable,
+        &BTreeMap::new(),
         &groups,
         &[],
         &["doc_parse".to_string()],
@@ -891,6 +935,7 @@ fn native_contract_retry_scopes_required_tool_and_adds_machine_observation() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        &BTreeMap::new(),
         &[],
         &[],
         &[],
@@ -926,6 +971,7 @@ fn native_response_contract_retry_targets_the_respond_schema() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        &BTreeMap::new(),
         &[],
         &[],
         &[],
@@ -962,6 +1008,7 @@ fn native_object_response_schema_and_repair_explain_serialized_json_values() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        &BTreeMap::new(),
         &[],
         &[],
         &[],
@@ -1008,6 +1055,7 @@ fn native_contract_repair_supports_two_bounded_protocol_transitions() {
         "current turn",
         Some(90),
         &callable_capabilities(),
+        &BTreeMap::new(),
         &[],
         &[],
         &[],

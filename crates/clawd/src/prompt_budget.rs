@@ -94,11 +94,7 @@ pub(crate) fn model_tool_surface_budget_report(
         .map(|tool| {
             let schema = serde_json::to_string(&tool.input_schema).unwrap_or_default();
             let schema_estimate = crate::token_estimator::estimate_generic_tokens(&schema);
-            let capability_enum_count = tool
-                .input_schema
-                .pointer("/properties/capability/enum")
-                .and_then(Value::as_array)
-                .map_or(0, Vec::len);
+            let capability_enum_count = capability_enum_leaf_count(&tool.input_schema);
             json!({
                 "name": tool.name,
                 "description_char_count": tool.description.chars().count(),
@@ -125,6 +121,21 @@ pub(crate) fn model_tool_surface_budget_report(
         "token_estimator": estimate.estimator.as_str(),
         "tools": tool_reports,
     })
+}
+
+fn capability_enum_leaf_count(schema: &Value) -> usize {
+    let direct = schema
+        .pointer("/properties/capability/enum")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    direct
+        + schema
+            .get("oneOf")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(capability_enum_leaf_count)
+            .sum::<usize>()
 }
 
 pub(crate) fn publish_model_tool_surface_budget_report(

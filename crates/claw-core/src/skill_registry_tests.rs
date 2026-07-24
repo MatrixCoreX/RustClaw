@@ -107,6 +107,7 @@ fn planner_capability_aliases_are_hidden_but_resolve_to_canonical_policy() {
         r#"
 [[skills]]
 name = "fs_basic"
+input_schema = { type = "object", properties = { path = { type = "string" }, start_line = { type = "integer" } } }
 planner_capability_aliases = { "filesystem.read_file" = "filesystem.read_text_range" }
 planner_capabilities = [
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"], optional = ["start_line"], risk_level = "low", idempotent = true, dedup_scope = "args" },
@@ -145,6 +146,7 @@ fn planner_capability_alias_policy_drift_is_rejected() {
         r#"
 [[skills]]
 name = "fs_basic"
+input_schema = { type = "object", properties = { path = { type = "string" } } }
 planner_capability_aliases = { "filesystem.read_file" = "filesystem.read_text_range" }
 planner_capabilities = [
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"], risk_level = "low", idempotent = true, dedup_scope = "args" },
@@ -439,6 +441,7 @@ fn registry_manifest_exposes_planner_metadata() {
 	required_bins = ["sqlite3", "SQLite3"]
 	optional_bins = ["file", "FILE"]
 	platform_notes = ["SQLite file access is pure Rust in the runner.", "SQLite file access is pure Rust in the runner.", ""]
+	input_schema = { type = "object", properties = { db_path = { type = "string" }, limit = { type = "integer" } } }
 	planner_capabilities = [
 		  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low", once_per_task = false, dedup_scope = "args", idempotent = true, execution_mode = "async_preferred", async_adapter_kind = "HTTP-Job-Poll", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, final_answer_shape = "Table-Listing" },
 	  { name = "database::list-tables", action = "duplicate-ignored" }
@@ -622,6 +625,7 @@ fn registry_resolves_action_governance_from_explicit_fields_effects_and_legacy_d
 	once_per_task = true
 	dedup_scope = "action"
 	idempotent = false
+	input_schema = { type = "object", properties = { path = { type = "string" } } }
 	planner_capabilities = [
 	  { name = "config.plan", action = "plan", effect = "observe" },
 	  { name = "config.apply", action = "apply", effect = "mutate" },
@@ -1057,4 +1061,115 @@ output_schema = { type = "object", properties = { text = { type = "string" } } }
         Some("object")
     );
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn planner_requirement_grammar_supports_alternatives_and_conjunctions() {
+    assert_eq!(
+        planner_requirement_alternatives("city|latitude+longitude"),
+        vec![
+            vec!["city".to_string()],
+            vec!["latitude".to_string(), "longitude".to_string()]
+        ]
+    );
+}
+
+#[test]
+fn planner_argument_schema_projects_only_declared_capability_fields() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "doc_parse"
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, max_chars = { type = "integer", minimum = 100 }, internal_only = { type = "string" } } }
+planner_capabilities = [
+  { name = "document.parse", required = ["path"], optional = ["max_chars"] },
+]
+"#,
+    )
+    .expect("load exact-schema fixture");
+    let manifest = registry.manifest("doc_parse").expect("manifest");
+    let mapping = registry
+        .planner_exposed_capabilities("doc_parse")
+        .into_iter()
+        .next()
+        .expect("mapping");
+    let schema =
+        planner_capability_argument_schema(manifest.input_schema.as_ref(), mapping).unwrap();
+
+    assert_eq!(schema["required"], serde_json::json!(["path"]));
+    assert_eq!(schema["properties"]["path"]["type"], "string");
+    assert_eq!(schema["properties"]["max_chars"]["minimum"], 100);
+    assert!(schema["properties"].get("action").is_none());
+    assert!(schema["properties"].get("internal_only").is_none());
+    assert_eq!(schema["additionalProperties"], false);
+}
+
+#[test]
+fn planner_argument_schema_encodes_or_and_required_expression() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "weather"
+input_schema = { type = "object", properties = { city = { type = "string" }, latitude = { type = "number" }, longitude = { type = "number" }, days = { type = "integer" } } }
+planner_capabilities = [
+  { name = "weather.current", required = ["city|latitude+longitude"], optional = ["days"] },
+]
+"#,
+    )
+    .expect("load conjunction fixture");
+    let manifest = registry.manifest("weather").expect("manifest");
+    let mapping = registry
+        .planner_exposed_capabilities("weather")
+        .into_iter()
+        .next()
+        .expect("mapping");
+    let schema =
+        planner_capability_argument_schema(manifest.input_schema.as_ref(), mapping).unwrap();
+
+    assert_eq!(
+        schema["allOf"][0]["anyOf"],
+        serde_json::json!([
+            {"required": ["city"]},
+            {"required": ["latitude", "longitude"]}
+        ])
+    );
+    assert_eq!(schema["properties"]["latitude"]["type"], "number");
+    assert_eq!(schema["properties"]["longitude"]["type"], "number");
+}
+
+#[test]
+fn registry_rejects_planner_argument_absent_from_input_schema() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "weather"
+input_schema = { type = "object", properties = { city = { type = "string" }, latitude = { type = "number" } } }
+planner_capabilities = [
+  { name = "weather.current", required = ["city|latitude+longitude"] },
+]
+"#,
+    )
+    .expect_err("missing longitude schema must fail registry load");
+
+    assert!(error.contains("weather.current"), "{error}");
+    assert!(error.contains("longitude"), "{error}");
+    assert!(error.contains("weather"), "{error}");
+}
+
+#[test]
+fn registry_rejects_malformed_planner_requirement_expression() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "weather"
+input_schema = { type = "object", properties = { city = { type = "string" }, latitude = { type = "number" }, longitude = { type = "number" } } }
+planner_capabilities = [
+  { name = "weather.current", required = ["city||latitude+longitude"] },
+]
+"#,
+    )
+    .expect_err("empty alternative must not be normalized away");
+
+    assert!(error.contains("invalid required expression"), "{error}");
+    assert!(error.contains("city||latitude+longitude"), "{error}");
 }

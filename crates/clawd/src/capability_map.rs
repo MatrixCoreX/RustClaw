@@ -4,6 +4,7 @@ use crate::{skill_availability, AppState, ClaimedTask};
 use claw_core::skill_registry::{
     PlannerCapabilityKind, PlannerCapabilityMapping, SkillRegistryEntry,
 };
+use serde_json::Value;
 
 const UNGROUPED_CAPABILITY_TOKEN: &str = "ungrouped";
 const NATIVE_GROUP_DESCRIPTION_CHAR_BUDGET: usize = 2_048;
@@ -15,6 +16,7 @@ pub(crate) struct PlannerNativeCapabilityGroup {
     pub(crate) tool_name: String,
     pub(crate) description: String,
     pub(crate) capability_names: Vec<String>,
+    pub(crate) capability_argument_schemas: BTreeMap<String, Value>,
 }
 
 fn registry_group_token(entry: &SkillRegistryEntry) -> Option<String> {
@@ -336,18 +338,35 @@ fn planner_native_capability_groups_for_task_filtered(
             continue;
         }
         let exposed_capabilities = registry.planner_exposed_capabilities(&skill);
-        let capability_names = exposed_capabilities
+        let input_schema = registry
+            .manifest(&skill)
+            .and_then(|manifest| manifest.input_schema);
+        let capability_argument_schemas = exposed_capabilities
             .iter()
-            .map(|mapping| mapping.name.trim())
-            .filter(|name| !name.is_empty())
+            .filter(|mapping| {
+                let name = mapping.name.trim();
+                !name.is_empty()
+                    && allowed
+                        .as_ref()
+                        .is_none_or(|allowed| allowed.contains(name))
+            })
+            .map(|mapping| {
+                let schema = claw_core::skill_registry::planner_capability_argument_schema(
+                    input_schema.as_ref(),
+                    mapping,
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
+                (mapping.name.clone(), schema)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let capability_names = capability_argument_schemas
+            .keys()
             .filter(|name| {
                 allowed
                     .as_ref()
-                    .is_none_or(|allowed| allowed.contains(*name))
+                    .is_none_or(|allowed| allowed.contains(name.as_str()))
             })
-            .map(ToString::to_string)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
+            .cloned()
             .collect::<Vec<_>>();
         if capability_names.is_empty() {
             continue;
@@ -391,6 +410,7 @@ fn planner_native_capability_groups_for_task_filtered(
             tool_name,
             description,
             capability_names,
+            capability_argument_schemas,
         });
     }
     groups

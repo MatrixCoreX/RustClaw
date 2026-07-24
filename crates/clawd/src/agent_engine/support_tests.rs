@@ -171,6 +171,7 @@ kind = "builtin"
 risk_level = "high"
 side_effect = true
 requires_confirmation = true
+input_schema = { type = "object", properties = { command = { type = "string" } } }
 planner_capabilities = [
   { name = "system.run_command", effect = "external", required = ["command"], once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]

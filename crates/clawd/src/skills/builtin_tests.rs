@@ -1074,7 +1074,7 @@ async fn run_safe_command_externalizes_noisy_command_output() {
     assert_eq!(full_output.trim().len(), 2000);
     assert_eq!(
         projection["range_handles"][0]["read_capability"],
-        "filesystem.read_text_range"
+        "artifact.read_range"
     );
 }
 

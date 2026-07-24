@@ -111,12 +111,11 @@ fn capability_enum_constraints(
     required
         .iter()
         .chain(optional)
-        .flat_map(|field| field.split('|'))
-        .map(str::trim)
-        .filter(|field| !field.is_empty())
+        .flat_map(|field| claw_core::skill_registry::planner_requirement_alternatives(field))
+        .flatten()
         .filter_map(|field| {
             let values = properties
-                .get(field)
+                .get(&field)
                 .and_then(|property| property.get("enum"))
                 .and_then(Value::as_array)?
                 .iter()

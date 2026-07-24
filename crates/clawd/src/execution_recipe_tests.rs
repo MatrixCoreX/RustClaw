@@ -271,6 +271,7 @@ enabled = true
 kind = "builtin"
 planner_kind = "tool"
 side_effect = true
+input_schema = { type = "object", properties = { command = { type = "string" } } }
 planner_capabilities = [
   { name = "run_cmd", effect = "external", required = ["command"], idempotent = false },
 ]
@@ -299,6 +300,7 @@ enabled = true
 kind = "builtin"
 planner_kind = "tool"
 side_effect = true
+input_schema = { type = "object", properties = { command = { type = "string" } } }
 planner_capabilities = [
   { name = "system.run_command", action = "run_cmd", effect = "external", required = ["command"], idempotent = false },
 ]
