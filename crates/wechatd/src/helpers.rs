@@ -380,7 +380,7 @@ pub(super) fn inbox_rel_suits_doc_parse(rel: &str) -> bool {
         .map(|e| {
             matches!(
                 e.to_ascii_lowercase().as_str(),
-                "pdf" | "docx" | "md" | "txt" | "html" | "htm"
+                "pdf" | "docx" | "xlsx" | "pptx" | "md" | "txt" | "html" | "htm"
             )
         })
         .unwrap_or(false)

@@ -219,7 +219,7 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
         planner_disclosed_native_capability_groups_for_task(&state, &task, &BTreeSet::new());
     let loadable =
         planner_loadable_capability_group_names_for_task(&state, &task, &BTreeSet::new());
-    assert_eq!(full.len(), 34);
+    assert_eq!(full.len(), 35);
     assert_eq!(initial.len(), 7);
     assert_eq!(
         initial
@@ -228,7 +228,7 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
             .sum::<usize>(),
         71
     );
-    assert_eq!(loadable.len(), 27);
+    assert_eq!(loadable.len(), 28);
     assert_eq!(full.len(), initial.len() + loadable.len());
     assert!(initial
         .iter()

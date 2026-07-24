@@ -391,7 +391,7 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, map_merchant = false, music_generate = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
+skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, map_merchant = false, music_generate = true, office_workspace = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
 uninstalled_skills = ["crypto", "invest_copy", "map_merchant", "photo_organize", "stock", "weather", "x"]
 skill_max_concurrency = 2
 # Phase 0.1 收敛：86400 (24h, demo 演示值) → 600 (10 min)
@@ -445,6 +445,7 @@ skills_list = [
     "task_control",
     "config_guard",
     "doc_parse",
+    "office_workspace",
     "transform",
     "web_search_extract",
     "kb",
