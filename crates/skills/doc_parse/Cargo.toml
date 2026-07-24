@@ -13,4 +13,5 @@ anyhow.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+office_workspace = { package = "office-workspace-skill", path = "../office_workspace" }
 zip = { version = "2", default-features = false, features = ["deflate"] }

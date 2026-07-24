@@ -441,3 +441,7 @@ fn env_usize(name: &str, fallback: usize) -> usize {
         .and_then(|value| value.parse().ok())
         .unwrap_or(fallback)
 }
+
+#[cfg(test)]
+#[path = "package_tests.rs"]
+mod tests;

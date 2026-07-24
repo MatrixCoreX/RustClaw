@@ -4,9 +4,11 @@ use crate::model::{
     OfficeArtifactEnvelope, OfficeFormat, OfficeWarning, OperationRecord, PageCursor,
     ValidationEvidence, ENVELOPE_SCHEMA_VERSION,
 };
+use crate::mutation;
 use crate::package::{resolve_input_path, OfficePackage};
 use crate::pptx::read_presentation;
 use crate::range::{parse_coordinate, CellRange};
+use crate::renderer;
 use crate::xlsx::read_workbook;
 use serde_json::{json, Map, Value};
 
@@ -19,12 +21,14 @@ pub fn execute(args: &Value) -> OfficeResult<Value> {
         .ok_or_else(|| OfficeError::invalid("args must be an object"))?;
     let action = required_string(object, "action")?;
     match action {
+        "office.render_status" | "office.render" => renderer::execute(action, object),
         "office.inspect"
         | "office.validate"
         | "word.read"
         | "spreadsheet.inspect"
         | "spreadsheet.read_range"
-        | "presentation.read" => inspect_action(action, object),
+        | "presentation.read"
+        | "word.find" => inspect_action(action, object),
         "word.preview_create"
         | "word.create"
         | "word.preview_edit"
@@ -36,10 +40,7 @@ pub fn execute(args: &Value) -> OfficeResult<Value> {
         | "presentation.preview_create"
         | "presentation.create"
         | "presentation.preview_edit"
-        | "presentation.edit" => Err(OfficeError::unsupported(
-            "Office mutation capability is not available in this build stage",
-            json!({"action": action}),
-        )),
+        | "presentation.edit" => mutation::execute_mutation(action, object),
         _ => Err(OfficeError::new(
             "unsupported_action",
             "unsupported Office workspace action",
@@ -68,6 +69,9 @@ fn inspect_action(action: &str, object: &Map<String, Value>) -> OfficeResult<Val
         }
     }
 
+    if action == "word.find" {
+        select_word_matches(&mut envelope, object)?;
+    }
     if action == "spreadsheet.read_range" {
         select_spreadsheet_range(&mut envelope, object)?;
     }
@@ -80,6 +84,49 @@ fn inspect_action(action: &str, object: &Map<String, Value>) -> OfficeResult<Val
             json!({}),
         )
     })?)
+}
+
+pub fn inspect_output(path: &std::path::Path, format: OfficeFormat) -> OfficeResult<Value> {
+    let action = match format {
+        OfficeFormat::Docx => "word.read",
+        OfficeFormat::Xlsx => "spreadsheet.inspect",
+        OfficeFormat::Pptx => "presentation.read",
+    };
+    let object = serde_json::Map::from_iter([
+        (
+            "path".to_string(),
+            Value::String(path.display().to_string()),
+        ),
+        ("limit".to_string(), Value::Number(1_000u64.into())),
+    ]);
+    inspect_action(action, &object)
+}
+
+fn select_word_matches(
+    envelope: &mut OfficeArtifactEnvelope,
+    object: &Map<String, Value>,
+) -> OfficeResult<()> {
+    let query = required_string(object, "query")?;
+    let matches = envelope
+        .document_blocks
+        .iter()
+        .filter(|block| block.text.contains(query))
+        .map(|block| {
+            json!({
+                "match_id": format!("match:{}", block.id),
+                "block_id": block.id,
+                "text": block.text,
+                "source_part": block.source_part,
+                "source_sha256": envelope.source.sha256,
+            })
+        })
+        .collect::<Vec<_>>();
+    envelope.metadata["find"] = json!({
+        "query": query,
+        "matches": matches,
+        "match_count": matches.len(),
+    });
+    Ok(())
 }
 
 fn base_envelope(package: &OfficePackage) -> OfficeArtifactEnvelope {

@@ -1,18 +1,8 @@
-mod docx;
-mod engine;
-mod error;
-mod model;
-mod package;
-mod pptx;
-mod range;
-mod xlsx;
-mod xml;
-
 #[cfg(test)]
+#[allow(dead_code)]
 mod test_support;
 
-use crate::engine::execute;
-use crate::model::{SkillRequest, SkillResponse};
+use office_workspace::{execute, SkillRequest, SkillResponse};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 
