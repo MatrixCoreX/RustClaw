@@ -121,6 +121,13 @@ export function DashboardPage({
   workspaceUpdateStatusLabel,
   workspaceUpdateTimeLabel,
 }: DashboardPageProps) {
+  const latestReleaseStatus = workspaceUpdateStatus?.latest_release_check_status;
+  const latestReleaseDisplay =
+    workspaceUpdateStatus?.latest_release_tag ||
+    (latestReleaseStatus === "unavailable"
+      ? t("暂时无法获取", "Temporarily unavailable")
+      : t("正在检查...", "Checking..."));
+
   return (
     <>
       <section className="theme-panel setup-hero p-5 sm:p-6">
@@ -268,8 +275,21 @@ export function DashboardPage({
                     <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
                       <p className="text-white/45">{t("最新 Release", "Latest Release")}</p>
                       <p className="mt-1 break-all font-mono text-white/85">
-                        {workspaceUpdateStatus?.latest_release_tag || "--"}
+                        {latestReleaseDisplay}
                       </p>
+                      {latestReleaseStatus === "stale" ? (
+                        <p className="mt-1 text-[11px] leading-4 text-amber-200/75">
+                          {t("当前显示缓存版本，远端检查暂时失败。", "Showing the cached version because the remote check failed.")}
+                        </p>
+                      ) : null}
+                      {latestReleaseStatus === "unavailable" ? (
+                        <p
+                          className="mt-1 text-[11px] leading-4 text-amber-200/75"
+                          title={workspaceUpdateStatus?.latest_release_check_error || undefined}
+                        >
+                          {t("请点击“检查远端版本”重试。", "Click Check remote to retry.")}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                 </div>

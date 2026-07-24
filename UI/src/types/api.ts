@@ -249,6 +249,8 @@ export interface WorkspaceUpdateStatus {
   remote_commit?: string | null;
   current_version?: string | null;
   latest_release_tag?: string | null;
+  latest_release_check_status?: "unchecked" | "available" | "stale" | "unavailable" | string;
+  latest_release_check_error?: string | null;
   exit_code?: number | null;
   stdout_tail: string;
   stderr_tail: string;

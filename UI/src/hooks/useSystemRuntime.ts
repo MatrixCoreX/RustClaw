@@ -97,7 +97,8 @@ export function useSystemRuntime({
       setWorkspaceUpdateMessage(null);
     }
     try {
-      const res = await apiFetch("/v1/admin/workspace-update");
+      const refreshQuery = silent ? "" : "?refresh_release=true";
+      const res = await apiFetch(`/v1/admin/workspace-update${refreshQuery}`);
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace update status failed (${res.status})`);

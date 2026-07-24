@@ -1056,7 +1056,7 @@ async fn workspace_update_refresh_clears_resolved_failure_when_upstream_matches(
         ..WorkspaceUpdateStatus::default()
     }));
 
-    let status = refresh_workspace_update_versions(&root, shared).await;
+    let status = refresh_workspace_update_versions(&root, shared, false).await;
 
     assert_eq!(status.status, "up_to_date");
     assert_eq!(status.step, "already_latest");
@@ -1104,6 +1104,56 @@ fn workspace_update_release_selector_requires_matching_platform_asset() {
         select_latest_compatible_release_tag(&releases, "pi-aarch64-", "RustClaw-pi-aarch64-")
             .as_deref(),
         Some("pi-aarch64-20260724-2")
+    );
+}
+
+#[test]
+fn workspace_update_release_check_retries_failures_and_honors_forced_refresh() {
+    let mut status = WorkspaceUpdateStatus {
+        latest_release_checked_ts: Some(1_000),
+        ..WorkspaceUpdateStatus::default()
+    };
+
+    assert!(!latest_release_check_due(&status, false, 1_299));
+    assert!(latest_release_check_due(&status, false, 1_300));
+    assert!(latest_release_check_due(&status, true, 1_001));
+
+    status.latest_release_check_error = Some("release_lookup_timed_out".to_string());
+    assert!(!latest_release_check_due(&status, false, 1_029));
+    assert!(latest_release_check_due(&status, false, 1_030));
+}
+
+#[test]
+fn workspace_update_start_preserves_release_lookup_state() {
+    let previous = WorkspaceUpdateStatus {
+        latest_release_tag: Some("pi-aarch64-20260724-4".to_string()),
+        latest_release_check_status: "available".to_string(),
+        latest_release_checked_ts: Some(1_234),
+        ..WorkspaceUpdateStatus::default()
+    };
+
+    let started = begin_workspace_update_status(&previous, WorkspaceUpdateMode::UiOnly);
+
+    assert_eq!(started.status, "running");
+    assert_eq!(started.step, "starting");
+    assert_eq!(started.mode, "ui_only");
+    assert_eq!(
+        started.latest_release_tag.as_deref(),
+        Some("pi-aarch64-20260724-4")
+    );
+    assert_eq!(started.latest_release_check_status, "available");
+    assert_eq!(started.latest_release_checked_ts, Some(1_234));
+}
+
+#[test]
+fn workspace_update_release_lookup_errors_control_cached_tag_reuse() {
+    assert!(LatestReleaseLookupError::RequestTimedOut.can_use_cached_tag());
+    assert!(LatestReleaseLookupError::HttpStatus.can_use_cached_tag());
+    assert!(!LatestReleaseLookupError::CompatibleReleaseNotFound.can_use_cached_tag());
+    assert!(!LatestReleaseLookupError::UnsupportedPlatform.can_use_cached_tag());
+    assert_eq!(
+        LatestReleaseLookupError::CompatibleReleaseNotFound.as_str(),
+        "compatible_release_not_found"
     );
 }
 

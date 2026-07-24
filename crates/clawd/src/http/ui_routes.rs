@@ -72,6 +72,8 @@ struct WorkspaceUpdateStatus {
     remote_commit: Option<String>,
     current_version: String,
     latest_release_tag: Option<String>,
+    latest_release_check_status: String,
+    latest_release_check_error: Option<String>,
     #[serde(skip)]
     latest_release_checked_ts: Option<i64>,
     exit_code: Option<i32>,
@@ -96,6 +98,8 @@ impl Default for WorkspaceUpdateStatus {
             remote_commit: None,
             current_version: env!("CARGO_PKG_VERSION").to_string(),
             latest_release_tag: None,
+            latest_release_check_status: "unchecked".to_string(),
+            latest_release_check_error: None,
             latest_release_checked_ts: None,
             exit_code: None,
             stdout_tail: String::new(),
