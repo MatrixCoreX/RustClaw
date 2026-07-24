@@ -25,7 +25,7 @@ Use `{"type":"call_tool","tool":"config_basic","args":{...}}` for structured TOM
 | `read_field` | `field_path` | yes | string | - | Dot/bracket path, including array filters when needed. |
 | `read_field` | `format` | no | string | auto | `json|toml|yaml`. |
 | `read_fields` | `path` | yes | string(path) | - | JSON/TOML/YAML file path. |
-| `read_fields` | `field_paths` | yes | string/string[] | - | Field paths to extract. |
+| `read_fields` | `field_paths` | yes | non-empty string/string[] | - | One or more exact field paths to extract. |
 | `read_fields` | `format` | no | string | auto | `json|toml|yaml`. |
 | `list_keys` | `path` | yes | string(path) | - | JSON/TOML/YAML file path. |
 | `list_keys` | `field_path` | no | string | root | Optional object/array location. |
@@ -43,6 +43,9 @@ Use `{"type":"call_tool","tool":"config_basic","args":{...}}` for structured TOM
   evidence only after the validator explicitly reports a structured gap.
 - `validate` proves parse/schema syntax only. RustClaw semantic safety, risk, or problem checks must use `guard_rustclaw_config` directly; do not approximate them with raw file reads.
 - Field paths support dot/bracket selectors. For arrays of objects, `<item-name>.<field>` may resolve the unique object whose `name`, `id`, or `key` equals `<item-name>` before reading `<field>`.
+- `read_fields.field_paths` must contain at least one non-empty selector. After
+  `list_keys`, pass the relevant returned key tokens to `read_fields`, or use
+  `list_keys.field_path` to inspect a nested object before extracting values.
 - Do not plan `patch_field`, `write`, `set`, or other generic config mutation through `config_basic` in v1.
 - Confirmed structured config edits should use `config_edit` when available, followed by validation, guard checks, and read-back. Use broad file or command workflows only when the requested mutation cannot be represented as a config field path and typed value.
 - `config_guard` remains the backing RustClaw safety scanner, not a general editor.

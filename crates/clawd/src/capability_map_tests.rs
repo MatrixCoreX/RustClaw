@@ -139,6 +139,48 @@ fn real_config_capability_hints_keep_leaf_semantics_distinct() {
 }
 
 #[test]
+fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "config-native-schema-contract".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let config = planner_native_capability_groups_for_task(&state, &task)
+        .into_iter()
+        .find(|group| group.skill_name == "config_basic")
+        .expect("config_basic native group");
+    let read_fields = config
+        .capability_argument_schemas
+        .get("config.read_fields")
+        .expect("read_fields schema");
+    let list_keys = config
+        .capability_argument_schemas
+        .get("config.list_keys")
+        .expect("list_keys schema");
+
+    assert_eq!(
+        read_fields["properties"]["field_paths"]["anyOf"][1]["minItems"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        read_fields["properties"]["field_paths"]["anyOf"][1]["items"]["minLength"],
+        serde_json::json!(1)
+    );
+    assert!(list_keys["properties"].get("field_path").is_some());
+    assert!(list_keys["properties"].get("format").is_some());
+}
+
+#[test]
 fn native_capability_groups_expose_distinct_registry_tools() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()

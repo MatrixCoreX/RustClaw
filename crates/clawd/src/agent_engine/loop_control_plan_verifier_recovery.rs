@@ -9,6 +9,7 @@ fn issue_is_planner_repairable(kind: crate::verifier::VerifyIssueKind) -> bool {
         kind,
         crate::verifier::VerifyIssueKind::SkillNotVisible
             | crate::verifier::VerifyIssueKind::CapabilityUnavailable
+            | crate::verifier::VerifyIssueKind::MissingRequiredArg
             | crate::verifier::VerifyIssueKind::InvalidArgumentValue
             | crate::verifier::VerifyIssueKind::UnresolvedTemplateArg
             | crate::verifier::VerifyIssueKind::InvalidDependsOn
