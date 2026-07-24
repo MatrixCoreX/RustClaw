@@ -318,15 +318,12 @@ fn execute_generate(
         .unwrap_or(20 * 1024 * 1024);
     let first_frame = image_arg_to_api_value(
         workspace_root,
-        obj.get("first_frame_image")
-            .or_else(|| obj.get("first_frame"))
-            .or_else(|| obj.get("image")),
+        first_nonempty_image_arg(obj, &["first_frame_image", "first_frame", "image"]),
         max_input_bytes,
     )?;
     let last_frame = image_arg_to_api_value(
         workspace_root,
-        obj.get("last_frame_image")
-            .or_else(|| obj.get("last_frame")),
+        first_nonempty_image_arg(obj, &["last_frame_image", "last_frame"]),
         max_input_bytes,
     )?;
     let mut payload = Map::new();
@@ -1326,7 +1323,13 @@ fn image_arg_to_api_value(
     let Some(value) = value else {
         return Ok(None);
     };
-    if let Some(s) = value.as_str().map(str::trim).filter(|v| !v.is_empty()) {
+    if value.is_null() {
+        return Ok(None);
+    }
+    if let Some(s) = value.as_str().map(str::trim) {
+        if s.is_empty() {
+            return Ok(None);
+        }
         return image_string_to_api_value(workspace_root, s, max_input_bytes).map(Some);
     }
     if let Some(obj) = value.as_object() {
@@ -1368,6 +1371,33 @@ fn image_arg_to_api_value(
         }
     }
     Err("image input must be url/path/base64/data_url".to_string())
+}
+
+fn first_nonempty_image_arg<'a>(obj: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter()
+        .filter_map(|key| obj.get(*key))
+        .find(|value| !image_arg_is_empty(value))
+}
+
+fn image_arg_is_empty(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(value) => value.trim().is_empty(),
+        Value::Object(value) if value.is_empty() => true,
+        Value::Object(value) => {
+            let selectors = ["url", "data_url", "base64", "path"];
+            selectors.iter().any(|key| value.contains_key(*key))
+                && selectors.iter().all(|key| {
+                    value.get(*key).is_none_or(|candidate| {
+                        candidate.is_null()
+                            || candidate
+                                .as_str()
+                                .is_some_and(|candidate| candidate.trim().is_empty())
+                    })
+                })
+        }
+        Value::Array(_) | Value::Bool(_) | Value::Number(_) => false,
+    }
 }
 
 fn image_string_to_api_value(
