@@ -128,11 +128,31 @@ fn permission_denial_never_enters_planner_repair() {
 }
 
 #[test]
-fn missing_user_argument_stays_on_clarification_boundary() {
+fn missing_planner_argument_enters_bounded_replan() {
     let mut loop_state = LoopState::default();
     let outcome = recover_plan_verifier_rejection(
         &mut loop_state,
         &verify_result(&[crate::verifier::VerifyIssueKind::MissingRequiredArg]),
+    )
+    .expect("planner-generated missing argument should be repairable");
+
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(loop_state.has_recoverable_failure_context);
+    assert!(loop_state.history_compact.iter().any(|entry| {
+        entry.contains("plan_verifier_replan_required")
+            && entry.contains("\"verify_issue_kind\":\"MissingRequiredArg\"")
+    }));
+}
+
+#[test]
+fn explicit_boundary_clarification_never_enters_planner_repair() {
+    let mut loop_state = LoopState::default();
+    let outcome = recover_plan_verifier_rejection(
+        &mut loop_state,
+        &verify_result(&[crate::verifier::VerifyIssueKind::BoundaryClarifyRequired]),
     );
 
     assert!(outcome.is_none());

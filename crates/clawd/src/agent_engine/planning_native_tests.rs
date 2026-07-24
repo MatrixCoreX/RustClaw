@@ -1220,6 +1220,60 @@ fn native_leaf_rejects_missing_direct_required_arguments() {
 }
 
 #[test]
+fn native_leaf_rejects_empty_direct_required_arguments() {
+    let capability = "config.read_fields";
+    let callable = vec![capability.to_string()];
+    let tool_name = native_capability_leaf_tool_name(capability);
+    let group_map = BTreeMap::from([(tool_name.clone(), BTreeSet::from([capability.to_string()]))]);
+    let schemas = BTreeMap::from([(
+        capability.to_string(),
+        json!({
+            "type": "object",
+            "required": ["path", "field_paths"],
+            "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "field_paths": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {"type": "string", "minLength": 1}
+                }
+            },
+            "additionalProperties": false
+        }),
+    )]);
+
+    for (case, arguments) in [
+        ("empty path", json!({"path": " ", "field_paths": ["app"]})),
+        (
+            "empty field list",
+            json!({"path": "config.toml", "field_paths": []}),
+        ),
+        (
+            "blank field item",
+            json!({"path": "config.toml", "field_paths": [" "]}),
+        ),
+    ] {
+        let error = actions_from_native_turn_with_schemas(
+            &turn(
+                vec![ModelToolCall {
+                    id: case.to_string(),
+                    name: tool_name.clone(),
+                    arguments,
+                }],
+                "",
+            ),
+            &callable,
+            &group_map,
+            &schemas,
+            None,
+        )
+        .expect_err("empty required direct leaf argument rejected");
+
+        assert_eq!(error, "native_plan_required_args_missing", "{case}");
+    }
+}
+
+#[test]
 fn native_contract_retry_scopes_required_tool_and_adds_machine_observation() {
     let request = native_planner_request(
         "protocol",

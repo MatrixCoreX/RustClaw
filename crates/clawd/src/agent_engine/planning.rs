@@ -1379,9 +1379,21 @@ fn schema_has_missing_required_fields(schema: &Value, arguments: &Value) -> bool
         .and_then(Value::as_array)
         .is_some_and(|required| {
             required.iter().filter_map(Value::as_str).any(|field| {
-                !arguments.contains_key(field) || arguments.get(field) == Some(&Value::Null)
+                arguments
+                    .get(field)
+                    .is_none_or(|value| !native_required_value_is_present(value))
             })
         })
+}
+
+fn native_required_value_is_present(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(value) => !value.trim().is_empty(),
+        Value::Array(values) => values.iter().any(native_required_value_is_present),
+        Value::Object(values) => !values.is_empty(),
+        Value::Bool(_) | Value::Number(_) => true,
+    }
 }
 
 fn action_from_native_respond_call(
