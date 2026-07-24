@@ -576,6 +576,7 @@ rustclaw -key disable rk-xxxx
 常用接口（请求时带上当前 UI/user key 的 `X-RustClaw-Key`）：
 
 - `GET /v1/health`
+- `GET /v1/system/host-summary`：返回经过鉴权、带版本且不含密钥的首页主机摘要，包括系统/版本、架构、内存、RustClaw 数据卷存储、运行时长和机器可读的缺失字段
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
 - `POST /v1/tasks/cancel`
@@ -681,6 +682,7 @@ UI 相关说明：
 - `deploy-ui-nginx.sh` 更偏向“部署已有 `UI/dist`”，可选 `--build`
 - `install-rustclaw-cmd.sh` 默认走本地无 nginx 安装；云服务器使用 `--deploy-ui-nginx`
 - 管理员打开首页时会自动检查源码版本和当前平台可用的 GitHub Release，并显示运行版本与最新 Release 标签
+- 首页系统信息区显示系统/版本、架构、内存、RustClaw 存储、部署类型和运行时长，不暴露主机路径或环境变量；Linux/macOS 缺失的指标会显示为部分数据，不会让整个首页失败
 - 只有真实构建或部署任务才显示进度；完整编译、仅 UI、仅 clawd 成功完成后会自动刷新一次页面
 - 浏览器 UI 里有独立的 `NNI` 导航分类，对应后端 `/v1/nni/device/*`；没有签名芯片的设备会返回 `signature_chip_present=false`，并在 UI 上显示明确的缺失签名芯片状态
 - 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串

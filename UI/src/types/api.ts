@@ -1033,6 +1033,34 @@ export interface DashboardCommunicationRow extends ServiceStatusRow {
   usesSharedGatewayMemory: boolean;
 }
 
+export interface HostUnavailableField {
+  field: string;
+  code: string;
+}
+
+export interface HostCapacitySummary {
+  total_bytes: number | null;
+  available_bytes: number | null;
+  available_ratio: number | null;
+}
+
+export interface HostSystemSummary {
+  schema_version: number;
+  collected_at_ts: number;
+  os: {
+    family: string;
+    name: string | null;
+    version: string | null;
+    kernel: string | null;
+  };
+  architecture: string;
+  deployment: string | null;
+  memory: HostCapacitySummary;
+  storage: HostCapacitySummary;
+  uptime_seconds: number | null;
+  unavailable_fields: HostUnavailableField[];
+}
+
 export interface ServiceActionNotice {
   tone: "success" | "error";
   text: string;

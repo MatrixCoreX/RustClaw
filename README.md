@@ -645,6 +645,9 @@ In the current defaults, `clawd` commonly listens on `0.0.0.0:8787` and `webd` c
 Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 
 - `GET /v1/health`
+- `GET /v1/system/host-summary`: returns a versioned, authenticated, secret-free
+  host summary for the dashboard, including OS/version, architecture, memory,
+  RustClaw data-volume storage, uptime, and machine-readable unavailable fields
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
 - `POST /v1/tasks/cancel`
@@ -717,6 +720,10 @@ UI notes:
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-rustclaw-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment
 - the dashboard checks source and compatible GitHub Release versions when an admin opens it; it shows the running package version and latest platform-specific Release tag
+- the dashboard system-information section shows OS/version, architecture,
+  memory, RustClaw storage, deployment type, and uptime without exposing host
+  paths or environment values; missing Linux/macOS facts remain partial data
+  rather than breaking the page
 - build progress is only shown for a real build/deploy session, and source/UI/clawd compilation modes refresh the page once after successful completion
 - the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
 - `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, configuration retention, and third-party import flows

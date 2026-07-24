@@ -621,6 +621,7 @@ dependencies = [
  "claw-core",
  "futures-util",
  "hmac",
+ "libc",
  "portable-pty",
  "proc-macro2",
  "r2d2",
