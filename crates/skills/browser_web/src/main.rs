@@ -4,6 +4,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::os::windows::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -12,6 +13,7 @@ use url::Url;
 const SKILL_NAME: &str = "browser_web";
 const MAX_URL_BYTES: usize = 4_096;
 const MAX_DOMAIN_FILTERS: usize = 32;
+const SYNTHETIC_DNS_PROBE_HOST: &str = "example.com";
 
 #[derive(Debug, Deserialize)]
 struct Request {
@@ -508,6 +510,7 @@ fn open_extract_action(
         .map(|path| resolve_workspace_file(workspace_root, path))
         .transpose()?;
 
+    let allow_proxy_synthetic_dns = proxy_synthetic_dns_active();
     let helper_input = json!({
         "action": "openExtract",
         "urls": validated_urls,
@@ -522,6 +525,7 @@ fn open_extract_action(
         "waitMapPath": wait_map_path,
         "domainsAllow": domains_allow,
         "domainsDeny": domains_deny,
+        "allowProxySyntheticDns": allow_proxy_synthetic_dns,
         "workspaceRoot": workspace_root,
     });
 
@@ -577,9 +581,14 @@ fn validate_browser_target(
             .collect::<Vec<_>>()
     };
     if addresses.is_empty()
-        || addresses
-            .iter()
-            .any(|address| !is_public_or_proxy_synthetic(*address, &host, url.scheme()))
+        || addresses.iter().any(|address| {
+            !is_public_or_proxy_synthetic(
+                *address,
+                &host,
+                url.scheme(),
+                proxy_synthetic_dns_active(),
+            )
+        })
     {
         return Err(SkillFailure::machine("PRIVATE_NETWORK_BLOCKED"));
     }
@@ -597,14 +606,39 @@ fn is_local_hostname(host: &str) -> bool {
         || host.ends_with(".internal")
 }
 
-fn is_public_or_proxy_synthetic(address: IpAddr, host: &str, scheme: &str) -> bool {
+fn is_public_or_proxy_synthetic(
+    address: IpAddr,
+    host: &str,
+    scheme: &str,
+    synthetic_dns_active: bool,
+) -> bool {
     if is_public_ip(address) {
         return true;
     }
     host.parse::<IpAddr>().is_err()
-        && proxy_configured(scheme)
+        && (proxy_configured(scheme) || synthetic_dns_active)
         && !host_matches_no_proxy(host)
         && is_proxy_synthetic_ip(address)
+}
+
+fn proxy_synthetic_dns_active() -> bool {
+    static ACTIVE: OnceLock<bool> = OnceLock::new();
+    *ACTIVE.get_or_init(|| {
+        let addresses = (SYNTHETIC_DNS_PROBE_HOST, 443)
+            .to_socket_addrs()
+            .map(|resolved| resolved.map(|address| address.ip()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        detects_proxy_synthetic_dns(&addresses)
+    })
+}
+
+fn detects_proxy_synthetic_dns(addresses: &[IpAddr]) -> bool {
+    addresses
+        .iter()
+        .any(|address| is_proxy_synthetic_ip(*address))
+        && addresses
+            .iter()
+            .all(|address| is_public_ip(*address) || is_proxy_synthetic_ip(*address))
 }
 
 fn is_public_ip(address: IpAddr) -> bool {

@@ -197,6 +197,47 @@ fn target_policy_blocks_private_credentials_and_domain_escape() {
 }
 
 #[test]
+fn synthetic_dns_detection_requires_reserved_proxy_addresses_without_private_peers() {
+    assert!(detects_proxy_synthetic_dns(&[IpAddr::V4(Ipv4Addr::new(
+        198, 18, 0, 42
+    ))]));
+    assert!(detects_proxy_synthetic_dns(&[
+        IpAddr::V4(Ipv4Addr::new(198, 19, 0, 42)),
+        IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
+    ]));
+    assert!(!detects_proxy_synthetic_dns(&[IpAddr::V4(Ipv4Addr::new(
+        1, 1, 1, 1
+    ))]));
+    assert!(!detects_proxy_synthetic_dns(&[
+        IpAddr::V4(Ipv4Addr::new(198, 18, 0, 42)),
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+    ]));
+}
+
+#[test]
+fn synthetic_dns_gateway_only_allows_reserved_addresses_for_named_hosts() {
+    let synthetic = IpAddr::V4(Ipv4Addr::new(198, 18, 0, 42));
+    assert!(is_public_or_proxy_synthetic(
+        synthetic,
+        "example.com",
+        "https",
+        true
+    ));
+    assert!(!is_public_or_proxy_synthetic(
+        synthetic,
+        "198.18.0.42",
+        "https",
+        true
+    ));
+    assert!(!is_public_or_proxy_synthetic(
+        synthetic,
+        "example.com",
+        "https",
+        false
+    ));
+}
+
+#[test]
 fn reserved_network_ranges_are_not_public() {
     for address in [
         IpAddr::V4(Ipv4Addr::LOCALHOST),

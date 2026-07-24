@@ -87,6 +87,11 @@ function isProxySyntheticIp(ip) {
     return a === 198 && (b === 18 || b === 19);
 }
 
+function resolvedAddressAllowed(address, proxyMediated, syntheticDnsMediated) {
+    return !isPrivateIp(address)
+        || ((proxyMediated || syntheticDnsMediated) && isProxySyntheticIp(address));
+}
+
 function firstProxyValue(scheme) {
     const names = scheme === 'https:'
         ? ['HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy']
@@ -167,9 +172,16 @@ async function validateNetworkUrl(rawUrl, policy = {}, applyDomainPolicy = false
         DNS_POLICY_CACHE.set(host, addresses);
     }
     const proxyMediated = !literalFamily && Boolean(firstProxyValue(parsed.protocol)) && !hostMatchesNoProxy(host);
+    const syntheticDnsMediated = !literalFamily
+        && policy.allowProxySyntheticDns === true
+        && !hostMatchesNoProxy(host);
     if (
         addresses.length === 0
-        || addresses.some((address) => isPrivateIp(address) && !(proxyMediated && isProxySyntheticIp(address)))
+        || addresses.some((address) => !resolvedAddressAllowed(
+            address,
+            proxyMediated,
+            syntheticDnsMediated,
+        ))
     ) {
         throw new SkillError('PRIVATE_NETWORK_BLOCKED', 'private_network_blocked');
     }
@@ -177,7 +189,7 @@ async function validateNetworkUrl(rawUrl, policy = {}, applyDomainPolicy = false
     return {
         url: parsed.toString(),
         host,
-        proxy_mediated: proxyMediated,
+        proxy_mediated: proxyMediated || syntheticDnsMediated,
         resolved_addresses: addresses,
     };
 }
@@ -983,6 +995,7 @@ async function openExtract(input) {
         maxCaptureImages = DEFAULT_MAX_CAPTURE_IMAGES,
         domainsAllow = [],
         domainsDeny = [],
+        allowProxySyntheticDns = false,
         workspaceRoot = process.cwd(),
     } = input;
 
@@ -993,7 +1006,7 @@ async function openExtract(input) {
         throw new SkillError('EMPTY_CONTENT', 'contentMode must be one of clean|raw');
     }
 
-    const networkPolicy = { domainsAllow, domainsDeny };
+    const networkPolicy = { domainsAllow, domainsDeny, allowProxySyntheticDns };
     const validatedUrls = [];
     for (const url of urls) {
         validatedUrls.push((await validateNetworkUrl(url, networkPolicy, true)).url);
@@ -1361,5 +1374,6 @@ module.exports = {
     classifyError,
     isPrivateIp,
     partialExtractionItem,
+    resolvedAddressAllowed,
     validateNetworkUrl,
 };
