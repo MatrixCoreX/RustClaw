@@ -68,7 +68,7 @@ fn claimed_task() -> crate::ClaimedTask {
 
 fn test_policy() -> super::AgentLoopGuardPolicy {
     super::AgentLoopGuardPolicy {
-        max_steps: 16,
+        max_actions_per_turn: 16,
         repeat_action_limit: 4,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,

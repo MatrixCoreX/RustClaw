@@ -44,7 +44,7 @@ pub(crate) fn active_recipe_terminal_discussion_should_replan(
     }
     !actions
         .iter()
-        .take(policy.max_steps.max(1))
+        .take(policy.max_actions_per_turn.max(1))
         .skip(idx + 1)
         .any(|action| !is_discussion_only_action(action))
 }
@@ -113,11 +113,11 @@ pub(super) fn record_active_recipe_terminal_discussion_replan(
 pub(super) fn has_remaining_action_after(
     actions: &[AgentAction],
     current_idx: usize,
-    max_steps: usize,
+    max_actions_per_turn: usize,
 ) -> bool {
     actions
         .iter()
-        .take(max_steps.max(1))
+        .take(max_actions_per_turn.max(1))
         .skip(current_idx + 1)
         .any(|action| !matches!(action, AgentAction::Think { .. }))
 }
@@ -132,11 +132,11 @@ fn has_remaining_action_after_full(actions: &[AgentAction], current_idx: usize) 
 fn remaining_actions_are_discussion_only(
     actions: &[AgentAction],
     current_idx: usize,
-    max_steps: usize,
+    max_actions_per_turn: usize,
 ) -> bool {
     let remaining = actions
         .iter()
-        .take(max_steps.max(1))
+        .take(max_actions_per_turn.max(1))
         .skip(current_idx + 1)
         .filter(|action| !matches!(action, AgentAction::Think { .. }))
         .collect::<Vec<_>>();
@@ -150,9 +150,9 @@ fn remaining_actions_are_discussion_only(
 fn remaining_actions_after_plan_capacity_are_discussion_only(
     actions: &[AgentAction],
     current_idx: usize,
-    max_steps: usize,
+    max_actions_per_turn: usize,
 ) -> bool {
-    if current_idx + 1 < max_steps.max(1) {
+    if current_idx + 1 < max_actions_per_turn.max(1) {
         return false;
     }
     let remaining = actions
@@ -256,7 +256,7 @@ pub(crate) fn classify_skill_failure_recovery(
     state: &AppState,
     actions: &[AgentAction],
     current_idx: usize,
-    max_steps: usize,
+    max_actions_per_turn: usize,
     normalized_skill: &str,
     call_args: Option<&Value>,
     err: &str,
@@ -271,14 +271,14 @@ pub(crate) fn classify_skill_failure_recovery(
         && run_cmd_error_is_observable(normalized_skill, err)
         && run_cmd_is_literal_user_command(call_args)
         && !run_cmd_literal_failure_is_repairable(call_args)
-        && remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+        && remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn)
     {
         return Some("recoverable_failure_finalize");
     }
     if normalized_skill.eq_ignore_ascii_case("run_cmd")
         && run_cmd_error_is_observable(normalized_skill, err)
-        && has_remaining_action_after(actions, current_idx, max_steps)
-        && !remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+        && has_remaining_action_after(actions, current_idx, max_actions_per_turn)
+        && !remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn)
         && !run_cmd_should_continue_after_split_failure(call_args)
     {
         if run_cmd_is_literal_user_command(call_args) {
@@ -287,8 +287,8 @@ pub(crate) fn classify_skill_failure_recovery(
         return Some("recoverable_failure_continue_round");
     }
     if crate::skills::is_recoverable_skill_error(normalized_skill, err) {
-        if has_remaining_action_after(actions, current_idx, max_steps)
-            && !remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+        if has_remaining_action_after(actions, current_idx, max_actions_per_turn)
+            && !remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn)
         {
             return Some("recoverable_failure_continue_in_round");
         }
@@ -298,24 +298,24 @@ pub(crate) fn classify_skill_failure_recovery(
         if remaining_actions_after_plan_capacity_are_discussion_only(
             actions,
             current_idx,
-            max_steps,
+            max_actions_per_turn,
         ) {
             return Some("recoverable_failure_finalize");
         }
-        if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
+        if remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn) {
             return Some("recoverable_failure_continue_round");
         }
         return Some("recoverable_failure_continue_round");
     }
     if normalized_skill.eq_ignore_ascii_case("run_cmd")
         && run_cmd_should_continue_after_split_failure(call_args)
-        && has_remaining_action_after(actions, current_idx, max_steps)
+        && has_remaining_action_after(actions, current_idx, max_actions_per_turn)
     {
         return Some("recoverable_failure_continue_in_round");
     }
     if normalized_skill.eq_ignore_ascii_case("run_cmd")
         && run_cmd_error_is_observable(normalized_skill, err)
-        && !has_remaining_action_after(actions, current_idx, max_steps)
+        && !has_remaining_action_after(actions, current_idx, max_actions_per_turn)
     {
         if current_idx > 0 && !has_remaining_action_after_full(actions, current_idx) {
             return Some("recoverable_failure_finalize");
@@ -323,7 +323,7 @@ pub(crate) fn classify_skill_failure_recovery(
         if remaining_actions_after_plan_capacity_are_discussion_only(
             actions,
             current_idx,
-            max_steps,
+            max_actions_per_turn,
         ) {
             return Some("recoverable_failure_finalize");
         }
@@ -343,7 +343,7 @@ pub(crate) fn classify_skill_failure_recovery(
         && run_cmd_error_is_observable(normalized_skill, err)
         && !run_cmd_is_literal_user_command(call_args)
         && !run_cmd_should_continue_after_split_failure(call_args)
-        && remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+        && remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn)
     {
         return Some("recoverable_failure_continue_round");
     }
@@ -351,13 +351,13 @@ pub(crate) fn classify_skill_failure_recovery(
         && run_cmd_error_is_observable(normalized_skill, err)
         && run_cmd_is_literal_user_command(call_args)
         && run_cmd_literal_failure_is_repairable(call_args)
-        && remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+        && remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn)
     {
         return Some("recoverable_failure_continue_round");
     }
     if planner_can_repair_structured_skill_error(err) {
-        if has_remaining_action_after(actions, current_idx, max_steps)
-            && !remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+        if has_remaining_action_after(actions, current_idx, max_actions_per_turn)
+            && !remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn)
         {
             return Some("recoverable_failure_continue_in_round");
         }
@@ -366,25 +366,29 @@ pub(crate) fn classify_skill_failure_recovery(
     if state.skill_is_retryable(normalized_skill)
         && !state.skill_invocation_requires_confirmation_policy(normalized_skill, call_args)
     {
-        if has_remaining_action_after(actions, current_idx, max_steps) {
+        if has_remaining_action_after(actions, current_idx, max_actions_per_turn) {
             return Some("recoverable_failure_continue_in_round");
         }
-        if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
+        if remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn) {
             return Some("recoverable_failure_finalize");
         }
         return Some("recoverable_failure_continue_round");
     }
-    if has_remaining_action_after(actions, current_idx, max_steps)
+    if has_remaining_action_after(actions, current_idx, max_actions_per_turn)
         && call_args
             .map(|args| is_read_only_skill_invocation(state, normalized_skill, args))
             .unwrap_or(false)
     {
         return Some("recoverable_failure_continue_in_round");
     }
-    if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
+    if remaining_actions_are_discussion_only(actions, current_idx, max_actions_per_turn) {
         return Some("recoverable_failure_continue_in_round");
     }
-    if remaining_actions_after_plan_capacity_are_discussion_only(actions, current_idx, max_steps) {
+    if remaining_actions_after_plan_capacity_are_discussion_only(
+        actions,
+        current_idx,
+        max_actions_per_turn,
+    ) {
         return Some("recoverable_failure_finalize");
     }
     if normalized_skill.eq_ignore_ascii_case("run_cmd")

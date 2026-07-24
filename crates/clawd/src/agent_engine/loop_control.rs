@@ -650,7 +650,10 @@ fn clamp_child_loop_guard_policy(task: &ClaimedTask, policy: &mut AgentLoopGuard
     let Some(limits) = child_loop_budget_limits(&task.payload_json) else {
         return;
     };
-    policy.max_steps = policy.max_steps.min(limits.max_tool_calls as usize).max(1);
+    policy.max_actions_per_turn = policy
+        .max_actions_per_turn
+        .min(limits.max_tool_calls as usize)
+        .max(1);
 }
 
 fn clamp_child_task_budget_policy(
@@ -886,22 +889,19 @@ fn observe_task_budget(
 ) -> crate::task_budget_contract::BudgetDecision {
     use crate::task_budget_contract::{BudgetObservation, BudgetProgress};
 
-    let successful_steps = loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok())
-        .count() as u64;
-    let artifact_count = loop_state.written_file_aliases.len() as u64
-        + u64::from(loop_state.last_written_file_path.is_some());
+    let unique_successful_actions = loop_state.successful_action_fingerprints.len() as u64;
+    let artifact_count = super::progress_contract::unique_artifact_count(loop_state) as u64;
     let lifecycle_state = task_budget_lifecycle_state(loop_state).map(str::to_string);
     let provider_waiting = outcome.is_some_and(|round| {
         round.stop_signal.as_deref() == Some("recoverable_failure_continue_round")
     }) && recoverable_provider_blocker_resume_reason(loop_state).is_some();
     let progress = BudgetProgress {
-        evidence_count: loop_state.capability_results.len() as u64 + successful_steps,
+        evidence_count: super::progress_contract::machine_progress_fingerprint_count(loop_state)
+            as u64,
+        machine_progress_digest: super::progress_contract::machine_progress_digest(loop_state),
         artifact_count,
-        completed_plan_nodes: successful_steps,
-        verified_state_transitions: loop_state.successful_action_fingerprints.len() as u64,
+        completed_plan_nodes: unique_successful_actions,
+        verified_state_transitions: u64::from(loop_state.latest_validation_result.is_some()),
         async_continuations: u64::from(lifecycle_state.as_deref() == Some("background")),
         stagnation_count: loop_state.consecutive_no_progress.min(u32::MAX as usize) as u32,
     };
@@ -1073,11 +1073,11 @@ async fn run_agent_round(
     );
     if profile_changed {
         info!(
-            "loop_planner_budget_profile task_id={} profile={} candidate_profile={} max_steps={} soft_slice_ms={} stagnation_tolerance={}",
+            "loop_planner_budget_profile task_id={} profile={} candidate_profile={} max_actions_per_turn={} soft_slice_ms={} stagnation_tolerance={}",
             task.task_id,
             profile.as_str(),
             candidate_profile.as_str(),
-            policy.max_steps,
+            policy.max_actions_per_turn,
             loop_state
                 .task_budget_slice
                 .as_ref()
@@ -1408,10 +1408,10 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         );
     }
     info!(
-        "loop_budget_profile task_id={} profile={} max_steps={} repeat_action_limit={}",
+        "loop_budget_profile task_id={} profile={} max_actions_per_turn={} repeat_action_limit={}",
         task.task_id,
         budget_profile.as_str(),
-        policy.max_steps,
+        policy.max_actions_per_turn,
         policy.repeat_action_limit
     );
     let mut round = 1usize;

@@ -155,11 +155,11 @@ pub(super) async fn plan_round_actions(
         crate::language_policy::task_user_request_for_prompt(task, user_text);
     let attempt_ledger = build_attempt_ledger_compact(loop_state);
     info!(
-        "{} loop_round_plan task_id={} round={} max_steps={}",
+        "{} loop_round_plan task_id={} round={} max_actions_per_turn={}",
         crate::highlight_tag("loop"),
         task.task_id,
         loop_state.round_no,
-        policy.max_steps
+        policy.max_actions_per_turn
     );
     let native_protocol = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
@@ -419,6 +419,7 @@ pub(super) async fn plan_round_actions(
         let raw_plan_text =
             serde_json::to_string(&native_turn).map_err(|error| error.to_string())?;
         let plan_result = build_plan_result_with_notes(
+            Some(state),
             goal,
             &raw_plan_text,
             PlanKind::Native,
@@ -585,6 +586,7 @@ pub(super) async fn plan_round_actions(
         )
     };
     let plan_result = build_plan_result_with_notes(
+        Some(state),
         goal,
         &raw_plan_text,
         plan_kind,

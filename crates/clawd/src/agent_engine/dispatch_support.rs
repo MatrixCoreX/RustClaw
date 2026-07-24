@@ -302,7 +302,8 @@ pub(super) fn handle_respond_action(
     )
     .trim()
     .to_string();
-    let has_remaining_actions = has_remaining_action_after(actions, idx, policy.max_steps);
+    let has_remaining_actions =
+        has_remaining_action_after(actions, idx, policy.max_actions_per_turn);
     let terminal_last_output_passthrough = !has_remaining_actions
         && !resolved_text.is_empty()
         && respond_template_guard::bare_last_output_placeholder(content);

@@ -319,7 +319,7 @@ pub(super) async fn try_run_post_write_validation_reserve_recovery(
     {
         return Ok(false);
     }
-    let max_actions = policy.max_steps.max(1).min(8);
+    let max_actions = policy.max_actions_per_turn.max(1).min(8);
     let actions = post_write_validation_reserve_actions(
         state,
         reply,
@@ -557,7 +557,9 @@ pub(super) fn post_write_content_evidence_recovery_policy(
     action_count: usize,
 ) -> AgentLoopGuardPolicy {
     let mut recovery_policy = policy.clone();
-    recovery_policy.max_steps = recovery_policy.max_steps.max(action_count.max(1));
+    recovery_policy.max_actions_per_turn = recovery_policy
+        .max_actions_per_turn
+        .max(action_count.max(1));
     recovery_policy
 }
 

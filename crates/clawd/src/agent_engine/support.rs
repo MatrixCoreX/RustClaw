@@ -11,7 +11,7 @@ use crate::{repo, AgentAction, AppState, ClaimedTask};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct LoopRecipeOverrides {
-    pub(super) max_steps: Option<usize>,
+    pub(super) max_actions_per_turn: Option<usize>,
     pub(super) repeat_action_limit: Option<usize>,
     pub(super) max_repairs: Option<usize>,
     pub(super) run_cmd_timeout_seconds: Option<u64>,
@@ -101,7 +101,7 @@ impl AnswerVerifierRequiredEvidenceScope {
 
 #[derive(Debug, Clone)]
 pub(super) struct AgentLoopGuardPolicy {
-    pub(super) max_steps: usize,
+    pub(super) max_actions_per_turn: usize,
     pub(super) repeat_action_limit: usize,
     pub(super) answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope,
     pub(super) registry_idempotency_guard_scope: RegistryIdempotencyGuardScope,
@@ -236,8 +236,8 @@ impl AgentLoopGuardPolicy {
     fn adjusted_for_loop_budget_profile(&self, profile: LoopBudgetProfile) -> Self {
         let overrides = self.overrides_for_profile(profile);
         let mut policy = self.clone();
-        if let Some(max_steps) = overrides.max_steps {
-            policy.max_steps = max_steps;
+        if let Some(max_actions_per_turn) = overrides.max_actions_per_turn {
+            policy.max_actions_per_turn = max_actions_per_turn;
         }
         if let Some(repeat_action_limit) = overrides.repeat_action_limit {
             policy.repeat_action_limit = repeat_action_limit;
@@ -314,6 +314,30 @@ fn parse_optional_u64_from_toml(root: &TomlValue, path: &[&str]) -> Option<u64> 
         .filter(|v| *v >= 1)
 }
 
+fn parse_migrated_action_limit(
+    root: &TomlValue,
+    prefix: &[&str],
+    default: Option<usize>,
+) -> Option<usize> {
+    let mut current_path = prefix.to_vec();
+    current_path.push("max_actions_per_turn");
+    if let Some(value) = parse_optional_usize_from_toml(root, &current_path) {
+        return Some(value);
+    }
+    let mut legacy_path = prefix.to_vec();
+    legacy_path.push("max_steps");
+    let legacy = parse_optional_usize_from_toml(root, &legacy_path);
+    if legacy.is_some() {
+        warn!(
+            legacy_key = "max_steps",
+            replacement_key = "max_actions_per_turn",
+            reason_code = "agent_loop_action_limit_key_migrated",
+            "agent_loop_guard_legacy_key_loaded"
+        );
+    }
+    legacy.or(default)
+}
+
 fn parse_answer_verifier_required_evidence_scope(
     root: &TomlValue,
 ) -> AnswerVerifierRequiredEvidenceScope {
@@ -349,8 +373,6 @@ fn parse_registry_idempotency_guard_scope(root: &TomlValue) -> RegistryIdempoten
 }
 
 fn parse_loop_recipe_overrides(root: &TomlValue, path: &[&str]) -> LoopRecipeOverrides {
-    let mut max_steps_path = path.to_vec();
-    max_steps_path.push("max_steps");
     let mut repeat_action_limit_path = path.to_vec();
     repeat_action_limit_path.push("repeat_action_limit");
     let mut max_repairs_path = path.to_vec();
@@ -361,7 +383,7 @@ fn parse_loop_recipe_overrides(root: &TomlValue, path: &[&str]) -> LoopRecipeOve
     run_cmd_validation_timeout_path.push("run_cmd_validation_timeout_seconds");
 
     LoopRecipeOverrides {
-        max_steps: parse_optional_usize_from_toml(root, &max_steps_path),
+        max_actions_per_turn: parse_migrated_action_limit(root, path, None),
         repeat_action_limit: parse_optional_usize_from_toml(root, &repeat_action_limit_path),
         max_repairs: parse_optional_usize_from_toml(root, &max_repairs_path),
         run_cmd_timeout_seconds: parse_optional_u64_from_toml(root, &run_cmd_timeout_path),
@@ -385,11 +407,12 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
         parse_answer_verifier_required_evidence_scope(&parsed);
     let registry_idempotency_guard_scope = parse_registry_idempotency_guard_scope(&parsed);
     let policy = AgentLoopGuardPolicy {
-        max_steps: parse_usize_from_toml(
+        max_actions_per_turn: parse_migrated_action_limit(
             &parsed,
-            &["agent", "loop_guard", "max_steps"],
-            crate::AGENT_MAX_STEPS,
-        ),
+            &["agent", "loop_guard"],
+            Some(crate::AGENT_MAX_ACTIONS_PER_TURN),
+        )
+        .unwrap_or(crate::AGENT_MAX_ACTIONS_PER_TURN),
         repeat_action_limit: parse_usize_from_toml(
             &parsed,
             &["agent", "loop_guard", "repeat_action_limit"],

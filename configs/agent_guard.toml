@@ -167,7 +167,7 @@ tool_timeout_class = "long_tail"
 # 建议修改/Recommended change: 通常保持默认值；任务总生命周期由 [agent.task_budget] 的软时间片、
 # progress/stagnation 判断和高管理员硬上限控制。
 # 风险/Risk: 过低会增加重规划次数；过高会让一个模型回合在观察新证据前执行过多预先规划动作。
-max_steps = 32
+max_actions_per_turn = 32
 # 用途/Purpose: Answer Verifier required-evidence 强制阻断范围；替代全局 bool.
 # 终态值/Final token: all.
 # 建议修改/Recommended change: 保持 all；非 all 的历史值会被 runtime 归一化为 all。
@@ -191,24 +191,24 @@ repeat_same_action_limit = 4
 
 [agent.loop_guard.budget_profiles.fast_read]
 # 用途/Purpose: 单次只读/状态/标量类 planner turn 的动作批次上限，保持低延迟.
-max_steps = 16
+max_actions_per_turn = 16
 repeat_action_limit = 3
 
 [agent.loop_guard.budget_profiles.grounded_summary]
 # 用途/Purpose: 需要证据覆盖、摘要、比较、验证或命令输出总结的 planner turn 动作批次上限.
-max_steps = 40
+max_actions_per_turn = 40
 repeat_action_limit = 5
 
 [agent.loop_guard.budget_profiles.multi_step_workspace]
 # 用途/Purpose: 多文件/目录/交付/写入类 workspace planner turn，允许更大的动作批次.
-max_steps = 56
+max_actions_per_turn = 56
 repeat_action_limit = 6
 
 [agent.loop_guard.ops_closed_loop]
 # 用途/Purpose: 针对“检查 -> 修改 -> 验证 -> 修复”长尾闭环的单回合动作批次和恢复策略。
 # 建议修改/Recommended change: 只对复杂运维/配置任务放宽，避免影响普通短任务收敛速度。
 # 风险/Risk: 过高会拉长单任务占用时间；过低仍可能截断长尾修复闭环。
-max_steps = 48
+max_actions_per_turn = 48
 repeat_action_limit = 6
 max_repairs = 3
 run_cmd_timeout_seconds = 180

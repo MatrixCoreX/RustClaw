@@ -358,7 +358,7 @@ fn plan_result_with_raw_and_steps(
 
 fn test_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
-        max_steps: 8,
+        max_actions_per_turn: 8,
         repeat_action_limit: 3,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,

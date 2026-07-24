@@ -142,6 +142,28 @@ fn historical_progress_does_not_hide_repeated_stagnation() {
 }
 
 #[test]
+fn changed_machine_digest_advances_progress_when_evidence_count_is_stable() {
+    let mut slice = slice();
+    slice.progress.evidence_count = 1;
+    slice.progress.machine_progress_digest = Some("sha256:pending".to_string());
+
+    let decision = slice.observe(BudgetObservation {
+        cumulative_model_turns: 2,
+        progress: BudgetProgress {
+            evidence_count: 1,
+            machine_progress_digest: Some("sha256:complete".to_string()),
+            stagnation_count: 3,
+            ..BudgetProgress::default()
+        },
+        stagnation_exhausted: true,
+        resumable: true,
+        ..BudgetObservation::default()
+    });
+
+    assert_eq!(decision, BudgetDecision::Continue);
+}
+
+#[test]
 fn checkpoint_round_trip_resumes_once() {
     let mut original = slice();
     original.observe(BudgetObservation {

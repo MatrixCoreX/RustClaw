@@ -4,6 +4,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use tracing::{debug, info};
 
+mod action_batch_contract;
 mod arg_resolver;
 mod async_start_checkpoint;
 mod attempt_ledger;
@@ -24,8 +25,10 @@ pub(crate) use mutation_ledger::{
     load_task_mutation_reconciliation_directive, safe_mutation_outcome_projection,
 };
 pub(crate) mod observed_output;
+mod parallel_read_batch;
 mod planner_skill_context;
 mod planning;
+mod progress_contract;
 mod scratch_cleanup_args;
 pub(crate) use explicit_machine_command::explicit_machine_syntax_command_segment;
 mod planning_action_normalization;
@@ -1119,7 +1122,7 @@ pub(crate) async fn run_agent_with_tools_seeded(
 }
 
 pub(crate) fn direct_capability_plan(
-    _state: &AppState,
+    state: &AppState,
     capability: &str,
     args: Value,
 ) -> PlanResult {
@@ -1138,6 +1141,7 @@ pub(crate) fn direct_capability_plan(
     })
     .to_string();
     self::planning_actions::build_plan_result_with_notes(
+        Some(state),
         &format!("capability:{capability}"),
         &raw_plan,
         PlanKind::Single,
@@ -1173,6 +1177,7 @@ pub(crate) fn checkpoint_action_plan(
     })
     .to_string();
     let mut plan = self::planning_actions::build_plan_result_with_notes(
+        None,
         &format!("checkpoint_action:{action_ref}"),
         &raw_plan,
         PlanKind::Single,

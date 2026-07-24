@@ -1,26 +1,25 @@
 use super::plan_step_label;
-use crate::{plan_step_from_agent_action, AgentAction, PlanKind, PlanResult};
+use crate::{plan_step_from_agent_action, AgentAction, AppState, PlanKind, PlanResult};
 
 pub(super) fn build_plan_result_with_notes(
+    state: Option<&AppState>,
     goal: &str,
     raw_plan_text: &str,
     plan_kind: PlanKind,
     actions: &[AgentAction],
     planner_notes: &str,
 ) -> PlanResult {
-    let mut previous_actionable_step_id: Option<String> = None;
+    let dependencies = super::action_batch_contract::planner_action_dependencies(state, actions);
     let mut steps = Vec::new();
     for (idx, action) in actions.iter().enumerate() {
         let step_id = format!("step_{}", idx + 1);
-        let depends_on = previous_actionable_step_id
-            .as_ref()
-            .map(|v| vec![v.clone()])
-            .unwrap_or_default();
         let why = plan_step_label(action);
-        let step = plan_step_from_agent_action(action, step_id.clone(), depends_on, why);
-        if !matches!(action, AgentAction::Think { .. }) {
-            previous_actionable_step_id = Some(step_id);
-        }
+        let step = plan_step_from_agent_action(
+            action,
+            step_id,
+            dependencies.get(idx).cloned().unwrap_or_default(),
+            why,
+        );
         steps.push(step);
     }
     PlanResult {

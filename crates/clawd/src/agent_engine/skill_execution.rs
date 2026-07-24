@@ -689,7 +689,7 @@ async fn handle_skill_step_failure(
         state,
         actions,
         idx,
-        policy.max_steps,
+        policy.max_actions_per_turn,
         normalized_skill,
         recovery_args,
         err,
