@@ -153,27 +153,44 @@ pub fn edit_docx(
                 replace_image(&mut members, media_id, &image_path)?;
                 changed_refs.push(media_id.to_string());
             }
+            kind if crate::docx_structure_edit::supports(kind) => {
+                changed_refs.extend(crate::docx_structure_edit::apply(&mut document, operation)?);
+            }
             "set_properties" => update_properties(&mut members, operation)?,
             "set_header" => {
                 let text = operation.string("text")?;
                 members.insert("word/header1.xml".into(), header_xml(text).into_bytes());
-                ensure_document_relation(
+                ensure_content_override(
+                    &mut members,
+                    "/word/header1.xml",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml",
+                )?;
+                let relationship_id = ensure_singleton_document_relation(
                     &mut members,
                     "header",
                     "header1.xml",
                     "rIdRustClawHeader",
                 )?;
+                document =
+                    ensure_section_reference(&document, "headerReference", &relationship_id)?;
                 changed_refs.push("word_header1".to_string());
             }
             "set_footer" => {
                 let text = operation.string("text")?;
                 members.insert("word/footer1.xml".into(), footer_xml(text).into_bytes());
-                ensure_document_relation(
+                ensure_content_override(
+                    &mut members,
+                    "/word/footer1.xml",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml",
+                )?;
+                let relationship_id = ensure_singleton_document_relation(
                     &mut members,
                     "footer",
                     "footer1.xml",
                     "rIdRustClawFooter",
                 )?;
+                document =
+                    ensure_section_reference(&document, "footerReference", &relationship_id)?;
                 changed_refs.push("word_footer1".to_string());
             }
             "set_section" => {
@@ -191,11 +208,11 @@ pub fn edit_docx(
             }
         }
     }
+    merge_auxiliary_parts(&mut members, &mut append_parts)?;
     if !append_parts.body.is_empty() {
         document = append_to_document(&document, &append_parts.body)?;
         changed_refs.push("word_document_body".to_string());
     }
-    merge_auxiliary_parts(&mut members, append_parts)?;
     members.insert("word/document.xml".to_string(), document.into_bytes());
     Ok(DocxWriteResult {
         members,
@@ -562,33 +579,224 @@ fn add_note_relationships(
 
 fn merge_auxiliary_parts(
     members: &mut BTreeMap<String, Vec<u8>>,
-    parts: DocxParts,
+    parts: &mut DocxParts,
 ) -> OfficeResult<()> {
-    if let Some(header) = parts.header {
+    if let Some(header) = parts.header.take() {
         members.insert("word/header1.xml".into(), header_xml(&header).into_bytes());
+        ensure_content_override(
+            members,
+            "/word/header1.xml",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml",
+        )?;
         ensure_document_relation(members, "header", "header1.xml", "rIdRustClawHeader")?;
     }
-    if let Some(footer) = parts.footer {
+    if let Some(footer) = parts.footer.take() {
         members.insert("word/footer1.xml".into(), footer_xml(&footer).into_bytes());
+        ensure_content_override(
+            members,
+            "/word/footer1.xml",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml",
+        )?;
         ensure_document_relation(members, "footer", "footer1.xml", "rIdRustClawFooter")?;
     }
-    for (name, bytes) in parts.media {
-        members.insert(name, bytes);
-    }
-    if !parts.relationships.is_empty() {
-        let rels_name = "word/_rels/document.xml.rels";
-        let mut rels = members
-            .get(rels_name)
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())
-            .unwrap_or(r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#)
+
+    let mut relationships = std::mem::take(&mut parts.relationships);
+    for (old_member, bytes) in std::mem::take(&mut parts.media) {
+        let extension = Path::new(&old_member)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("png");
+        let image_index = next_media_index(members);
+        let member = format!("word/media/image{image_index}.{extension}");
+        let old_target = old_member
+            .strip_prefix("word/")
+            .unwrap_or(&old_member)
             .to_string();
-        for (id, kind, target, external) in parts.relationships {
-            let relation = relationship_xml(&id, &kind, &target, external);
-            rels = insert_before(&rels, "</Relationships>", &relation)?;
+        if let Some((id, _, target, _)) = relationships
+            .iter_mut()
+            .find(|(_, kind, target, _)| kind == "image" && *target == old_target)
+        {
+            let new_id = format!("rIdRustClawImage{}", uuid::Uuid::new_v4().simple());
+            parts.body = parts.body.replace(
+                &format!("r:embed=\"{}\"", xml(id)),
+                &format!("r:embed=\"{new_id}\""),
+            );
+            *id = new_id;
+            *target = member.strip_prefix("word/").unwrap_or(&member).to_string();
         }
-        members.insert(rels_name.into(), rels.into_bytes());
+        members.insert(member, bytes);
+        ensure_content_default(members, extension, image_content_type(extension))?;
     }
+
+    for (id, kind, target, external) in &mut relationships {
+        if kind != "image" {
+            let old_id = id.clone();
+            let new_id = format!("rIdRustClaw{}", uuid::Uuid::new_v4().simple());
+            parts.body = parts.body.replace(
+                &format!("r:id=\"{}\"", xml(&old_id)),
+                &format!("r:id=\"{new_id}\""),
+            );
+            *id = new_id;
+        }
+        ensure_document_relation_with_mode(members, kind, target, id, *external)?;
+    }
+
+    merge_notes(
+        members,
+        &mut parts.body,
+        "footnotes",
+        "footnote",
+        "footnoteReference",
+        "rIdRustClawFootnotes",
+        std::mem::take(&mut parts.footnotes),
+    )?;
+    merge_notes(
+        members,
+        &mut parts.body,
+        "endnotes",
+        "endnote",
+        "endnoteReference",
+        "rIdRustClawEndnotes",
+        std::mem::take(&mut parts.endnotes),
+    )?;
+    merge_comments(
+        members,
+        &mut parts.body,
+        std::mem::take(&mut parts.comments),
+    )?;
     Ok(())
+}
+
+fn merge_notes(
+    members: &mut BTreeMap<String, Vec<u8>>,
+    body: &mut String,
+    root: &str,
+    item: &str,
+    reference: &str,
+    relationship_id: &str,
+    values: Vec<String>,
+) -> OfficeResult<()> {
+    if values.is_empty() {
+        return Ok(());
+    }
+    let member = format!("word/{root}.xml");
+    let mut source = members
+        .get(&member)
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:{root} xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"></w:{root}>"
+            )
+        });
+    let base = max_word_id(&source, item);
+    for (index, value) in values.iter().enumerate() {
+        let old_id = index + 1;
+        let new_id = base + old_id;
+        *body = body.replace(
+            &format!("<w:{reference} w:id=\"{old_id}\"/>"),
+            &format!("<w:{reference} w:id=\"{new_id}\"/>"),
+        );
+        source = insert_before(
+            &source,
+            &format!("</w:{root}>"),
+            &format!(
+                "<w:{item} w:id=\"{new_id}\"><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:{item}>",
+                xml(value)
+            ),
+        )?;
+    }
+    members.insert(member, source.into_bytes());
+    ensure_content_override(
+        members,
+        &format!("/word/{root}.xml"),
+        &format!("application/vnd.openxmlformats-officedocument.wordprocessingml.{root}+xml"),
+    )?;
+    ensure_singleton_document_relation(members, root, &format!("{root}.xml"), relationship_id)?;
+    Ok(())
+}
+
+fn merge_comments(
+    members: &mut BTreeMap<String, Vec<u8>>,
+    body: &mut String,
+    values: Vec<String>,
+) -> OfficeResult<()> {
+    if values.is_empty() {
+        return Ok(());
+    }
+    let member = "word/comments.xml";
+    let mut source = members
+        .get(member)
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:comments xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"></w:comments>".to_string()
+        });
+    let base = max_word_id(&source, "comment");
+    for (index, value) in values.iter().enumerate() {
+        let old_id = index;
+        let new_id = base + index + 1;
+        for tag in ["commentRangeStart", "commentRangeEnd", "commentReference"] {
+            *body = body.replace(
+                &format!("<w:{tag} w:id=\"{old_id}\"/>"),
+                &format!("<w:{tag} w:id=\"{new_id}\"/>"),
+            );
+        }
+        source = insert_before(
+            &source,
+            "</w:comments>",
+            &format!(
+                "<w:comment w:id=\"{new_id}\" w:author=\"RustClaw\"><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:comment>",
+                xml(value)
+            ),
+        )?;
+    }
+    members.insert(member.into(), source.into_bytes());
+    ensure_content_override(
+        members,
+        "/word/comments.xml",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml",
+    )?;
+    ensure_singleton_document_relation(members, "comments", "comments.xml", "rIdRustClawComments")?;
+    Ok(())
+}
+
+fn max_word_id(source: &str, item: &str) -> usize {
+    let token = format!("<w:{item}");
+    source
+        .match_indices(&token)
+        .filter_map(|(start, _)| {
+            let opening_end = source[start..].find('>').map(|value| start + value)?;
+            attribute_value(&source[start..=opening_end], "w:id")?
+                .parse()
+                .ok()
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn next_media_index(members: &BTreeMap<String, Vec<u8>>) -> usize {
+    let used = members
+        .keys()
+        .filter_map(|name| {
+            let value = name.strip_prefix("word/media/image")?;
+            let number = value.split_once('.').map(|(number, _)| number)?;
+            number.parse::<usize>().ok()
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    (1..).find(|index| !used.contains(index)).unwrap_or(1)
+}
+
+fn attribute_value(opening: &str, name: &str) -> Option<String> {
+    for quote in ['"', '\''] {
+        let prefix = format!("{name}={quote}");
+        if let Some(start) = opening.find(&prefix) {
+            let value_start = start + prefix.len();
+            let end = opening[value_start..].find(quote)? + value_start;
+            return Some(opening[value_start..end].to_string());
+        }
+    }
+    None
 }
 
 fn replace_element_text(
@@ -682,8 +890,14 @@ fn set_paragraph_style(xml_text: &str, index: usize, style: &str) -> OfficeResul
         format!("{}{}{}", &element[..start], style_xml, &element[end..])
     } else if element.contains("<w:pPr>") {
         element.replacen("<w:pPr>", &format!("<w:pPr>{style_xml}"), 1)
+    } else if let Some(open_end) = element.find('>') {
+        format!(
+            "{}<w:pPr>{style_xml}</w:pPr>{}",
+            &element[..open_end + 1],
+            &element[open_end + 1..]
+        )
     } else {
-        element.replacen("<w:p", &format!("<w:p><w:pPr>{style_xml}</w:pPr>"), 1)
+        return Err(malformed_selector("w:p"));
     };
     Ok(format!(
         "{}{}{}",
@@ -896,21 +1110,97 @@ fn set_section(document: &str, operation: &NormalizedOperation) -> OfficeResult<
     let landscape = operation
         .optional_string("orientation")
         .is_some_and(|value| value == "landscape");
-    let (section, _, _) = section_xml(landscape, false, false);
     if let Some(start) = document.find("<w:sectPr") {
         let end = document[start..]
             .find("</w:sectPr>")
             .map(|relative| start + relative + "</w:sectPr>".len())
             .ok_or_else(|| malformed_selector("w:sectPr"))?;
+        let section = &document[start..end];
+        let updated = set_section_page_size(section, landscape)?;
         Ok(format!(
             "{}{}{}",
             &document[..start],
-            section,
+            updated,
             &document[end..]
         ))
     } else {
+        let (section, _, _) = section_xml(landscape, false, false);
         insert_before(document, "</w:body>", &section)
     }
+}
+
+fn set_section_page_size(section: &str, landscape: bool) -> OfficeResult<String> {
+    let (width, height) = if landscape {
+        ("15840", "12240")
+    } else {
+        ("12240", "15840")
+    };
+    if let Some(start) = section.find("<w:pgSz") {
+        let end = section[start..]
+            .find('>')
+            .map(|relative| start + relative + 1)
+            .ok_or_else(|| malformed_selector("w:pgSz"))?;
+        let mut opening = replace_or_add_xml_attribute(&section[start..end], "w:w", width);
+        opening = replace_or_add_xml_attribute(&opening, "w:h", height);
+        opening = if landscape {
+            replace_or_add_xml_attribute(&opening, "w:orient", "landscape")
+        } else {
+            remove_xml_attribute(&opening, "w:orient")
+        };
+        return Ok(format!(
+            "{}{}{}",
+            &section[..start],
+            opening,
+            &section[end..]
+        ));
+    }
+    insert_before(
+        section,
+        "</w:sectPr>",
+        &format!(
+            "<w:pgSz w:w=\"{width}\" w:h=\"{height}\"{} />",
+            if landscape {
+                " w:orient=\"landscape\""
+            } else {
+                ""
+            }
+        ),
+    )
+}
+
+fn ensure_section_reference(document: &str, kind: &str, id: &str) -> OfficeResult<String> {
+    if document.contains(&format!("<w:{kind}")) {
+        return Ok(document.to_string());
+    }
+    let reference = format!("<w:{kind} w:type=\"default\" r:id=\"{}\"/>", xml(id));
+    if let Some(start) = document.find("<w:sectPr") {
+        let opening_end = document[start..]
+            .find('>')
+            .map(|relative| start + relative + 1)
+            .ok_or_else(|| malformed_selector("w:sectPr"))?;
+        if document[start..opening_end].trim_end().ends_with("/>") {
+            let opening = document[start..opening_end]
+                .trim_end_matches("/>")
+                .trim_end();
+            return Ok(format!(
+                "{}{}>{reference}</w:sectPr>{}",
+                &document[..start],
+                opening,
+                &document[opening_end..]
+            ));
+        }
+        return Ok(format!(
+            "{}{}{}",
+            &document[..opening_end],
+            reference,
+            &document[opening_end..]
+        ));
+    }
+    insert_before(
+        document,
+        "</w:body>",
+        &format!("<w:sectPr>{reference}</w:sectPr>"),
+    )
 }
 
 fn ensure_document_relation(
@@ -918,6 +1208,16 @@ fn ensure_document_relation(
     kind: &str,
     target: &str,
     id: &str,
+) -> OfficeResult<()> {
+    ensure_document_relation_with_mode(members, kind, target, id, false)
+}
+
+fn ensure_document_relation_with_mode(
+    members: &mut BTreeMap<String, Vec<u8>>,
+    kind: &str,
+    target: &str,
+    id: &str,
+    external: bool,
 ) -> OfficeResult<()> {
     let name = "word/_rels/document.xml.rels";
     let current = members
@@ -930,10 +1230,133 @@ fn ensure_document_relation(
     let updated = insert_before(
         current,
         "</Relationships>",
-        &relationship_xml(id, kind, target, false),
+        &relationship_xml(id, kind, target, external),
     )?;
     members.insert(name.into(), updated.into_bytes());
     Ok(())
+}
+
+fn ensure_singleton_document_relation(
+    members: &mut BTreeMap<String, Vec<u8>>,
+    kind: &str,
+    target: &str,
+    preferred_id: &str,
+) -> OfficeResult<String> {
+    let name = "word/_rels/document.xml.rels";
+    let current = members
+        .get(name)
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .unwrap_or(
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#,
+        );
+    if let Some(id) = relationship_id_by_kind(current, kind) {
+        return Ok(id);
+    }
+    ensure_document_relation(members, kind, target, preferred_id)?;
+    Ok(preferred_id.to_string())
+}
+
+fn relationship_id_by_kind(source: &str, kind: &str) -> Option<String> {
+    let mut cursor = 0usize;
+    while let Some(relative) = source[cursor..].find("<Relationship") {
+        let start = cursor + relative;
+        let end = source[start..].find('>').map(|value| start + value + 1)?;
+        let opening = &source[start..end];
+        let relation_type = attribute_value(opening, "Type")?;
+        if relation_type.ends_with(&format!("/{kind}")) {
+            return attribute_value(opening, "Id");
+        }
+        cursor = end;
+    }
+    None
+}
+
+fn ensure_content_override(
+    members: &mut BTreeMap<String, Vec<u8>>,
+    part_name: &str,
+    content_type: &str,
+) -> OfficeResult<()> {
+    let source = member_text(members, "[Content_Types].xml")?.to_string();
+    if source.contains(&format!("PartName=\"{}\"", xml(part_name))) {
+        return Ok(());
+    }
+    let value = format!(
+        "<Override PartName=\"{}\" ContentType=\"{}\"/>",
+        xml(part_name),
+        xml(content_type)
+    );
+    members.insert(
+        "[Content_Types].xml".into(),
+        insert_before(&source, "</Types>", &value)?.into_bytes(),
+    );
+    Ok(())
+}
+
+fn ensure_content_default(
+    members: &mut BTreeMap<String, Vec<u8>>,
+    extension: &str,
+    content_type: &str,
+) -> OfficeResult<()> {
+    let source = member_text(members, "[Content_Types].xml")?.to_string();
+    if source.contains(&format!("Extension=\"{}\"", xml(extension))) {
+        return Ok(());
+    }
+    let value = format!(
+        "<Default Extension=\"{}\" ContentType=\"{}\"/>",
+        xml(extension),
+        xml(content_type)
+    );
+    members.insert(
+        "[Content_Types].xml".into(),
+        insert_before(&source, "</Types>", &value)?.into_bytes(),
+    );
+    Ok(())
+}
+
+fn replace_or_add_xml_attribute(opening: &str, name: &str, value: &str) -> String {
+    for quote in ['"', '\''] {
+        let prefix = format!("{name}={quote}");
+        if let Some(start) = opening.find(&prefix) {
+            let value_start = start + prefix.len();
+            if let Some(relative) = opening[value_start..].find(quote) {
+                let end = value_start + relative;
+                return format!(
+                    "{}{}{}",
+                    &opening[..value_start],
+                    xml(value),
+                    &opening[end..]
+                );
+            }
+        }
+    }
+    let index = opening
+        .rfind("/>")
+        .or_else(|| opening.rfind('>'))
+        .unwrap_or(opening.len());
+    format!(
+        "{} {name}=\"{}\"{}",
+        &opening[..index],
+        xml(value),
+        &opening[index..]
+    )
+}
+
+fn remove_xml_attribute(opening: &str, name: &str) -> String {
+    for quote in ['"', '\''] {
+        let prefix = format!("{name}={quote}");
+        if let Some(start) = opening.find(&prefix) {
+            let value_start = start + prefix.len();
+            if let Some(relative) = opening[value_start..].find(quote) {
+                let end = value_start + relative + 1;
+                let whitespace_start = opening[..start]
+                    .rfind(|character: char| !character.is_whitespace())
+                    .map(|index| index + 1)
+                    .unwrap_or(start);
+                return format!("{}{}", &opening[..whitespace_start], &opening[end..]);
+            }
+        }
+    }
+    opening.to_string()
 }
 
 fn set_or_insert_simple_element(

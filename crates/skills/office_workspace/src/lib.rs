@@ -1,4 +1,5 @@
 mod docx;
+mod docx_structure_edit;
 mod docx_write;
 mod engine;
 mod error;

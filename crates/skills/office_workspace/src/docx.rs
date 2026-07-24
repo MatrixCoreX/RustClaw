@@ -65,6 +65,8 @@ fn parse_part(
     let mut table_rows: Vec<Vec<String>> = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let mut cell = String::new();
+    let mut part_block_index = 0usize;
+    let mut part_table_index = 0usize;
 
     loop {
         match reader.read_event() {
@@ -171,9 +173,9 @@ fn parse_part(
                 b"hyperlink" => hyperlink = None,
                 b"p" if paragraph_depth > 0 => {
                     if paragraph_depth == 1 && !paragraph_text.trim().is_empty() {
-                        let index = blocks.len() + 1;
+                        part_block_index += 1;
                         blocks.push(DocumentBlock {
-                            id: stable_id(part, "paragraph", index),
+                            id: stable_id(part, "paragraph", part_block_index),
                             kind: part_kind(part).to_string(),
                             text: paragraph_text.trim().to_string(),
                             runs: runs.clone(),
@@ -200,9 +202,9 @@ fn parse_part(
                 }
                 b"tbl" if table_depth > 0 => {
                     if table_depth == 1 {
-                        let index = tables.len() + 1;
+                        part_table_index += 1;
                         tables.push(OfficeTable {
-                            id: stable_id(part, "table", index),
+                            id: stable_id(part, "table", part_table_index),
                             source_part: part.to_string(),
                             rows: std::mem::take(&mut table_rows),
                         });
