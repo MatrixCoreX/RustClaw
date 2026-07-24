@@ -1,10 +1,11 @@
 use super::{
-    answer_contract_for_reply, answer_verifier_retry_summary,
-    apply_structured_respond_clarify_to_loop_state, budget_replan_cause, child_loop_budget_limits,
-    coding_workflow_ready_for_model_finalization, commit_answer_verifier_retry_answer,
-    forced_boundary_observation_clarify_intent, initial_execution_recipe_spec,
-    next_resumable_budget_action, observe_only_round_should_continue,
-    planner_owned_observation_round_should_continue, post_write_content_evidence_recovery_policy,
+    action_result_boundary_requires_planner, answer_contract_for_reply,
+    answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
+    budget_replan_cause, child_loop_budget_limits, coding_workflow_ready_for_model_finalization,
+    commit_answer_verifier_retry_answer, forced_boundary_observation_clarify_intent,
+    initial_execution_recipe_spec, next_resumable_budget_action,
+    observe_only_round_should_continue, planner_owned_observation_round_should_continue,
+    post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
     record_agent_loop_decision_envelope_output_vars, retry_rewritten_answer_is_publishable,
     retry_verifier_accepts_rewritten_answer, round_is_policy_terminal, round_model_finished,
@@ -82,6 +83,42 @@ fn zero_action_observation_ready_round_is_not_model_finished() {
     };
 
     assert!(!round_model_finished(Some(&outcome)));
+}
+
+#[test]
+fn successful_action_result_boundary_is_not_model_finished() {
+    for signal in [
+        "independent_read_batch_observed",
+        "material_action_observed",
+    ] {
+        let mut loop_state = LoopState::new();
+        let outcome = RoundOutcome {
+            executed_actions: 1,
+            had_error: false,
+            stop_signal: Some(signal.to_string()),
+            next_goal_hint: None,
+            no_progress: false,
+        };
+
+        assert!(action_result_boundary_requires_planner(
+            &loop_state,
+            &outcome,
+        ));
+
+        let continued = RoundOutcome {
+            stop_signal: Some("action_result_continue_round".to_string()),
+            ..outcome.clone()
+        };
+        assert!(!round_model_finished(Some(&continued)));
+
+        loop_state
+            .delivery_messages
+            .push("FILE:/tmp/result".to_string());
+        assert!(!action_result_boundary_requires_planner(
+            &loop_state,
+            &outcome,
+        ));
+    }
 }
 
 #[test]

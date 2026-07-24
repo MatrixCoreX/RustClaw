@@ -721,7 +721,8 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
     round.stop_signal.as_deref().is_some_and(|signal| {
         matches!(
             signal,
-            "recoverable_failure_continue_round"
+            "action_result_continue_round"
+                | "recoverable_failure_continue_round"
                 | "capability_groups_loaded"
                 | "mcp_capabilities_loaded"
                 | "replan_from_verifier_signal"
@@ -731,6 +732,14 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
                 | "structured_observation_already_ready"
         )
     })
+}
+
+fn action_result_boundary_requires_planner(loop_state: &LoopState, outcome: &RoundOutcome) -> bool {
+    matches!(
+        outcome.stop_signal.as_deref(),
+        Some("independent_read_batch_observed" | "material_action_observed")
+    ) && !has_authoritative_delivery(loop_state)
+        && !loop_state.pending_user_input_required
 }
 
 fn round_model_finished(outcome: Option<&RoundOutcome>) -> bool {
@@ -1185,15 +1194,16 @@ async fn run_agent_round(
             || planner_owned_observation_round_should_continue(loop_state, &actions),
             |contract| observe_only_round_should_continue(contract, loop_state, &actions),
         );
-    let observation_boundary_can_continue = outcome.stop_signal.is_none()
-        || outcome.stop_signal.as_deref() == Some("independent_read_batch_observed");
-    if observation_boundary_can_continue && observation_round_requires_planner {
-        loop_state.has_recoverable_failure_context = true;
+    let action_result_requires_planner =
+        action_result_boundary_requires_planner(loop_state, &outcome);
+    if action_result_requires_planner
+        || (outcome.stop_signal.is_none() && observation_round_requires_planner)
+    {
         loop_state.output_vars.insert(
-            "agent_loop.observe_only_continue".to_string(),
+            "agent_loop.action_result_continue".to_string(),
             "true".to_string(),
         );
-        outcome.stop_signal = Some("recoverable_failure_continue_round".to_string());
+        outcome.stop_signal = Some("action_result_continue_round".to_string());
     }
     info!(
         "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
