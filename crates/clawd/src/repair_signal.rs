@@ -371,7 +371,6 @@ fn verifier_issue_retryable(kind: crate::verifier::VerifyIssueKind) -> bool {
         Kind::MissingRequiredArg
             | Kind::UnresolvedTemplateArg
             | Kind::InvalidDependsOn
-            | Kind::PrimaryFallbackConflict
             | Kind::RecipeInspectBeforeMutateRequired
             | Kind::RecipeValidationAfterMutateRequired
             | Kind::RecipeTargetScopeRequired

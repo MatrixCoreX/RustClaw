@@ -45,7 +45,6 @@ CORE_KEYS = (
     "kind",
     "planner_kind",
     "group",
-    "primary_fallback_role",
     "aliases",
     "timeout_seconds",
     "prompt_file",

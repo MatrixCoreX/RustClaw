@@ -108,7 +108,6 @@ fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> S
         timeout_seconds: None,
         retryable: None,
         group: None,
-        primary_fallback_role: None,
         once_per_task: None,
         dedup_scope: None,
         idempotent: None,

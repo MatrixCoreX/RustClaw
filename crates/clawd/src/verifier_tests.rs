@@ -220,7 +220,6 @@ enabled = true
 kind = "runner"
 output_kind = "text"
 group = "reader"
-primary_fallback_role = "primary"
 
 	[[skills]]
 	name = "fallback_reader"
@@ -228,7 +227,6 @@ primary_fallback_role = "primary"
 	kind = "runner"
 	output_kind = "text"
 	group = "reader"
-	primary_fallback_role = "fallback"
 
 	[[skills]]
 	name = "photo_organize"
@@ -1258,7 +1256,6 @@ fn verifier_issue_kinds_expose_stable_machine_fields() {
         VerifyIssueKind::ConfirmationRequired,
         VerifyIssueKind::SandboxPolicyDenied,
         VerifyIssueKind::RiskBudgetExceeded,
-        VerifyIssueKind::PrimaryFallbackConflict,
         VerifyIssueKind::BoundaryClarifyRequired,
         VerifyIssueKind::RecipeInspectBeforeMutateRequired,
         VerifyIssueKind::RecipeValidationAfterMutateRequired,
@@ -1662,7 +1659,7 @@ fn deterministic_subagent_boundary_plan_defers_clarify_when_locator_is_structure
 }
 
 #[test]
-fn enforce_mode_blocks_primary_fallback_conflict() {
+fn verifier_allows_independent_steps_from_same_registry_group() {
     let state = test_state();
     let task = test_task();
     let result = verify_plan(
@@ -1694,15 +1691,11 @@ fn enforce_mode_blocks_primary_fallback_conflict() {
         },
         VerifyMode::Enforce,
     );
-    assert!(!result.approved);
-    assert!(result
-        .issues
-        .iter()
-        .any(|issue| { matches!(issue.kind, VerifyIssueKind::PrimaryFallbackConflict) }));
+    assert!(result.approved, "issues: {:?}", result.issues);
 }
 
 #[test]
-fn verifier_allows_repeated_steps_from_same_primary_group_skill() {
+fn verifier_allows_repeated_steps_from_same_registry_group_skill() {
     let state = test_state();
     let task = test_task();
     let result = verify_plan(
@@ -1735,10 +1728,7 @@ fn verifier_allows_repeated_steps_from_same_primary_group_skill() {
         VerifyMode::Enforce,
     );
 
-    assert!(result
-        .issues
-        .iter()
-        .all(|issue| { !matches!(issue.kind, VerifyIssueKind::PrimaryFallbackConflict) }));
+    assert!(result.approved, "issues: {:?}", result.issues);
 }
 
 #[test]

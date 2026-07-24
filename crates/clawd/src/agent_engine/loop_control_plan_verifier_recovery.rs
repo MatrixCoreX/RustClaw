@@ -13,7 +13,6 @@ fn issue_is_planner_repairable(kind: crate::verifier::VerifyIssueKind) -> bool {
             | crate::verifier::VerifyIssueKind::InvalidArgumentValue
             | crate::verifier::VerifyIssueKind::UnresolvedTemplateArg
             | crate::verifier::VerifyIssueKind::InvalidDependsOn
-            | crate::verifier::VerifyIssueKind::PrimaryFallbackConflict
             | crate::verifier::VerifyIssueKind::RecipeInspectBeforeMutateRequired
             | crate::verifier::VerifyIssueKind::RecipeValidationAfterMutateRequired
             | crate::verifier::VerifyIssueKind::RecipeTargetScopeRequired
