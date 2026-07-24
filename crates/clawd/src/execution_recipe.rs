@@ -1524,10 +1524,12 @@ fn http_basic_accept_non_success(args: &Value) -> bool {
         || args.get("allow_non_success").and_then(Value::as_bool) == Some(true)
 }
 
-fn structured_validation_result(value: &Value) -> ValidationObservation {
+fn structured_validation_result(
+    value: &Value,
+    accept_generic_status: bool,
+) -> ValidationObservation {
     let result = value
         .get("result")
-        .or_else(|| value.get("status"))
         .and_then(Value::as_str)
         .map(|text| text.trim().to_ascii_lowercase());
     match result.as_deref() {
@@ -1564,6 +1566,27 @@ fn structured_validation_result(value: &Value) -> ValidationObservation {
             .unwrap_or("structured_validation_failed");
         return ValidationObservation::Failed(detail.to_string());
     }
+    let status = accept_generic_status
+        .then(|| value.get("status"))
+        .flatten()
+        .and_then(Value::as_str)
+        .map(|text| text.trim().to_ascii_lowercase());
+    match status.as_deref() {
+        Some("passed" | "pass" | "ok" | "success" | "succeeded") => {
+            return ValidationObservation::Passed;
+        }
+        Some("failed" | "fail" | "error" | "rejected") => {
+            let detail = value
+                .get("detail")
+                .or_else(|| value.get("reason"))
+                .or_else(|| value.get("error"))
+                .and_then(Value::as_str)
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or("structured_validation_failed");
+            return ValidationObservation::Failed(detail.to_string());
+        }
+        _ => {}
+    }
     ValidationObservation::Inconclusive
 }
 
@@ -1571,14 +1594,25 @@ fn structured_validation_from_output_text(output: &str) -> ValidationObservation
     let Ok(value) = serde_json::from_str::<Value>(output) else {
         return ValidationObservation::Inconclusive;
     };
-    if let Some(validation) = value.get("validation") {
-        return structured_validation_result(validation);
+    let candidates = [
+        (value.get("validation"), true),
+        (
+            value.get("extra").and_then(|extra| extra.get("validation")),
+            true,
+        ),
+        (value.get("extra"), false),
+        (Some(&value), false),
+    ];
+    for (candidate, accept_generic_status) in candidates {
+        let Some(candidate) = candidate else {
+            continue;
+        };
+        let observation = structured_validation_result(candidate, accept_generic_status);
+        if !matches!(observation, ValidationObservation::Inconclusive) {
+            return observation;
+        }
     }
-    value
-        .get("extra")
-        .and_then(|extra| extra.get("validation"))
-        .map(structured_validation_result)
-        .unwrap_or(ValidationObservation::Inconclusive)
+    ValidationObservation::Inconclusive
 }
 
 fn declared_validation_success_fallback(
@@ -1597,7 +1631,7 @@ pub(crate) fn assess_validation_output_with_structured(
     structured_validation: Option<&Value>,
 ) -> ValidationObservation {
     if let Some(validation) = structured_validation {
-        let observation = structured_validation_result(validation);
+        let observation = structured_validation_result(validation, true);
         if !matches!(observation, ValidationObservation::Inconclusive) {
             return observation;
         }
