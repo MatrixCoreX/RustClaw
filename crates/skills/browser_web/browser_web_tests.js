@@ -8,6 +8,7 @@ const {
     classifyError,
     isPrivateIp,
     partialExtractionItem,
+    resolvedAddressAllowed,
     validateNetworkUrl,
 } = require('./browser_web.js');
 
@@ -77,6 +78,13 @@ test('network address classifier covers private and public literals', () => {
     assert.equal(isPrivateIp('fc00::1'), true);
     assert.equal(isPrivateIp('1.1.1.1'), false);
     assert.equal(isPrivateIp('2606:4700:4700::1111'), false);
+});
+
+test('synthetic DNS policy keeps literals blocked and permits mediated named-host addresses', () => {
+    assert.equal(resolvedAddressAllowed('198.18.0.42', false, false), false);
+    assert.equal(resolvedAddressAllowed('198.18.0.42', false, true), true);
+    assert.equal(resolvedAddressAllowed('10.0.0.1', false, true), false);
+    assert.equal(resolvedAddressAllowed('1.1.1.1', false, false), true);
 });
 
 test('helper process returns a single structured failure envelope', () => {
