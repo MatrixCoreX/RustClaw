@@ -615,6 +615,51 @@ fn fs_basic_find_entries_max_entries_rewrites_to_fs_search_max_results() {
 }
 
 #[test]
+fn fs_basic_find_entries_empty_ext_array_keeps_name_search() {
+    let args = json!({
+        "action": "find_entries",
+        "root": "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3",
+        "target_kind": "file",
+        "pattern": "*abcd*",
+        "ext": []
+    });
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "fs_search");
+    assert_eq!(
+        rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+        Some("find_name")
+    );
+    assert_eq!(
+        rewrite.runtime_args.get("pattern").and_then(|v| v.as_str()),
+        Some("*abcd*")
+    );
+    assert!(rewrite.runtime_args.get("ext").is_none());
+}
+
+#[test]
+fn fs_basic_find_entries_empty_ext_without_pattern_degrades_to_listing() {
+    let args = json!({
+        "action": "find_entries",
+        "root": "scripts/nl_tests/fixtures/device_local/docs",
+        "target_kind": "file",
+        "ext": []
+    });
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "system_basic");
+    assert_eq!(
+        rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+        Some("inventory_dir")
+    );
+    assert!(rewrite.runtime_args.get("ext").is_none());
+}
+
+#[test]
 fn fs_basic_search_pagination_args_reach_runtime_backing_skill() {
     let find = rewrite_virtual_tool_call(
         "fs_basic",

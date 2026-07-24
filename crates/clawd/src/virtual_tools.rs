@@ -281,6 +281,9 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             demote_existing_directory_pattern_to_root(&mut obj);
             let has_pattern = has_non_empty_arg(&obj, "pattern");
             let has_ext = has_non_empty_arg(&obj, "ext");
+            if !has_ext {
+                obj.remove("ext");
+            }
             if !has_pattern && !has_ext {
                 if let Some(root) = obj.remove("root") {
                     obj.insert("path".to_string(), root);
@@ -318,7 +321,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                 }
                 return Ok(rewrite_to("system_basic", obj));
             }
-            let search_by_ext = obj.get("ext").is_some()
+            let search_by_ext = has_ext
                 || string_field_matches(&obj, &["by", "mode", "match_kind"], &["ext", "extension"]);
             if explicit_exact_basename && !search_by_ext {
                 obj.entry("exact".to_string()).or_insert(Value::Bool(true));
