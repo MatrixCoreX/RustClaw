@@ -54,6 +54,10 @@ crates/claw-core/src/skill_registry.rs	parse capabilities for skill `{canonical}
 crates/claw-core/src/skill_registry.rs	parse memory_policy for skill `{skill_name}` in {}: source token `{token}` appears in both include and exclude	"parse memory_policy for skill `{skill_name}` in {}: source token `{token}` appears in both include and exclude",
 crates/claw-core/src/skill_registry.rs	parse memory_policy.max_chars for skill `{skill_name}` in {}: value must be greater than 0	"parse memory_policy.max_chars for skill `{skill_name}` in {}: value must be greater than 0",
 crates/claw-core/src/skill_registry.rs	parse memory_policy.{field} for skill `{skill_name}` in {}: unknown source token `{token}`	"parse memory_policy.{field} for skill `{skill_name}` in {}: unknown source token `{token}`",
+crates/claw-core/src/skill_registry.rs	planner capability `{}` argument `{field}` is absent from skill input_schema	"planner capability `{}` argument `{field}` is absent from skill input_schema",
+crates/claw-core/src/skill_registry.rs	planner capability `{}` declares arguments but its skill input_schema has no properties	"planner capability `{}` declares arguments but its skill input_schema has no properties",
+crates/claw-core/src/skill_registry.rs	planner capability `{}` has invalid optional expression `{invalid}`	"planner capability `{}` has invalid optional expression `{invalid}`",
+crates/claw-core/src/skill_registry.rs	planner capability `{}` has invalid required expression `{requirement}`	"planner capability `{}` has invalid required expression `{requirement}`",
 crates/claw-core/src/skill_registry.rs	planner capability alias `{alias_name}` is not a declared mapping for skill `{}` in {}	"planner capability alias `{alias_name}` is not a declared mapping for skill `{}` in {}",
 crates/claw-core/src/skill_registry.rs	planner capability alias arguments are not covered by `{target_name}` for alias `{alias_name}` in skill `{}` ({})	"planner capability alias arguments are not covered by `{target_name}` for alias `{alias_name}` in skill `{}` ({})",
 crates/claw-core/src/skill_registry.rs	planner capability alias chain `{alias_name}` -> `{target_name}` is not allowed for skill `{}` in {}	"planner capability alias chain `{alias_name}` -> `{target_name}` is not allowed for skill `{}` in {}",
@@ -68,9 +72,9 @@ crates/claw-core/src/skill_registry.rs	unknown capability `{token}` (allowed: ll
 crates/claw-core/src/skill_registry.rs	vendor-唯一	/// image / text / vision 等用途各自独立，不要写成 `secrets.openai_api_key` 这种跨用途的"vendor-唯一"命名）。
 crates/claw-core/src/skill_registry.rs	vendor-唯一	/// 跨用途的"vendor-唯一"命名，否则会把 image_generate 的 key 误注入到
 crates/claw-core/src/skill_registry.rs	vendor-唯一 key	// 隐含"vendor-唯一 key"，会让 §P4.4 的 token 注入跨域串货。
+crates/claw-core/src/skill_registry.rs	{error} for skill `{}` in {}	.map_err(|error| format!("{error} for skill `{}` in {}", entry.name, path.display()))?;
 crates/claw-core/src/skill_registry.rs	启动期 + CI 双保险	/// 这是 §P4.1 alias 收敛子项的"启动期 + CI 双保险"基础：
 crates/claw-core/src/skill_registry.rs	声明顺序	// 排序 + dedup 让"声明顺序"不影响等价性，并避免重复声明在策略层
-crates/claw-core/src/skill_registry.rs	必须存在且 kind=builtin	/// §P4.1 收尾：clawd 进程内"必须存在且 kind=builtin"的技能 canonical 集合。
 crates/claw-core/src/skill_registry.rs	未声明任何能力	/// 未注册的技能返回空切片（与"未声明任何能力"语义同 — 都不应放行任何
 crates/claw-core/src/skill_registry.rs	纯计算 + 标准库	/// 排序）。空表示"纯计算 + 标准库"，不需要任何特权资源。
 crates/claw-core/src/skill_registry.rs	裸 vendor 名	// §P4.1 ↔ image/text 配置独立性：拦截"裸 vendor 名"反模式。
@@ -154,7 +158,6 @@ crates/clawd/src/agent_engine/observed_output_success.rs	# Test Workspace\nThis 
 crates/clawd/src/agent_engine/observed_output_success.rs	skill(run_cmd): success	assert!(observed.action_label.contains("skill(run_cmd): success"));
 crates/clawd/src/agent_engine/observed_output_transform.rs	referenced transform step should produce formatted output	.expect("referenced transform step should produce formatted output");
 crates/clawd/src/agent_engine/observed_output_transform.rs	| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |	"| name | score |\\n| --- | --- |\\n| beta | 12 |\\n| gamma | 9 |\\n| alpha | 7 |"
-crates/clawd/src/agent_engine/planning.rs	Last round output: (none)	// 写入这里。结果是 round N+1 的 loop planner 看到 "Last round output: (none)"，
 crates/clawd/src/agent_engine/planning.rs	runtime_capability_map_v2\n{capability_map}	Ok(format!("runtime_capability_map_v2\\n{capability_map}"))
 crates/clawd/src/agent_engine/prepare_round.rs	needs_clarification: {needs_clarify}	format!("needs_clarification: {needs_clarify}"),
 crates/clawd/src/agent_engine/prepare_round.rs	needs_confirmation: {needs_confirmation}	format!("needs_confirmation: {needs_confirmation}"),
@@ -325,9 +328,9 @@ crates/clawd/src/finalize/helpers.rs	**実行過程**	pub(crate) const EXECUTION
 crates/clawd/src/finalize/helpers.rs	**执行过程**	pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX: &str = "**执行过程**";
 crates/clawd/src/finalize/loop_reply.rs	我需要确认一下...	// §7.2: 执行结束但 delivery 全空（最常见的"我需要确认一下..."触发点之一）→ SynthesisEmpty。
 crates/clawd/src/finalize/loop_reply_contract_enforce.rs	shape 整形	// §7.1 output_contract verifier hook：在 enforce_output_contract 的"shape 整形"
+crates/clawd/src/finalize/loop_reply_generic_projection.rs	selected field must be present	.expect("selected field must be present")
 crates/clawd/src/finalize/loop_reply_language_closeout.rs	max_repairs: {max_repairs}	format!("max_repairs: {max_repairs}"),
 crates/clawd/src/finalize/loop_reply_language_closeout.rs	repair_count: {repair_count}	format!("repair_count: {repair_count}"),
-crates/clawd/src/finalize/loop_reply_language_closeout.rs	required_success_marker: {marker}	format!("required_success_marker: {marker}"),
 crates/clawd/src/finalize/loop_reply_missing_delivery.rs	current plan requires explicit confirmation	.unwrap_or("current plan requires explicit confirmation");
 crates/clawd/src/finalize/loop_reply_missing_delivery.rs	finalizer could not confirm a reliable final answer from the observed execution result	"finalizer could not confirm a reliable final answer from the observed execution result"
 crates/clawd/src/finalize/loop_reply_missing_delivery.rs	finalizer could not confirm a reliable final answer from the observed execution result	return "finalizer could not confirm a reliable final answer from the observed execution result"
@@ -609,6 +612,7 @@ crates/clawd/src/http/ui_routes/skill_import_config.rs	write downloaded SKILL.md
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write prompt file failed: {err}	error: Some(format!("write prompt file failed: {err}")),
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write skills registry failed: {err}	error: Some(format!("write skills registry failed: {err}")),
 crates/clawd/src/http/ui_routes/workspace_update.rs	; fi; cargo build -p clawd --release	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
+crates/clawd/src/http/ui_routes/workspace_update.rs	RUSTCLAW_SYSTEMD_UNIT contains unsupported characters	return Err("RUSTCLAW_SYSTEMD_UNIT contains unsupported characters".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	cargo build -p clawd --release failed	"cargo build -p clawd --release failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to capture {program} stderr	.ok_or_else(|| format!("failed to capture {program} stderr"))?;
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to capture {program} stdout	.ok_or_else(|| format!("failed to capture {program} stdout"))?;
@@ -617,6 +621,7 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	failed to run {program}: {er
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to run {program}: {err}	.map_err(|err| format!("failed to run {program}: {err}"))?;
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to schedule clawd restart: {err}	.map_err(|err| format!("failed to schedule clawd restart: {err}"))
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to schedule clawd restart: {err}	format!("failed to schedule clawd restart: {err}"),
+crates/clawd/src/http/ui_routes/workspace_update.rs	failed to schedule systemd restart: {err}	.map_err(|err| format!("failed to schedule systemd restart: {err}"))?;
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to wait for {program}: {err}	Ok(Err(err)) => return Err(format!("failed to wait for {program}: {err}")),
 crates/clawd/src/http/ui_routes/workspace_update.rs	git clean conflict files failed: {}	"git clean conflict files failed: {}",
 crates/clawd/src/http/ui_routes/workspace_update.rs	git pull --ff-only failed	"git pull --ff-only failed",
@@ -626,6 +631,8 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	git rev-parse failed	"git re
 crates/clawd/src/http/ui_routes/workspace_update.rs	git rev-parse upstream failed	"git rev-parse upstream failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	no release asset found for prefix {release_prefix}	raise SystemExit(f"no release asset found for prefix {release_prefix}")
 crates/clawd/src/http/ui_routes/workspace_update.rs	set -euo pipefail; if [[ -f 	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
+crates/clawd/src/http/ui_routes/workspace_update.rs	systemctl not found for systemd-managed restart	.ok_or_else(|| "systemctl not found for systemd-managed restart".to_string())?;
+crates/clawd/src/http/ui_routes/workspace_update.rs	systemd-run failed to schedule restart for {service_unit}	"systemd-run failed to schedule restart for {service_unit}"
 crates/clawd/src/http/ui_routes/workspace_update.rs	workspace update canceled by user	guard.error = Some("workspace update canceled by user".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {timeout_seconds}s	.map_err(|_| format!("{program} timed out after {timeout_seconds}s"))?
 crates/clawd/src/llm_gateway.rs	HTTP 请求总量	/// （流程异常放大），不是挡"HTTP 请求总量"（那是 retry/circuit-breaker 的职责）。
@@ -737,6 +744,8 @@ crates/clawd/src/prompt_utils_schema.rs	{path}: missing required field `{field}`
 crates/clawd/src/prompt_utils_schema.rs	{path}: unresolved schema ref `{raw_ref}`	None => errors.push(format!("{path}: unresolved schema ref `{raw_ref}`")),
 crates/clawd/src/providers/anthropic_claude.rs	parse response failed: {err}	format!("parse response failed: {err}"),
 crates/clawd/src/providers/anthropic_claude.rs	read response failed: {err}	ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
+crates/clawd/src/providers/anthropic_model_turn.rs	parse response failed: {error}	format!("parse response failed: {error}"),
+crates/clawd/src/providers/anthropic_model_turn.rs	read response failed: {error}	ProviderError::retryable(format!("read response failed: {error}"), req_body.clone())
 crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
 crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
 crates/clawd/src/providers/circuit.rs	circuit breaker mutex poisoned	let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
@@ -757,6 +766,8 @@ crates/clawd/src/providers/fixture_replay.rs	未来某天 prompt 又膨胀回来
 crates/clawd/src/providers/fixture_replay.rs	现网当前行为	/// （最贴近"现网当前行为"）。若需切到 first 策略，调用方可在拿到 Vec 后自己
 crates/clawd/src/providers/fixture_replay.rs	读旧日志	///     不会再触发；这条仍保留作为"读旧日志"或"未来某天 prompt 又膨胀回来"的
 crates/clawd/src/providers/fixture_replay.rs	首次出现顺序，同 hash 留最后一次值	/// `convert_model_io_log_to_fixture` 的"首次出现顺序，同 hash 留最后一次值"语义，
+crates/clawd/src/providers/gemini_model_turn.rs	parse response failed: {error}	format!("parse response failed: {error}"),
+crates/clawd/src/providers/gemini_model_turn.rs	read response failed: {error}	ProviderError::retryable(format!("read response failed: {error}"), req_body.clone())
 crates/clawd/src/providers/google_gemini.rs	missing candidates[0].content.parts[*].text	"missing candidates[0].content.parts[*].text".to_string(),
 crates/clawd/src/providers/google_gemini.rs	parse response failed: {err}	format!("parse response failed: {err}"),
 crates/clawd/src/providers/google_gemini.rs	read response failed: {err}	ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
@@ -776,7 +787,6 @@ crates/clawd/src/repo/auth.rs	DELETE FROM {table_name}	let sql = format!("DELETE
 crates/clawd/src/repo/auth.rs	SELECT COUNT(*) FROM auth_keys	db.query_row("SELECT COUNT(*) FROM auth_keys", [], |row| row.get(0))?;
 crates/clawd/src/repo/auth.rs	admin key already exists	return Err(anyhow::anyhow!("admin key already exists"));
 crates/clawd/src/repo/auth.rs	admin key cannot be deleted; rotate a new admin key instead	"admin key cannot be deleted; rotate a new admin key instead"
-crates/clawd/src/repo/auth.rs	api_key and api_secret are required	return Err(anyhow::anyhow!("api_key and api_secret are required"));
 crates/clawd/src/repo/auth.rs	cannot change current admin key role	return Err(anyhow::anyhow!("cannot change current admin key role"));
 crates/clawd/src/repo/auth.rs	cannot change the admin key role	return Err(anyhow::anyhow!("cannot change the admin key role"));
 crates/clawd/src/repo/auth.rs	cannot delete current key	return Err(anyhow::anyhow!("cannot delete current key"));
@@ -803,7 +813,6 @@ crates/clawd/src/repo/auth.rs	pending bind session not found or already terminal
 crates/clawd/src/repo/auth.rs	pending bind session not found or already terminal	anyhow::bail!("pending bind session not found or already terminal");
 crates/clawd/src/repo/auth.rs	rebound user_key in audit_logs after admin rotation	"rebound user_key in audit_logs after admin rotation"
 crates/clawd/src/repo/auth.rs	user_key is required	anyhow::bail!("user_key is required");
-crates/clawd/src/repo/auth.rs	user_key is required	return Err(anyhow::anyhow!("user_key is required"));
 crates/clawd/src/repo/auth.rs	verification_url is required	anyhow::bail!("verification_url is required");
 crates/clawd/src/repo/auth/schema.rs	ALTER TABLE audit_logs ADD COLUMN user_key TEXT	"ALTER TABLE audit_logs ADD COLUMN user_key TEXT",
 crates/clawd/src/repo/auth/schema.rs	ALTER TABLE long_term_memories ADD COLUMN user_key TEXT	"ALTER TABLE long_term_memories ADD COLUMN user_key TEXT",
@@ -833,6 +842,16 @@ crates/clawd/src/repo/auth_webd.rs	invalid stored password hash: {e}	.map_err(|e
 crates/clawd/src/repo/auth_webd.rs	user_key does not exist or is disabled in auth_keys	anyhow::bail!("user_key does not exist or is disabled in auth_keys");
 crates/clawd/src/repo/auth_webd.rs	username already assigned to another key	anyhow::bail!("username already assigned to another key");
 crates/clawd/src/repo/auth_webd.rs	username and user_key required	anyhow::bail!("username and user_key required");
+crates/clawd/src/repo/crypto_storage.rs	DELETE FROM exchange_api_credentials	tx.execute("DELETE FROM exchange_api_credentials", [])?;
+crates/clawd/src/repo/crypto_storage.rs	api_key and api_secret are required	anyhow::bail!("api_key and api_secret are required");
+crates/clawd/src/repo/crypto_storage.rs	crypto storage pool: {error}	.map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
+crates/clawd/src/repo/crypto_storage.rs	crypto storage pool: {error}	.map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
+crates/clawd/src/repo/crypto_storage.rs	crypto storage pool: {error}	.map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
+crates/clawd/src/repo/crypto_storage.rs	crypto storage pool: {error}	.map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
+crates/clawd/src/repo/crypto_storage.rs	crypto storage pool: {error}	.map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
+crates/clawd/src/repo/crypto_storage.rs	crypto storage pool: {error}	.map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
+crates/clawd/src/repo/crypto_storage.rs	crypto storage pool: {error}	.map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
+crates/clawd/src/repo/crypto_storage.rs	user_key is required	anyhow::bail!("user_key is required");
 crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0	"ALTER TABLE task_mutation_ledger ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0",
 crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''	"ALTER TABLE task_mutation_ledger ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''",
 crates/clawd/src/repo/task_mutation_ledger.rs	ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT	"ALTER TABLE task_mutation_ledger ADD COLUMN outcome_json TEXT",
@@ -880,6 +899,43 @@ crates/clawd/src/schedule_service.rs	unknown skill: {raw_skill}	.ok_or_else(|| f
 crates/clawd/src/schedule_service.rs	{param} (required: {required}) - {desc}	rows.push(format!("{param} (required: {required}) - {desc}"));
 crates/clawd/src/semantic_judge.rs	最终文本是否对外发布	//! - finalize 层是"最终文本是否对外发布"的唯一仲裁点；planning / skill_execution
 crates/clawd/src/skill_output_artifact.rs	extra initialized as object	.expect("extra initialized as object")
+crates/clawd/src/skill_storage/migration.rs	DELETE FROM memory_retrieval_index_fts	kb.execute("DELETE FROM memory_retrieval_index_fts", [])?;
+crates/clawd/src/skill_storage/migration.rs	DROP TABLE exchange_api_credentials	tx.execute("DROP TABLE exchange_api_credentials", [])?;
+crates/clawd/src/skill_storage/migration.rs	KB skill storage migration verification failed	anyhow::bail!("KB skill storage migration verification failed");
+crates/clawd/src/skill_storage/migration.rs	crypto skill storage migration verification failed	anyhow::bail!("crypto skill storage migration verification failed");
+crates/clawd/src/skill_storage/migration.rs	get KB db for migration: {error}	.map_err(|error| anyhow::anyhow!("get KB db for migration: {error}"))?;
+crates/clawd/src/skill_storage/migration.rs	get crypto db for migration: {error}	.map_err(|error| anyhow::anyhow!("get crypto db for migration: {error}"))?;
+crates/clawd/src/skill_storage/migration.rs	get main db for KB migration: {error}	.map_err(|error| anyhow::anyhow!("get main db for KB migration: {error}"))?;
+crates/clawd/src/skill_storage/migration.rs	get main db for crypto migration: {error}	.map_err(|error| anyhow::anyhow!("get main db for crypto migration: {error}"))?;
+crates/clawd/src/skill_storage/migration.rs	migrated KB retrieval rows to skill-owned storage	"migrated KB retrieval rows to skill-owned storage"
+crates/clawd/src/skill_storage/migration.rs	migrated crypto credentials to skill-owned storage	"migrated crypto credentials to skill-owned storage"
+crates/clawd/src/skill_storage/migration.rs	runtime_main.memory_retrieval_index[kb_doc]	"runtime_main.memory_retrieval_index[kb_doc]",
+crates/clawd/src/skill_storage/mod.rs	DELETE FROM exchange_api_credentials	let rows_deleted = tx.execute("DELETE FROM exchange_api_credentials", [])?;
+crates/clawd/src/skill_storage/mod.rs	SELECT COUNT(*) FROM exchange_api_credentials	db.query_row("SELECT COUNT(*) FROM exchange_api_credentials", [], |row| {
+crates/clawd/src/skill_storage/mod.rs	SELECT COUNT(*) FROM kb_namespaces	"kb_namespaces" => db.query_row("SELECT COUNT(*) FROM kb_namespaces", [], |row| {
+crates/clawd/src/skill_storage/mod.rs	SELECT COUNT(*) FROM memory_retrieval_index	db.query_row("SELECT COUNT(*) FROM memory_retrieval_index", [], |row| {
+crates/clawd/src/skill_storage/mod.rs	build skill storage test pool	.expect("build skill storage test pool");
+crates/clawd/src/skill_storage/mod.rs	crypto storage pool: {error}	.map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
+crates/clawd/src/skill_storage/mod.rs	get skill storage connection: {error}	.map_err(|error| anyhow::anyhow!("get skill storage connection: {error}"))?;
+crates/clawd/src/skill_storage/mod.rs	get skill storage test connection	let db = pool.get().expect("get skill storage test connection");
+crates/clawd/src/skill_storage/mod.rs	init skill storage pool: {error}	.map_err(|error| anyhow::anyhow!("init skill storage pool: {error}"))?;
+crates/clawd/src/skill_storage/mod.rs	initialize skill storage test schema	ensure_schema(&db).expect("initialize skill storage test schema");
+crates/clawd/src/skill_storage/mod.rs	negative skill storage row count	usize::try_from(count).map_err(|_| anyhow::anyhow!("negative skill storage row count"))
+crates/clawd/src/skill_storage/mod.rs	skill storage pool: {error}	.map_err(|error| anyhow::anyhow!("skill storage pool: {error}"))?;
+crates/clawd/src/skill_storage/mod.rs	unsupported skill storage table	_ => anyhow::bail!("unsupported skill storage table"),
+crates/clawd/src/skill_storage/ownership.rs	DELETE FROM kb_namespaces	tx.execute("DELETE FROM kb_namespaces", [])?;
+crates/clawd/src/skill_storage/ownership.rs	DELETE FROM memory_retrieval_index	tx.execute("DELETE FROM memory_retrieval_index", [])?;
+crates/clawd/src/skill_storage/ownership.rs	DELETE FROM memory_retrieval_index_fts	db.execute("DELETE FROM memory_retrieval_index_fts", [])?;
+crates/clawd/src/skill_storage/ownership.rs	KB namespace payload must be an object	.ok_or_else(|| anyhow::anyhow!("KB namespace payload must be an object"))?;
+crates/clawd/src/skill_storage/ownership.rs	KB storage pool: {error}	.map_err(|error| anyhow::anyhow!("KB storage pool: {error}"))?;
+crates/clawd/src/skill_storage/ownership.rs	KB storage pool: {error}	.map_err(|error| anyhow::anyhow!("KB storage pool: {error}"))?;
+crates/clawd/src/skill_storage/resolver.rs	create test skill storage root	std::fs::create_dir_all(&root).expect("create test skill storage root");
+crates/clawd/src/skill_storage/resolver.rs	invalid canonical skill storage name	anyhow::bail!("invalid canonical skill storage name");
+crates/clawd/src/skill_storage/resolver.rs	rustclaw-skill-storage-test-{}	"rustclaw-skill-storage-test-{}",
+crates/clawd/src/skill_storage/resolver.rs	skill storage path has no parent	.ok_or_else(|| anyhow::anyhow!("skill storage path has no parent"))?;
+crates/clawd/src/skill_storage/resolver.rs	skill-owned storage is unsupported on this platform	anyhow::bail!("skill-owned storage is unsupported on this platform")
+crates/clawd/src/skill_storage/resolver.rs	skill_data_root contains an unsafe path component	anyhow::bail!("skill_data_root contains an unsafe path component");
+crates/clawd/src/skill_storage/schema.rs	{skill_name} skill storage integrity check failed	anyhow::bail!("{skill_name} skill storage integrity check failed");
 crates/clawd/src/skills.rs	policy_token: {policy_token}	format!("policy_token: {policy_token}"),
 crates/clawd/src/skills.rs	private exchange account access failed	"private exchange account access failed".to_string()
 crates/clawd/src/skills.rs	private exchange account access failed	.unwrap_or("private exchange account access failed")
@@ -1204,7 +1260,6 @@ crates/skills/db_basic/src/main.rs	read col failed: {err}	SkillError::new("sqlit
 crates/skills/db_basic/src/main.rs	run query failed: {err}	SkillError::new("sqlite_query_failed", format!("run query failed: {err}"))
 crates/skills/db_basic/src/main.rs	unsupported action; use sqlite_query|sqlite_execute|schema_version|user_version|list_tables	"unsupported action; use sqlite_query|sqlite_execute|schema_version|user_version|list_tables",
 crates/skills/doc_parse/src/main.rs	failed to run pdftotext; install poppler-utils	.with_context(|| "failed to run pdftotext; install poppler-utils")?;
-crates/skills/doc_parse/src/main.rs	invalid docx zip archive	let mut zip = ZipArchive::new(file).with_context(|| "invalid docx zip archive")?;
 crates/skills/doc_parse/src/main.rs	missing required args.path	.ok_or_else(|| anyhow!("missing required args.path"))?;
 crates/skills/doc_parse/src/main.rs	unsupported action: {raw_action}	error: Some(format!("unsupported action: {raw_action}")),
 crates/skills/docker_basic/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
@@ -1638,23 +1693,32 @@ crates/skills/install_module/src/main.rs	invalid module name: {module}	return Er
 crates/skills/install_module/src/main.rs	no modules to install	return Err("no modules to install".to_string());
 crates/skills/install_module/src/main.rs	python3 pip is not available. install python3-pip first	"python" => "python3 pip is not available. install python3-pip first".to_string(),
 crates/skills/install_module/src/main.rs	run installer failed: {err}	.map_err(|err| format!("run installer failed: {err}"))
-crates/skills/kb/src/main.rs	ALTER TABLE memory_retrieval_index ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'	"ALTER TABLE memory_retrieval_index ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
-crates/skills/kb/src/main.rs	ALTER TABLE memory_retrieval_index ADD COLUMN source_ref TEXT	"ALTER TABLE memory_retrieval_index ADD COLUMN source_ref TEXT",
-crates/skills/kb/src/main.rs	PRAGMA table_info({table_name})	let pragma = format!("PRAGMA table_info({table_name})");
+crates/skills/kb/src/main.rs	KB skill storage descriptor is invalid	return Err(anyhow!("KB skill storage descriptor is invalid"));
+crates/skills/kb/src/main.rs	KB skill storage descriptor is required	.ok_or_else(|| anyhow!("KB skill storage descriptor is required"))?;
 crates/skills/kb/src/main.rs	action must be ingest|search|list_namespaces|stats	"action must be ingest|search|list_namespaces|stats"
 crates/skills/kb/src/main.rs	found {} hit(s) for query	"summary": format!("found {} hit(s) for query", hits.len()),
-crates/skills/kb/src/main.rs	index json parse failed	serde_json::from_str(&raw).with_context(|| "index json parse failed")?;
 crates/skills/kb/src/main.rs	load namespace failed: {namespace}	.with_context(|| format!("load namespace failed: {namespace}"))?;
-crates/skills/kb/src/main.rs	namespace is owned by another user scope	return Err(anyhow!("namespace is owned by another user scope"));
 crates/skills/kb/src/main.rs	namespace not found or unreadable: {}	.map_err(|_| anyhow!("namespace not found or unreadable: {}", s.namespace))?;
 crates/skills/kb/src/main.rs	no effective query terms	json!({"status":"ok","hits":[],"summary":"no effective query terms","stats":{"total_candidates":0}}),
 crates/skills/kb/src/main.rs	no matching chunks under filters	json!({"status":"ok","hits":[],"summary":"no matching chunks under filters","stats":{"total_candidates":0}}),
-crates/skills/kb/src/main.rs	no namespace indexes found	"summary": "no namespace indexes found"
-crates/skills/kb/src/main.rs	open unified index db failed: {}	.with_context(|| format!("open unified index db failed: {}", db_path.display()))?;
 crates/skills/kb/src/main.rs	paths[] must not be empty	return Err(anyhow!("paths[] must not be empty"));
+crates/skills/kb/src/main.rs	skill-owned retrieval index sync failed: {err}	warnings.push(format!("skill-owned retrieval index sync failed: {err}"));
 crates/skills/kb/src/main.rs	skip empty text file {}	warnings.push(format!("skip empty text file {}", path_str));
 crates/skills/kb/src/main.rs	skip large file {} ({} bytes > max_file_size {})	"skip large file {} ({} bytes > max_file_size {})",
-crates/skills/kb/src/main.rs	unified index sync failed: {err}	warnings.push(format!("unified index sync failed: {err}"));
+crates/skills/kb/src/storage.rs	DELETE FROM memory_retrieval_index_fts	db.execute("DELETE FROM memory_retrieval_index_fts", [])?;
+crates/skills/kb/src/storage.rs	KB skill storage integrity check failed	return Err(anyhow!("KB skill storage integrity check failed"));
+crates/skills/kb/src/storage.rs	legacy KB snapshot has no stable owner or namespace identity	"legacy KB snapshot has no stable owner or namespace identity"
+crates/skills/kb/src/storage.rs	legacy KB snapshot verification failed	return Err(anyhow!("legacy KB snapshot verification failed"));
+crates/skills/kb/src/storage.rs	namespace is owned by another user scope	return Err(anyhow!("namespace is owned by another user scope"));
+crates/skills/kb/src/storage.rs	namespace payload is malformed	.context("namespace payload is malformed")?;
+crates/skills/kb/src/storage.rs	namespace payload is malformed	.context("namespace payload is malformed")?;
+crates/skills/kb/src/storage.rs	open KB skill storage failed: {}	"open KB skill storage failed: {}",
+crates/skills/kb/src/storage.rs	parse legacy KB snapshot failed: {}	.with_context(|| format!("parse legacy KB snapshot failed: {}", path.display()))?;
+crates/skills/kb/src/storage.rs	read legacy KB directory failed: {}	.with_context(|| format!("read legacy KB directory failed: {}", directory.display()))?
+crates/skills/kb/src/storage.rs	read legacy KB snapshot failed: {}	.with_context(|| format!("read legacy KB snapshot failed: {}", path.display()))?;
+crates/skills/kb/src/storage.rs	remove migrated KB snapshot failed: {}	.with_context(|| format!("remove migrated KB snapshot failed: {}", path.display()))?;
+crates/skills/kb/src/storage.rs	skill storage database identity is invalid	return Err(anyhow!("skill storage database identity is invalid"));
+crates/skills/kb/src/storage.rs	skill storage database path must be absolute	return Err(anyhow!("skill storage database path must be absolute"));
 crates/skills/log_analyze/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/log_analyze/src/main.rs	log directory contains no readable files: {}	"log directory contains no readable files: {}",
 crates/skills/log_analyze/src/main.rs	log directory contains no readable files: {}	"log directory contains no readable files: {}",
@@ -1681,6 +1745,208 @@ crates/skills/music_generate/src/main.rs	read music download failed: {err}	.map_
 crates/skills/music_generate/src/main.rs	write music output failed: {err}	std::fs::write(output_path, bytes).map_err(|err| format!("write music output failed: {err}"))
 crates/skills/music_generate/src/main.rs	{provider_name} config missing	.ok_or_else(|| format!("{provider_name} config missing"))?;
 crates/skills/music_generate/src/main.rs	{vendor} api key is not configured	return Err(format!("{vendor} api key is not configured"));
+crates/skills/office_workspace/src/docx.rs	cannot parse DOCX XML: {error}	format!("cannot parse DOCX XML: {error}"),
+crates/skills/office_workspace/src/docx.rs	invalid DOCX text: {error}	format!("invalid DOCX text: {error}"),
+crates/skills/office_workspace/src/docx_structure_edit.rs	DOCX structure operation is not implemented	"DOCX structure operation is not implemented",
+crates/skills/office_workspace/src/docx_structure_edit.rs	move_block position must be before or after	"move_block position must be before or after",
+crates/skills/office_workspace/src/docx_structure_edit.rs	move_block source and target must be different	"move_block source and target must be different",
+crates/skills/office_workspace/src/docx_structure_edit.rs	object identifier does not address the required DOCX part and kind	"object identifier does not address the required DOCX part and kind",
+crates/skills/office_workspace/src/docx_structure_edit.rs	object identifiers are one-based	return Err(OfficeError::invalid("object identifiers are one-based"));
+crates/skills/office_workspace/src/docx_structure_edit.rs	operation requires values as an array	.ok_or_else(|| OfficeError::invalid("operation requires values as an array"))
+crates/skills/office_workspace/src/docx_structure_edit.rs	selected DOCX XML element is malformed	"selected DOCX XML element is malformed",
+crates/skills/office_workspace/src/docx_structure_edit.rs	selected OOXML object does not exist	"selected OOXML object does not exist",
+crates/skills/office_workspace/src/docx_structure_edit.rs	selected object index is outside the current revision	"selected object index is outside the current revision",
+crates/skills/office_workspace/src/docx_structure_edit.rs	selected run has no editable text node	"selected run has no editable text node",
+crates/skills/office_workspace/src/docx_structure_edit.rs	selected run text does not match the expected revision	"selected run text does not match the expected revision",
+crates/skills/office_workspace/src/docx_structure_edit.rs	table_delete_column cannot remove the final column	"table_delete_column cannot remove the final column",
+crates/skills/office_workspace/src/docx_structure_edit.rs	table_delete_row cannot remove the final row	"table_delete_row cannot remove the final row",
+crates/skills/office_workspace/src/docx_write.rs	DOCX create operation is not implemented	"DOCX create operation is not implemented",
+crates/skills/office_workspace/src/docx_write.rs	DOCX edit operation is not implemented without potential format loss	"DOCX edit operation is not implemented without potential format loss",
+crates/skills/office_workspace/src/docx_write.rs	DOCX mutation currently requires the standard w namespace prefix	"DOCX mutation currently requires the standard w namespace prefix",
+crates/skills/office_workspace/src/docx_write.rs	DOCX package part is not UTF-8 XML: {error}	format!("DOCX package part is not UTF-8 XML: {error}"),
+crates/skills/office_workspace/src/docx_write.rs	add_table requires rows as an array of arrays	"add_table requires rows as an array of arrays",
+crates/skills/office_workspace/src/docx_write.rs	cannot read image source: {error}	format!("cannot read image source: {error}"),
+crates/skills/office_workspace/src/docx_write.rs	cannot read replacement image: {error}	format!("cannot read replacement image: {error}"),
+crates/skills/office_workspace/src/docx_write.rs	expected text is absent from the selected object revision	"expected text is absent from the selected object revision",
+crates/skills/office_workspace/src/docx_write.rs	image replacement must preserve the package media type	"image replacement must preserve the package media type",
+crates/skills/office_workspace/src/docx_write.rs	image source requires a file extension	.ok_or_else(|| OfficeError::invalid("image source requires a file extension"))?;
+crates/skills/office_workspace/src/docx_write.rs	media_id must use media_<index> format	.ok_or_else(|| OfficeError::invalid("media_id must use media_<index> format"))?;
+crates/skills/office_workspace/src/docx_write.rs	object identifier does not match the expected Word object kind	"object identifier does not match the expected Word object kind",
+crates/skills/office_workspace/src/docx_write.rs	object identifier has an invalid index	"object identifier has an invalid index",
+crates/skills/office_workspace/src/docx_write.rs	object identifier refers to an unsupported Word package part	"object identifier refers to an unsupported Word package part",
+crates/skills/office_workspace/src/docx_write.rs	object identifiers are one-based	return Err(OfficeError::invalid("object identifiers are one-based"));
+crates/skills/office_workspace/src/docx_write.rs	required DOCX package part is missing	"required DOCX package part is missing",
+crates/skills/office_workspace/src/docx_write.rs	required closing element is missing	"required closing element is missing",
+crates/skills/office_workspace/src/docx_write.rs	selected OOXML element is malformed	"selected OOXML element is malformed",
+crates/skills/office_workspace/src/docx_write.rs	selected OOXML object does not exist	"selected OOXML object does not exist",
+crates/skills/office_workspace/src/docx_write.rs	selected image does not exist	"selected image does not exist",
+crates/skills/office_workspace/src/docx_write.rs	supported Office image inputs are PNG, JPEG, and GIF	"supported Office image inputs are PNG, JPEG, and GIF",
+crates/skills/office_workspace/src/engine.rs	Office evidence cursor is beyond the available result	"Office evidence cursor is beyond the available result",
+crates/skills/office_workspace/src/engine.rs	Office evidence cursor is invalid for this source revision	"Office evidence cursor is invalid for this source revision",
+crates/skills/office_workspace/src/engine.rs	args must be an object	.ok_or_else(|| OfficeError::invalid("args must be an object"))?;
+crates/skills/office_workspace/src/engine.rs	cannot serialize Office evidence: {error}	format!("cannot serialize Office evidence: {error}"),
+crates/skills/office_workspace/src/engine.rs	requested worksheet does not exist	"requested worksheet does not exist",
+crates/skills/office_workspace/src/engine.rs	required string argument is missing	"required string argument is missing",
+crates/skills/office_workspace/src/engine.rs	required string argument is missing	"required string argument is missing",
+crates/skills/office_workspace/src/engine.rs	spreadsheet range reads require an XLSX workbook	"spreadsheet range reads require an XLSX workbook",
+crates/skills/office_workspace/src/engine.rs	unsupported Office workspace action	"unsupported Office workspace action",
+crates/skills/office_workspace/src/main.rs	cannot read request: {error}	format!("cannot read request: {error}"),
+crates/skills/office_workspace/src/main.rs	invalid skill request JSON: {error}	format!("invalid skill request JSON: {error}"),
+crates/skills/office_workspace/src/mutation.rs	in-place edit requires output_path to equal source_path	"in-place edit requires output_path to equal source_path",
+crates/skills/office_workspace/src/mutation.rs	in_place is valid only for edit capabilities	"in_place is valid only for edit capabilities",
+crates/skills/office_workspace/src/mutation.rs	mutation action does not select an Office format	"mutation action does not select an Office format",
+crates/skills/office_workspace/src/mutation.rs	output extension does not match the selected Office format	"output extension does not match the selected Office format",
+crates/skills/office_workspace/src/mutation.rs	required string argument is missing	"required string argument is missing",
+crates/skills/office_workspace/src/mutation.rs	source package hash does not match the requested revision	"source package hash does not match the requested revision",
+crates/skills/office_workspace/src/operations.rs	Office mutation batch contains too many operations	"Office mutation batch contains too many operations",
+crates/skills/office_workspace/src/operations.rs	each operation must be an object	"each operation must be an object",
+crates/skills/office_workspace/src/operations.rs	operation is not supported for this Office format and mutation mode	"operation is not supported for this Office format and mutation mode",
+crates/skills/office_workspace/src/operations.rs	operation requires a non-empty string field	"operation requires a non-empty string field",
+crates/skills/office_workspace/src/operations.rs	operation requires a non-negative integer field	"operation requires a non-negative integer field",
+crates/skills/office_workspace/src/operations.rs	operation requires an op token	"operation requires an op token",
+crates/skills/office_workspace/src/operations.rs	operations must be an array	.ok_or_else(|| OfficeError::invalid("operations must be an array"))?;
+crates/skills/office_workspace/src/operations.rs	operations must contain at least one operation	"operations must contain at least one operation",
+crates/skills/office_workspace/src/package.rs	OOXML member exceeds the compression expansion limit	"OOXML member exceeds the compression expansion limit",
+crates/skills/office_workspace/src/package.rs	OOXML member exceeds the uncompressed size limit	"OOXML member exceeds the uncompressed size limit",
+crates/skills/office_workspace/src/package.rs	OOXML package exceeds the total uncompressed size limit	"OOXML package exceeds the total uncompressed size limit",
+crates/skills/office_workspace/src/package.rs	OOXML package has too many members	"OOXML package has too many members",
+crates/skills/office_workspace/src/package.rs	OOXML package part is not UTF-8 XML: {error}	format!("OOXML package part is not UTF-8 XML: {error}"),
+crates/skills/office_workspace/src/package.rs	Office package format does not match the requested capability	"Office package format does not match the requested capability",
+crates/skills/office_workspace/src/package.rs	cannot inspect ZIP member: {error}	format!("cannot inspect ZIP member: {error}"),
+crates/skills/office_workspace/src/package.rs	cannot read ZIP member: {error}	format!("cannot read ZIP member: {error}"),
+crates/skills/office_workspace/src/package.rs	cannot read source package: {error}	format!("cannot read source package: {error}"),
+crates/skills/office_workspace/src/package.rs	cannot read source package: {error}	format!("cannot read source package: {error}"),
+crates/skills/office_workspace/src/package.rs	encrypted Office packages are not supported	"encrypted Office packages are not supported",
+crates/skills/office_workspace/src/package.rs	invalid OOXML ZIP package: {error}	format!("invalid OOXML ZIP package: {error}"),
+crates/skills/office_workspace/src/package.rs	macro-enabled Office packages are rejected	"macro-enabled Office packages are rejected",
+crates/skills/office_workspace/src/package.rs	parent path traversal is not allowed	"parent path traversal is not allowed",
+crates/skills/office_workspace/src/package.rs	required OOXML package part is missing	"required OOXML package part is missing",
+crates/skills/office_workspace/src/package.rs	required OOXML package part is missing	"required OOXML package part is missing",
+crates/skills/office_workspace/src/package.rs	source path must be a file	return Err(OfficeError::invalid("source path must be a file"));
+crates/skills/office_workspace/src/package.rs	supported Office formats are docx, xlsx, and pptx	"supported Office formats are docx, xlsx, and pptx",
+crates/skills/office_workspace/src/package.rs	unsafe OOXML ZIP member path	"unsafe OOXML ZIP member path",
+crates/skills/office_workspace/src/package.rs	unsafe OOXML ZIP member path	"unsafe OOXML ZIP member path",
+crates/skills/office_workspace/src/package_write.rs	.{file_name}.rustclaw-backup-{}	".{file_name}.rustclaw-backup-{}",
+crates/skills/office_workspace/src/package_write.rs	.{file_name}.rustclaw-{}.tmp	let temp_path = parent.join(format!(".{file_name}.rustclaw-{}.tmp", Uuid::new_v4()));
+crates/skills/office_workspace/src/package_write.rs	cannot atomically publish Office artifact: {error}	format!("cannot atomically publish Office artifact: {error}"),
+crates/skills/office_workspace/src/package_write.rs	cannot create in-place backup: {error}	format!("cannot create in-place backup: {error}"),
+crates/skills/office_workspace/src/package_write.rs	cannot create output directory: {error}	format!("cannot create output directory: {error}"),
+crates/skills/office_workspace/src/package_write.rs	cannot create temporary Office package: {error}	format!("cannot create temporary Office package: {error}"),
+crates/skills/office_workspace/src/package_write.rs	cannot finish Office package: {error}	format!("cannot finish Office package: {error}"),
+crates/skills/office_workspace/src/package_write.rs	cannot flush Office package: {error}	format!("cannot flush Office package: {error}"),
+crates/skills/office_workspace/src/package_write.rs	cannot start Office package member: {error}	format!("cannot start Office package member: {error}"),
+crates/skills/office_workspace/src/package_write.rs	cannot sync Office package: {error}	format!("cannot sync Office package: {error}"),
+crates/skills/office_workspace/src/package_write.rs	cannot write Office package member: {error}	format!("cannot write Office package member: {error}"),
+crates/skills/office_workspace/src/package_write.rs	in-place mutation requires source and output paths to match	"in-place mutation requires source and output paths to match",
+crates/skills/office_workspace/src/package_write.rs	output path already exists and overwrite was not approved	"output path already exists and overwrite was not approved",
+crates/skills/office_workspace/src/package_write.rs	output path must name a file	return Err(OfficeError::invalid("output path must name a file"));
+crates/skills/office_workspace/src/package_write.rs	parent path traversal is not allowed	"parent path traversal is not allowed",
+crates/skills/office_workspace/src/package_write.rs	reopening the temporary Office package failed	"reopening the temporary Office package failed",
+crates/skills/office_workspace/src/pptx.rs	cannot parse slide XML: {error}	format!("cannot parse slide XML: {error}"),
+crates/skills/office_workspace/src/pptx.rs	invalid slide text: {error}	format!("invalid slide text: {error}"),
+crates/skills/office_workspace/src/pptx.rs	{stable_slide_id}_table_{}	id: format!("{stable_slide_id}_table_{}", tables.len() + 1),
+crates/skills/office_workspace/src/pptx_edit.rs	PPTX edit operation is not implemented without potential layout loss	"PPTX edit operation is not implemented without potential layout loss",
+crates/skills/office_workspace/src/pptx_edit.rs	PPTX package part is not UTF-8 XML: {error}	format!("PPTX package part is not UTF-8 XML: {error}"),
+crates/skills/office_workspace/src/pptx_edit.rs	a presentation must retain at least one slide	"a presentation must retain at least one slide",
+crates/skills/office_workspace/src/pptx_edit.rs	cannot parse presentation XML: {error}	format!("cannot parse presentation XML: {error}"),
+crates/skills/office_workspace/src/pptx_edit.rs	cannot read presentation image: {error}	format!("cannot read presentation image: {error}"),
+crates/skills/office_workspace/src/pptx_edit.rs	cannot read replacement image: {error}	format!("cannot read replacement image: {error}"),
+crates/skills/office_workspace/src/pptx_edit.rs	chart categories and values must have the same non-zero length	"chart categories and values must have the same non-zero length",
+crates/skills/office_workspace/src/pptx_edit.rs	duplicate_slide requires a source slide without speaker notes	"duplicate_slide requires a source slide without speaker notes",
+crates/skills/office_workspace/src/pptx_edit.rs	expected slide text is absent from the selected revision	"expected slide text is absent from the selected revision",
+crates/skills/office_workspace/src/pptx_edit.rs	image replacement must preserve the package media type	"image replacement must preserve the package media type",
+crates/skills/office_workspace/src/pptx_edit.rs	image source requires a file extension	.ok_or_else(|| OfficeError::invalid("image source requires a file extension"))?;
+crates/skills/office_workspace/src/pptx_edit.rs	layout must be a package path or slideLayout machine token	"layout must be a package path or slideLayout machine token",
+crates/skills/office_workspace/src/pptx_edit.rs	media_id must use media_<index> format	.ok_or_else(|| OfficeError::invalid("media_id must use media_<index> format"))?;
+crates/skills/office_workspace/src/pptx_edit.rs	operation field is missing or invalid	"operation field is missing or invalid",
+crates/skills/office_workspace/src/pptx_edit.rs	required PPTX package part is missing	"required PPTX package part is missing",
+crates/skills/office_workspace/src/pptx_edit.rs	selected package relationship or content type does not exist	"selected package relationship or content type does not exist",
+crates/skills/office_workspace/src/pptx_edit.rs	selected presentation XML element is malformed	"selected presentation XML element is malformed",
+crates/skills/office_workspace/src/pptx_edit.rs	selected presentation object does not exist	"selected presentation object does not exist",
+crates/skills/office_workspace/src/pptx_edit.rs	selected slide layout does not exist	"selected slide layout does not exist",
+crates/skills/office_workspace/src/pptx_edit.rs	selected slide relationship does not exist	"selected slide relationship does not exist",
+crates/skills/office_workspace/src/pptx_edit.rs	slide position is outside the presentation	"slide position is outside the presentation",
+crates/skills/office_workspace/src/pptx_edit.rs	slide relationship is missing	"slide relationship is missing",
+crates/skills/office_workspace/src/pptx_edit.rs	supported presentation image inputs are PNG, JPEG, and GIF	"supported presentation image inputs are PNG, JPEG, and GIF",
+crates/skills/office_workspace/src/pptx_edit.rs	text arrays must contain strings	.ok_or_else(|| OfficeError::invalid("text arrays must contain strings"))
+crates/skills/office_workspace/src/pptx_edit.rs	text content must be a string or string array	"text content must be a string or string array",
+crates/skills/office_workspace/src/pptx_write.rs	PPTX create operation is not implemented	"PPTX create operation is not implemented",
+crates/skills/office_workspace/src/pptx_write.rs	cannot read presentation image: {error}	format!("cannot read presentation image: {error}"),
+crates/skills/office_workspace/src/pptx_write.rs	chart categories and values must have the same non-zero length	"chart categories and values must have the same non-zero length",
+crates/skills/office_workspace/src/pptx_write.rs	image source requires a file extension	.ok_or_else(|| OfficeError::invalid("image source requires a file extension"))?;
+crates/skills/office_workspace/src/pptx_write.rs	operation field is missing or invalid	"operation field is missing or invalid",
+crates/skills/office_workspace/src/pptx_write.rs	presentation creation requires at least one add_slide operation	"presentation creation requires at least one add_slide operation",
+crates/skills/office_workspace/src/pptx_write.rs	selected slide does not exist	"selected slide does not exist",
+crates/skills/office_workspace/src/pptx_write.rs	slide_id must use slide_<index> format	.ok_or_else(|| OfficeError::invalid("slide_id must use slide_<index> format"))
+crates/skills/office_workspace/src/pptx_write.rs	supported presentation image inputs are PNG, JPEG, and GIF	"supported presentation image inputs are PNG, JPEG, and GIF",
+crates/skills/office_workspace/src/pptx_write.rs	text arrays must contain strings	.ok_or_else(|| OfficeError::invalid("text arrays must contain strings"))
+crates/skills/office_workspace/src/pptx_write.rs	text content must be a string or string array	"text content must be a string or string array",
+crates/skills/office_workspace/src/range.rs	cell range must use A1 notation	"cell range must use A1 notation",
+crates/skills/office_workspace/src/renderer.rs	Office renderer did not produce the expected output artifact	"Office renderer did not produce the expected output artifact",
+crates/skills/office_workspace/src/renderer.rs	Office renderer returned a non-success status	"Office renderer returned a non-success status",
+crates/skills/office_workspace/src/renderer.rs	cannot create render output directory: {error}	format!("cannot create render output directory: {error}"),
+crates/skills/office_workspace/src/renderer.rs	cannot create render workspace: {error}	format!("cannot create render workspace: {error}"),
+crates/skills/office_workspace/src/renderer.rs	cannot publish render output: {error}	format!("cannot publish render output: {error}"),
+crates/skills/office_workspace/src/renderer.rs	cannot replace render output: {error}	format!("cannot replace render output: {error}"),
+crates/skills/office_workspace/src/renderer.rs	cannot start Office renderer: {error}	format!("cannot start Office renderer: {error}"),
+crates/skills/office_workspace/src/renderer.rs	cannot verify render output: {error}	format!("cannot verify render output: {error}"),
+crates/skills/office_workspace/src/renderer.rs	no supported Office renderer is available	"no supported Office renderer is available",
+crates/skills/office_workspace/src/renderer.rs	render output already exists and overwrite was not approved	"render output already exists and overwrite was not approved",
+crates/skills/office_workspace/src/renderer.rs	required string argument is missing	"required string argument is missing",
+crates/skills/office_workspace/src/renderer.rs	the portable Office renderer currently supports PDF output	"the portable Office renderer currently supports PDF output",
+crates/skills/office_workspace/src/xlsx.rs	cannot parse workbook XML: {error}	format!("cannot parse workbook XML: {error}"),
+crates/skills/office_workspace/src/xlsx.rs	cannot parse worksheet XML: {error}	format!("cannot parse worksheet XML: {error}"),
+crates/skills/office_workspace/src/xlsx.rs	invalid worksheet text: {error}	format!("invalid worksheet text: {error}"),
+crates/skills/office_workspace/src/xlsx_edit.rs	XLSX edit operation is not implemented without potential package loss	"XLSX edit operation is not implemented without potential package loss",
+crates/skills/office_workspace/src/xlsx_edit.rs	a workbook must retain at least one worksheet	"a workbook must retain at least one worksheet",
+crates/skills/office_workspace/src/xlsx_edit.rs	cannot parse workbook XML: {error}	format!("cannot parse workbook XML: {error}"),
+crates/skills/office_workspace/src/xlsx_edit.rs	cannot read spreadsheet image: {error}	format!("cannot read spreadsheet image: {error}"),
+crates/skills/office_workspace/src/xlsx_edit.rs	column must be between 1 and 16384	return Err(OfficeError::invalid("column must be between 1 and 16384"));
+crates/skills/office_workspace/src/xlsx_edit.rs	column width must be between 0 and 255	.ok_or_else(|| OfficeError::invalid("column width must be between 0 and 255"))?;
+crates/skills/office_workspace/src/xlsx_edit.rs	copy_sheet requires a source worksheet without dependent package relationships	"copy_sheet requires a source worksheet without dependent package relationships",
+crates/skills/office_workspace/src/xlsx_edit.rs	delete_sheet requires a worksheet without dependent package relationships	"delete_sheet requires a worksheet without dependent package relationships",
+crates/skills/office_workspace/src/xlsx_edit.rs	image source requires a file extension	.ok_or_else(|| OfficeError::invalid("image source requires a file extension"))?;
+crates/skills/office_workspace/src/xlsx_edit.rs	moved range exceeds worksheet column limit	.ok_or_else(|| OfficeError::invalid("moved range exceeds worksheet column limit"))?,
+crates/skills/office_workspace/src/xlsx_edit.rs	moved range exceeds worksheet row limit	.ok_or_else(|| OfficeError::invalid("moved range exceeds worksheet row limit"))?,
+crates/skills/office_workspace/src/xlsx_edit.rs	named range already exists	"named range already exists",
+crates/skills/office_workspace/src/xlsx_edit.rs	named range name must be a non-empty machine-safe token	"named range name must be a non-empty machine-safe token",
+crates/skills/office_workspace/src/xlsx_edit.rs	requested worksheet does not exist	"requested worksheet does not exist",
+crates/skills/office_workspace/src/xlsx_edit.rs	required XLSX package part is missing	"required XLSX package part is missing",
+crates/skills/office_workspace/src/xlsx_edit.rs	row height must be positive	.ok_or_else(|| OfficeError::invalid("row height must be positive"))?;
+crates/skills/office_workspace/src/xlsx_edit.rs	row must be between 1 and 1048576	return Err(OfficeError::invalid("row must be between 1 and 1048576"));
+crates/skills/office_workspace/src/xlsx_edit.rs	supported spreadsheet image inputs are PNG, JPEG, and GIF	"supported spreadsheet image inputs are PNG, JPEG, and GIF",
+crates/skills/office_workspace/src/xlsx_edit.rs	worksheet cell already has a comment	"worksheet cell already has a comment",
+crates/skills/office_workspace/src/xlsx_edit.rs	worksheet comment relationships are incomplete	"worksheet comment relationships are incomplete",
+crates/skills/office_workspace/src/xlsx_edit.rs	worksheet index is outside the workbook	"worksheet index is outside the workbook",
+crates/skills/office_workspace/src/xlsx_edit.rs	worksheet names must be unique	"worksheet names must be unique",
+crates/skills/office_workspace/src/xlsx_edit.rs	worksheet relationship is missing	"worksheet relationship is missing",
+crates/skills/office_workspace/src/xlsx_edit.rs	{source_sheet}!{source_ref}	changed_refs.push(format!("{source_sheet}!{source_ref}"));
+crates/skills/office_workspace/src/xlsx_edit.rs	{target_sheet}!{destination_ref}	changed_refs.push(format!("{target_sheet}!{destination_ref}"));
+crates/skills/office_workspace/src/xlsx_write.rs	XLSX create operation is not implemented	"XLSX create operation is not implemented",
+crates/skills/office_workspace/src/xlsx_write.rs	XLSX package part is not UTF-8 XML: {error}	format!("XLSX package part is not UTF-8 XML: {error}"),
+crates/skills/office_workspace/src/xlsx_write.rs	boolean cell requires a boolean value	OfficeError::invalid("boolean cell requires a boolean value")
+crates/skills/office_workspace/src/xlsx_write.rs	cannot read spreadsheet image: {error}	format!("cannot read spreadsheet image: {error}"),
+crates/skills/office_workspace/src/xlsx_write.rs	conditional format operation must be an object	OfficeError::invalid("conditional format operation must be an object")
+crates/skills/office_workspace/src/xlsx_write.rs	conditional format requires range	.ok_or_else(|| OfficeError::invalid("conditional format requires range"))?;
+crates/skills/office_workspace/src/xlsx_write.rs	data validation operation must be an object	.ok_or_else(|| OfficeError::invalid("data validation operation must be an object"))?;
+crates/skills/office_workspace/src/xlsx_write.rs	data validation requires range	.ok_or_else(|| OfficeError::invalid("data validation requires range"))?;
+crates/skills/office_workspace/src/xlsx_write.rs	date cell requires an ISO date string	.ok_or_else(|| OfficeError::invalid("date cell requires an ISO date string"))?
+crates/skills/office_workspace/src/xlsx_write.rs	formula cell values must be formula strings	OfficeError::invalid("formula cell values must be formula strings")
+crates/skills/office_workspace/src/xlsx_write.rs	image source requires a file extension	.ok_or_else(|| OfficeError::invalid("image source requires a file extension"))?;
+crates/skills/office_workspace/src/xlsx_write.rs	number cell requires a numeric value	.ok_or_else(|| OfficeError::invalid("number cell requires a numeric value"))?,
+crates/skills/office_workspace/src/xlsx_write.rs	operation field is missing or invalid	"operation field is missing or invalid",
+crates/skills/office_workspace/src/xlsx_write.rs	range value column count does not match the target range	"range value column count does not match the target range",
+crates/skills/office_workspace/src/xlsx_write.rs	range value row count does not match the target range	"range value row count does not match the target range",
+crates/skills/office_workspace/src/xlsx_write.rs	requested worksheet does not exist	"requested worksheet does not exist",
+crates/skills/office_workspace/src/xlsx_write.rs	requested worksheet does not exist	"requested worksheet does not exist",
+crates/skills/office_workspace/src/xlsx_write.rs	required XLSX package part is missing	"required XLSX package part is missing",
+crates/skills/office_workspace/src/xlsx_write.rs	required worksheet closing element is missing	"required worksheet closing element is missing",
+crates/skills/office_workspace/src/xlsx_write.rs	selected worksheet XML element is malformed	"selected worksheet XML element is malformed",
+crates/skills/office_workspace/src/xlsx_write.rs	spreadsheet creation requires at least one add_sheet operation	"spreadsheet creation requires at least one add_sheet operation",
+crates/skills/office_workspace/src/xlsx_write.rs	supported spreadsheet image inputs are PNG, JPEG, and GIF	"supported spreadsheet image inputs are PNG, JPEG, and GIF",
+crates/skills/office_workspace/src/xlsx_write.rs	unsupported spreadsheet cell value_type	"unsupported spreadsheet cell value_type",
+crates/skills/office_workspace/src/xlsx_write.rs	worksheet name violates XLSX naming constraints	"worksheet name violates XLSX naming constraints",
+crates/skills/office_workspace/src/xlsx_write.rs	worksheet names must be unique	"worksheet names must be unique",
 crates/skills/package_manager/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/package_manager/src/main.rs	args.package or args.packages is required	Err("args.package or args.packages is required".to_string())
 crates/skills/package_manager/src/main.rs	cannot detect package manager; set args.manager	.ok_or_else(|| "cannot detect package manager; set args.manager".to_string())?;
