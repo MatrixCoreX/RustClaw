@@ -736,9 +736,13 @@ pub(crate) fn apply_execution_context_to_prompts(
     if execution_view.recent_turns_full != "<none>" {
         chat_prompt_context.push_str("\n\n");
         chat_prompt_context.push_str(&execution_view.recent_turns_full);
+        prompt_with_memory_for_execution.push_str("\n\n");
+        prompt_with_memory_for_execution.push_str(&execution_view.recent_turns_full);
     } else if execution_view.last_turn_full != "<none>" {
         chat_prompt_context.push_str("\n\n");
         chat_prompt_context.push_str(&execution_view.last_turn_full);
+        prompt_with_memory_for_execution.push_str("\n\n");
+        prompt_with_memory_for_execution.push_str(&execution_view.last_turn_full);
     }
     let prompt_execution_context = if execution_view.recent_execution_anchor != "<none>" {
         execution_view.recent_execution_anchor.as_str()
