@@ -107,6 +107,15 @@ fn first_round_uses_only_budgeted_compact_index() {
         task_control_line.contains("quota_exhausted"),
         "task_control_line={task_control_line}"
     );
+    assert!(
+        task_control_line.contains("provider_cause_policy"),
+        "task_control_line={task_control_line}"
+    );
+    assert!(
+        task_control_line.contains("failure_ownership_attribution")
+            && task_control_line.contains("external_blocker"),
+        "task_control_line={task_control_line}"
+    );
     let run_cmd_line = context
         .text
         .lines()

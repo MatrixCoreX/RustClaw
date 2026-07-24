@@ -25,9 +25,9 @@
 - `cancel_all` - Cancel all unfinished tasks for this user/chat, excluding the current control task itself.
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 - `preview_resume` - Return the no-mutation resume entrypoint and renewable execution-lease contract for a stable `task_id`.
-- `preview_provider_failure` - Return the shared no-mutation provider failure, retry, waiting-state, and checkpoint policy for a canonical `failure_class`.
+- `preview_provider_failure` - Return the shared no-mutation retry, waiting-state, and checkpoint policy for a canonical provider cause token such as `quota_exhausted`. This action does not produce the broad ownership class `external_blocker`.
 - `preview_retryable_failure_observation` - Return a synthetic no-mutation machine contract for a retryable tool failure, including the stable error, recovery, repeat-prevention, and bounded-attempt fields consumed by the planner.
-- `preview_repair_observation` - Return a synthetic no-mutation repair envelope for either a missing required argument or a bounded-repair blocked/waiting state.
+- `preview_repair_observation` - Return a synthetic no-mutation repair or failure-ownership envelope. Use `repair_kind=provider_external_blocker` when the required machine result is `failure_class=external_blocker`, `provider_blocker=true`, and explicit non-code/non-route attribution.
 - `preview_coding_repair` - Return a synthetic no-mutation coding-loop contract containing checkpoint, diff, failed verification, repair attempt, passing verification, and rewind references.
 - `bind_session_alias` - Return an exact structured `session_alias_bindings` update for a planner-selected `alias` and `target`; the runtime persists only this machine result and does not infer bindings from user-language phrases.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
@@ -40,7 +40,7 @@
 | `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_retryable_failure_observation`, `preview_repair_observation`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
 | `alias` | required for `bind_session_alias` | string | - | Exact user-defined alias surface selected by the planner; maximum 256 characters. |
 | `target` | required for `bind_session_alias` | string | - | Concrete locator or stable target to retain for later turns; maximum 4096 characters. |
-| `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider failure token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. |
+| `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider cause token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. It is not the broad ownership-attribution class returned by `provider_external_blocker`. |
 | `repair_kind` | required for `preview_repair_observation` | string | - | One canonical repair shape: `missing_required_argument`, `bounded_repair_blocked`, or `provider_external_blocker`. |
 | `task_id` | required for `get`, `resume`, `pause` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
